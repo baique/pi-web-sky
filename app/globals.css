@@ -23,7 +23,10 @@
   --bg-panel: #f5f5f5;
   --bg-hover: #eeeeee;
   --bg-selected: #e8e8e8;
-  --border: #e0e0e0;
+  /* Border is a translucent mix of the text colour (not a fixed near-white
+     like #e0e0e0): over a dark wallpaper it stays dark, over a light one it
+     stays light — never a stark pure-white/black line. */
+  --border: color-mix(in srgb, var(--text) 20%, transparent);
   --text: #0f172a;
   --text-muted: #3f4c5f;
   --text-dim: #8b95a3;
@@ -53,12 +56,17 @@
 
   /* Message-bubble glass — user keeps a blue tint, assistant keeps
      neutral; both translucent so the wallpaper shows through.
-     Alpha ~0.60 + 10px blur: wallpaper hue bleeds through while
+     Alpha ~0.60 + strong blur: wallpaper hue bleeds through while
      body text stays readable at 14px/1.6 against var(--text). */
   --user-bg-glass: rgba(219, 234, 254, 0.60);
   --user-border-glass: rgba(59, 130, 246, 0.22);
   --assistant-card-glass: rgba(252, 252, 253, 0.55);
   --tool-bg-glass: rgba(248, 248, 250, 0.55);
+
+  /* Backdrop desaturation: light theme washes wallpaper colours toward a
+     neutral backing (real frosted glass), dark theme keeps the richer
+     boost it already looks good with. */
+  --glass-saturate: 80%;
 }
 
 
@@ -67,7 +75,9 @@ html.dark {
   --bg-panel: #242424;
   --bg-hover: #2e2e2e;
   --bg-selected: #383838;
-  --border: #3a3a3a;
+  /* Same translucent-border treatment: fixed #3a3a3a reads as a harsh
+     black line over a light wallpaper. */
+  --border: color-mix(in srgb, var(--text) 25%, transparent);
   --text: #f5f7fa;
   --text-muted: #c7d0da;
   --text-dim: #8a93a0;
@@ -82,6 +92,7 @@ html.dark {
   --app-bg-scrim: rgba(0, 0, 0, 0.06);
   --glass-bg: rgba(30, 30, 33, 0.65);
   --glass-bg-strong: rgba(34, 34, 37, 0.78);
+  --glass-saturate: 140%;
   --glass-bg-input: rgba(34, 34, 37, 0.52);
   --glass-blur: 8px;
   --glass-blur-heavy: 12px;
