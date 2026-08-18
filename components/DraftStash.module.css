@@ -26,7 +26,7 @@
   .panel { animation: none; }
 }
 
-/* 收起条：常态入口，点击展开/收起列表 */
+/* 收起条：标题级入口（N 条草稿），点击展开/收起列表；不做 hover 变色 */
 .toggle {
   display: flex;
   align-items: center;
@@ -36,14 +36,14 @@
   border: none;
   border-radius: 12px;
   background: none;
-  color: var(--text-dim);
-  font-size: 12px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
   cursor: pointer;
-  transition: color 0.12s, background 0.12s;
+  transition: color 0.12s;
 }
 .toggle:hover {
   color: var(--text);
-  background: var(--bg-hover);
 }
 
 .toggleLabel {
