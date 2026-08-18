@@ -1,0 +1,262 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  addDraft,
+  formatRelativeTime,
+  loadDrafts,
+  removeDraft,
+  updateDraft,
+  type DraftItem,
+} from "@/lib/draft-stash";
+import styles from "./DraftStash.module.css";
+
+/**
+ * 用户级草稿暂存面板（自包含组件）。
+ *
+ * 通过 DOM 协议与聊天输入框交互（读取焦点 textarea 的值、用原生 setter
+ * 写回并派发 input 事件让 React 同步），因此不修改 ChatInput 内部实现，
+ * 接入仅需在输入框上方渲染 <DraftStash />。
+ *
+ * 快捷键（输入框聚焦时，window capture 阶段拦截）：
+ *   Ctrl/Cmd+S      新增或更新草稿 + 清空输入框
+ *   Ctrl/Cmd+Delete 有关联：清空 + 删除关联记录；无关联：仅清空
+ *
+ * 关联（回填后记住草稿 id，决定 Ctrl+S 是更新还是新增）在输入框内容
+ * 被清空时自动解除：原生 input 事件 + Enter 发送后的延迟校验兜底
+ * （React 受控组件自身清空不派发原生事件）。
+ */
+
+/** 当前聊天输入框：优先焦点所在 textarea，否则页面第一个 textarea */
+function getChatTextarea(): HTMLTextAreaElement | null {
+  if (document.activeElement instanceof HTMLTextAreaElement) {
+    return document.activeElement;
+  }
+  return document.querySelector("textarea");
+}
+
+/** 写回 React 受控 textarea 的值（原生 setter + input 事件） */
+function writeTextareaValue(ta: HTMLTextAreaElement, text: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLTextAreaElement.prototype,
+    "value",
+  )?.set;
+  if (setter) setter.call(ta, text);
+  ta.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function isEditingActive(activeId: string | null, items: DraftItem[]): activeId is string {
+  return activeId !== null && items.some((d) => d.id === activeId);
+}
+
+/** 纯展示子组件：可独立测试 */
+export function DraftStashList({
+  items,
+  activeItem,
+  onPick,
+  onDelete,
+  onCancelActive,
+}: {
+  items: DraftItem[];
+  activeItem: DraftItem | null;
+  onPick: (id: string) => void;
+  onDelete: (id: string) => void;
+  onCancelActive: () => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div
+      className={styles.panel}
+      role="region"
+      aria-label="草稿暂存区"
+      style={{
+        // Inline (not CSS module): Tailwind v4's build pipeline strips
+        // backdrop-filter from authored stylesheets.
+        backdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+        WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+      }}
+    >
+      {activeItem && (
+        <div className={styles.activeBar}>
+          <span className={styles.activeDot} />
+          <span className={styles.activeLabel}>正在编辑草稿</span>
+          <button
+            type="button"
+            className={styles.cancelBtn}
+            onClick={onCancelActive}
+            title="取消关联（内容保留在输入框）"
+            aria-label="取消草稿关联"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      <div className={styles.list}>
+        {items.map((item) => (
+          <div key={item.id} className={styles.row}>
+            <button
+              type="button"
+              className={styles.btn}
+              onClick={() => onPick(item.id)}
+              title="回填到输入框"
+              aria-label="回填到输入框"
+            >
+              <svg
+                width="12" height="12" viewBox="0 0 10 10" fill="none"
+                stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+              >
+                <path d="M9 5 H1" />
+                <polyline points="4 1.5 1 5 4 8.5" />
+              </svg>
+            </button>
+            <span className={styles.content} title={item.content}>
+              {item.content}
+            </span>
+            <span className={styles.time}>{formatRelativeTime(item.updatedAt)}</span>
+            <button
+              type="button"
+              className={styles.btn}
+              onClick={() => onDelete(item.id)}
+              title="删除草稿"
+              aria-label="删除草稿"
+            >
+              <svg
+                width="12" height="12" viewBox="0 0 10 10" fill="none"
+                stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
+              >
+                <line x1="2" y1="2" x2="8" y2="8" />
+                <line x1="8" y1="2" x2="2" y2="8" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function DraftStash() {
+  const [items, setItems] = useState<DraftItem[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const itemsRef = useRef(items);
+  const activeIdRef = useRef(activeId);
+  useEffect(() => { itemsRef.current = items; }, [items]);
+  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
+
+  useEffect(() => { setItems(loadDrafts()); }, []);
+
+  const refresh = useCallback(() => setItems(loadDrafts()), []);
+
+  // 输入框内容被清空（用户手动删除 / Ctrl+S 保存后 / 回填保护写入空）→ 解除关联
+  useEffect(() => {
+    const onInput = (e: Event) => {
+      const ta = e.target;
+      if (!(ta instanceof HTMLTextAreaElement)) return;
+      if (!ta.value.trim() && activeIdRef.current) setActiveId(null);
+    };
+    document.addEventListener("input", onInput, true);
+    return () => document.removeEventListener("input", onInput, true);
+  }, []);
+
+  // 全局快捷键（capture 先于 React 合成事件；仅焦点在 textarea 时生效）
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod || e.altKey || e.shiftKey) return;
+      const ta =
+        document.activeElement instanceof HTMLTextAreaElement
+          ? document.activeElement
+          : null;
+      if (!ta) return;
+
+      if (e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (!ta.value.trim()) return;
+        const active = activeIdRef.current;
+        if (isEditingActive(active, itemsRef.current)) {
+          updateDraft(active, ta.value);
+        } else {
+          addDraft(ta.value);
+        }
+        setActiveId(null);
+        refresh();
+        writeTextareaValue(ta, "");
+        return;
+      }
+
+      if (e.key === "Delete") {
+        e.preventDefault();
+        const active = activeIdRef.current;
+        if (isEditingActive(active, itemsRef.current)) {
+          removeDraft(active);
+          setActiveId(null);
+          refresh();
+        }
+        writeTextareaValue(ta, "");
+        return;
+      }
+
+      // Enter 发送（React 受控清空不派发原生事件）→ 下一 tick 校验输入框为空则解除关联
+      if (e.key === "Enter" && !e.shiftKey && activeIdRef.current) {
+        setTimeout(() => {
+          if (!ta.value.trim()) setActiveId(null);
+        }, 0);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [refresh]);
+
+  const handlePick = useCallback(
+    (id: string) => {
+      const target = itemsRef.current.find((d) => d.id === id);
+      if (!target) return;
+      const ta = getChatTextarea();
+      if (!ta) return;
+      // 回填前保护：输入框当前内容先暂存（有关联则更新原记录，无则新增）
+      if (ta.value.trim()) {
+        const active = activeIdRef.current;
+        if (isEditingActive(active, itemsRef.current)) {
+          updateDraft(active, ta.value);
+        } else {
+          addDraft(ta.value);
+        }
+      }
+      setActiveId(id);
+      refresh();
+      writeTextareaValue(ta, target.content);
+      ta.focus();
+    },
+    [refresh],
+  );
+
+  const handleDelete = useCallback(
+    (id: string) => {
+      removeDraft(id);
+      if (activeIdRef.current === id) setActiveId(null);
+      refresh();
+    },
+    [refresh],
+  );
+
+  if (items.length === 0) return null;
+
+  const activeItem =
+    activeId !== null
+      ? (items.find((d) => d.id === activeId) ?? null)
+      : null;
+
+  return (
+    <DraftStashList
+      items={items}
+      activeItem={activeItem}
+      onPick={handlePick}
+      onDelete={handleDelete}
+      onCancelActive={() => setActiveId(null)}
+    />
+  );
+}
+
+export default DraftStash;

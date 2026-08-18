@@ -9,6 +9,7 @@ import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-fi
 import { MessageView } from "./MessageView";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
+import { DraftStash } from "./DraftStash";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { useI18n } from "@/hooks/useI18n";
 import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
@@ -710,6 +711,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 </span>
               </div>
             </div>
+            <DraftStash />
             {chatInputElement}
             <ExtensionStatusBar statuses={extensionStatuses} widgets={extensionWidgets} />
           </div>
@@ -959,6 +961,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       </div>
 
       <div className="relative">
+        <DraftStash />
         {chatInputElement}
         <ExtensionStatusBar statuses={extensionStatuses} widgets={extensionWidgets} />
       </div>
