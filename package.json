@@ -1,6 +1,6 @@
 {
   "name": "@baique/pi-web-sky",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Web UI for the pi coding agent — Sky skin edition (fork of @agegr/pi-web / earendil-labs pi-web, MIT)",
   "homepage": "https://github.com/baique/pi-web-sky#readme",
   "repository": {
