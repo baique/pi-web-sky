@@ -27,58 +27,52 @@ const sampleItems = [
   { id: "b", content: "第二条草稿", updatedAt: 1000 },
 ];
 
+const baseProps = {
+  onPick: () => {},
+  onDelete: () => {},
+  onCancelActive: () => {},
+  onToggle: () => {},
+};
+
 test("renders nothing when there are no drafts", () => {
   const html = renderToStaticMarkup(
-    React.createElement(DraftStashList, {
-      items: [],
-      activeItem: null,
-      onPick: () => {},
-      onDelete: () => {},
-      onCancelActive: () => {},
-    }),
+    React.createElement(DraftStashList, { items: [], expanded: false, activeItem: null, ...baseProps }),
   );
   assert.equal(html, "");
 });
 
-test("renders one row per draft in given order", () => {
+test("collapsed: shows only the count bar, no rows", () => {
   const html = renderToStaticMarkup(
-    React.createElement(DraftStashList, {
-      items: sampleItems,
-      activeItem: null,
-      onPick: () => {},
-      onDelete: () => {},
-      onCancelActive: () => {},
-    }),
+    React.createElement(DraftStashList, { items: sampleItems, expanded: false, activeItem: null, ...baseProps }),
   );
+  assert.ok(html.includes("2 条草稿"));
+  assert.ok(html.includes("aria-expanded=\"false\""));
+  // 折叠态不渲染行内回填/删除按钮
+  assert.ok(!html.includes("aria-label=\"回填到输入框\""));
+  assert.ok(!html.includes("第一条草稿"));
+});
+
+test("expanded: renders one row per draft with both action buttons", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(DraftStashList, { items: sampleItems, expanded: true, activeItem: null, ...baseProps }),
+  );
+  assert.ok(html.includes("2 条草稿"));
+  assert.ok(html.includes("aria-expanded=\"true\""));
   assert.ok(html.includes("第一条草稿"));
   assert.ok(html.includes("第二条草稿"));
-  // 每条都有回填与删除按钮（aria-label）
   assert.equal((html.match(/aria-label="回填到输入框"/g) ?? []).length, 2);
   assert.equal((html.match(/aria-label="删除草稿"/g) ?? []).length, 2);
-  // 区域标注
   assert.ok(html.includes("草稿暂存区"));
 });
 
 test("renders the active-draft bar only when editing a draft", () => {
   const withoutActive = renderToStaticMarkup(
-    React.createElement(DraftStashList, {
-      items: sampleItems,
-      activeItem: null,
-      onPick: () => {},
-      onDelete: () => {},
-      onCancelActive: () => {},
-    }),
+    React.createElement(DraftStashList, { items: sampleItems, expanded: true, activeItem: null, ...baseProps }),
   );
   assert.ok(!withoutActive.includes("正在编辑草稿"));
 
   const withActive = renderToStaticMarkup(
-    React.createElement(DraftStashList, {
-      items: sampleItems,
-      activeItem: sampleItems[0],
-      onPick: () => {},
-      onDelete: () => {},
-      onCancelActive: () => {},
-    }),
+    React.createElement(DraftStashList, { items: sampleItems, expanded: true, activeItem: sampleItems[0], ...baseProps }),
   );
   assert.ok(withActive.includes("正在编辑草稿"));
   assert.ok(withActive.includes("取消草稿关联"));

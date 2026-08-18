@@ -3,9 +3,14 @@
   min-width: 0;
   width: 100%;
   max-width: 820px;
-  margin: 0 auto 8px;
-  padding: 6px;
-  background: var(--glass-bg);
+  /* ChatInput 根容器 padding-left:16px / padding-right:52px（右侧 36px 为
+     ChatMinimap 对齐预留，见 ChatInput.tsx 根容器注释）。面板复刻同一盒子
+     模型，使水平中心与输入框列严格一致，而不是简单 margin:auto 居中。 */
+  margin-left: calc(16px + (100% - 888px) / 2);
+  margin-right: calc(52px + (100% - 888px) / 2);
+  margin-bottom: 8px;
+  padding: 4px 6px;
+  background: var(--glass-bg-input);
   border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   border-radius: 16px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
@@ -21,13 +26,57 @@
   .panel { animation: none; }
 }
 
+/* 收起条：常态入口，点击展开/收起列表 */
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 12px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.toggle:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.toggleLabel {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-weight: 500;
+}
+
+.toggleArrow {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-dim);
+  font-size: 9px;
+  user-select: none;
+}
+
+/* 展开区 */
+.expandArea {
+  margin-top: 2px;
+  padding-top: 2px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
 .activeBar {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 6px 6px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  padding: 4px 8px;
 }
 
 .activeDot {
@@ -77,14 +126,15 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 1px;
+  padding: 2px;
 }
 
+/* 行内按钮常驻可见（避免隐藏留白），hover 行时强化 */
 .row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 6px;
+  gap: 6px;
+  padding: 4px 6px;
   border-radius: 10px;
   min-width: 0;
   transition: background 0.12s;
@@ -92,11 +142,14 @@
 .row:hover {
   background: var(--bg-hover);
 }
+.row:hover .btn {
+  color: var(--text);
+}
 
 .content {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: 12.5px;
   line-height: 1.5;
   color: var(--text);
   overflow: hidden;
@@ -108,7 +161,7 @@
 
 .time {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--text-dim);
   user-select: none;
   font-variant-numeric: tabular-nums;
@@ -119,22 +172,21 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: none;
   border-radius: 6px;
   background: none;
   color: var(--text-dim);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s, color 0.12s, background 0.12s;
-}
-.row:hover .btn,
-.row:focus-within .btn {
-  opacity: 1;
+  transition: color 0.12s, background 0.12s;
 }
 .btn:hover {
-  color: var(--text);
   background: var(--bg-selected);
+}
+
+.btnDanger:hover {
+  color: #ef4444;
+  background: color-mix(in srgb, #ef4444 12%, transparent);
 }

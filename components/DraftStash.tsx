@@ -22,6 +22,7 @@ import styles from "./DraftStash.module.css";
  *   Ctrl/Cmd+S      新增或更新草稿 + 清空输入框
  *   Ctrl/Cmd+Delete 有关联：清空 + 删除关联记录；无关联：仅清空
  *
+ * 常态收起为一条计数条（点击展开/收起列表）；有草稿才显示。
  * 关联（回填后记住草稿 id，决定 Ctrl+S 是更新还是新增）在输入框内容
  * 被清空时自动解除：原生 input 事件 + Enter 发送后的延迟校验兜底
  * （React 受控组件自身清空不派发原生事件）。
@@ -52,13 +53,17 @@ function isEditingActive(activeId: string | null, items: DraftItem[]): activeId 
 /** 纯展示子组件：可独立测试 */
 export function DraftStashList({
   items,
+  expanded,
   activeItem,
+  onToggle,
   onPick,
   onDelete,
   onCancelActive,
 }: {
   items: DraftItem[];
+  expanded: boolean;
   activeItem: DraftItem | null;
+  onToggle: () => void;
   onPick: (id: string) => void;
   onDelete: (id: string) => void;
   onCancelActive: () => void;
@@ -72,65 +77,79 @@ export function DraftStashList({
       style={{
         // Inline (not CSS module): Tailwind v4's build pipeline strips
         // backdrop-filter from authored stylesheets.
-        backdropFilter: "blur(var(--glass-blur)) saturate(140%)",
-        WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+        backdropFilter: "blur(var(--glass-blur)) saturate(150%)",
+        WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(150%)",
       }}
     >
-      {activeItem && (
-        <div className={styles.activeBar}>
-          <span className={styles.activeDot} />
-          <span className={styles.activeLabel}>正在编辑草稿</span>
-          <button
-            type="button"
-            className={styles.cancelBtn}
-            onClick={onCancelActive}
-            title="取消关联（内容保留在输入框）"
-            aria-label="取消草稿关联"
-          >
-            ✕
-          </button>
+      <button
+        type="button"
+        className={styles.toggle}
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-label={expanded ? "收起草稿列表" : "展开草稿列表"}
+      >
+        <span className={styles.toggleLabel}>{items.length} 条草稿</span>
+        <span className={styles.toggleArrow}>{expanded ? "▴" : "▾"}</span>
+      </button>
+      {expanded && (
+        <div className={styles.expandArea}>
+          {activeItem && (
+            <div className={styles.activeBar}>
+              <span className={styles.activeDot} />
+              <span className={styles.activeLabel}>正在编辑草稿</span>
+              <button
+                type="button"
+                className={styles.cancelBtn}
+                onClick={onCancelActive}
+                title="取消关联（内容保留在输入框）"
+                aria-label="取消草稿关联"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+          <div className={styles.list}>
+            {items.map((item) => (
+              <div key={item.id} className={styles.row}>
+                <button
+                  type="button"
+                  className={styles.btn}
+                  onClick={() => onPick(item.id)}
+                  title="回填到输入框"
+                  aria-label="回填到输入框"
+                >
+                  <svg
+                    width="11" height="11" viewBox="0 0 10 10" fill="none"
+                    stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+                  >
+                    <path d="M9 5 H1" />
+                    <polyline points="4 1.5 1 5 4 8.5" />
+                  </svg>
+                </button>
+                <span className={styles.content} title={item.content}>
+                  {item.content}
+                </span>
+                <span className={styles.time}>{formatRelativeTime(item.updatedAt)}</span>
+                <button
+                  type="button"
+                  className={`${styles.btn} ${styles.btnDanger}`}
+                  onClick={() => onDelete(item.id)}
+                  title="删除草稿"
+                  aria-label="删除草稿"
+                >
+                  <svg
+                    width="11" height="11" viewBox="0 0 10 10" fill="none"
+                    stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
+                  >
+                    <line x1="2" y1="2" x2="8" y2="8" />
+                    <line x1="8" y1="2" x2="2" y2="8" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
-      <div className={styles.list}>
-        {items.map((item) => (
-          <div key={item.id} className={styles.row}>
-            <button
-              type="button"
-              className={styles.btn}
-              onClick={() => onPick(item.id)}
-              title="回填到输入框"
-              aria-label="回填到输入框"
-            >
-              <svg
-                width="12" height="12" viewBox="0 0 10 10" fill="none"
-                stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
-              >
-                <path d="M9 5 H1" />
-                <polyline points="4 1.5 1 5 4 8.5" />
-              </svg>
-            </button>
-            <span className={styles.content} title={item.content}>
-              {item.content}
-            </span>
-            <span className={styles.time}>{formatRelativeTime(item.updatedAt)}</span>
-            <button
-              type="button"
-              className={styles.btn}
-              onClick={() => onDelete(item.id)}
-              title="删除草稿"
-              aria-label="删除草稿"
-            >
-              <svg
-                width="12" height="12" viewBox="0 0 10 10" fill="none"
-                stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
-              >
-                <line x1="2" y1="2" x2="8" y2="8" />
-                <line x1="8" y1="2" x2="2" y2="8" />
-              </svg>
-            </button>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -138,6 +157,7 @@ export function DraftStashList({
 export function DraftStash() {
   const [items, setItems] = useState<DraftItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const itemsRef = useRef(items);
   const activeIdRef = useRef(activeId);
@@ -251,7 +271,9 @@ export function DraftStash() {
   return (
     <DraftStashList
       items={items}
+      expanded={expanded}
       activeItem={activeItem}
+      onToggle={() => setExpanded((open) => !open)}
       onPick={handlePick}
       onDelete={handleDelete}
       onCancelActive={() => setActiveId(null)}
