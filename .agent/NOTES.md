@@ -7,7 +7,7 @@
 
 | # | 问题 | 改动 | 提交 |
 |---|------|------|------|
-| 前置 | 提交上一会话玻璃成果（背景图+置底+毛玻璃基础；`.next-prod` 加入 `.gitignore`） | — | `4e4193a` |
+| 前置 | 提交上一会话玻璃成果（背景图+置底+毛玻璃基础） | — | `4e4193a` |
 | q2 | 消息字体 | `--font-mono` 首位改 `'JetBrains Mono','Consolas'`；`.markdown-body` 显式挂 mono（中文回退保留 Noto/PingFang/YaHei） | `adaf811` |
 | q3 | 文字颜色 | 浅色 `--text #1a1a1a→#0f172a`（偏青蓝深色）、muted/meta 同步加深；深色 `--text #ebebeb→#f5f7fa`、muted/meta 偏白 | `347e96c` |
 | q1 | 玻璃效果 | 新增 `--glass-bg-input`；`--glass-bg` 0.82→0.65、`--glass-bg-strong` 0.90→0.78；扩展 widget 展开面板由实心 `--bg-panel` 改半透明玻璃 | `c25eb73` |

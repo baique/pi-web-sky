@@ -14,7 +14,6 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **文字对比度**：浅色偏青蓝深色、深色偏白
 - **右上角 todo 面板**：窄面板展示会话 pi-todo 状态，运行中 6s 轮询 + 展开前即时刷新
 - **右下角堆叠弱通知**：扩展/错误等瞬时提示以小卡片堆叠在右下角，自动消失
-- 生产构建与开发隔离（`.next-prod`），不污染 `npm run dev`
 
 ![Pi Web displaying a pi session with structured Markdown, tool calls, and project navigation](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
 

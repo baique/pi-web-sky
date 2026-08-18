@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
@@ -2111,8 +2112,13 @@ export function AppShell() {
               hideInlineButton
             />
           )}
-          {/* Top panel dropdown — shared, only one active at a time */}
-          {activeTopPanel && topPanelPos && (
+          {/* Top panel dropdown — shared, only one active at a time.
+              Rendered through a portal to <body>: the topbar's glass
+              backdrop-filter makes it the containing block of fixed-position
+              descendants, which shifts the panel right by the topbar's offset
+              and overflows the viewport. A portal keeps position:fixed
+              relative to the viewport. */}
+          {activeTopPanel && topPanelPos && createPortal((
             <div style={{
               position: "fixed",
               top: topPanelPos.top,
@@ -2206,6 +2212,10 @@ export function AppShell() {
                   borderBottom: "1px solid var(--border)",
                   boxShadow: "0 10px 28px rgba(0,0,0,0.16)",
                   padding: "12px 16px",
+                  // Cap the width so the stats panel never stretches across the
+                  // whole top bar on wide screens; hug the top-right corner.
+                  maxWidth: "min(560px, 100%)",
+                  marginLeft: "auto",
                 }}>
                   {sessionStats ? (() => {
                     const formatDuration = (ms: number) => {
@@ -2259,7 +2269,7 @@ export function AppShell() {
                           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{title}</div>
                           <div style={{
                             display: "grid",
-                            gridTemplateColumns: compact ? "max-content max-content" : "auto minmax(0, 1fr)",
+                            gridTemplateColumns: compact ? "max-content minmax(0, 1fr)" : "auto minmax(0, 1fr)",
                             columnGap: compact ? 14 : 12,
                             rowGap: 4,
                             justifyContent: compact ? "start" : undefined,
@@ -2270,9 +2280,9 @@ export function AppShell() {
                                 <div style={{
                                   color: "var(--text-muted)",
                                   minWidth: 0,
-                                  overflowWrap: compact ? "normal" : "anywhere",
+                                  overflowWrap: "anywhere",
                                   textAlign: valueAlign,
-                                  whiteSpace: valueAlign === "right" ? "nowrap" : "normal",
+                                  whiteSpace: "normal",
                                 }}>{value}</div>
                               </div>
                             ))}
@@ -2350,17 +2360,22 @@ export function AppShell() {
                     return (
                       <div style={{
                         display: "grid",
-                        gridTemplateColumns: isMobile
-                          ? "1fr"
-                          : "minmax(360px, 1.7fr) minmax(140px, 0.55fr) minmax(190px, 0.75fr)",
-                        gap: isMobile ? 16 : 24,
+                        gap: isMobile ? 16 : 20,
                         fontSize: 12,
                         lineHeight: 1.5,
                         fontFamily: "var(--font-mono)",
                       }}>
                         {sessionInfoSection}
-                         {section(translate("session.messages"), messageRows)}
-                         {section(translate("session.tokens"), [...tokenRows, ...extraTokenRows], "right", true)}
+                        <div style={{
+                          display: "grid",
+                          gridTemplateColumns: isMobile
+                            ? "1fr"
+                            : "minmax(160px, 0.5fr) minmax(240px, 0.7fr)",
+                          gap: isMobile ? 16 : 24,
+                        }}>
+                          {section(translate("session.messages"), messageRows)}
+                          {section(translate("session.tokens"), [...tokenRows, ...extraTokenRows], "right", true)}
+                        </div>
                       </div>
                     );
                   })() : (
@@ -2371,7 +2386,7 @@ export function AppShell() {
                 </div>
               )}
             </div>
-          )}
+          ), document.body)}
 
           {/* Todo panel — narrow, pinned to top-right, drops down like the
               session stats popover. Lists the session's pi-todo.state. */}

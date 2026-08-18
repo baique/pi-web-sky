@@ -12,9 +12,6 @@ try {
 } catch { /* package not found, use default */ }
 
 const nextConfig: NextConfig = {
-  // Production (systemd service) builds into .next-prod via PI_WEB_DIST, so
-  // `npm run dev`'s .next is never touched by service rebuilds (isolation).
-  distDir: process.env.PI_WEB_DIST || ".next",
   outputFileTracingRoot: configDir,
   serverExternalPackages: [
     "undici",
