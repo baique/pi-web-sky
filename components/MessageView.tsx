@@ -365,7 +365,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   return (
     <div
-      style={{ marginBottom: 16, display: "flex", flexDirection: "column", alignItems: "flex-end" }}
+      style={{ marginBottom: 20, display: "flex", flexDirection: "column", alignItems: "flex-end" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -477,14 +477,14 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                 padding: "3px 8px", height: 22,
                 background: "none", border: "none",
                 borderRadius: 5,
-                color: copied ? "var(--accent)" : "var(--text-dim)",
+                color: copied ? "var(--accent)" : "var(--text-muted)",
                 cursor: "pointer",
                 fontSize: 11, fontWeight: 400,
                 whiteSpace: "nowrap",
                 transition: "color 0.12s",
               }}
               onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "var(--accent)"; }}
-              onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-dim)"; }}
+              onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-muted)"; }}
             >
               {copied ? (
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -721,7 +721,7 @@ function AssistantMessageView({
 
   return (
     <div
-      style={{ marginBottom: 16 }}
+      style={{ marginBottom: 20 }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -730,7 +730,7 @@ function AssistantMessageView({
           display: "flex",
           flexDirection: "column",
           gap: 8,
-          padding: "10px 14px",
+          padding: "8px 14px",
           borderRadius: 12,
           background: "var(--assistant-card-glass)",
           backdropFilter: "blur(12px) saturate(var(--glass-saturate))",
@@ -830,7 +830,7 @@ function AssistantMessageView({
                     padding: "3px 8px", height: 22,
                     background: "none", border: "none",
                     borderRadius: 5,
-                    color: copied ? "var(--accent)" : "var(--text-dim)",
+                    color: copied ? "var(--accent)" : "var(--text-muted)",
                     cursor: "pointer",
                     fontSize: 11, fontWeight: 400,
                     whiteSpace: "nowrap",
@@ -839,7 +839,7 @@ function AssistantMessageView({
                     transition: "opacity 0.12s, color 0.12s",
                   }}
                   onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "var(--accent)"; }}
-                  onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-dim)"; }}
+                  onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-muted)"; }}
                 >
                   {copied ? (
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -1020,7 +1020,7 @@ function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; re
           {isStreamingInput ? t("chat.generatingToolInput") : getToolPreview(block)}
         </span>
         {duration !== undefined && (
-          <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
         )}
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
           <polyline points="2 3.5 5 6.5 8 3.5" />
@@ -1033,7 +1033,7 @@ function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; re
           style={{
             margin: 0,
             padding: "8px 10px",
-            color: "var(--text-muted)",
+            color: "var(--text)",
             fontSize: 12,
             lineHeight: 1.5,
             overflow: "auto",
@@ -1343,7 +1343,7 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
   const time = formatTime(message.timestamp);
 
   return (
-    <div style={{ marginBottom: 16 }}>
+    <div style={{ marginBottom: 20 }}>
       <div
         style={{
           border: "1px solid var(--border)",
@@ -1440,7 +1440,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
   };
 
   return (
-    <div style={{ marginBottom: 16 }}>
+    <div style={{ marginBottom: 20 }}>
       <div
         style={{
           border: "1px solid var(--border)",
@@ -1527,7 +1527,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
                 padding: "3px 7px",
                 border: "none",
                 background: "none",
-                color: copied ? "var(--accent)" : "var(--text-dim)",
+                color: copied ? "var(--accent)" : "var(--text-muted)",
                 cursor: "pointer",
                 fontSize: 11,
               }}

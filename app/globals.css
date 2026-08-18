@@ -32,7 +32,7 @@
   --text-dim: #8b95a3;
   /* In-bubble metadata (model name, usage, tool labels): clearly readable
      on frosted glass, one step below body text, never white-on-white. */
-  --text-meta: rgba(30, 41, 59, 0.78);
+  --text-meta: rgba(30, 41, 59, 0.92);
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --user-bg: #eff6ff;
@@ -81,7 +81,7 @@ html.dark {
   --text: #f5f7fa;
   --text-muted: #c7d0da;
   --text-dim: #8a93a0;
-  --text-meta: rgba(226, 232, 240, 0.80);
+  --text-meta: rgba(232, 238, 247, 0.92);
   --accent: #60a5fa;
   --accent-hover: #93c5fd;
   --user-bg: #1e293b;

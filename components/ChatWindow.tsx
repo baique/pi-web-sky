@@ -230,7 +230,11 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
           padding: "2px 0",
           border: "none",
           background: "transparent",
-          color: "var(--text-muted)",
+          color: "var(--text)",
+          /* Reverse-halo stroke: dark theme = white text on black halo,
+             light theme = black text on white halo, so the label stays
+             legible over any wallpaper. */
+          textShadow: "0 0 1.5px color-mix(in srgb, var(--bg) 70%, transparent)",
           cursor: "pointer",
           fontSize: 12,
           textAlign: "left",
@@ -721,7 +725,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       <div className="relative flex min-w-0 flex-1 overflow-hidden">
         <div
           ref={scrollContainerRef}
-          className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none]"
+          className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 pb-[4px] mb-[4px] [scrollbar-width:none]"
           onScroll={(e) => {
             const el = e.currentTarget;
             setAtBottom(isScrollAtTail(el.scrollTop, el.clientHeight, el.scrollHeight));
