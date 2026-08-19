@@ -2018,27 +2018,31 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 display: "flex", alignItems: "center", gap: 6,
                 padding: "7px 14px",
                 border: (value.trim() || attachedImages.length)
-                  ? "1px solid transparent"
+                  ? "1px solid color-mix(in srgb, var(--accent) 38%, transparent)"
                   : "1px solid color-mix(in srgb, var(--border) 50%, transparent)",
                 borderRadius: 10,
                 background: (value.trim() || attachedImages.length)
-                  ? "linear-gradient(180deg, var(--accent), var(--accent-hover))"
+                  ? "color-mix(in srgb, var(--accent) 13%, transparent)"
                   : "var(--bg-panel)",
-                color: (value.trim() || attachedImages.length) ? "var(--bg)" : "var(--text-muted)",
+                color: (value.trim() || attachedImages.length) ? "var(--accent)" : "var(--text-muted)",
                 cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
                 fontSize: 13,
                 fontWeight: 600,
                 letterSpacing: "-0.01em",
                 boxShadow: (value.trim() || attachedImages.length)
-                  ? "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.10), 0 2px 10px -2px color-mix(in srgb, var(--accent) 45%, transparent)"
+                  ? "0 2px 10px -4px color-mix(in srgb, var(--accent) 30%, transparent)"
                   : "none",
-                transition: "background 0.15s, box-shadow 0.15s, filter 0.12s, transform 0.08s",
+                transition: "background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.08s",
               }}
               onMouseEnter={(e) => {
-                if (!e.currentTarget.disabled) e.currentTarget.style.filter = "brightness(1.06)";
+                if (e.currentTarget.disabled) return;
+                e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 20%, transparent)";
+                e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 60%, transparent)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.filter = "none";
+                if (e.currentTarget.disabled) return;
+                e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 13%, transparent)";
+                e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 38%, transparent)";
               }}
               onMouseDown={(e) => {
                 if (!e.currentTarget.disabled) e.currentTarget.style.transform = "translateY(1px)";
