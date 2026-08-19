@@ -23,6 +23,7 @@ import {
   type AtQueryMatch, type FileIndexEntry,
 } from "@/lib/file-fuzzy";
 import { FolderIcon, getFileIcon } from "./FileIcons";
+import { DraftStash } from "./DraftStash";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import type { ToolPreset } from "@/lib/tool-presets";
@@ -411,6 +412,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>(() => (
     draftKey ? draftImagesToAttachedImages(getDraft(draftKey)?.images) : []
   ));
+  /** 输入行聚焦时整块 composer 面板联动亮起（边框/光晕/阴影）。 */
+  const [composerFocused, setComposerFocused] = useState(false);
   const trimmedValue = value.trimStart();
   const bashMode = attachedImages.length === 0 && trimmedValue.startsWith("!");
   const bashExcluded = bashMode && trimmedValue.startsWith("!!");
@@ -1504,38 +1507,61 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {compactError}
           </div>
         )}
-        {/* Image previews */}
-        {attachedImages.length > 0 && (
-          <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-            {attachedImages.map((img, i) => (
-              <div key={i} style={{ position: "relative", flexShrink: 0 }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={img.previewUrl}
-                  alt=""
-                  style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)", display: "block" }}
-                />
-                <button
-                  onClick={() => removeImage(i)}
-                  style={{
-                    position: "absolute", top: -4, right: -4,
-                    width: 16, height: 16, borderRadius: "50%",
-                    background: "var(--bg-panel)", border: "1px solid var(--border)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    cursor: "pointer", padding: 0, color: "var(--text-muted)",
-                  }}
-                >
-                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                    <line x1="1" y1="1" x2="7" y2="7" /><line x1="7" y1="1" x2="1" y2="7" />
-                  </svg>
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* ── Composer：草稿 + 输入 + 底部工具，一块整体玻璃面板 ── */}
+        <div
+          style={{
+            borderRadius: isMobile ? 14 : 16,
+            background: "color-mix(in srgb, var(--glass-bg-input) 78%, var(--glass-bg))",
+            backdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+            WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+            border: `1px solid ${
+              bashMode
+                ? "color-mix(in srgb, var(--accent) 45%, transparent)"
+                : isStreaming && (onSteer || onFollowUp)
+                ? "rgba(234,179,8,0.4)"
+                : "color-mix(in srgb, var(--border) 90%, transparent)"
+            }`,
+            padding: "8px 8px 8px",
+            boxShadow: composerFocused
+              ? "0 0 14px 1px color-mix(in srgb, var(--border) 50%, transparent), 0 1px 2px rgba(15,23,42,0.05), 0 8px 24px -8px rgba(15,23,42,0.24)"
+              : "0 1px 2px rgba(15,23,42,0.05), 0 2px 5px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.16)",
+            transition: "border-color 0.15s, box-shadow 0.15s",
+          } as React.CSSProperties}
+        >
+          <DraftStash />
 
-        {/* Main input */}
-        <div style={{ position: "relative", minWidth: 0 }}>
+          {/* Image previews — 属输入内容层，与输入行同组 */}
+          {attachedImages.length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "4px 4px 0" }}>
+              {attachedImages.map((img, i) => (
+                <div key={i} style={{ position: "relative", flexShrink: 0 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.previewUrl}
+                    alt=""
+                    style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)", display: "block" }}
+                  />
+                  <button
+                    onClick={() => removeImage(i)}
+                    style={{
+                      position: "absolute", top: -4, right: -4,
+                      width: 16, height: 16, borderRadius: "50%",
+                      background: "var(--bg-panel)", border: "1px solid var(--border)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      cursor: "pointer", padding: 0, color: "var(--text-muted)",
+                    }}
+                  >
+                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                      <line x1="1" y1="1" x2="7" y2="7" /><line x1="7" y1="1" x2="1" y2="7" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Main input */}
+          <div style={{ position: "relative", minWidth: 0 }}>
           {historyMenuOpen && inputHistory.length > 0 && (
             <div
               ref={historyMenuRef}
@@ -1877,16 +1903,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               display: "flex",
               gap: 8,
               alignItems: "center",
-              background: "var(--glass-bg-input)",
-              backdropFilter: "blur(var(--glass-blur)) saturate(150%)",
-              WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(150%)",
-              border: `1px solid ${bashMode ? "var(--tool-bg)" : isStreaming && (onSteer || onFollowUp)
-                ? "rgba(234,179,8,0.4)"
-                : "color-mix(in srgb, var(--border) 70%, transparent)"}`,
-              borderRadius: 16,
-              padding: "10px 10px 10px 14px",
-              boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.12)",
-              transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s",
+              padding: "8px 4px",
             } as React.CSSProperties}
           >
           <textarea
@@ -1913,6 +1930,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               updateAtQuery(el.value, el.selectionStart);
             }}
             onInput={handleInput}
+            onFocus={() => setComposerFocused(true)}
+            onBlur={() => setComposerFocused(false)}
             onPaste={handlePaste}
             placeholder={
               isStreaming && (onSteer || onFollowUp)
@@ -1998,16 +2017,34 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 alignSelf: "flex-end",
                 display: "flex", alignItems: "center", gap: 6,
                 padding: "7px 14px",
-                background: (value.trim() || attachedImages.length) ? "var(--accent)" : "var(--bg-panel)",
-                border: "none",
-                borderRadius: 8,
-                color: (value.trim() || attachedImages.length) ? "#fff" : "var(--text-dim)",
+                border: (value.trim() || attachedImages.length)
+                  ? "1px solid transparent"
+                  : "1px solid color-mix(in srgb, var(--border) 50%, transparent)",
+                borderRadius: 10,
+                background: (value.trim() || attachedImages.length)
+                  ? "linear-gradient(180deg, var(--accent), var(--accent-hover))"
+                  : "var(--bg-panel)",
+                color: (value.trim() || attachedImages.length) ? "var(--bg)" : "var(--text-muted)",
                 cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
                 fontSize: 13,
                 fontWeight: 600,
                 letterSpacing: "-0.01em",
-                boxShadow: (value.trim() || attachedImages.length) ? "0 1px 3px rgba(37,99,235,0.25)" : "none",
-                transition: "background 0.15s, box-shadow 0.15s",
+                boxShadow: (value.trim() || attachedImages.length)
+                  ? "inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.10), 0 2px 10px -2px color-mix(in srgb, var(--accent) 45%, transparent)"
+                  : "none",
+                transition: "background 0.15s, box-shadow 0.15s, filter 0.12s, transform 0.08s",
+              }}
+              onMouseEnter={(e) => {
+                if (!e.currentTarget.disabled) e.currentTarget.style.filter = "brightness(1.06)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.filter = "none";
+              }}
+              onMouseDown={(e) => {
+                if (!e.currentTarget.disabled) e.currentTarget.style.transform = "translateY(1px)";
+              }}
+              onMouseUp={(e) => {
+                e.currentTarget.style.transform = "none";
               }}
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2022,24 +2059,21 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
         {/* Bash mode status label */}
         {bashMode && (
-          <div className="text-xs px-2 py-1" style={{ color: bashExcluded ? "var(--text-muted)" : "var(--accent)", marginTop: 4 }}>
+          <div className="text-xs" style={{ color: bashExcluded ? "var(--text-muted)" : "var(--accent)", padding: "2px 8px 4px" }}>
              {t("chat.shell")} · {bashExcluded ? t("chat.outputLocal") : t("chat.outputModel")}
           </div>
         )}
 
-        {/* Bottom bar: left | center (context) | right — sits on its own
-            frosted strip so its buttons/text stay readable over a wallpaper. */}
+        {/* Bottom bar: 工具层压入台面，顶部内阴影分隔线 */}
         <div style={{
-          marginTop: 8,
           display: isMobile ? "grid" : "flex",
           gridTemplateColumns: isMobile ? "minmax(0, 1fr) auto" : undefined,
           alignItems: "center",
           gap: 6,
-          padding: "3px 4px",
-          borderRadius: 12,
-          background: "var(--glass-bg)",
-          backdropFilter: "blur(var(--glass-blur)) saturate(140%)",
-          WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+          padding: "6px 4px 4px",
+          marginTop: 4,
+          borderRadius: 10,
+          background: "color-mix(in srgb, var(--bg-panel) 45%, transparent)",
         }}>
 
           {/* LEFT: attach + model selector (idle) or steer/followup toggle (streaming) */}
@@ -2666,6 +2700,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </button>
             )}
             </div>
+          </div>
           </div>
 
         </div>

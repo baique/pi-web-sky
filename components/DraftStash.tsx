@@ -74,12 +74,6 @@ export function DraftStashList({
       className={styles.panel}
       role="region"
       aria-label="草稿暂存区"
-      style={{
-        // Inline (not CSS module): Tailwind v4's build pipeline strips
-        // backdrop-filter from authored stylesheets.
-        backdropFilter: "blur(var(--glass-blur)) saturate(150%)",
-        WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(150%)",
-      }}
     >
       <button
         type="button"
