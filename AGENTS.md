@@ -8,7 +8,11 @@ npm run dev   # port 30141
 
 Typecheck: `node_modules/.bin/tsc --noEmit`  
 Lint: `npm run lint`  
-**Never run `next build` during dev** — pollutes `.next/` and breaks `npm run dev`.
+**Never run `next build` during dev** — pollutes `.next/` and breaks `npm run dev`.  
+
+## 发布 npm
+
+发布 / 发版 / `npm publish` / 升级版本号 / `npm run release` 时，先读 [`.agent/release.md`](.agent/release.md) — 发布方式、token 位置、版本同步约定、故障排查都在那里。
 
 ---
 
