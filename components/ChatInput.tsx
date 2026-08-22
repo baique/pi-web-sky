@@ -2172,17 +2172,24 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   </button>
                   {modelDropdownOpen && modelDropdownRect && (() => {
                     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-                    const bottom = viewportHeight - modelDropdownRect.top + 6;
+                    // Height cap: the panel opens upward from the button. Keep it from
+                    // overflowing above the viewport top (modelDropdownRect.top is the
+                    // button's viewport-space top captured at click time).
                     const maxH = Math.max(120, Math.min(modelDropdownRect.top - 8, viewportHeight * 0.6));
-                    // On mobile, pin to a small left margin and cap width to the
-                    // viewport so long model names never push the panel off-screen.
+                    // Anchor to the dropdownRef wrapper (position: relative). Do NOT use
+                    // `position: fixed` with viewport-space coords here: the bottom-bar
+                    // ancestor has backdrop-filter, which becomes the containing block
+                    // for fixed descendants, so left/bottom would be measured from the
+                    // bar's box instead of the viewport (panel lands way off to the
+                    // right). Positioning absolutely relative to the wrapper — like the
+                    // thinking/tool dropdowns — keeps it just above the button.
                     const panelPos: React.CSSProperties = isMobile
-                      ? { left: 8, right: 8, maxWidth: "calc(100vw - 16px)" }
-                      : { left: modelDropdownRect.left, width: "max-content", minWidth: modelDropdownRect.width };
+                      ? { left: 0, right: 0, width: "100%" }
+                      : { left: 0, width: "max-content", minWidth: modelDropdownRect.width };
                     return (
                       <div ref={modelDropdownPanelRef} style={{
-                      position: "fixed",
-                      bottom,
+                      position: "absolute",
+                      bottom: "calc(100% + 6px)",
                       ...panelPos,
                       zIndex: 500, background: "var(--bg)", border: "1px solid var(--border)",
                       borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
