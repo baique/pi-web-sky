@@ -80,6 +80,8 @@
      back into one token. */
   --panel-glass-todo: rgba(250, 250, 251, 0.9);
   --panel-glass-minimap: rgba(250, 250, 251, 0.9);
+  /* Terminal content bed — light glass so dark text stays readable. */
+  --terminal-bg: rgba(250, 250, 251, 0.92);
   --glass-blur: 8px;
   --glass-blur-heavy: 12px;
 
@@ -143,6 +145,8 @@ html.dark {
   --panel-glass: rgba(34, 34, 37, 0.9);
   --panel-glass-todo: rgba(34, 34, 37, 0.9);
   --panel-glass-minimap: rgba(34, 34, 37, 0.9);
+  /* Terminal content bed — dark glass, light text. */
+  --terminal-bg: rgba(12, 12, 14, 0.86);
   --glass-blur: 8px;
   --glass-blur-heavy: 12px;
 
@@ -1613,8 +1617,7 @@ span.token.table {
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
-  background:
-    linear-gradient(rgba(12, 12, 14, 0.86), rgba(12, 12, 14, 0.86));
+  background: var(--terminal-bg);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
@@ -1638,7 +1641,7 @@ span.token.table {
   .terminal-panel-top, .terminal-panel-bottombar, .terminal-panel-mobile { animation: none; }
 }
 @media (prefers-reduced-transparency: reduce) {
-  .terminal-panel { background: #101013; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .terminal-panel { background: var(--terminal-bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
 
 .terminal-tabs {
@@ -1648,10 +1651,10 @@ span.token.table {
   height: 34px;
   padding-left: 6px;
   gap: 2px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
 }
-html.dark .terminal-tabs { border-bottom-color: rgba(255, 255, 255, 0.06); }
+html.dark .terminal-tabs { border-bottom-color: color-mix(in srgb, var(--text) 6%, transparent); }
 
 .terminal-tab-scroll {
   display: flex;
@@ -1672,7 +1675,7 @@ html.dark .terminal-tabs { border-bottom-color: rgba(255, 255, 255, 0.06); }
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: rgba(235, 240, 245, 0.45);
+  color: color-mix(in srgb, var(--text) 45%, transparent);
   white-space: nowrap;
 }
 
@@ -1684,13 +1687,13 @@ html.dark .terminal-tabs { border-bottom-color: rgba(255, 255, 255, 0.06); }
   padding: 0 4px 0 8px;
   border-radius: 5px;
   cursor: pointer;
-  color: rgba(235, 240, 245, 0.75);
+  color: color-mix(in srgb, var(--text) 75%, transparent);
   font-size: 11px;
   white-space: nowrap;
   transition: background 0.1s;
   user-select: none;
 }
-.terminal-chip:hover { background: rgba(255, 255, 255, 0.08); }
+.terminal-chip:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
 .terminal-chip.is-active {
   background: color-mix(in srgb, var(--accent) 26%, transparent);
   color: var(--text);
@@ -1709,23 +1712,23 @@ html.dark .terminal-tabs { border-bottom-color: rgba(255, 255, 255, 0.06); }
 .terminal-chip-close, .terminal-new, .terminal-close {
   display: flex; align-items: center; justify-content: center;
   border: none; background: none;
-  color: rgba(235, 240, 245, 0.5);
+  color: color-mix(in srgb, var(--text) 50%, transparent);
   cursor: pointer;
   border-radius: 4px;
   transition: color 0.1s, background 0.1s;
   flex-shrink: 0;
 }
 .terminal-chip-close { width: 16px; height: 16px; margin-left: 2px; }
-.terminal-chip-close:hover, .terminal-close:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+.terminal-chip-close:hover, .terminal-close:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
 .terminal-new, .terminal-close { width: 30px; margin-right: 2px; align-self: center; height: 24px; }
-.terminal-new:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+.terminal-new:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
 
 .terminal-error {
   flex-shrink: 0;
   padding: 6px 12px;
   font-size: 11px;
   color: #f87171;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .terminal-body { flex: 1; min-height: 0; padding: 6px 8px 8px; position: relative; }
@@ -1739,13 +1742,13 @@ html.dark .terminal-tabs { border-bottom-color: rgba(255, 255, 255, 0.06); }
 .terminal-placeholder button {
   padding: 7px 16px;
   border-radius: 7px;
-  border: 1px dashed rgba(255, 255, 255, 0.25);
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(235, 240, 245, 0.85);
+  border: 1px dashed color-mix(in srgb, var(--text) 25%, transparent);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: color-mix(in srgb, var(--text) 85%, transparent);
   font-size: 12px;
   cursor: pointer;
 }
-.terminal-placeholder button:hover { background: rgba(255, 255, 255, 0.1); }
+.terminal-placeholder button:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
 
 /* Bottom-bar terminal toggle — leftmost item of the status shelf. */
 .terminal-bar-toggle {

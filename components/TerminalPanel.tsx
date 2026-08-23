@@ -44,6 +44,24 @@ interface Attached {
 
 export type TerminalOrigin = "top" | "bottombar";
 
+/** ANSI 16-colour palette for the dark terminal bed (classic xterm). */
+const DARK_ANSI = {
+  black: "#000000", red: "#cd3131", green: "#0dbc79", yellow: "#e5e510",
+  blue: "#2472c8", magenta: "#bc3fbc", cyan: "#11a8cd", white: "#e5e5e5",
+  brightBlack: "#666666", brightRed: "#f14c4c", brightGreen: "#23d18b",
+  brightYellow: "#f5f543", brightBlue: "#3b8eea", brightMagenta: "#d670d6",
+  brightCyan: "#29b8db", brightWhite: "#ffffff",
+};
+
+/** ANSI 16-colour palette tuned for a light terminal bed (VS Code Light+). */
+const LIGHT_ANSI = {
+  black: "#000000", red: "#cd3131", green: "#0dbc79", yellow: "#949800",
+  blue: "#0451a5", magenta: "#bc05bc", cyan: "#0598bc", white: "#555555",
+  brightBlack: "#666666", brightRed: "#cd3131", brightGreen: "#14ce14",
+  brightYellow: "#b5ba00", brightBlue: "#0451a5", brightMagenta: "#bc05bc",
+  brightCyan: "#0598bc", brightWhite: "#a5a5a5",
+};
+
 export function TerminalPanel({
   origin,
   anchorRect,
@@ -80,24 +98,34 @@ export function TerminalPanel({
   }, []);
 
   // ── xterm theme from CSS variables (re-derived per terminal creation) ──────
-  // ponytail: captured at terminal creation; mid-session theme switches apply
-  // to newly created terminals only.
+  // ANSI palettes follow the current theme: dark bed + light text, or a
+  // light bed + dark text set tuned for readability on a light backdrop.
   const buildTheme = useMemo(() => () => {
     const css = getComputedStyle(document.documentElement);
     const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+    const dark = document.documentElement.classList.contains("dark");
     return {
-      background: "rgba(0, 0, 0, 0)",
-      foreground: v("--text", "#d4d4d4"),
+      background: v("--terminal-bg", dark ? "rgba(12, 12, 14, 0.86)" : "rgba(250, 250, 251, 0.92)"),
+      foreground: v("--text", dark ? "#d4d4d4" : "#1f2328"),
       cursor: v("--accent", "#3b82f6"),
-      cursorAccent: v("--bg", "#1e1e1e"),
-      selectionBackground: "rgba(128, 128, 128, 0.35)",
-      black: "#000000", red: "#cd3131", green: "#0dbc79", yellow: "#e5e510",
-      blue: "#2472c8", magenta: "#bc3fbc", cyan: "#11a8cd", white: "#e5e5e5",
-      brightBlack: "#666666", brightRed: "#f14c4c", brightGreen: "#23d18b",
-      brightYellow: "#f5f543", brightBlue: "#3b8eea", brightMagenta: "#d670d6",
-      brightCyan: "#29b8db", brightWhite: "#ffffff",
+      cursorAccent: v("--bg", dark ? "#1e1e1e" : "#ffffff"),
+      selectionBackground: dark ? "rgba(128, 128, 128, 0.35)" : "rgba(0, 0, 0, 0.15)",
+      ...(dark ? DARK_ANSI : LIGHT_ANSI),
     };
   }, []);
+
+  // Live theme switching: re-theme every attached terminal when the
+  // theme class on <html> flips, instead of waiting for a new terminal.
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      const theme = buildTheme();
+      for (const [, a] of attachedRef.current) {
+        if (a.term) a.term.options.theme = theme;
+      }
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, [buildTheme]);
 
   // ── SSE attach / reconnect with offset resume ─────────────────────────────
   const attach = useCallback((id: string) => {
