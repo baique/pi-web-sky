@@ -591,7 +591,7 @@ export function ChatMinimap({
     previewBox.scrollTop = Math.max(0, targetTop);
   }, [allNodes, minimapHovered, nearestNodeIndex]);
 
-  if (!visible) return null;
+  const showRail = visible;
 
   const lastNodeTop = positionedNodes.length > 0
     ? positionedNodes[positionedNodes.length - 1].topRatio * minimapHeight
@@ -614,25 +614,29 @@ export function ChatMinimap({
         position: "relative",
         cursor: "pointer",
         userSelect: "none",
-        borderLeft: "1px solid var(--border)",
-        background: "var(--bg-panel)",
+        borderLeft: showRail ? "1px solid var(--border)" : "none",
+        background: showRail ? "var(--glass-bg)" : "transparent",
+        backdropFilter: showRail ? "blur(var(--glass-blur)) saturate(var(--glass-saturate))" : "none",
+        WebkitBackdropFilter: showRail ? "blur(var(--glass-blur)) saturate(var(--glass-saturate))" : "none",
         overflow: "visible",
       }}
     >
-      <div
-        style={{
-          position: "absolute",
-          left: "50%",
-          top: MINIMAP_PADDING,
-          height: railHeight,
-          width: 1,
-          background: "var(--border)",
-          transform: "translateX(-50%)",
-          zIndex: 0,
-        }}
-      />
+      {showRail && (
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: MINIMAP_PADDING,
+            height: railHeight,
+            width: 1,
+            background: "var(--border)",
+            transform: "translateX(-50%)",
+            zIndex: 0,
+          }}
+        />
+      )}
 
-      {positionedNodes.map((node) => {
+      {showRail && positionedNodes.map((node) => {
         const isNearest = minimapHovered && nearestNode?.index === node.index;
         const isActive = activeIndex === node.index;
 
@@ -671,7 +675,7 @@ export function ChatMinimap({
         );
       })}
 
-      {minimapHovered && allNodes.length > 0 && (
+      {showRail && minimapHovered && allNodes.length > 0 && (
         <div
           ref={previewBoxRef}
           className={styles.preview}
