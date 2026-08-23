@@ -18,6 +18,7 @@
 2. **确认 token 有效**：`npm whoami` 输出 `baique`。不是 → 换 token（见故障）。
 3. **发布**：`npm run release`。内部依次完成：版本号 patch +1 → `next build` → `npm publish --access public`。
 4. **验证发布成功**：`npm view @baique/pi-web-sky version` 输出必须等于 package.json 的 `version`。
+   - **注意**：npm 新后端对 publish 返回 `PUT 202 Accepted` 并在日志打印 `+ @baique/pi-web-sky@0.1.x`，但版本要**几分钟后才会出现在 registry 的 versions 列表**。日志成功行出现后别急着验证；等 2–5 分钟再查，或直接用 `curl -s https://registry.npmjs.org/@baique%2Fpi-web-sky` 检查 `dist-tags.latest`。期间 `npm view` 仍显示上一版是正常的传播延迟，不是发布失败。
 5. **提交版本变更**：`git add package.json package-lock.json && git commit -m "chore: release 0.1.x"`（x = 新版本号，沿用历史提交风格）。
 6. **推送 GitHub**：`git push origin main`，确认远端与本地同步。
 
