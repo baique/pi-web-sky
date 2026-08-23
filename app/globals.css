@@ -89,13 +89,15 @@
   --follow-active: rgba(139, 92, 246, 1);
 
   /* Message-bubble glass — user keeps a blue tint, assistant keeps
-     neutral; both translucent so the wallpaper shows through.
-     Alpha ~0.60 + strong blur: wallpaper hue bleeds through while
-     body text stays readable at 14px/1.6 against var(--text). */
-  --user-bg-glass: rgba(219, 234, 254, 0.60);
+     neutral; both translucent so the wallpaper shows through, denser in
+     light theme so body text stays readable over vibrant wallpapers.
+     Alpha ~0.7 + heavy blur: wallpaper hue bleeds through while text at
+     14px/1.6 against var(--text) stays legible. */
+  --user-bg-glass: rgba(219, 234, 254, 0.50);
   --user-border-glass: rgba(59, 130, 246, 0.22);
-  --assistant-card-glass: rgba(252, 252, 253, 0.55);
-  --tool-bg-glass: rgba(248, 248, 250, 0.55);
+  --assistant-card-glass: rgba(252, 252, 253, 0.44);
+  --tool-bg-glass: rgba(248, 248, 250, 0.44);
+  --glass-blur-bubble: 18px;
 
   /* Backdrop desaturation: light theme washes wallpaper colours toward a
      neutral backing (real frosted glass), dark theme keeps the richer
@@ -149,6 +151,7 @@ html.dark {
   --user-border-glass: rgba(96, 165, 250, 0.28);
   --assistant-card-glass: rgba(36, 36, 39, 0.55);
   --tool-bg-glass: rgba(36, 36, 39, 0.55);
+  --glass-blur-bubble: 12px;
 }
 
 .catppuccin-file-icon {
@@ -1565,6 +1568,7 @@ span.token.table {
     --side-panel: var(--frame-glass);
     --glass-blur: 0px;
     --glass-blur-heavy: 0px;
+    --glass-blur-bubble: 0px;
   }
   html.dark {
     --app-bg-scrim: rgba(0, 0, 0, 1);
@@ -1579,6 +1583,7 @@ span.token.table {
     --side-panel: var(--frame-glass);
     --glass-blur: 0px;
     --glass-blur-heavy: 0px;
+    --glass-blur-bubble: 0px;
   }
 }
 

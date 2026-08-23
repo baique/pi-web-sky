@@ -2046,8 +2046,6 @@ export function AppShell() {
     `}</style>
     <div style={{
       display: "flex",
-      position: "relative",
-      zIndex: 1,
       width: "100%",
       height: "var(--app-viewport-height, 100dvh)",
       paddingLeft: "env(safe-area-inset-left)",
@@ -2243,7 +2241,7 @@ export function AppShell() {
           wallpaper renders on the ordinary page layer — immune to the
           video-compositor occlusion quirk. Scrim keeps text legible. */}
       {bgKind === "video" && bgUrl && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: -1, overflow: "hidden", pointerEvents: "none" }}>
           <video
             ref={bgVideoRef}
             src={bgUrl}
