@@ -43,7 +43,7 @@ function ToolbarIconButton({
   const enter = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (disabled || skipHover) return;
     e.currentTarget.style.color = "var(--text-muted)";
-    e.currentTarget.style.background = "var(--bg-hover)";
+    e.currentTarget.style.background = "var(--side-hover)";
   };
   const leave = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (disabled || skipHover) return;
@@ -1068,7 +1068,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               display: "flex",
               alignItems: "center",
               padding: "6px 10px",
-              background: selectedCwd ? "var(--bg-hover)" : "rgba(37,99,235,0.06)",
+              background: selectedCwd ? "transparent" : "color-mix(in srgb, var(--accent) 8%, transparent)",
               border: selectedCwd ? "1px solid var(--border)" : "1px solid rgba(37,99,235,0.4)",
               borderRadius: 7,
               cursor: "pointer",
@@ -1127,7 +1127,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               left: 0,
               right: 0,
               zIndex: 100,
-              background: "var(--bg)",
+              background: "var(--panel-glass)",
+              backdropFilter: "blur(var(--glass-blur-heavy)) saturate(140%)",
+              WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(140%)",
               border: "1px solid var(--border)",
               borderRadius: 8,
               boxShadow: "0 6px 20px rgba(0,0,0,0.10)",
@@ -1155,7 +1157,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       border: "1px solid var(--border)",
                       borderRadius: 5,
                       outline: "none",
-                      background: "var(--bg)",
+                      background: "var(--side-input)",
                       color: "var(--text)",
                       boxSizing: "border-box",
                     }}
@@ -1180,7 +1182,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       gap: 7,
                       width: "100%",
                       padding: "8px 10px",
-                      background: "var(--bg)",
+                      background: "transparent",
                       border: "none",
                       borderBottom: "1px solid var(--border)",
                       color: project.key === selectedProject?.key ? "var(--text)" : "var(--text-muted)",
@@ -1193,6 +1195,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       whiteSpace: "nowrap",
                     }}
                     title={project.root}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-hover)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
                   >
                     {project.key === selectedProject?.key && (
                       <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -1291,7 +1295,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   alignItems: "center",
                   gap: 6,
                   padding: "0 10px",
-                  background: "var(--bg-hover)",
+                  background: "transparent",
                   border: "1px solid var(--border)",
                   borderRadius: 7,
                   cursor: "pointer",
@@ -1332,7 +1336,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   left: 0,
                   right: 0,
                   zIndex: 100,
-                  background: "var(--bg)",
+                  background: "var(--panel-glass)",
+                  backdropFilter: "blur(var(--glass-blur-heavy)) saturate(140%)",
+                  WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(140%)",
                   border: "1px solid var(--border)",
                   borderRadius: 8,
                   boxShadow: "0 6px 20px rgba(0,0,0,0.10)",
@@ -1360,7 +1366,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                           border: "1px solid var(--border)",
                           borderRadius: 5,
                           outline: "none",
-                          background: "var(--bg)",
+                          background: "var(--side-input)",
                           color: "var(--text)",
                           boxSizing: "border-box",
                         }}
@@ -1385,7 +1391,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             </button>
                             <button
                               onClick={() => setWtConfirmRemove(null)}
-                              style={{ padding: "3px 9px", background: "var(--bg-hover)", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-muted)", fontSize: 11, cursor: "pointer", flexShrink: 0 }}
+                              style={{ padding: "3px 9px", background: "transparent", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-muted)", fontSize: 11, cursor: "pointer", flexShrink: 0 }}
                             >
                               {t("sidebar.cancel")}
                             </button>
@@ -1406,6 +1412,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                               setWtFilter("");
                             }}
                             title={wt.path}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-hover)"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
                             style={{
                               flex: 1,
                               minWidth: 0,
@@ -1413,7 +1421,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                               alignItems: "center",
                               gap: 7,
                               padding: "8px 10px",
-                              background: "var(--bg)",
+                              background: "transparent",
                               border: "none",
                               color: isCurrent ? "var(--text)" : "var(--text-muted)",
                               cursor: "pointer",
@@ -1522,7 +1530,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                           border: "1px solid var(--accent)",
                           borderRadius: 5,
                           outline: "none",
-                          background: "var(--bg)",
+                          background: "var(--side-input)",
                           color: "var(--text)",
                           boxSizing: "border-box",
                         }}
@@ -1551,7 +1559,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                           style={{
                             flex: 1,
                             padding: "4px 0",
-                            background: "var(--bg-hover)",
+                            background: "transparent",
                             border: "1px solid var(--border)",
                             borderRadius: 5,
                             color: "var(--text-muted)",
@@ -1596,7 +1604,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               padding: "0 10px",
               border: "1px solid var(--border)",
               borderRadius: 7,
-              background: "var(--bg-hover)",
+              background: "transparent",
               color: "var(--text-dim)",
               fontSize: 11,
               lineHeight: 1.35,
@@ -1703,7 +1711,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 title={t("sidebar.changedFiles", { count: changesCount })}
                 ariaPressed={!changesCollapsed}
                 color={changesCollapsed ? "var(--text-dim)" : "var(--accent)"}
-                background={changesCollapsed ? "none" : "var(--bg-selected)"}
+                background={changesCollapsed ? "none" : "var(--side-active)"}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <circle cx="12" cy="12" r="3" />
@@ -2090,7 +2098,7 @@ function SessionItem({
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete
           ? "rgba(239,68,68,0.06)"
-          : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
+          : isSelected ? "var(--side-selected)" : hovered ? "var(--side-hover)" : "transparent",
         borderLeft: confirmDelete
           ? "2px solid #ef4444"
           : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
@@ -2131,7 +2139,7 @@ function SessionItem({
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 height: 30, padding: "0 11px",
-                background: "var(--bg)", border: "1px solid var(--border)",
+                background: "var(--side-input)", border: "1px solid var(--border)",
                 borderRadius: 6, color: "var(--text-muted)",
                 cursor: "pointer", fontSize: 12, fontWeight: 500,
                 whiteSpace: "nowrap",
@@ -2160,7 +2168,7 @@ function SessionItem({
             border: "1px solid var(--accent)",
             borderRadius: 5,
             outline: "none",
-            background: "var(--bg)",
+            background: "var(--side-input)",
             color: "var(--text)",
             height: 30,
           }}
@@ -2250,20 +2258,18 @@ function SessionItem({
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
                   width: 32, height: 32, padding: 0,
-                  background: "var(--bg-hover)", border: "1px solid var(--border)",
+                  background: "transparent", border: "1px solid transparent",
                   borderRadius: 7, color: "var(--text-muted)",
                   cursor: "pointer", flexShrink: 0,
-                  transition: "background 0.12s, color 0.12s, border-color 0.12s",
+                  transition: "background 0.12s, color 0.12s",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--bg-selected)";
+                  e.currentTarget.style.background = "var(--side-active)";
                   e.currentTarget.style.color = "var(--accent)";
-                  e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.background = "transparent";
                   e.currentTarget.style.color = "var(--text-muted)";
-                  e.currentTarget.style.borderColor = "var(--border)";
                 }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2276,20 +2282,18 @@ function SessionItem({
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
                   width: 32, height: 32, padding: 0,
-                  background: "var(--bg-hover)", border: "1px solid var(--border)",
+                  background: "transparent", border: "1px solid transparent",
                   borderRadius: 7, color: "var(--text-muted)",
                   cursor: "pointer", flexShrink: 0,
-                  transition: "background 0.12s, color 0.12s, border-color 0.12s",
+                  transition: "background 0.12s, color 0.12s",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "rgba(239,68,68,0.08)";
+                  e.currentTarget.style.background = "rgba(239,68,68,0.12)";
                   e.currentTarget.style.color = "#ef4444";
-                  e.currentTarget.style.borderColor = "rgba(239,68,68,0.35)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.background = "transparent";
                   e.currentTarget.style.color = "var(--text-muted)";
-                  e.currentTarget.style.borderColor = "var(--border)";
                 }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

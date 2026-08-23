@@ -2134,7 +2134,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       padding: isMobile ? "8px 10px" : "8px 12px",
                       height: 32,
                       width: isMobile ? "100%" : undefined,
-                      maxWidth: isMobile ? "100%" : 220,
+                      maxWidth: isMobile ? "100%" : 300,
                       overflow: "hidden",
                       background: modelDropdownOpen ? "var(--bg-hover)" : "none",
                       border: "none",
@@ -2170,8 +2170,16 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                         <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
                       </svg>
                     )}
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                      {currentName ?? (modelOptions.length > 0 ? "Select model" : "No models")}
+                    <span style={{ display: "flex", alignItems: "baseline", minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                        {currentName ?? (modelOptions.length > 0 ? "Select model" : "No models")}
+                      </span>
+                      {model?.provider && (
+                        <>
+                          <span aria-hidden="true" style={{ flexShrink: 0, margin: "0 4px", color: "var(--text-dim)" }}>·</span>
+                          <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 11 }}>{model.provider}</span>
+                        </>
+                      )}
                     </span>
                   </button>
                   {modelDropdownOpen && modelDropdownRect && (() => {

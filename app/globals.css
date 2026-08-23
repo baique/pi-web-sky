@@ -42,6 +42,20 @@
   --tool-bg: #f9fafb;
   --bg-subtle: rgba(0,0,0,0.04);
 
+  /* Sidebar interactive layers — overlays derived from the text colour so
+     the tint direction follows the theme: light theme darkens slightly
+     (never white-on-glass, which reads grey), dark theme lightens.
+     Alpha stays low: these are hints, not coatings. */
+  --side-hover: color-mix(in srgb, var(--text) 6%, transparent);
+  --side-active: color-mix(in srgb, var(--text) 10%, transparent);
+  --side-selected: color-mix(in srgb, var(--accent) 12%, transparent);
+  /* Rename/inline inputs on glass: translucent base instead of opaque
+     --bg (pure white read as cheap plastic over frosted material). */
+  --side-input: color-mix(in srgb, var(--glass-bg-strong) 60%, transparent);
+  /* Sidebar backing — denser than the global --glass-bg so dark text keeps
+     its luminance gap over busy wallpapers (light theme especially). */
+  --side-panel: rgba(255, 255, 255, 0.85);
+
   /* Frosted-glass surfaces — chrome stays *near-solid* so the wallpaper
      shows through around the chrome, not through it. Each chat bubble
      adds its own tint-and-blur layer for actual frosted material.
@@ -60,6 +74,11 @@
      blur keeps them looking frosted everywhere without depending on the
      compositor actually applying backdrop-filter. */
   --panel-glass: rgba(250, 250, 251, 0.9);
+  /* Per-surface splits of --panel-glass: todo task board and the chat
+     timeline rail are tuned independently on purpose — do NOT merge them
+     back into one token. */
+  --panel-glass-todo: rgba(250, 250, 251, 0.9);
+  --panel-glass-minimap: rgba(250, 250, 251, 0.9);
   --glass-blur: 8px;
   --glass-blur-heavy: 12px;
 
@@ -99,6 +118,11 @@ html.dark {
   --msg-tool-text: color-mix(in srgb, var(--text) 32%, var(--text-muted));
   --accent: #60a5fa;
   --accent-hover: #93c5fd;
+  --side-hover: color-mix(in srgb, var(--text) 6%, transparent);
+  --side-active: color-mix(in srgb, var(--text) 10%, transparent);
+  --side-selected: color-mix(in srgb, var(--accent) 14%, transparent);
+  --side-input: color-mix(in srgb, var(--glass-bg-strong) 60%, transparent);
+  --side-panel: rgba(28, 28, 31, 0.75);
   --user-bg: #1e293b;
   --assistant-bg: #1a1a1a;
   --tool-bg: #1f2937;
@@ -110,6 +134,8 @@ html.dark {
   --glass-saturate: 140%;
   --glass-bg-input: rgba(34, 34, 37, 0.52);
   --panel-glass: rgba(34, 34, 37, 0.9);
+  --panel-glass-todo: rgba(34, 34, 37, 0.9);
+  --panel-glass-minimap: rgba(34, 34, 37, 0.9);
   --glass-blur: 8px;
   --glass-blur-heavy: 12px;
 
@@ -1494,6 +1520,7 @@ span.token.table {
     --app-bg-scrim: rgba(255, 255, 255, 1);
     --glass-bg: var(--bg);
     --glass-bg-strong: var(--bg);
+    --side-panel: var(--bg);
     --glass-blur: 0px;
     --glass-blur-heavy: 0px;
   }
@@ -1506,6 +1533,7 @@ span.token.table {
   :root, html.dark {
     --glass-bg: var(--bg);
     --glass-bg-strong: var(--bg);
+    --side-panel: var(--bg);
     --glass-blur: 0px;
     --glass-blur-heavy: 0px;
   }
@@ -1516,4 +1544,5 @@ span.token.table {
   from { opacity: 0; transform: translateY(4px) scale(0.92); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+
 

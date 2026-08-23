@@ -614,11 +614,11 @@ export function ChatMinimap({
         position: "relative",
         cursor: "pointer",
         userSelect: "none",
-        // Same denser floating-panel glass as the todo popover
-        // (--panel-glass): wallpaper colour blocks behind this narrow strip
+        // Independent glass token (see --panel-glass-minimap in globals.css):
+        // wallpaper colour blocks behind this narrow strip
         // otherwise read straight through a thin tint.
         border: showRail ? "1px solid color-mix(in srgb, var(--border) 60%, transparent)" : "none",
-        background: showRail ? "var(--panel-glass)" : "transparent",
+        background: showRail ? "var(--panel-glass-minimap)" : "transparent",
         backdropFilter: showRail ? "blur(16px) saturate(var(--glass-saturate))" : "none",
         WebkitBackdropFilter: showRail ? "blur(16px) saturate(var(--glass-saturate))" : "none",
         transform: "translateZ(0)",

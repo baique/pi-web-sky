@@ -345,19 +345,46 @@ export function AppShell() {
     setMobileToolbarMoreOpen(false);
     setActiveTopPanel(null);
     const opening = !todoPanelOpen;
-    if (opening) {
-      if (todoBtnRef.current) {
-        const rect = todoBtnRef.current.getBoundingClientRect();
-        setTodoPanelPos({
-          top: rect.bottom + 2,
-          right: Math.max(8, Math.round(window.innerWidth - rect.right)),
-        });
-      }
+    if (opening && selectedSession?.id) {
       // Refresh right before opening so the panel always shows current state.
-      if (selectedSession?.id) void refreshTodos(selectedSession.id);
+      void refreshTodos(selectedSession.id);
     }
     setTodoPanelOpen((open) => !open);
   }, [isMobile, todoPanelOpen, selectedSession?.id, refreshTodos]);
+
+  // Keep the todo panel anchored to its button while open. Rendered through
+  // a portal to <body> (same as the other top panels): the topbar's glass
+  // backdrop-filter makes it the containing block of fixed-position
+  // descendants, so an inline panel would shift when e.g. the right file
+  // panel narrows the topbar. Position is recomputed on any ancestor layout
+  // change so the panel can never be pushed away from its button.
+  useEffect(() => {
+    if (!todoPanelOpen || !todoBtnRef.current) return;
+    const update = () => {
+      const btn = todoBtnRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      setTodoPanelPos({
+        top: rect.bottom + 2,
+        right: Math.max(8, Math.round(window.innerWidth - rect.right)),
+      });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(document.documentElement);
+    let node: HTMLElement | null = todoBtnRef.current.parentElement;
+    while (node) {
+      ro.observe(node);
+      node = node.parentElement;
+    }
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [todoPanelOpen]);
 
   // Close the todo panel on outside click or Escape.
   useEffect(() => {
@@ -1969,7 +1996,7 @@ export function AppShell() {
         className={`sidebar-container${sidebarOpen ? " sidebar-open" : " sidebar-closed"}${mobileSidebarReady ? "" : " sidebar-mobile-pending"}${sidebarResizer.isResizing ? " sidebar-resizing" : ""}`}
         style={{
           "--sidebar-width": `${sidebarResizer.width}px`,
-          background: "var(--glass-bg)",
+          background: "var(--side-panel)",
           backdropFilter: "blur(var(--glass-blur-heavy)) saturate(140%)",
           WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(140%)",
           borderRight: "1px solid color-mix(in srgb, var(--border) 80%, transparent)",
@@ -2394,8 +2421,9 @@ export function AppShell() {
           ), document.body)}
 
           {/* Todo panel — narrow, pinned to top-right, drops down like the
-              session stats popover. Lists the session's pi-todo.state. */}
-          {todoPanelOpen && todoPanelPos && (
+              session stats popover. Lists the session's pi-todo.state.
+              Portaled to <body> — see the position-tracking effect above. */}
+          {todoPanelOpen && todoPanelPos && createPortal((
             <div
               ref={todoPanelRef}
               role="menu"
@@ -2408,10 +2436,10 @@ export function AppShell() {
                 maxHeight: "min(440px, calc(100dvh - 44px))",
                 overflowY: "auto",
                 zIndex: 500,
-                // Floating-panel glass (see --panel-glass in globals.css):
+                // Floating-panel glass (see --panel-glass-todo in globals.css):
                 // denser than bubbles so wallpaper colour blocks never read
                 // through it, blur kept on top when the compositor applies it.
-                background: "var(--panel-glass)",
+                background: "var(--panel-glass-todo)",
                 backdropFilter: "blur(16px) saturate(var(--glass-saturate))",
                 WebkitBackdropFilter: "blur(16px) saturate(var(--glass-saturate))",
                 transform: "translateZ(0)",
@@ -2485,7 +2513,7 @@ export function AppShell() {
                 </div>
               )}
             </div>
-          )}
+          ), document.body)}
 
         </div>
         {isMobile && renderProjectTrustWarning(true)}
