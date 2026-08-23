@@ -14,6 +14,8 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **文字对比度**：浅色偏青蓝深色、深色偏白
 - **右上角 todo 面板**：窄面板展示会话 pi-todo 状态，运行中 6s 轮询 + 展开前即时刷新
 - **右下角堆叠弱通知**：扩展/错误等瞬时提示以小卡片堆叠在右下角，自动消失
+- **内置多会话终端**：从顶栏或底部状态栏一键唤出，xterm.js + 服务端 pty，SSE 流式输出，刷新页面后会话保留
+- **可定制壁纸**：图片/视频壁纸，支持横向位置拖动调整、平铺重复、边缘色彩填充与一键重置
 
 ![Pi Web displaying a pi session with structured Markdown, tool calls, and project navigation](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
 
@@ -24,6 +26,8 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **Project file tools**: browse and upload files, inspect Git diffs, and preview source, Markdown, images, audio, PDFs, and DOCX files with automatic refresh.
 - **Git worktrees**: switch checkouts from the sidebar while keeping sessions from the same repository grouped together.
 - **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
+- **Built-in multi-session terminal**: launch a terminal panel from the top bar or the bottom status bar; xterm.js sessions stream over SSE, run side by side, and survive page refreshes.
+- **Customisable wallpaper**: use an image or video as the background, drag it horizontally to reposition, tile it, fill side gaps with edge-sampled colours, and reset on demand.
 - **English and Simplified Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.
 
 ## Quick Start
