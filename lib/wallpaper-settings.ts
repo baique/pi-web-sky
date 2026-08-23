@@ -52,11 +52,11 @@ export function saveWallpaperSettings(s: WallpaperSettings): void {
 /** Push the current settings into CSS custom properties on <html>. */
 export function applyWallpaperCss(s: WallpaperSettings, hasImage: boolean): void {
   const el = document.documentElement.style;
-  const tiled = s.repeat || (s.fill && hasImage);
   el.setProperty("--app-bg-repeat", s.repeat ? "repeat-x" : "no-repeat");
-  // Tiling and edge-fill both fit the wallpaper to full height so spare
-  // width exists: tiles duplicate it, fill lets the sampled colours own it.
-  el.setProperty("--app-bg-size", tiled ? "auto 100%" : "cover");
+  // The wallpaper always keeps its fitted `cover` size. Repeat/fill merely
+  // cover the side gaps that open up after a horizontal drag offset — they
+  // must never rescale the image itself.
+  el.setProperty("--app-bg-size", "cover");
   el.setProperty("--app-bg-pos-x", `calc(50% + ${Math.round(s.offsetX)}px)`);
   if (s.fill && !s.repeat && hasImage) {
     el.setProperty(
@@ -123,29 +123,6 @@ export function loadMediaDims(
     img.onerror = () => resolve(null);
     img.src = url;
   });
-}
-
-/**
- * How far the wallpaper may shift horizontally before a gap opens.
- * `tiled` wallpapers may travel through half a tile; fitted ones stop at
- * their horizontal slack.
- */
-export function computeMaxShift(
-  dims: WallpaperDims,
-  vw: number,
-  vh: number,
-  tiled: boolean,
-): number {
-  if (!dims.width || !dims.height || !vw || !vh) return 0;
-  let renderedW: number;
-  if (tiled) {
-    renderedW = (dims.width * vh) / dims.height; // auto 100%
-  } else {
-    const scale = Math.max(vw / dims.width, vh / dims.height); // cover
-    renderedW = dims.width * scale;
-  }
-  const slack = Math.max(0, (renderedW - vw) / 2);
-  return tiled ? Math.max(slack, renderedW / 2) : slack;
 }
 
 /** Load, persist and live-apply wallpaper display settings. */
