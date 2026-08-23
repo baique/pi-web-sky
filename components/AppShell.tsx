@@ -365,7 +365,10 @@ export function AppShell() {
       if (!btn) return;
       const rect = btn.getBoundingClientRect();
       setTodoPanelPos({
-        top: rect.bottom + 2,
+        // Flush against the button's bottom edge: square corners there so
+        // the panel reads as an extension of the trigger, matching the
+        // floating widget panel's flush-square edge on the status shelf.
+        top: rect.bottom,
         right: Math.max(8, Math.round(window.innerWidth - rect.right)),
       });
     };
@@ -2444,7 +2447,7 @@ export function AppShell() {
                 WebkitBackdropFilter: "blur(16px) saturate(var(--glass-saturate))",
                 transform: "translateZ(0)",
                 border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
-                borderRadius: 12,
+                borderRadius: "0 0 12px 12px",
                 boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
                 fontFamily: "inherit",
               }}

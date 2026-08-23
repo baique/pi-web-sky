@@ -273,7 +273,7 @@ body {
 
 .extension-widget-panels {
   position: absolute;
-  bottom: calc(100% + 6px);
+  bottom: 100%;
   left: 0;
   right: 0;
   z-index: 60;
@@ -285,7 +285,7 @@ body {
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  border-radius: 8px;
+  border-radius: 8px 8px 0 0;
   background: color-mix(in srgb, var(--glass-bg) 62%, transparent);
   box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.10);
 }
