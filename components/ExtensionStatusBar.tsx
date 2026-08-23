@@ -34,21 +34,26 @@ export function ExtensionStatusBar({
     <div
       className={`extension-status-shelf${widgets.length > 0 ? " has-widgets" : ""}${statuses.length > 0 ? " has-status" : ""}`}
     >
-      {widgets.length > 0 && <ExtensionWidgets widgets={widgets} />}
-      {statuses.length > 0 && (
-        <div
-          role="status"
-          className="extension-status-line"
-          aria-label={plainStatusLine}
-          title={plainStatusLine}
-        >
-          <span className="extension-status-text">
-            {parseAnsiLine(statusLine).map((segment, index) => (
-              <span key={index} style={segment.style}>{segment.text}</span>
-            ))}
-          </span>
-        </div>
-      )}
+      {/* Left: the TUI extension shelf (widgets + status text), left-aligned. */}
+      <div className="extension-status-left">
+        {widgets.length > 0 && <ExtensionWidgets widgets={widgets} />}
+        {statuses.length > 0 && (
+          <div
+            role="status"
+            className="extension-status-line"
+            aria-label={plainStatusLine}
+            title={plainStatusLine}
+          >
+            <span className="extension-status-text">
+              {parseAnsiLine(statusLine).map((segment, index) => (
+                <span key={index} style={segment.style}>{segment.text}</span>
+              ))}
+            </span>
+          </div>
+        )}
+      </div>
+      {/* Right: reserved integration area, right-aligned, empty for now. */}
+      <div className="extension-status-right" aria-hidden="true" />
     </div>
   );
 }

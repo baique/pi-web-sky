@@ -239,13 +239,35 @@ body {
 .extension-status-shelf {
   display: flex;
   flex-shrink: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: stretch;
   min-width: 0;
   border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   background: var(--frame-glass);
   backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+}
+
+/* Left: the TUI extension shelf (widget triggers + status line). Fills all
+   space up to the right button slot so the two halves stay flush and the
+   internal layout (panels spanning 100%, 70/30 widget/status split) keeps
+   behaving exactly like the pre-split shelf. */
+.extension-status-left {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: stretch;
+  min-width: 0;
+}
+
+/* Right: reserved integration slot. Width follows content — empty for now;
+   once a button is added, the left half flexes down to make room. */
+.extension-status-right {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: stretch;
+  justify-content: center;
+  min-width: 0;
 }
 
 .extension-widget-panels {
@@ -282,7 +304,7 @@ body {
 
 .extension-widget-triggers {
   display: flex;
-  flex: 1 1 100%;
+  flex: 0 1 auto;
   align-items: stretch;
   min-width: 0;
   height: 35px;
@@ -297,9 +319,7 @@ body {
 }
 
 .extension-status-shelf.has-widgets.has-status .extension-widget-triggers {
-  flex: 0 1 70%;
-  max-width: 70%;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
 }
 
 .extension-widget-trigger {
@@ -422,7 +442,7 @@ button.extension-widget-trigger:focus-visible {
 
 .extension-status-line {
   display: flex;
-  flex: 1 1 0;
+  flex: 0 1 auto;
   align-items: center;
   min-width: 0;
   height: 35px;
@@ -437,6 +457,13 @@ button.extension-widget-trigger:focus-visible {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Mobile: hide the reserved integration area, keep the TUI shelf. */
+@media (max-width: 640px) {
+  .extension-status-right {
+    display: none;
+  }
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-dim);
