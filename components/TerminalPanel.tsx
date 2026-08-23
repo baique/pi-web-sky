@@ -89,11 +89,18 @@ export function TerminalPanel({
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = activeId;
 
+  // Sessions we are in the middle of deleting client-side. Any refreshList
+  // that lands before the DELETE round-trips must not resurrect the chip.
+  const pendingDeleteRef = useRef<Set<string>>(new Set());
+
   const refreshList = useCallback(async () => {
     try {
       const res = await fetch("/api/terminal");
       const d = await res.json() as { terminals?: TerminalMeta[] };
-      if (Array.isArray(d.terminals)) setSessions(d.terminals);
+      if (Array.isArray(d.terminals)) {
+        const pending = pendingDeleteRef.current;
+        setSessions(d.terminals.filter((t) => !pending.has(t.id)));
+      }
     } catch { /* transient */ }
   }, []);
 
@@ -294,17 +301,38 @@ export function TerminalPanel({
 
   // Auto-create the first terminal when the server has none yet — opening the
   // panel should just work, not present an empty state. One attempt only;
-  // failures surface via the manual create button.
+  // failures surface via the manual create button. Setting autoCreatedRef in
+  // every non-creating branch matters: if a session existed on open, deleting
+  // it must NOT auto-spawn a replacement (the user asked to close it).
   const autoCreatedRef = useRef(false);
   useEffect(() => {
-    if (autoCreatedRef.current || !loadedOnce || creating || sessions.length > 0) return;
+    if (autoCreatedRef.current) return;
+    if (!loadedOnce || creating) return;
     autoCreatedRef.current = true;
+    if (sessions.length > 0) return; // sessions already exist — no auto-create
     void createSession();
   }, [loadedOnce, creating, sessions.length, createSession]);
 
   const closeSession = useCallback(async (id: string) => {
-    await fetch(`/api/terminal/${id}`, { method: "DELETE" });
-    await refreshList(); // prune effect disposes the attachment
+    // Optimistic removal: drop the chip immediately so one click always
+    // closes it — the prune effect disposes the attachment right away,
+    // which also stops stale resize/SSE requests to the dying session.
+    // The id stays in pendingDeleteRef so a late refreshList (SSE gone /
+    // poll) cannot resurrect the chip before the DELETE round-trips.
+    pendingDeleteRef.current.add(id);
+    setSessions((cur) => cur.filter((s) => s.id !== id));
+    try {
+      const res = await fetch(`/api/terminal/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        // Server still has it — the kill didn't happen; lift the guard so
+        // the next list refresh shows it again.
+        pendingDeleteRef.current.delete(id);
+        void refreshList();
+      }
+    } catch {
+      pendingDeleteRef.current.delete(id);
+      void refreshList();
+    }
   }, [refreshList]);
 
   // Outside click / Escape close.
