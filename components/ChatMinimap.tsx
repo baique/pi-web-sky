@@ -614,10 +614,12 @@ export function ChatMinimap({
         position: "relative",
         cursor: "pointer",
         userSelect: "none",
-        borderLeft: showRail ? "1px solid var(--border)" : "none",
-        background: showRail ? "var(--glass-bg)" : "transparent",
-        backdropFilter: showRail ? "blur(var(--glass-blur)) saturate(var(--glass-saturate))" : "none",
-        WebkitBackdropFilter: showRail ? "blur(var(--glass-blur)) saturate(var(--glass-saturate))" : "none",
+        border: showRail ? "1px solid color-mix(in srgb, var(--border) 60%, transparent)" : "none",
+        background: showRail ? "var(--assistant-card-glass)" : "transparent",
+        backdropFilter: showRail ? "blur(12px) saturate(var(--glass-saturate))" : "none",
+        WebkitBackdropFilter: showRail ? "blur(12px) saturate(var(--glass-saturate))" : "none",
+        borderRadius: 12,
+        boxShadow: showRail ? "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)" : "none",
         overflow: "visible",
       }}
     >

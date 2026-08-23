@@ -229,11 +229,10 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
           padding: "2px 0",
           border: "none",
           background: "transparent",
-          color: "var(--text)",
-          /* Reverse-halo stroke: dark theme = white text on black halo,
-             light theme = black text on white halo, so the label stays
-             legible over any wallpaper. */
-          textShadow: "0 0 1.5px color-mix(in srgb, var(--bg) 70%, transparent)",
+          color: "#ffffff",
+          /* Blend-difference: white text automagnetically inverts against
+             whatever sits behind (wallpaper/glass), no halo needed. */
+          mixBlendMode: "exclusion",
           cursor: "pointer",
           fontSize: 12,
           textAlign: "left",
@@ -591,23 +590,6 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       cwd={session?.cwd ?? newSessionCwd}
       atBottom={atBottom}
       onScrollToBottom={scrollToBottom}
-      header={isEmptyNew ? (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, fontFamily: "var(--font-mono)" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: isMobile ? 7 : 10, minWidth: 0, flex: 1, lineHeight: 1.4, overflow: "hidden" }}>
-            <span style={{ fontSize: 28, fontWeight: 700, letterSpacing: 0, color: "var(--text)", flexShrink: 0, whiteSpace: "nowrap" }}>π</span>
-            <span style={{ fontSize: 22, color: "var(--text)", fontWeight: 700, letterSpacing: 0, flexShrink: 0, whiteSpace: "nowrap" }}>Pi Web</span>
-            <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
-            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-              web <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span>
-            </span>
-            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-              pi <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span>
-            </span>
-          </div>
-        </div>
-      ) : undefined}
     />
   );
 
@@ -705,6 +687,32 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       {isEmptyNew ? (
         <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
           <div className="w-full max-w-[820px]">
+            <div
+              className="mb-3"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                marginLeft: 16,
+                marginRight: isMobile ? 16 : 52,
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "baseline", gap: isMobile ? 7 : 10, minWidth: 0, flex: 1, lineHeight: 1.4, overflow: "hidden" }}>
+                <span style={{ fontSize: 34, fontWeight: 700, letterSpacing: 0, color: "#ffffff", mixBlendMode: "exclusion", flexShrink: 0, whiteSpace: "nowrap" }}>π</span>
+                <span style={{ fontSize: 28, color: "#ffffff", fontWeight: 700, letterSpacing: 0, mixBlendMode: "exclusion", flexShrink: 0, whiteSpace: "nowrap" }}>Pi Web</span>
+                <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0, mixBlendMode: "exclusion" }}>
+                <span style={{ fontSize: 12, color: "#ffffff", fontWeight: 700 }}>
+                  web <span style={{ color: "#ffffff", fontWeight: 700 }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span>
+                </span>
+                <span style={{ fontSize: 12, color: "#ffffff", fontWeight: 700 }}>
+                  pi <span style={{ color: "#ffffff", fontWeight: 700 }}>v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span>
+                </span>
+              </div>
+            </div>
             {chatInputElement}
             <ExtensionStatusBar statuses={extensionStatuses} widgets={extensionWidgets} />
           </div>
@@ -913,13 +921,13 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
             )}
 
             {agentRunning && !hasStreamingContent && agentPhase && (
-              <div className="break-words py-2 text-[13px]" style={{ color: "var(--text)" }}>
+              <div className="break-words py-2 text-[13px]" style={{ color: "#ffffff", mixBlendMode: "exclusion" }}>
                 <span className="animate-[pulse_1.5s_infinite]">{phaseLabel(agentPhase, t)}</span>
               </div>
             )}
 
             {bashRunning && !pendingBash && (
-              <div className="py-2 text-[13px]" style={{ color: "var(--text)" }}>
+              <div className="py-2 text-[13px]" style={{ color: "#ffffff", mixBlendMode: "exclusion" }}>
                  <span className="animate-[pulse_1.5s_infinite]">{t("chat.runningCommand")}</span>
               </div>
             )}

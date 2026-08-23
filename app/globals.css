@@ -33,7 +33,9 @@
   /* In-bubble metadata (model name, usage, tool labels): clearly readable
      on frosted glass, one step below body text, never white-on-white. */
   --text-meta: rgba(30, 41, 59, 0.92);
-  --accent: #2563eb;
+  /* 消息工具行文字(复制/编辑/新建会话/时间): 浅色向黑, 深色向白 */
+  --msg-tool-text: color-mix(in srgb, #000000 85%, var(--text-muted));
+  --accent: #3184f8;
   --accent-hover: #1d4ed8;
   --user-bg: #eff6ff;
   --assistant-bg: #ffffff;
@@ -47,12 +49,17 @@
      the washed-out grey that a white scrim produces over wallpaper and
      keeps the frosted panels looking like real glass instead of cheap
      mist. */
-  --app-bg-scrim: rgba(0, 0, 0, 0.12);
+  --app-bg-scrim: rgba(0, 0, 0, 0.05);
   --glass-bg: rgba(250, 250, 251, 0.65);
   --glass-bg-strong: rgba(255, 255, 255, 0.78);
   --glass-bg-input: rgba(250, 250, 251, 0.52);
   --glass-blur: 8px;
   --glass-blur-heavy: 12px;
+
+  /* Composer action-tint text — light theme keeps brighter amber/indigo so
+     they stay vivid on light glass. */
+  --steer-active: rgba(249, 115, 22, 1);
+  --follow-active: rgba(139, 92, 246, 1);
 
   /* Message-bubble glass — user keeps a blue tint, assistant keeps
      neutral; both translucent so the wallpaper shows through.
@@ -82,6 +89,7 @@ html.dark {
   --text-muted: #c7d0da;
   --text-dim: #8a93a0;
   --text-meta: rgba(232, 238, 247, 0.92);
+  --msg-tool-text: color-mix(in srgb, var(--text) 32%, var(--text-muted));
   --accent: #60a5fa;
   --accent-hover: #93c5fd;
   --user-bg: #1e293b;
@@ -96,6 +104,10 @@ html.dark {
   --glass-bg-input: rgba(34, 34, 37, 0.52);
   --glass-blur: 8px;
   --glass-blur-heavy: 12px;
+
+  /* Dark theme: calmer amber/indigo (already verified to look right). */
+  --steer-active: rgba(217, 119, 6, 1);
+  --follow-active: rgba(129, 140, 248, 1);
 
   --user-bg-glass: rgba(30, 58, 95, 0.55);
   --user-border-glass: rgba(96, 165, 250, 0.28);
@@ -395,7 +407,7 @@ button.extension-widget-trigger:focus-visible {
 }
 
 :root {
-  --font-mono: 'JetBrains Mono', 'Consolas', var(--font-noto-mono), ui-monospace, 'PingFang SC', 'Microsoft YaHei', monospace;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'PingFang SC', 'Microsoft YaHei', monospace;
 }
 
 pre, code {
@@ -1496,3 +1508,4 @@ span.token.table {
   from { opacity: 0; transform: translateY(4px) scale(0.92); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+

@@ -41,10 +41,6 @@ interface ModelOption {
 }
 
 interface Props {
-  /** Optional header rendered at the very top of the composer glass panel
-   *  (used by the empty-new-session state to merge the brand title row with
-   *  the input box into one surface). */
-  header?: React.ReactNode;
   onSend: (message: string, images?: AttachedImage[]) => void;
   onAbort: () => void;
   onSteer?: (message: string, images?: AttachedImage[]) => void;
@@ -391,7 +387,6 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
-  header,
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
@@ -1533,12 +1528,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             transition: "border-color 0.15s, box-shadow 0.15s",
           } as React.CSSProperties}
         >
-          {header && (
-            <div style={{ padding: "4px 10px 2px" }}>
-              {header}
-            </div>
-          )}
-
           <DraftStash />
 
           {/* Image previews — 属输入内容层，与输入行同组 */}
@@ -1976,20 +1965,27 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   onClick={() => sendQueued("steer")}
                   disabled={!canQueueStreamingMessage}
                   title="Interrupt the current run and inject this message now"
+                  onMouseEnter={(e) => {
+                    if (e.currentTarget.disabled) return;
+                    e.currentTarget.style.background = "rgba(120,120,128,0.10)";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (e.currentTarget.disabled) return;
+                    e.currentTarget.style.background = "transparent";
+                  }}
                   style={{
                     display: "flex", alignItems: "center", gap: 5,
-                    padding: "7px 12px",
-                    background: canQueueStreamingMessage ? "rgba(234,179,8,0.12)" : "none",
-                    border: "1px solid rgba(234,179,8,0.35)",
+                    padding: "6px 10px",
+                    background: "transparent",
                     borderRadius: 8,
-                    color: canQueueStreamingMessage ? "rgba(180,130,0,1)" : "var(--text-dim)",
+                    color: canQueueStreamingMessage ? "color-mix(in srgb, var(--text) 20%, var(--text-muted))" : "var(--text-dim)",
                     cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
                     fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
                     transition: "background 0.12s",
                   }}
                 >
-                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 1 L9 5 L5 9" /><line x1="1" y1="5" x2="9" y2="5" />
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M7 3 L11 7 L7 11" /><line x1="3" y1="7" x2="11" y2="7" />
                   </svg>
                   {t("chat.steer")}
                 </button>
@@ -1999,21 +1995,28 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   onClick={() => sendQueued("followup")}
                   disabled={!canQueueStreamingMessage}
                   title="Queue this message after the agent finishes"
+                  onMouseEnter={(e) => {
+                    if (e.currentTarget.disabled) return;
+                    e.currentTarget.style.background = "rgba(120,120,128,0.10)";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (e.currentTarget.disabled) return;
+                    e.currentTarget.style.background = "transparent";
+                  }}
                   style={{
                     display: "flex", alignItems: "center", gap: 5,
-                    padding: "7px 12px",
-                    background: canQueueStreamingMessage ? "rgba(129,140,248,0.12)" : "none",
-                    border: "1px solid rgba(129,140,248,0.35)",
+                    padding: "6px 10px",
+                    background: "transparent",
                     borderRadius: 8,
-                    color: canQueueStreamingMessage ? "rgba(99,102,241,1)" : "var(--text-dim)",
+                    color: canQueueStreamingMessage ? "color-mix(in srgb, var(--text) 20%, var(--text-muted))" : "var(--text-dim)",
                     cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
                     fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
                     transition: "background 0.12s",
                   }}
                 >
-                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="5" y1="1" x2="5" y2="6" /><polyline points="2.5 3.5 5 1 7.5 3.5" />
-                    <line x1="2" y1="9" x2="8" y2="9" />
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="7" y1="3" x2="7" y2="8" /><polyline points="4.5 5.5 7 3 9.5 5.5" />
+                    <line x1="4" y1="11" x2="10" y2="11" />
                   </svg>
                   {t("chat.followUp")}
                 </button>
@@ -2027,35 +2030,23 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 flexShrink: 0,
                 alignSelf: "flex-end",
                 display: "flex", alignItems: "center", gap: 6,
-                padding: "7px 14px",
-                border: (value.trim() || attachedImages.length)
-                  ? "1px solid color-mix(in srgb, var(--accent) 38%, transparent)"
-                  : "1px solid color-mix(in srgb, var(--border) 45%, transparent)",
-                borderRadius: 10,
-                background: (value.trim() || attachedImages.length)
-                  ? "color-mix(in srgb, var(--accent) 13%, transparent)"
-                  : "color-mix(in srgb, var(--glass-bg) 52%, transparent)",
-                backdropFilter: "blur(var(--glass-blur)) saturate(140%)",
-                WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(140%)",
-                color: (value.trim() || attachedImages.length) ? "var(--accent)" : "var(--text-muted)",
+                padding: "6px 10px",
+                borderRadius: 8,
+                background: "transparent",
+                color: (value.trim() || attachedImages.length) ? "color-mix(in srgb, var(--text) 20%, var(--text-muted))" : "var(--text-dim)",
                 cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
                 fontSize: 13,
                 fontWeight: 600,
                 letterSpacing: "-0.01em",
-                boxShadow: (value.trim() || attachedImages.length)
-                  ? "0 2px 10px -4px color-mix(in srgb, var(--accent) 30%, transparent)"
-                  : "none",
-                transition: "background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.08s",
+                transition: "background 0.12s",
               }}
               onMouseEnter={(e) => {
                 if (e.currentTarget.disabled) return;
-                e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 20%, transparent)";
-                e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 60%, transparent)";
+                e.currentTarget.style.background = "rgba(120,120,128,0.10)";
               }}
               onMouseLeave={(e) => {
                 if (e.currentTarget.disabled) return;
-                e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 13%, transparent)";
-                e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 38%, transparent)";
+                e.currentTarget.style.background = "transparent";
               }}
               onMouseDown={(e) => {
                 if (!e.currentTarget.disabled) e.currentTarget.style.transform = "translateY(1px)";

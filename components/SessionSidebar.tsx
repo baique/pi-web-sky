@@ -978,37 +978,34 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <PiWebTitle />
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
             <button
               onClick={handleNewSession}
               disabled={!selectedCwd}
               style={{
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                background: "var(--bg-hover)",
-                border: "1px solid var(--border)",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                background: "transparent",
+                border: "none",
                 color: selectedCwd ? "var(--text-muted)" : "var(--text-dim)",
                 cursor: selectedCwd ? "pointer" : "not-allowed",
-                height: 32,
-                paddingLeft: 10,
-                paddingRight: 12,
-                borderRadius: 7,
+                padding: "3px 6px",
+                borderRadius: 4,
                 fontSize: 12,
                 fontWeight: 500,
                 letterSpacing: "-0.01em",
                 flexShrink: 0,
-                transition: "background 0.12s, color 0.12s, border-color 0.12s",
+                textDecoration: "none",
+                transition: "color 0.12s",
               }}
              title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.selectProject")}
               onMouseEnter={(e) => {
                 if (!selectedCwd) return;
-                e.currentTarget.style.background = "var(--bg-selected)";
                 e.currentTarget.style.color = "var(--accent)";
-                e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
+                e.currentTarget.style.textDecoration = "underline";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = "var(--bg-hover)";
                 e.currentTarget.style.color = selectedCwd ? "var(--text-muted)" : "var(--text-dim)";
-                e.currentTarget.style.borderColor = "var(--border)";
+                e.currentTarget.style.textDecoration = "none";
               }}
             >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
@@ -1020,41 +1017,43 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             <button
               onClick={() => loadSessions(false, true)}
               style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                background: sessionRefreshDone ? "rgba(74,222,128,0.18)" : "var(--bg-hover)",
-                border: `1px solid ${sessionRefreshDone ? "rgba(74,222,128,0.4)" : "var(--border)"}`,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                background: sessionRefreshDone ? "rgba(74,222,128,0.12)" : "transparent",
+                border: "none",
                 color: sessionRefreshDone ? "#4ade80" : "var(--text-muted)",
                 cursor: "pointer",
-                width: 32, height: 32,
-                borderRadius: 7,
-                padding: 0,
+                padding: "3px 6px",
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 500,
+                letterSpacing: "-0.01em",
                 flexShrink: 0,
-                transition: "background 0.3s, color 0.3s, border-color 0.3s",
+                textDecoration: "none",
+                transition: "color 0.3s, background 0.3s",
               }}
               onMouseEnter={(e) => {
                 if (sessionRefreshDone) return;
-                e.currentTarget.style.background = "var(--bg-selected)";
                 e.currentTarget.style.color = "var(--accent)";
-                e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
+                e.currentTarget.style.textDecoration = "underline";
               }}
               onMouseLeave={(e) => {
                 if (sessionRefreshDone) return;
-                e.currentTarget.style.background = "var(--bg-hover)";
                 e.currentTarget.style.color = "var(--text-muted)";
-                e.currentTarget.style.borderColor = "var(--border)";
+                e.currentTarget.style.textDecoration = "none";
               }}
                title={t("sidebar.refresh")}
             >
               {sessionRefreshDone ? (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               ) : (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                   <path d="M3 3v5h5" />
                 </svg>
               )}
+              {t("sidebar.refresh")}
             </button>
           </div>
         </div>

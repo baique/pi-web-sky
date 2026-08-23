@@ -462,6 +462,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "flex-end",
           gap: 6, marginTop: 3,
+          mixBlendMode: "exclusion",
         }}>
           <div style={{
             display: "flex", gap: 3,
@@ -477,14 +478,14 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                 padding: "3px 8px", height: 22,
                 background: "none", border: "none",
                 borderRadius: 5,
-                color: copied ? "var(--accent)" : "var(--text-muted)",
+                color: copied ? "var(--accent)" : "#ffffff",
                 cursor: "pointer",
                 fontSize: 11, fontWeight: 400,
                 whiteSpace: "nowrap",
                 transition: "color 0.12s",
               }}
-              onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "var(--accent)"; }}
-              onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-muted)"; }}
+              onMouseEnter={(e) => { if (!copied) { e.currentTarget.style.fontWeight = "600"; e.currentTarget.style.textDecoration = "underline"; } }}
+              onMouseLeave={(e) => { if (!copied) { e.currentTarget.style.fontWeight = "400"; e.currentTarget.style.textDecoration = "none"; } }}
             >
               {copied ? (
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -515,14 +516,14 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                     padding: "3px 8px", height: 22,
                     background: "none", border: "none",
                     borderRadius: 5,
-                    color: "var(--text-dim)",
+                    color: "#ffffff",
                     cursor: "pointer",
                     fontSize: 11, fontWeight: 400,
                     whiteSpace: "nowrap",
                     transition: "color 0.12s",
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.fontWeight = "600"; e.currentTarget.style.textDecoration = "underline"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.fontWeight = "400"; e.currentTarget.style.textDecoration = "none"; }}
                 >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="15 10 20 15 15 20" />
@@ -541,14 +542,14 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                     padding: "3px 8px", height: 22,
                     background: "none", border: "none",
                     borderRadius: 5,
-                    color: forking ? "var(--accent)" : "var(--text-dim)",
+                    color: forking ? "var(--accent)" : "#ffffff",
                     cursor: forking ? "not-allowed" : "pointer",
                     fontSize: 11, fontWeight: 400,
                     whiteSpace: "nowrap",
                     transition: "color 0.12s",
                   }}
-                  onMouseEnter={(e) => { if (!forking) e.currentTarget.style.color = "var(--accent)"; }}
-                  onMouseLeave={(e) => { if (!forking) e.currentTarget.style.color = "var(--text-dim)"; }}
+                  onMouseEnter={(e) => { if (!forking) { e.currentTarget.style.fontWeight = "600"; e.currentTarget.style.textDecoration = "underline"; } }}
+                  onMouseLeave={(e) => { if (!forking) { e.currentTarget.style.fontWeight = "400"; e.currentTarget.style.textDecoration = "none"; } }}
                 >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="6" y1="3" x2="6" y2="15" />
@@ -561,7 +562,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
               )}
             </div>
           )}
-          {time && <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{time}</span>}
+          {time && <span style={{ fontSize: 10, color: "#ffffff" }}>{time}</span>}
         </div>
       )}
     </div>
@@ -758,7 +759,7 @@ function AssistantMessageView({
             <>
 
               {est > 0 && (
-                <span style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text)" }} title={t("i18n.estimatedTokens")}>
+                <span style={{ display: "flex", alignItems: "center", gap: 4, color: "#ffffff", mixBlendMode: "exclusion" }} title={t("i18n.estimatedTokens")}>
                   <span style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 11, fontWeight: 400 }}>
                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />

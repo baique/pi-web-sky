@@ -843,7 +843,12 @@ export function AppShell() {
   // Close the todo popover when switching sessions — the panel is per-session.
   useEffect(() => {
     setTodoPanelOpen(false);
-  }, [selectedSession?.id]);
+    // Refresh todo badge on session switch so the Tasks button renders even
+    // before the first click (otherwise the panel is unreachable: clicking the
+    // button cannot happen before the count is known).
+    const sid = selectedSession?.id;
+    if (sid) void refreshTodos(sid);
+  }, [selectedSession?.id, refreshTodos]);
 
   // Poll todos every few seconds while the current agent run is active, so the
   // Tasks badge + open panel track pi-todo.state changes made mid-run.
@@ -2403,10 +2408,10 @@ export function AppShell() {
                 maxHeight: "min(440px, calc(100dvh - 44px))",
                 overflowY: "auto",
                 zIndex: 500,
-                background: "color-mix(in srgb, var(--glass-bg-strong) 80%, transparent)",
-                backdropFilter: "blur(12px) saturate(140%)",
-                WebkitBackdropFilter: "blur(12px) saturate(140%)",
-                border: "1px solid color-mix(in srgb, var(--border) 80%, transparent)",
+                background: "color-mix(in srgb, var(--assistant-card-glass) 80%, var(--bg))",
+                backdropFilter: "blur(12px) saturate(var(--glass-saturate))",
+                WebkitBackdropFilter: "blur(12px) saturate(var(--glass-saturate))",
+                border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
                 borderRadius: 10,
                 boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
                 fontFamily: "inherit",
