@@ -1895,6 +1895,7 @@ export function AppShell() {
     return (
       <button
         type="button"
+        id="terminal-topbar-btn"
         ref={terminalBtnRef}
         onClick={() => toggleTerminal("top")}
         title={translate("terminal.title")}

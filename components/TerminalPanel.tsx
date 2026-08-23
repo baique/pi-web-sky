@@ -64,6 +64,7 @@ export function TerminalPanel({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadedOnce, setLoadedOnce] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const attachedRef = useRef<Map<string, Attached>>(new Map());
@@ -191,6 +192,7 @@ export function TerminalPanel({
   // Initial load: list sessions, activate newest.
   useEffect(() => {
     void refreshList().then(() => {
+      setLoadedOnce(true);
       setSessions((cur) => {
         if (!activeIdRef.current && cur.length > 0) setActiveId(cur[cur.length - 1].id);
         return cur;
@@ -251,6 +253,16 @@ export function TerminalPanel({
     }
   }, [activeCwd, refreshList]);
 
+  // Auto-create the first terminal when the server has none yet — opening the
+  // panel should just work, not present an empty state. One attempt only;
+  // failures surface via the manual create button.
+  const autoCreatedRef = useRef(false);
+  useEffect(() => {
+    if (autoCreatedRef.current || !loadedOnce || creating || sessions.length > 0) return;
+    autoCreatedRef.current = true;
+    void createSession();
+  }, [loadedOnce, creating, sessions.length, createSession]);
+
   const closeSession = useCallback(async (id: string) => {
     await fetch(`/api/terminal/${id}`, { method: "DELETE" });
     await refreshList(); // prune effect disposes the attachment
@@ -265,6 +277,10 @@ export function TerminalPanel({
       const target = event.target as Node;
       if (rootRef.current?.contains(target)) return;
       if (fabRef.current?.contains(target)) return;
+      // The topbar trigger is the sibling entry button — clicking it must be a
+      // genuine toggle, not an outside-click close, or the two handlers fight
+      // (close + reopen) and the collapsed panel replays its enter animation.
+      if (document.getElementById("terminal-topbar-btn")?.contains(target)) return;
       onClose();
     };
     const onKeyDown = (event: KeyboardEvent) => {
@@ -332,9 +348,6 @@ export function TerminalPanel({
       {/* Tab strip */}
       <div className="terminal-tabs">
         <div className="terminal-tab-scroll">
-          {groups.length === 0 && (
-            <span className="terminal-tab-empty">{t("terminal.empty")}</span>
-          )}
           {groups.map(([label, items]) => (
             <div key={label} className="terminal-group">
               <span className="terminal-group-label">{label}</span>
