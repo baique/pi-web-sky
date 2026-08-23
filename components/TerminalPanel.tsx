@@ -212,9 +212,20 @@ export function TerminalPanel({
       } catch { /* panel hidden mid-fit */ }
     };
     doFit();
+    // Double-fit on the next frame: right after the first fit the xterm
+    // scrollback geometry can be stale (first line rendered at the panel
+    // bottom) until a second geometry pass. A rAF re-fit runs after the
+    // browser has laid the fixed panel out; a late pass after the enter
+    // animation also absorbs SSE history written in the first frames.
+    const raf = requestAnimationFrame(() => {
+      try { a!.fit.fit(); } catch { /* panel hidden mid-frame */ }
+    });
+    const lateFit = setTimeout(() => {
+      try { a!.fit.fit(); } catch { /* panel hidden */ }
+    }, 250);
     const ro = new ResizeObserver(doFit);
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { ro.disconnect(); cancelAnimationFrame(raf); clearTimeout(lateFit); };
   }, [activeId, attach, sessions.length]);
 
   // Initial load: list sessions, activate newest.
