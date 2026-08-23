@@ -1,6 +1,8 @@
 import { randomUUID } from "crypto";
 import type { IPty } from "@lydell/node-pty";
 
+type IPtyModule = typeof import("@lydell/node-pty");
+
 // ============================================================================
 // Terminal session registry — server-side keepalive terminals.
 // Sessions outlive browser refreshes: pty output is kept in a ring buffer and
@@ -119,7 +121,11 @@ export async function createTerminal(opts: {
   const shell = process.platform === "win32" ? "powershell.exe" : process.env.SHELL || "bash";
   const args = process.platform === "win32" || process.env.SHELL?.endsWith("fish") ? [] : ["-l"];
 
-  const { default: pty } = await import("@lydell/node-pty");
+  // Webpack bundles external packages as plain CJS require()s, so the ESM
+  // interop `default` can be missing in the production build — fall back to
+  // the module object itself (dev keeps `default`, node-pty exports both).
+  const ptyMod = (await import("@lydell/node-pty")) as { default?: IPtyModule };
+  const pty = (ptyMod.default ?? ptyMod) as IPtyModule;
   const proc = pty.spawn(shell, args, {
     name: "xterm-256color",
     cwd: opts.cwd,
