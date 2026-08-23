@@ -52,6 +52,8 @@ interface Props {
   onSoundToggle?: () => void;
   playDoneSound?: () => void;
   unlockAudio?: () => void;
+  terminalOpen?: boolean;
+  onToggleTerminal?: () => void;
 }
 
 function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, string | number>) => string): string | null {
@@ -255,7 +257,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
 
@@ -547,6 +549,22 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     ? (modelThinkingLevelMaps[`${displayModelValue.provider}:${displayModelValue.modelId}`] ?? null)
     : null;
 
+  const terminalBarToggle = (
+    <button
+      type="button"
+      id="terminal-bottombar-btn"
+      onClick={onToggleTerminal}
+      title={t("terminal.title")}
+      aria-label={t("terminal.title")}
+      aria-expanded={terminalOpen}
+      className={`terminal-bar-toggle${terminalOpen ? " is-open" : ""}`}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
+      </svg>
+      <span>{t("terminal.title")}</span>
+    </button>
+  );
   const chatInputElement = (
     <ChatInput
       ref={chatInputRef}
@@ -714,7 +732,11 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               </div>
             </div>
             {chatInputElement}
-            <ExtensionStatusBar statuses={extensionStatuses} widgets={extensionWidgets} />
+            <ExtensionStatusBar
+              statuses={extensionStatuses}
+              widgets={extensionWidgets}
+              tools={terminalBarToggle}
+            />
           </div>
         </div>
       ) : (
@@ -963,7 +985,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
       <div className="relative">
         {chatInputElement}
-        <ExtensionStatusBar statuses={extensionStatuses} widgets={extensionWidgets} />
+        <ExtensionStatusBar statuses={extensionStatuses} widgets={extensionWidgets} tools={terminalBarToggle} />
       </div>
       </>
       )}

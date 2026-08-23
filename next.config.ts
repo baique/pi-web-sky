@@ -19,6 +19,9 @@ const nextConfig: NextConfig = {
     "@earendil-works/pi-agent-core",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
+    // Native pty binding — must stay external so the dynamic require of the
+    // platform-specific prebuilt package resolves at runtime, not bundle time.
+    "@lydell/node-pty",
   ],
   allowedDevOrigins: ["127.0.0.1", "192.168.*.*"],
   async headers() {

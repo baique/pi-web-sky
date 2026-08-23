@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
@@ -12,6 +13,8 @@ import { openFileTab, saveFileViewerState } from "./file-tab-state";
 import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { PluginsConfig } from "./PluginsConfig";
+// ssr:false — xterm.js touches browser globals at import time.
+const TerminalPanel = dynamic(() => import("./TerminalPanel").then((m) => m.TerminalPanel), { ssr: false });
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { useTheme } from "@/hooks/useTheme";
@@ -21,6 +24,10 @@ import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useAudio } from "@/hooks/useAudio";
 import { useAppBackground } from "@/lib/bg-image";
+import {
+  sampleEdgeColors,
+  useWallpaperSettings,
+} from "@/lib/wallpaper-settings";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
@@ -68,7 +75,88 @@ export function AppShell() {
   const searchParams = useSearchParams();
   const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
   const { preference, toggleTheme } = useTheme();
-  const { hasBg, ready: bgReady, pick: pickBg, remove: removeBg } = useAppBackground();
+  const { hasBg, ready: bgReady, pick: pickBg, remove: removeBg, kind: bgKind, url: bgUrl } = useAppBackground();
+ const { settings: wallSettings, update: updateWallSettings } = useWallpaperSettings(hasBg && bgKind === "image");
+ const [bgAdjusting, setBgAdjusting] = useState(false);
+ const bgVideoRef = useRef<HTMLVideoElement>(null);
+ const bgCanvasRef = useRef<HTMLCanvasElement>(null);
+ const bgOffsetRef = useRef(0);
+ bgOffsetRef.current = wallSettings.offsetX;
+ useEffect(() => {
+   const v = bgVideoRef.current;
+   if (!v) return;
+   v.muted = true;
+   v.preload = "auto";
+   let cancelled = false;
+   // Some Chrome builds defer/freeze autoplay for elements they deem
+   // occluded (symptom: video starts the moment DevTools inspects it).
+   // Fight it: kick playback at every readiness milestone and resume
+   // whenever something external pauses us — muted playback is always
+   // policy-allowed, so retrying cannot be blocked.
+   const tryPlay = () => {
+     if (!cancelled && v.paused) void v.play().catch(() => {});
+   };
+   v.addEventListener("loadeddata", tryPlay);
+   v.addEventListener("canplay", tryPlay);
+   v.addEventListener("pause", tryPlay);
+   tryPlay();
+   return () => {
+     cancelled = true;
+     v.removeEventListener("loadeddata", tryPlay);
+     v.removeEventListener("canplay", tryPlay);
+     v.removeEventListener("pause", tryPlay);
+   };
+ }, [bgUrl]);
+ // Canvas rendering path: Chromium sometimes decodes+plays a composited
+ // <video> layer but never paints it (pipeline kPlaying, zero visible
+ // frames). A canvas is ordinary page raster — same paint path as the
+ // image wallpaper, immune to the video-occlusion quirk. The hidden
+ // <video> element keeps doing decode + loop + autoplay; we blit its
+ // frames into the canvas every animation frame, with cover maths +
+ // horizontal pan applied in the draw call.
+ useEffect(() => {
+   const v = bgVideoRef.current;
+   const c = bgCanvasRef.current;
+   if (!v || !c || bgKind !== "video") return;
+   const ctx = c.getContext("2d");
+   if (!ctx) return;
+   let raf = 0;
+   const draw = () => {
+     raf = requestAnimationFrame(draw);
+     if (!v.videoWidth || !v.videoHeight) return;
+     const w = c.clientWidth;
+     const h = c.clientHeight;
+     const dpr = window.devicePixelRatio || 1;
+     if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+       c.width = Math.round(w * dpr);
+       c.height = Math.round(h * dpr);
+     }
+     const scale = Math.max(c.width / v.videoWidth, c.height / v.videoHeight);
+     const dw = v.videoWidth * scale;
+     const dh = v.videoHeight * scale;
+     const dx = (c.width - dw) / 2 + bgOffsetRef.current * dpr;
+     const dy = (c.height - dh) / 2;
+     ctx.clearRect(0, 0, c.width, c.height);
+     ctx.drawImage(v, dx, dy, dw, dh);
+   };
+   raf = requestAnimationFrame(draw);
+   return () => cancelAnimationFrame(raf);
+ }, [bgUrl, bgKind]);
+ // Adjust mode quality guards: dragging must never select passing text,
+ // and Escape leaves adjust mode like the done button.
+ useEffect(() => {
+   if (!bgAdjusting) return;
+   const prev = document.body.style.userSelect;
+   document.body.style.userSelect = "none";
+   const onKey = (e: KeyboardEvent) => {
+     if (e.key === "Escape") setBgAdjusting(false);
+   };
+   window.addEventListener("keydown", onKey);
+   return () => {
+     document.body.style.userSelect = prev;
+     window.removeEventListener("keydown", onKey);
+   };
+ }, [bgAdjusting]);
   const themeLabelKey =
     preference === "light" ? "theme.light" : "theme.dark";
   const { locale, setLocale, t: translate, supportedLocales } = useI18n();
@@ -110,6 +198,12 @@ export function AppShell() {
   const [projectTrustBusy, setProjectTrustBusy] = useState(false);
   const [projectTrustError, setProjectTrustError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Terminal panel — two entries (topbar dropdown + message-area corner FAB)
+  // share one open state; origin decides where the panel anchors and grows from.
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalOrigin, setTerminalOrigin] = useState<"top" | "bottombar">("top");
+  const [terminalAnchor, setTerminalAnchor] = useState<{ top: number; left: number; right: number; bottom: number } | null>(null);
+  const terminalBtnRef = useRef<HTMLButtonElement | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [mobileToolbarMoreOpen, setMobileToolbarMoreOpen] = useState(false);
   const [bgMenuOpen, setBgMenuOpen] = useState(false);
@@ -409,6 +503,35 @@ export function AppShell() {
       document.removeEventListener("keydown", handleKeyDown, true);
     };
   }, [todoPanelOpen]);
+
+  // Terminal panel — anchor the open panel to its entry button while open
+  // (same portal-anchoring reasoning as the todo panel above).
+  useEffect(() => {
+    if (!terminalOpen) return;
+    const update = () => {
+      const el = terminalOrigin === "top"
+        ? terminalBtnRef.current
+        : document.getElementById("terminal-bottombar-btn");
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setTerminalAnchor({ top: r.top, left: r.left, right: r.right, bottom: r.bottom });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(document.documentElement);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [terminalOpen, terminalOrigin]);
+
+  const toggleTerminal = useCallback((origin: "top" | "bottombar") => {
+    setTerminalOrigin(origin);
+    setTerminalOpen((open) => origin === terminalOrigin ? !open : true);
+  }, [terminalOrigin]);
 
   const handleSidebarToggle = useCallback(() => {
     if (isMobile) {
@@ -1556,6 +1679,7 @@ export function AppShell() {
           </svg>
           {!mobile && <span>{translate("system.label")}</span>}
         </button>
+        {!mobile && renderTerminalButton()}
         {mobile && renderThemeButton(true)}
         {mobile && renderLanguageButton(true)}
         {mobile && renderBackgroundButton(true)}
@@ -1766,6 +1890,37 @@ export function AppShell() {
     );
   };
 
+  const renderTerminalButton = () => {
+    const open = terminalOpen && terminalOrigin === "top";
+    return (
+      <button
+        type="button"
+        ref={terminalBtnRef}
+        onClick={() => toggleTerminal("top")}
+        title={translate("terminal.title")}
+        aria-label={translate("terminal.title")}
+        aria-expanded={open}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: "auto", height: "100%", padding: "0 10px", gap: 5,
+          background: open ? "var(--bg-selected)" : "none",
+          border: "none",
+          borderTop: open ? "2px solid var(--accent)" : "2px solid transparent",
+          borderLeft: "1px solid var(--border)",
+          color: open ? "var(--text)" : "var(--text-muted)",
+          cursor: "pointer", flexShrink: 0, transition: "color 0.12s, background 0.12s",
+        }}
+        onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
+        onMouseLeave={(event) => { event.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)"; }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
+        </svg>
+        <span>{translate("terminal.title")}</span>
+      </button>
+    );
+  };
+
   const renderMainFileToggle = (mobile: boolean) => {
     const covered = mobile && mobileToolbarMoreOpen;
     return (
@@ -1889,6 +2044,8 @@ export function AppShell() {
     `}</style>
     <div style={{
       display: "flex",
+      position: "relative",
+      zIndex: 1,
       width: "100%",
       height: "var(--app-viewport-height, 100dvh)",
       paddingLeft: "env(safe-area-inset-left)",
@@ -1923,11 +2080,16 @@ export function AppShell() {
           <input
             ref={bgFileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,video/mp4,video/webm"
             style={{ display: "none" }}
             onChange={async (e) => {
               const f = e.target.files?.[0];
-              if (f) await pickBg(f);
+              if (f) {
+                await pickBg(f);
+                // A new wallpaper starts centred: reset the stored horizontal
+                // drag offset so it does not carry over from the previous one.
+                updateWallSettings({ offsetX: 0 });
+              }
               e.target.value = "";
             }}
           />
@@ -1973,8 +2135,165 @@ export function AppShell() {
               {translate("bg.remove")}
             </button>
           )}
+          {hasBg && (
+            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+              {bgKind === "image" && (
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={wallSettings.repeat}
+                  onClick={() => updateWallSettings({ repeat: !wallSettings.repeat })}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8, width: "100%",
+                    padding: "7px 10px",
+                    background: wallSettings.repeat ? "var(--bg-selected)" : "transparent",
+                    color: "var(--text)", border: "1px solid var(--border)", borderRadius: 8,
+                    fontSize: 12.5, cursor: "pointer", textAlign: "left",
+                    transition: "background 0.12s",
+                  }}
+                >
+                  <span style={{ width: 14, flexShrink: 0, textAlign: "center", color: "var(--accent)" }}>
+                    {wallSettings.repeat ? "✓" : ""}
+                  </span>
+                  {translate("bg.repeat")}
+                </button>
+              )}
+              {bgKind === "image" && !wallSettings.repeat && (
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={wallSettings.fill}
+                  onClick={async () => {
+                    const next = !wallSettings.fill;
+                    if (next && bgUrl) {
+                      try {
+                        const blob = await (await fetch(bgUrl)).blob();
+                        const colors = await sampleEdgeColors(blob);
+                        if (colors) {
+                          updateWallSettings({ fill: next, fillColorLeft: colors.left, fillColorRight: colors.right });
+                          return;
+                        }
+                      } catch {
+                        // fall through to a plain toggle without sampled colours
+                      }
+                    }
+                    updateWallSettings({ fill: next });
+                  }}
+                  disabled={!bgReady}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8, width: "100%",
+                    padding: "7px 10px",
+                    background: wallSettings.fill ? "var(--bg-selected)" : "transparent",
+                    color: "var(--text)", border: "1px solid var(--border)", borderRadius: 8,
+                    fontSize: 12.5, cursor: "pointer", textAlign: "left",
+                    transition: "background 0.12s",
+                  }}
+                >
+                  <span style={{ width: 14, flexShrink: 0, textAlign: "center", color: "var(--accent)" }}>
+                    {wallSettings.fill ? "✓" : ""}
+                  </span>
+                  {translate("bg.fill")}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setBgAdjusting(true)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, width: "100%",
+                  padding: "7px 10px",
+                  background: "transparent",
+                  color: "var(--text)", border: "1px solid var(--border)", borderRadius: 8,
+                  fontSize: 12.5, cursor: "pointer", textAlign: "left",
+                  transition: "background 0.12s",
+                }}
+              >
+                <span style={{ width: 14, flexShrink: 0, textAlign: "center" }}>↔</span>
+                {translate("bg.adjust")}
+              </button>
+            </div>
+          )}
           <div style={{ fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5, marginTop: 10 }}>
             {translate("bg.hint")}
+          </div>
+        </div>
+      )}
+      {/* Video wallpaper: the hidden <video> drives decode/loop/autoplay;
+          a canvas above it repaints every frame (see rAF effect) so the
+          wallpaper renders on the ordinary page layer — immune to the
+          video-compositor occlusion quirk. Scrim keeps text legible. */}
+      {bgKind === "video" && bgUrl && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none" }}>
+          <video
+            ref={bgVideoRef}
+            src={bgUrl}
+            autoPlay
+            loop
+            playsInline
+            preload="auto"
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0 }}
+          />
+          <canvas
+            ref={bgCanvasRef}
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }}
+          />
+          <div style={{ position: "absolute", inset: 0, background: "var(--app-bg-scrim)" }} />
+        </div>
+      )}
+
+      {/* Wallpaper horizontal drag-adjust mode: full-screen capture layer,
+          pointer-drag updates offsetX (clamped to the wallpaper's slack),
+          click anywhere finishes. */}
+      {bgAdjusting && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 700,
+            cursor: "ew-resize", touchAction: "none",
+          }}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            const el = e.currentTarget;
+            el.setPointerCapture(e.pointerId);
+            const startX = e.clientX;
+            const startOffset = wallSettings.offsetX;
+            const onMove = (ev: PointerEvent) => {
+              updateWallSettings({
+                offsetX: startOffset + ev.clientX - startX,
+              });
+            };
+            const onUp = () => {
+              el.removeEventListener("pointermove", onMove);
+              el.removeEventListener("pointerup", onUp);
+              // Deliberately stay in adjust mode: re-pick freely, leave via
+              // the done action in the hint pill (or Escape).
+            };
+            el.addEventListener("pointermove", onMove);
+            el.addEventListener("pointerup", onUp);
+          }}
+        >
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{
+              position: "absolute", left: "50%", top: 16, transform: "translateX(-50%)",
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "8px 14px", borderRadius: 999,
+              background: "var(--panel-glass)", color: "var(--text)",
+              border: "1px solid var(--border)", fontSize: 12,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {translate("bg.adjustHint")}
+            <button
+              type="button"
+              onClick={() => setBgAdjusting(false)}
+              style={{
+                background: "var(--accent)", color: "#fff",
+                border: "none", borderRadius: 999,
+                padding: "4px 12px", fontSize: 12, fontWeight: 600,
+                cursor: "pointer", flexShrink: 0,
+              }}
+            >
+              {translate("bg.adjustDone")}
+            </button>
           </div>
         </div>
       )}
@@ -2549,6 +2868,8 @@ export function AppShell() {
               onSoundToggle={onSoundToggle}
               playDoneSound={playDoneSound}
               unlockAudio={unlockAudio}
+              terminalOpen={terminalOpen && terminalOrigin === "bottombar"}
+              onToggleTerminal={() => toggleTerminal("bottombar")}
             />
           ) : initialCwdStatus === "validating" ? (
             <div
@@ -2696,6 +3017,14 @@ export function AppShell() {
       </div>
     </div>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
+    {terminalOpen && (
+      <TerminalPanel
+        origin={terminalOrigin}
+        anchorRect={terminalAnchor}
+        activeCwd={selectedSession?.cwd ?? effectiveNewSessionCwd ?? null}
+        onClose={() => setTerminalOpen(false)}
+      />
+    )}
     {projectTrustDialogOpen && projectTrustCwd && (
       <ProjectTrustDialog
         cwd={projectTrustCwd}

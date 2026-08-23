@@ -1,0 +1,174 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+
+/**
+ * Wallpaper display settings (wallpaper-x branch prototype):
+ * - repeat   : tile horizontally (`background-repeat: repeat-x`)
+ * - offsetX  : horizontal drag offset in px, applied as `calc(50% + Npx)`
+ * - fill     : fill leftover side gaps with colours sampled from the
+ *              wallpaper's left/right edges (only meaningful when not tiling)
+ *
+ * Settings persist in localStorage and are applied to <html> as CSS custom
+ * properties consumed by the wallpaper layer on `body` in app/globals.css.
+ */
+
+export type WallpaperSettings = {
+  repeat: boolean;
+  offsetX: number;
+  fill: boolean;
+  fillColorLeft: string;
+  fillColorRight: string;
+};
+
+const DEFAULTS: WallpaperSettings = {
+  repeat: false,
+  offsetX: 0,
+  fill: false,
+  fillColorLeft: "#000000",
+  fillColorRight: "#000000",
+};
+
+const LS_KEY = "wallpaper-settings";
+
+export function loadWallpaperSettings(): WallpaperSettings {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return { ...DEFAULTS };
+    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<WallpaperSettings>) };
+  } catch {
+    return { ...DEFAULTS };
+  }
+}
+
+export function saveWallpaperSettings(s: WallpaperSettings): void {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(s));
+  } catch {
+    // localStorage unavailable — settings stay session-only.
+  }
+}
+
+/** Push the current settings into CSS custom properties on <html>. */
+export function applyWallpaperCss(s: WallpaperSettings, hasImage: boolean): void {
+  const el = document.documentElement.style;
+  const tiled = s.repeat || (s.fill && hasImage);
+  el.setProperty("--app-bg-repeat", s.repeat ? "repeat-x" : "no-repeat");
+  // Tiling and edge-fill both fit the wallpaper to full height so spare
+  // width exists: tiles duplicate it, fill lets the sampled colours own it.
+  el.setProperty("--app-bg-size", tiled ? "auto 100%" : "cover");
+  el.setProperty("--app-bg-pos-x", `calc(50% + ${Math.round(s.offsetX)}px)`);
+  if (s.fill && !s.repeat && hasImage) {
+    el.setProperty(
+      "--app-bg-fill",
+      `linear-gradient(90deg, ${s.fillColorLeft}, ${s.fillColorLeft} 50%, ${s.fillColorRight} 50%, ${s.fillColorRight})`,
+    );
+  } else {
+    el.removeProperty("--app-bg-fill");
+  }
+}
+
+/** Average the leftmost/rightmost pixel columns of an image blob into two CSS colours. */
+export async function sampleEdgeColors(
+  blob: Blob,
+): Promise<{ left: string; right: string } | null> {
+  try {
+    const bmp = await createImageBitmap(blob);
+    const h = 64;
+    const w = Math.max(2, Math.round((bmp.width * h) / bmp.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const avg = (x: number): string => {
+      const d = ctx.getImageData(x, 0, 1, h).data;
+      let r = 0, g = 0, b = 0;
+      for (let i = 0; i < h; i++) {
+        r += d[i * 4];
+        g += d[i * 4 + 1];
+        b += d[i * 4 + 2];
+      }
+      return `rgb(${Math.round(r / h)}, ${Math.round(g / h)}, ${Math.round(b / h)})`;
+    };
+    const result = { left: avg(0), right: avg(w - 1) };
+    bmp.close();
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+export type WallpaperDims = { width: number; height: number };
+
+/** Natural dimensions of an image or video URL (video reads metadata only). */
+export function loadMediaDims(
+  url: string,
+  isVideo: boolean,
+): Promise<WallpaperDims | null> {
+  if (isVideo) {
+    return new Promise((resolve) => {
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.onloadedmetadata = () =>
+        resolve({ width: v.videoWidth, height: v.videoHeight });
+      v.onerror = () => resolve(null);
+      v.src = url;
+    });
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+/**
+ * How far the wallpaper may shift horizontally before a gap opens.
+ * `tiled` wallpapers may travel through half a tile; fitted ones stop at
+ * their horizontal slack.
+ */
+export function computeMaxShift(
+  dims: WallpaperDims,
+  vw: number,
+  vh: number,
+  tiled: boolean,
+): number {
+  if (!dims.width || !dims.height || !vw || !vh) return 0;
+  let renderedW: number;
+  if (tiled) {
+    renderedW = (dims.width * vh) / dims.height; // auto 100%
+  } else {
+    const scale = Math.max(vw / dims.width, vh / dims.height); // cover
+    renderedW = dims.width * scale;
+  }
+  const slack = Math.max(0, (renderedW - vw) / 2);
+  return tiled ? Math.max(slack, renderedW / 2) : slack;
+}
+
+/** Load, persist and live-apply wallpaper display settings. */
+export function useWallpaperSettings(hasImage: boolean) {
+  const [settings, setSettings] = useState<WallpaperSettings>(DEFAULTS);
+
+  useEffect(() => {
+    setSettings(loadWallpaperSettings());
+  }, []);
+
+  useEffect(() => {
+    applyWallpaperCss(settings, hasImage);
+  }, [settings, hasImage]);
+
+  const update = useCallback(
+    (patch: Partial<WallpaperSettings>) =>
+      setSettings((prev) => {
+        const next = { ...prev, ...patch };
+        saveWallpaperSettings(next);
+        return next;
+      }),
+    [],
+  );
+
+  return { settings, update };
+}

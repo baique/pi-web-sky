@@ -21,10 +21,15 @@ export function formatExtensionStatusLine(statuses: ExtensionStatusItem[]): stri
 export function ExtensionStatusBar({
   statuses,
   widgets = [],
+  tools,
 }: {
   statuses: ExtensionStatusItem[];
   widgets?: ExtensionWidgetItem[];
+  /** Pi Web-owned tools rendered in the right side of the shelf. */
+  tools?: React.ReactNode;
 }) {
+  // The shelf is event-driven: Pi Web tools use its reserved right slot but
+  // must not make the otherwise-empty extension shelf permanently visible.
   if (statuses.length === 0 && widgets.length === 0) return null;
 
   const statusLine = formatExtensionStatusLine(statuses);
@@ -34,7 +39,7 @@ export function ExtensionStatusBar({
     <div
       className={`extension-status-shelf${widgets.length > 0 ? " has-widgets" : ""}${statuses.length > 0 ? " has-status" : ""}`}
     >
-      {/* Left: the TUI extension shelf (widgets + status text), left-aligned. */}
+      {/* Left: the original TUI extension shelf (widgets + status text). */}
       <div className="extension-status-left">
         {widgets.length > 0 && <ExtensionWidgets widgets={widgets} />}
         {statuses.length > 0 && (
@@ -52,8 +57,8 @@ export function ExtensionStatusBar({
           </div>
         )}
       </div>
-      {/* Right: reserved integration area, right-aligned, empty for now. */}
-      <div className="extension-status-right" aria-hidden="true" />
+      {/* Right: Pi Web-owned tools, kept separate from TUI extension content. */}
+      <div className={`extension-status-right${tools ? " has-tools" : ""}`}>{tools}</div>
     </div>
   );
 }

@@ -215,13 +215,18 @@ body {
   /* Wallpaper + scrim as layered background images: image layers paint
      above background-color, so the wallpaper is visible under the app's
      content. The scrim gradient sits on top of the wallpaper to keep
-     text legible; without a wallpaper it blends into the plain bg. */
+     text legible; without a wallpaper it blends into the plain bg.
+     Repeat/size/position-x and the edge-fill gradient are driven by
+     lib/wallpaper-settings.ts via --app-bg-* custom properties (defaults
+     keep the original cover-centred behaviour). */
+  background-color: var(--bg);
   background-image:
     linear-gradient(var(--app-bg-scrim), var(--app-bg-scrim)),
-    var(--app-bg-image, none);
-  background-size: 100% 100%, cover;
-  background-position: center, center;
-  background-repeat: no-repeat;
+    var(--app-bg-image, none),
+    var(--app-bg-fill, none);
+  background-size: 100% 100%, var(--app-bg-size, cover), 100% 100%;
+  background-position: center, var(--app-bg-pos-x, center) center, center;
+  background-repeat: no-repeat, var(--app-bg-repeat, no-repeat), no-repeat;
 }
 
 ::-webkit-scrollbar {
@@ -466,9 +471,9 @@ button.extension-widget-trigger:focus-visible {
   white-space: nowrap;
 }
 
-/* Mobile: hide the reserved integration area, keep the TUI shelf. */
+/* Mobile: hide an empty integration area, but keep Pi Web tools accessible. */
 @media (max-width: 640px) {
-  .extension-status-right {
+  .extension-status-right:not(.has-tools) {
     display: none;
   }
 }
@@ -1584,3 +1589,171 @@ span.token.table {
 }
 
 
+
+/* ── Terminal panel ─────────────────────────────────────────────────────────
+   Glass shell matching the other top panels; the terminal content sits on a
+   semi-opaque dark bed so output stays readable while the glass border and
+   blur still read around it. Enter animation scales from the anchor corner:
+   top entry grows downward, FAB entry grows up-and-out (spatial consistency). */
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background:
+    linear-gradient(rgba(12, 12, 14, 0.86), rgba(12, 12, 14, 0.86));
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+}
+
+@keyframes terminal-panel-in-top {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes terminal-panel-in-bottombar {
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* Materialize, don't just fade — blur+scale arrive together. */
+.terminal-panel-top { transform-origin: top right; animation: terminal-panel-in-top 0.15s ease-out both; }
+.terminal-panel-bottombar { transform-origin: bottom right; animation: terminal-panel-in-bottombar 0.15s ease-out both; }
+
+.terminal-panel-mobile { inset: 10px; width: auto !important; height: auto !important; animation: terminal-panel-in-bottombar 0.15s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-panel-top, .terminal-panel-bottombar, .terminal-panel-mobile { animation: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .terminal-panel { background: #101013; backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+.terminal-tabs {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  height: 34px;
+  padding-left: 6px;
+  gap: 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+html.dark .terminal-tabs { border-bottom-color: rgba(255, 255, 255, 0.06); }
+
+.terminal-tab-scroll {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-width: 0;
+  flex: 1;
+}
+.terminal-tab-scroll::-webkit-scrollbar { display: none; }
+
+.terminal-group { display: flex; align-items: stretch; gap: 2px; flex-shrink: 0; }
+.terminal-group-label {
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(235, 240, 245, 0.45);
+  white-space: nowrap;
+}
+
+.terminal-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 4px 0;
+  padding: 0 4px 0 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: rgba(235, 240, 245, 0.75);
+  font-size: 11px;
+  white-space: nowrap;
+  transition: background 0.1s;
+  user-select: none;
+}
+.terminal-chip:hover { background: rgba(255, 255, 255, 0.08); }
+.terminal-chip.is-active {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  color: var(--text);
+}
+.terminal-chip.is-dead { opacity: 0.55; }
+
+.terminal-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #34d399;
+  flex-shrink: 0;
+}
+.terminal-dot.is-dead { background: #6b7280; }
+
+.terminal-chip-cwd { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+
+.terminal-chip-close, .terminal-new, .terminal-close {
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: none;
+  color: rgba(235, 240, 245, 0.5);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 0.1s, background 0.1s;
+  flex-shrink: 0;
+}
+.terminal-chip-close { width: 16px; height: 16px; margin-left: 2px; }
+.terminal-chip-close:hover, .terminal-close:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+.terminal-new, .terminal-close { width: 30px; margin-right: 2px; align-self: center; height: 24px; }
+.terminal-new:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+
+.terminal-error {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: #f87171;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.terminal-body { flex: 1; min-height: 0; padding: 6px 8px 8px; position: relative; }
+.terminal-body .xterm { height: 100%; }
+.terminal-body .xterm-viewport { background-color: transparent !important; }
+
+.terminal-placeholder {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.terminal-placeholder button {
+  padding: 7px 16px;
+  border-radius: 7px;
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(235, 240, 245, 0.85);
+  font-size: 12px;
+  cursor: pointer;
+}
+.terminal-placeholder button:hover { background: rgba(255, 255, 255, 0.1); }
+
+/* Bottom-bar terminal toggle — leftmost item of the status shelf. */
+.terminal-bar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: none;
+  border-left: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  background: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.1s, background 0.1s;
+}
+.terminal-bar-toggle:hover { color: var(--text); background: var(--bg-hover); }
+.terminal-bar-toggle.is-open { color: var(--accent); background: var(--bg-selected); }
+
+@media (prefers-reduced-transparency: reduce) {
+  .terminal-bar-toggle { background: var(--bg-panel); }
+}
