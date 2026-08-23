@@ -13,7 +13,7 @@ type ThemeState = {
 type ToggleOrigin = { x: number; y: number };
 
 const STORAGE_KEY = "pi-theme";
-const PREFERENCE_CYCLE: ThemePreference[] = ["light", "dark", "auto"];
+const PREFERENCE_CYCLE: ThemePreference[] = ["light", "dark"];
 const SERVER_SNAPSHOT: ThemeState = { preference: "auto", theme: "light" };
 
 const listeners = new Set<() => void>();
@@ -32,11 +32,14 @@ function getSystemTheme(): ResolvedTheme {
 function readStoredPreference(): ThemePreference {
   try {
     const value = localStorage.getItem(STORAGE_KEY);
-    if (value === "light" || value === "dark" || value === "auto") return value;
+    // Legacy "auto" storage is normalized to the current system theme so the
+    // UI only ever cycles light/dark, never a system-following mode.
+    if (value === "light" || value === "dark") return value;
+    if (value === "auto") return getSystemTheme();
   } catch {
     // ignore storage errors (private mode, quota, etc.)
   }
-  return "auto";
+  return "light";
 }
 
 function resolveTheme(preference: ThemePreference): ResolvedTheme {

@@ -70,7 +70,7 @@ export function AppShell() {
   const { preference, toggleTheme } = useTheme();
   const { hasBg, ready: bgReady, pick: pickBg, remove: removeBg } = useAppBackground();
   const themeLabelKey =
-    preference === "light" ? "theme.light" : preference === "dark" ? "theme.dark" : "theme.auto";
+    preference === "light" ? "theme.light" : "theme.dark";
   const { locale, setLocale, t: translate, supportedLocales } = useI18n();
   const isMobile = useIsMobile();
   useViewportHeight();
@@ -2403,7 +2403,7 @@ export function AppShell() {
                 maxHeight: "min(440px, calc(100dvh - 44px))",
                 overflowY: "auto",
                 zIndex: 500,
-                background: "color-mix(in srgb, var(--glass-bg-strong) 62%, transparent)",
+                background: "color-mix(in srgb, var(--glass-bg-strong) 80%, transparent)",
                 backdropFilter: "blur(12px) saturate(140%)",
                 WebkitBackdropFilter: "blur(12px) saturate(140%)",
                 border: "1px solid color-mix(in srgb, var(--border) 80%, transparent)",

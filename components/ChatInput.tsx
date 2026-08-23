@@ -41,6 +41,10 @@ interface ModelOption {
 }
 
 interface Props {
+  /** Optional header rendered at the very top of the composer glass panel
+   *  (used by the empty-new-session state to merge the brand title row with
+   *  the input box into one surface). */
+  header?: React.ReactNode;
   onSend: (message: string, images?: AttachedImage[]) => void;
   onAbort: () => void;
   onSteer?: (message: string, images?: AttachedImage[]) => void;
@@ -387,6 +391,7 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
+  header,
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
@@ -1528,6 +1533,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             transition: "border-color 0.15s, box-shadow 0.15s",
           } as React.CSSProperties}
         >
+          {header && (
+            <div style={{ padding: "4px 10px 2px" }}>
+              {header}
+            </div>
+          )}
+
           <DraftStash />
 
           {/* Image previews — 属输入内容层，与输入行同组 */}
