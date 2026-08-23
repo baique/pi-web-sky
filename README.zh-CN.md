@@ -1,5 +1,7 @@
 # Pi Web — Sky 皮肤版（@baique/pi-web-sky）
 
+> 本项目由 baique 维护，基于 [pi-web](https://github.com/earendil-works/pi) 和 [@agegr/pi-web](https://github.com/agegr/pi-web) 二次开发；感谢原作者与上游项目的贡献。
+
 > **Sky 皮肤版**：基于 [pi-web](https://github.com/earendil-works/pi)（经 [@agegr/pi-web](https://github.com/agegr/pi-web) 二开）的独立发行版，MIT 协议。
 > 在原生 pi-web 之上新增 Sky 皮肤：毛玻璃气泡与面板、JetBrains Mono 消息字体、加深/提亮文字对比度、右上角 todo 面板、右下角堆叠弱通知。
 
@@ -25,21 +27,21 @@
 Pi Web 要求 Node.js 22.19.0 或更高版本。先用 `node --version` 检查版本，然后运行：
 
 ```bash
-npx @agegr/pi-web@latest
+npx @baique/pi-web-sky@latest
 ```
 
 服务就绪后，命令行会尝试自动打开浏览器。如果没有打开，请访问 [http://127.0.0.1:30143](http://127.0.0.1:30143)。Pi Web 默认仅监听 `127.0.0.1`。
 
 如果尚未配置模型 Provider，请打开**模型（Models）**面板登录或添加 API Key。
 
-如需全局安装 `pi-web` 命令：
+如需全局安装 `pi-web-sky` 命令：
 
 ```bash
-npm install -g @agegr/pi-web@latest
-pi-web
+npm install -g @baique/pi-web-sky@latest
+pi-web-sky
 ```
 
-更新前先用 `Ctrl+C` 停止正在运行的进程，再次执行同一条安装命令。卸载时运行 `npm uninstall -g @agegr/pi-web`。
+更新前先用 `Ctrl+C` 停止正在运行的进程，再次执行同一条安装命令。卸载时运行 `npm uninstall -g @baique/pi-web-sky`。
 
 ## 配置
 
@@ -56,7 +58,7 @@ pi-web
 例如：
 
 ```bash
-pi-web -p 8080 -H 0.0.0.0 --no-open
+pi-web-sky -p 8080 -H 0.0.0.0 --no-open
 ```
 
 ### 远程访问
@@ -79,7 +81,7 @@ macOS 或 Linux：
 HTTP_PROXY=http://127.0.0.1:7890 \
 HTTPS_PROXY=http://127.0.0.1:7890 \
 NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
+npx @baique/pi-web-sky@latest
 ```
 
 Windows PowerShell：
@@ -88,7 +90,7 @@ Windows PowerShell：
 $env:HTTP_PROXY = "http://127.0.0.1:7890"
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
+npx @baique/pi-web-sky@latest
 ```
 
 ## 注意事项

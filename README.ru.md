@@ -1,4 +1,6 @@
-# Pi Web
+# Pi Web — Sky Edition (@baique/pi-web-sky)
+
+> **Версия со скином Sky**: независимый дистрибутив, сопровождаемый baique. Основан на [pi-web](https://github.com/earendil-works/pi) и [@agegr/pi-web](https://github.com/agegr/pi-web); благодарим авторов и проекты верхнего уровня.
 
 [English](./README.md) | [中文文档](./README.zh-CN.md) | [日本語](./README.ja.md)
 
@@ -20,21 +22,21 @@
 Для работы Pi Web требуется Node.js 22.19.0 или новее. Проверьте версию командой `node --version`, затем выполните:
 
 ```bash
-npx @agegr/pi-web@latest
+npx @baique/pi-web-sky@latest
 ```
 
 Когда сервер будет готов, CLI попытается открыть браузер автоматически. Если этого не произошло, откройте [http://127.0.0.1:30143](http://127.0.0.1:30143). По умолчанию Pi Web прослушивает только `127.0.0.1`.
 
 Если Provider модели ещё не настроен, откройте панель **Models**, войдите в учётную запись или добавьте API Key.
 
-Чтобы установить команду `pi-web` глобально:
+Чтобы установить команду `pi-web-sky` глобально:
 
 ```bash
-npm install -g @agegr/pi-web@latest
-pi-web
+npm install -g @baique/pi-web-sky@latest
+pi-web-sky
 ```
 
-Для обновления остановите запущенный процесс с помощью `Ctrl+C` и повторите ту же команду установки. Для удаления выполните `npm uninstall -g @agegr/pi-web`.
+Для обновления остановите запущенный процесс с помощью `Ctrl+C` и повторите ту же команду установки. Для удаления выполните `npm uninstall -g @baique/pi-web-sky`.
 
 ## Настройка
 
@@ -51,7 +53,7 @@ pi-web
 Пример:
 
 ```bash
-pi-web -p 8080 -H 0.0.0.0 --no-open
+pi-web-sky -p 8080 -H 0.0.0.0 --no-open
 ```
 
 ### Удалённый доступ
@@ -74,7 +76,7 @@ Basic Auth не шифрует пароль при передаче. Не пуб
 HTTP_PROXY=http://127.0.0.1:7890 \
 HTTPS_PROXY=http://127.0.0.1:7890 \
 NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
+npx @baique/pi-web-sky@latest
 ```
 
 В Windows PowerShell:
@@ -83,7 +85,7 @@ npx @agegr/pi-web@latest
 $env:HTTP_PROXY = "http://127.0.0.1:7890"
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
+npx @baique/pi-web-sky@latest
 ```
 
 ## Примечания

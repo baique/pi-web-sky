@@ -31,21 +31,21 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --version`, then run:
 
 ```bash
-npx @agegr/pi-web@latest
+npx @baique/pi-web-sky@latest
 ```
 
 The CLI opens a browser after the server is ready. If it does not, open [http://127.0.0.1:30143](http://127.0.0.1:30143). Pi Web listens only on `127.0.0.1` by default.
 
 If no model provider is configured yet, open the **Models** panel to sign in or add an API key.
 
-To install the `pi-web` command globally:
+To install the `pi-web-sky` command globally:
 
 ```bash
-npm install -g @agegr/pi-web@latest
-pi-web
+npm install -g @baique/pi-web-sky@latest
+pi-web-sky
 ```
 
-To update, stop the running process with `Ctrl+C` and run the same install command again. To uninstall, run `npm uninstall -g @agegr/pi-web`.
+To update, stop the running process with `Ctrl+C` and run the same install command again. To uninstall, run `npm uninstall -g @baique/pi-web-sky`.
 
 ## Configuration
 
@@ -62,7 +62,7 @@ For port and hostname, command-line options override the corresponding environme
 For example:
 
 ```bash
-pi-web -p 8080 -H 0.0.0.0 --no-open
+pi-web-sky -p 8080 -H 0.0.0.0 --no-open
 ```
 
 ### Remote Access
@@ -85,7 +85,7 @@ On macOS or Linux:
 HTTP_PROXY=http://127.0.0.1:7890 \
 HTTPS_PROXY=http://127.0.0.1:7890 \
 NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
+npx @baique/pi-web-sky@latest
 ```
 
 On Windows PowerShell:
@@ -94,7 +94,7 @@ On Windows PowerShell:
 $env:HTTP_PROXY = "http://127.0.0.1:7890"
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
+npx @baique/pi-web-sky@latest
 ```
 
 ## Notes

@@ -1511,9 +1511,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         <div
           style={{
             borderRadius: isMobile ? 14 : 16,
-            background: "color-mix(in srgb, var(--glass-bg-input) 78%, var(--glass-bg))",
-            backdropFilter: "blur(var(--glass-blur)) saturate(140%)",
-            WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+            background: "var(--frame-glass)",
+            backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+            WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
             border: `1px solid ${
               bashMode
                 ? "color-mix(in srgb, var(--accent) 45%, transparent)"

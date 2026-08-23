@@ -1,4 +1,6 @@
-# Pi Web
+# Pi Web — Sky Edition (@baique/pi-web-sky)
+
+> **Sky スキン版**：baique が保守する独立配布版です。[pi-web](https://github.com/earendil-works/pi) と [@agegr/pi-web](https://github.com/agegr/pi-web) を基盤としており、原作者と上流プロジェクトに感謝します。
 
 [English](./README.md) | [简体中文](./README.zh-CN.md) | [Русский](./README.ru.md)
 
@@ -20,21 +22,21 @@
 Pi Web には Node.js 22.19.0 以降が必要です。`node --version` でバージョンを確認してから、次を実行します：
 
 ```bash
-npx @agegr/pi-web@latest
+npx @baique/pi-web-sky@latest
 ```
 
 サーバーの準備が整うと、CLI はブラウザーを自動的に開こうとします。開かない場合は [http://127.0.0.1:30143](http://127.0.0.1:30143) にアクセスしてください。Pi Web はデフォルトで `127.0.0.1` のみをリッスンします。
 
 モデル Provider が未設定の場合は、**Models** パネルを開いてログインするか API Key を追加してください。
 
-`pi-web` コマンドをグローバルにインストールする場合：
+`pi-web-sky` コマンドをグローバルにインストールする場合：
 
 ```bash
-npm install -g @agegr/pi-web@latest
-pi-web
+npm install -g @baique/pi-web-sky@latest
+pi-web-sky
 ```
 
-更新時は、実行中のプロセスを `Ctrl+C` で停止してから同じインストールコマンドを再実行します。アンインストールするには `npm uninstall -g @agegr/pi-web` を実行します。
+更新時は、実行中のプロセスを `Ctrl+C` で停止してから同じインストールコマンドを再実行します。アンインストールするには `npm uninstall -g @baique/pi-web-sky` を実行します。
 
 ## 設定
 
@@ -51,7 +53,7 @@ pi-web
 例：
 
 ```bash
-pi-web -p 8080 -H 0.0.0.0 --no-open
+pi-web-sky -p 8080 -H 0.0.0.0 --no-open
 ```
 
 ### リモートアクセス
@@ -74,7 +76,7 @@ macOS または Linux：
 HTTP_PROXY=http://127.0.0.1:7890 \
 HTTPS_PROXY=http://127.0.0.1:7890 \
 NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
+npx @baique/pi-web-sky@latest
 ```
 
 Windows PowerShell：
@@ -83,7 +85,7 @@ Windows PowerShell：
 $env:HTTP_PROXY = "http://127.0.0.1:7890"
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
+npx @baique/pi-web-sky@latest
 ```
 
 ## 注意事項

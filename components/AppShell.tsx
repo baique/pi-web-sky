@@ -1997,8 +1997,8 @@ export function AppShell() {
         style={{
           "--sidebar-width": `${sidebarResizer.width}px`,
           background: "var(--side-panel)",
-          backdropFilter: "blur(var(--glass-blur-heavy)) saturate(140%)",
-          WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(140%)",
+          backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+          WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
           borderRight: "1px solid color-mix(in srgb, var(--border) 80%, transparent)",
           display: "flex",
           flexDirection: "column",
@@ -2023,7 +2023,7 @@ export function AppShell() {
       {/* Center: chat */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Top bar with sidebar toggle */}
-        <div ref={topBarRef} style={{ position: "relative", zIndex: 300, flexShrink: 0, background: "var(--glass-bg-strong)", backdropFilter: "blur(var(--glass-blur))", WebkitBackdropFilter: "blur(var(--glass-blur))" }}>
+        <div ref={topBarRef} style={{ position: "relative", zIndex: 300, flexShrink: 0, background: "var(--frame-glass)", backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))", WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))" }}>
         <div style={{ display: "flex", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
           <button
             onClick={handleSidebarToggle}
