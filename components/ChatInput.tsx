@@ -2019,11 +2019,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 padding: "7px 14px",
                 border: (value.trim() || attachedImages.length)
                   ? "1px solid color-mix(in srgb, var(--accent) 38%, transparent)"
-                  : "1px solid color-mix(in srgb, var(--border) 50%, transparent)",
+                  : "1px solid color-mix(in srgb, var(--border) 45%, transparent)",
                 borderRadius: 10,
                 background: (value.trim() || attachedImages.length)
                   ? "color-mix(in srgb, var(--accent) 13%, transparent)"
-                  : "var(--bg-panel)",
+                  : "color-mix(in srgb, var(--glass-bg) 52%, transparent)",
+                backdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+                WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(140%)",
                 color: (value.trim() || attachedImages.length) ? "var(--accent)" : "var(--text-muted)",
                 cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
                 fontSize: 13,

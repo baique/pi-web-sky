@@ -984,8 +984,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               disabled={!selectedCwd}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                background: "var(--bg-hover)",
-                border: "1px solid var(--border)",
+                background: "color-mix(in srgb, var(--glass-bg-strong) 84%, var(--accent) 16%)",
+                backdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+                WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+                border: "1px solid color-mix(in srgb, var(--border) 82%, var(--accent) 18%)",
                 color: selectedCwd ? "var(--text-muted)" : "var(--text-dim)",
                 cursor: selectedCwd ? "pointer" : "not-allowed",
                 height: 32,
@@ -1001,14 +1003,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
              title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.selectProject")}
               onMouseEnter={(e) => {
                 if (!selectedCwd) return;
-                e.currentTarget.style.background = "var(--bg-selected)";
+                e.currentTarget.style.background = "color-mix(in srgb, var(--glass-bg-strong) 70%, var(--accent) 30%)";
                 e.currentTarget.style.color = "var(--accent)";
-                e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
+                e.currentTarget.style.borderColor = "rgba(37,99,235,0.45)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = "var(--bg-hover)";
+                e.currentTarget.style.background = "color-mix(in srgb, var(--glass-bg-strong) 84%, var(--accent) 16%)";
                 e.currentTarget.style.color = selectedCwd ? "var(--text-muted)" : "var(--text-dim)";
-                e.currentTarget.style.borderColor = "var(--border)";
+                e.currentTarget.style.borderColor = "color-mix(in srgb, var(--border) 82%, var(--accent) 18%)";
               }}
             >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
@@ -1021,8 +1023,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               onClick={() => loadSessions(false, true)}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
-                background: sessionRefreshDone ? "rgba(74,222,128,0.18)" : "var(--bg-hover)",
-                border: `1px solid ${sessionRefreshDone ? "rgba(74,222,128,0.4)" : "var(--border)"}`,
+                background: sessionRefreshDone ? "rgba(74,222,128,0.22)" : "color-mix(in srgb, var(--glass-bg-strong) 84%, var(--accent) 16%)",
+                backdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+                WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+                border: `1px solid ${sessionRefreshDone ? "rgba(74,222,128,0.4)" : "color-mix(in srgb, var(--border) 82%, var(--accent) 18%)"}`,
                 color: sessionRefreshDone ? "#4ade80" : "var(--text-muted)",
                 cursor: "pointer",
                 width: 32, height: 32,
@@ -1033,15 +1037,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               }}
               onMouseEnter={(e) => {
                 if (sessionRefreshDone) return;
-                e.currentTarget.style.background = "var(--bg-selected)";
+                e.currentTarget.style.background = "color-mix(in srgb, var(--glass-bg-strong) 70%, var(--accent) 30%)";
                 e.currentTarget.style.color = "var(--accent)";
-                e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
+                e.currentTarget.style.borderColor = "rgba(37,99,235,0.45)";
               }}
               onMouseLeave={(e) => {
                 if (sessionRefreshDone) return;
-                e.currentTarget.style.background = "var(--bg-hover)";
+                e.currentTarget.style.background = "color-mix(in srgb, var(--glass-bg-strong) 84%, var(--accent) 16%)";
                 e.currentTarget.style.color = "var(--text-muted)";
-                e.currentTarget.style.borderColor = "var(--border)";
+                e.currentTarget.style.borderColor = "color-mix(in srgb, var(--border) 82%, var(--accent) 18%)";
               }}
                title={t("sidebar.refresh")}
             >
@@ -1069,7 +1073,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               display: "flex",
               alignItems: "center",
               padding: "6px 10px",
-              background: selectedCwd ? "var(--bg-hover)" : "rgba(37,99,235,0.06)",
+              background: selectedCwd ? "color-mix(in srgb, var(--glass-bg-strong) 84%, var(--accent) 16%)" : "color-mix(in srgb, var(--glass-bg) 78%, var(--accent) 22%)",
+              backdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+              WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(140%)",
               border: selectedCwd ? "1px solid var(--border)" : "1px solid rgba(37,99,235,0.4)",
               borderRadius: 7,
               cursor: "pointer",
@@ -1292,8 +1298,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   alignItems: "center",
                   gap: 6,
                   padding: "0 10px",
-                  background: "var(--bg-hover)",
-                  border: "1px solid var(--border)",
+                  background: "color-mix(in srgb, var(--glass-bg-strong) 84%, var(--accent) 16%)",
+                  backdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+                  WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(140%)",
+                  border: "1px solid color-mix(in srgb, var(--border) 82%, var(--accent) 18%)",
                   borderRadius: 7,
                   cursor: "pointer",
                   fontSize: 11,
@@ -2090,12 +2098,19 @@ function SessionItem({
         paddingRight: 8,
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete
-          ? "rgba(239,68,68,0.06)"
-          : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
+          ? "rgba(239,68,68,0.10)"
+          : isSelected ? "color-mix(in srgb, var(--glass-bg-strong) 80%, var(--accent) 20%)" : hovered ? "color-mix(in srgb, var(--glass-bg) 80%, var(--accent) 20%)" : "transparent",
+        backdropFilter: hovered || isSelected
+          ? "blur(var(--glass-blur)) saturate(140%)"
+          : "none",
+        WebkitBackdropFilter: hovered || isSelected
+          ? "blur(var(--glass-blur)) saturate(140%)"
+          : "none",
         borderLeft: confirmDelete
           ? "2px solid #ef4444"
           : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
-        transition: "background 0.1s",
+        transition: "background 0.1s, backdrop-filter 0.1s",
+        WebkitTransition: "background 0.1s, -webkit-backdrop-filter 0.1s",
         opacity: deleting ? 0.5 : 1,
         gap: 6,
         overflow: "hidden",
