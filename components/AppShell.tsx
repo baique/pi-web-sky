@@ -1909,6 +1909,7 @@ export function AppShell() {
           borderLeft: "1px solid var(--border)",
           color: open ? "var(--text)" : "var(--text-muted)",
           cursor: "pointer", flexShrink: 0, transition: "color 0.12s, background 0.12s",
+          fontSize: 11, whiteSpace: "nowrap",
         }}
         onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
         onMouseLeave={(event) => { event.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)"; }}
