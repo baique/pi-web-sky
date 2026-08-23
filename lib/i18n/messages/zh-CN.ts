@@ -244,6 +244,7 @@ export const zhCNLocale: LocalePlugin = {
     "bg.adjust": "调整横向位置…",
     "bg.adjustHint": "左右拖拽调整壁纸位置",
     "bg.adjustDone": "移动完成",
+    "bg.reset": "重置位置",
     "chat.stopAgent": "停止 Agent",
     "chat.stop": "停止",
     "chat.disableSound": "关闭完成提示音",

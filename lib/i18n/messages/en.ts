@@ -243,6 +243,7 @@ export const enLocale: LocalePlugin = {
     "bg.adjust": "Adjust horizontal position…",
     "bg.adjustHint": "Drag left / right to reposition",
     "bg.adjustDone": "Done",
+    "bg.reset": "Reset position",
     "chat.stopAgent": "Stop agent",
     "chat.stop": "Stop",
     "chat.disableSound": "Disable completion sound",

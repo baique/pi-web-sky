@@ -1741,6 +1741,8 @@ html.dark .terminal-tabs { border-bottom-color: rgba(255, 255, 255, 0.06); }
   align-items: center;
   gap: 5px;
   padding: 0 10px;
+  width: 110px;
+  justify-content: center;
   border: none;
   border-left: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   background: none;

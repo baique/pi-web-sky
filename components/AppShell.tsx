@@ -2212,6 +2212,25 @@ export function AppShell() {
                 <span style={{ width: 14, flexShrink: 0, textAlign: "center" }}>↔</span>
                 {translate("bg.adjust")}
               </button>
+              <button
+                type="button"
+                onClick={() => updateWallSettings({ offsetX: 0 })}
+                disabled={wallSettings.offsetX === 0}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, width: "100%",
+                  padding: "7px 10px",
+                  background: wallSettings.offsetX === 0 ? "transparent" : "transparent",
+                  color: wallSettings.offsetX === 0 ? "var(--text-dim)" : "var(--text)",
+                  border: "1px solid var(--border)", borderRadius: 8,
+                  fontSize: 12.5, cursor: wallSettings.offsetX === 0 ? "default" : "pointer",
+                  textAlign: "left",
+                  opacity: wallSettings.offsetX === 0 ? 0.55 : 1,
+                  transition: "background 0.12s",
+                }}
+              >
+                <span style={{ width: 14, flexShrink: 0, textAlign: "center" }}>↺</span>
+                {translate("bg.reset")}
+              </button>
             </div>
           )}
           <div style={{ fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5, marginTop: 10 }}>
