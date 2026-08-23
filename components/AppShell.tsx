@@ -2408,12 +2408,16 @@ export function AppShell() {
                 maxHeight: "min(440px, calc(100dvh - 44px))",
                 overflowY: "auto",
                 zIndex: 500,
-                background: "color-mix(in srgb, var(--assistant-card-glass) 80%, var(--bg))",
-                backdropFilter: "blur(12px) saturate(var(--glass-saturate))",
-                WebkitBackdropFilter: "blur(12px) saturate(var(--glass-saturate))",
+                // Floating-panel glass (see --panel-glass in globals.css):
+                // denser than bubbles so wallpaper colour blocks never read
+                // through it, blur kept on top when the compositor applies it.
+                background: "var(--panel-glass)",
+                backdropFilter: "blur(16px) saturate(var(--glass-saturate))",
+                WebkitBackdropFilter: "blur(16px) saturate(var(--glass-saturate))",
+                transform: "translateZ(0)",
                 border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
-                borderRadius: 10,
-                boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
+                borderRadius: 12,
+                boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
                 fontFamily: "inherit",
               }}
             >
