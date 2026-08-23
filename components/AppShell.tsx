@@ -2229,6 +2229,52 @@ export function AppShell() {
                 <span style={{ width: 14, flexShrink: 0, textAlign: "center" }}>↺</span>
                 {translate("bg.reset")}
               </button>
+              <div
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, width: "100%",
+                  padding: "7px 10px",
+                  color: "var(--text)", border: "1px solid var(--border)", borderRadius: 8,
+                  fontSize: 12.5,
+                }}
+              >
+                <span style={{ width: 14, flexShrink: 0, textAlign: "center", fontSize: 12 }}>◐</span>
+                <span style={{ flexShrink: 0 }}>{translate("bg.bubbleOpacity")}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={wallSettings.bubbleOpacity}
+                  onChange={(e) => updateWallSettings({ bubbleOpacity: Number(e.target.value) })}
+                  style={{ flex: 1, minWidth: 0, accentColor: "var(--accent)", cursor: "pointer" }}
+                  aria-label={translate("bg.bubbleOpacity")}
+                />
+                <span style={{ width: 30, flexShrink: 0, textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>
+                  {wallSettings.bubbleOpacity}%
+                </span>
+              </div>
+              <div
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, width: "100%",
+                  padding: "7px 10px",
+                  color: "var(--text)", border: "1px solid var(--border)", borderRadius: 8,
+                  fontSize: 12.5,
+                }}
+              >
+                <span style={{ width: 14, flexShrink: 0, textAlign: "center", fontSize: 12 }}>❄</span>
+                <span style={{ flexShrink: 0 }}>{translate("bg.bubbleBlur")}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={30}
+                  value={wallSettings.bubbleBlur}
+                  onChange={(e) => updateWallSettings({ bubbleBlur: Number(e.target.value) })}
+                  style={{ flex: 1, minWidth: 0, accentColor: "var(--accent)", cursor: "pointer" }}
+                  aria-label={translate("bg.bubbleBlur")}
+                />
+                <span style={{ width: 30, flexShrink: 0, textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>
+                  {wallSettings.bubbleBlur}px
+                </span>
+              </div>
             </div>
           )}
           <div style={{ fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5, marginTop: 10 }}>
@@ -2241,7 +2287,7 @@ export function AppShell() {
           wallpaper renders on the ordinary page layer — immune to the
           video-compositor occlusion quirk. Scrim keeps text legible. */}
       {bgKind === "video" && bgUrl && (
-        <div style={{ position: "fixed", inset: 0, zIndex: -1, overflow: "hidden", pointerEvents: "none" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none" }}>
           <video
             ref={bgVideoRef}
             src={bgUrl}

@@ -3,11 +3,15 @@
 import { useCallback, useEffect, useState } from "react";
 
 /**
- * Wallpaper display settings (wallpaper-x branch prototype):
+ * Wallpaper display settings:
  * - repeat   : tile horizontally (`background-repeat: repeat-x`)
  * - offsetX  : horizontal drag offset in px, applied as `calc(50% + Npx)`
  * - fill     : fill leftover side gaps with colours sampled from the
  *              wallpaper's left/right edges (only meaningful when not tiling)
+ * - bubbleOpacity : chat-bubble glass opacity in percent (0–100), written to
+ *              `--bubble-alpha` on <html>
+ * - bubbleBlur    : frosted blur radius in px (0–30), written to
+ *              `--glass-blur-bubble` on <html>
  *
  * Settings persist in localStorage and are applied to <html> as CSS custom
  * properties consumed by the wallpaper layer on `body` in app/globals.css.
@@ -19,6 +23,8 @@ export type WallpaperSettings = {
   fill: boolean;
   fillColorLeft: string;
   fillColorRight: string;
+  bubbleOpacity: number;
+  bubbleBlur: number;
 };
 
 const DEFAULTS: WallpaperSettings = {
@@ -27,6 +33,8 @@ const DEFAULTS: WallpaperSettings = {
   fill: false,
   fillColorLeft: "#000000",
   fillColorRight: "#000000",
+  bubbleOpacity: 44,
+  bubbleBlur: 18,
 };
 
 const LS_KEY = "wallpaper-settings";
@@ -58,6 +66,8 @@ export function applyWallpaperCss(s: WallpaperSettings, hasImage: boolean): void
   // must never rescale the image itself.
   el.setProperty("--app-bg-size", "cover");
   el.setProperty("--app-bg-pos-x", `calc(50% + ${Math.round(s.offsetX)}px)`);
+  el.setProperty("--bubble-alpha", String(s.bubbleOpacity / 100));
+  el.setProperty("--glass-blur-bubble", `${Math.round(s.bubbleBlur)}px`);
   if (s.fill && !s.repeat && hasImage) {
     el.setProperty(
       "--app-bg-fill",

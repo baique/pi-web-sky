@@ -91,12 +91,15 @@
   /* Message-bubble glass — user keeps a blue tint, assistant keeps
      neutral; both translucent so the wallpaper shows through, denser in
      light theme so body text stays readable over vibrant wallpapers.
-     Alpha ~0.7 + heavy blur: wallpaper hue bleeds through while text at
-     14px/1.6 against var(--text) stays legible. */
-  --user-bg-glass: rgba(219, 234, 254, 0.50);
+     Alpha comes from --bubble-alpha (user-adjustable slider, 0–1). */
+  --user-bg-rgb: 219, 234, 254;
+  --assistant-bg-rgb: 252, 252, 253;
+  --tool-bg-rgb: 248, 248, 250;
+  --bubble-alpha: 0.44;
+  --user-bg-glass: rgba(var(--user-bg-rgb), var(--bubble-alpha));
   --user-border-glass: rgba(59, 130, 246, 0.22);
-  --assistant-card-glass: rgba(252, 252, 253, 0.44);
-  --tool-bg-glass: rgba(248, 248, 250, 0.44);
+  --assistant-card-glass: rgba(var(--assistant-bg-rgb), var(--bubble-alpha));
+  --tool-bg-glass: rgba(var(--tool-bg-rgb), var(--bubble-alpha));
   --glass-blur-bubble: 18px;
 
   /* Backdrop desaturation: light theme washes wallpaper colours toward a
@@ -147,10 +150,14 @@ html.dark {
   --steer-active: rgba(217, 119, 6, 1);
   --follow-active: rgba(129, 140, 248, 1);
 
-  --user-bg-glass: rgba(30, 58, 95, 0.55);
+  --user-bg-rgb: 30, 58, 95;
+  --assistant-bg-rgb: 36, 36, 39;
+  --tool-bg-rgb: 36, 36, 39;
+  --bubble-alpha: 0.55;
+  --user-bg-glass: rgba(var(--user-bg-rgb), var(--bubble-alpha));
   --user-border-glass: rgba(96, 165, 250, 0.28);
-  --assistant-card-glass: rgba(36, 36, 39, 0.55);
-  --tool-bg-glass: rgba(36, 36, 39, 0.55);
+  --assistant-card-glass: rgba(var(--assistant-bg-rgb), var(--bubble-alpha));
+  --tool-bg-glass: rgba(var(--tool-bg-rgb), var(--bubble-alpha));
   --glass-blur-bubble: 12px;
 }
 
