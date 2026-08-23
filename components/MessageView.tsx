@@ -354,8 +354,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
       })}
     </div>
   );
-  // 放宽: 只要回调可用(非 sessionBusy)即显示, 不再要求前一条是 assistant 消息
-  const canNavigate = !!onNavigate;
+  const canNavigate = !!prevAssistantEntryId && !!onNavigate;
 
   const copyContent = () => {
     copyText(copyTarget).then(() => {
@@ -478,14 +477,14 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                 padding: "3px 8px", height: 22,
                 background: "none", border: "none",
                 borderRadius: 5,
-                color: copied ? "var(--accent)" : "var(--text)",
+                color: copied ? "var(--accent)" : "var(--text-muted)",
                 cursor: "pointer",
                 fontSize: 11, fontWeight: 400,
                 whiteSpace: "nowrap",
                 transition: "color 0.12s",
               }}
               onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "var(--accent)"; }}
-              onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text)"; }}
+              onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-muted)"; }}
             >
               {copied ? (
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -500,33 +499,30 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                {copied ? t("i18n.copied") : t("i18n.copy")}
             </button>
           </div>
-          {canNavigate && (
+          {(canFork || canNavigate) && (
             <div style={{
               display: "flex", gap: 3,
-              // 常驻: 唯一条件是父级在会话忙碌(sessionBusy)时置 onNavigate 为
-              // undefined, 其余任何状态都直接显示, 不依赖 hover/前后消息
-              opacity: 1,
-              pointerEvents: "auto",
+              opacity: (hovered || forking) ? 1 : 0,
+              pointerEvents: (hovered || forking) ? "auto" : "none",
+              transition: "opacity 0.12s",
             }}>
-              <button
-                onClick={() => {
-                  if (prevAssistantEntryId) onNavigate!(prevAssistantEntryId);
-                  onEditContent?.(editTarget);
-                }}
+              {canNavigate && (
+                <button
+                  onClick={() => { onNavigate!(prevAssistantEntryId!); onEditContent?.(editTarget); }}
                    title={t("i18n.editFromHereTitle")}
                   style={{
                     display: "flex", alignItems: "center", gap: 4,
                     padding: "3px 8px", height: 22,
                     background: "none", border: "none",
                     borderRadius: 5,
-                    color: "var(--text-muted)",
+                    color: "var(--text-dim)",
                     cursor: "pointer",
                     fontSize: 11, fontWeight: 400,
                     whiteSpace: "nowrap",
                     transition: "color 0.12s",
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
                 >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="15 10 20 15 15 20" />
@@ -534,6 +530,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                   </svg>
                    {t("i18n.editFromHere")}
                 </button>
+              )}
               {canFork && (
                 <button
                   onClick={() => { onFork!(entryId!); }}
