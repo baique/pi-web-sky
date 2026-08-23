@@ -2275,6 +2275,25 @@ export function AppShell() {
                   {wallSettings.bubbleBlur}px
                 </span>
               </div>
+              <button
+                type="button"
+                onClick={() => updateWallSettings({ bubbleOpacity: 44, bubbleBlur: 18 })}
+                disabled={wallSettings.bubbleOpacity === 44 && wallSettings.bubbleBlur === 18}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, width: "100%",
+                  padding: "7px 10px",
+                  background: "transparent",
+                  color: wallSettings.bubbleOpacity === 44 && wallSettings.bubbleBlur === 18 ? "var(--text-dim)" : "var(--text)",
+                  border: "1px solid var(--border)", borderRadius: 8,
+                  fontSize: 12.5, cursor: wallSettings.bubbleOpacity === 44 && wallSettings.bubbleBlur === 18 ? "default" : "pointer",
+                  textAlign: "left",
+                  opacity: wallSettings.bubbleOpacity === 44 && wallSettings.bubbleBlur === 18 ? 0.55 : 1,
+                  transition: "background 0.12s",
+                }}
+              >
+                <span style={{ width: 14, flexShrink: 0, textAlign: "center" }}>↺</span>
+                {translate("bg.bubbleReset")}
+              </button>
             </div>
           )}
           <div style={{ fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5, marginTop: 10 }}>

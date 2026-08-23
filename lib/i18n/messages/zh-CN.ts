@@ -247,6 +247,7 @@ export const zhCNLocale: LocalePlugin = {
     "bg.reset": "重置位置",
     "bg.bubbleOpacity": "气泡透明度",
     "bg.bubbleBlur": "磨砂强度",
+    "bg.bubbleReset": "重置气泡",
     "chat.stopAgent": "停止 Agent",
     "chat.stop": "停止",
     "chat.disableSound": "关闭完成提示音",
