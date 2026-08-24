@@ -29,10 +29,12 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **Project file tools**: browse and upload files, inspect Git diffs, and preview source, Markdown, images, audio, PDFs, and DOCX files with automatic refresh.
 - **Git worktrees**: switch checkouts from the sidebar while keeping sessions from the same repository grouped together.
 - **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
+- **MCP server management**: add, remove, enable, disable, update and test MCP servers from a dedicated top-bar panel (global and project `mcp.json`), including a live connectivity test that lists the tools each server exposes.
 - **Built-in multi-session terminal**: launch a terminal panel from the top bar or the bottom status bar; xterm.js sessions stream over SSE, run side by side, and survive page refreshes.
 - **Customisable wallpaper**: use an image or video as the background, drag it horizontally to reposition, tile it, fill side gaps with edge-sampled colours, and reset on demand.
 - **Adjustable bubble glass**: sliders in the wallpaper menu control message-bubble opacity and frost blur independently, persisted across refreshes.
 - **English and Simplified Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.
+- **Security hardening**: streamed file responses carry `X-Content-Type-Options: nosniff`; inline SVG previews are served with a strict CSP and `Referrer-Policy: no-referrer` so a malicious SVG's `<script>` cannot execute inside the Pi Web origin; API Origin checks compare hostnames (tolerating Chromium dropping the port) while the host allow-list still blocks DNS rebinding and cross-loopback attacks.
 
 ## Quick Start
 
