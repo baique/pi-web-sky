@@ -1,54 +1,82 @@
-# 上游 PR 移植记录（Upstream Ports）
+# 上游 PR 移植记录
 
-本仓库（`@baique/pi-web-sky`）是从 [agegr/pi-web](https://github.com/agegr/pi-web) fork 的独立分叉（Sky 皮肤 + 终端等自研能力）。本文件记录我们**已合并进本 fork 的上游 PR**，便于日后升级/排查时对照。
+本文件说明这个仓库（`@baique/pi-web-sky`）从上游 [agegr/pi-web](https://github.com/agegr/pi-web) fork 之后，**采纳了哪些上游 pull request（PR）**、各自做了什么改动，以及与上游**刻意不同**的地方。
 
-所有移植均经浏览器 e2e（playwright + chrome-devtools）或单元测试验证，并遵循项目「只做必要功能测试」的原则。
+> 先明确几个概念，阅读者无需依赖任何外部上下文：
+> - **本仓库与上游的关系**：本仓库是 agegr/pi-web 的一个分叉（叫 pi-web-sky）。因为分叉后代码已大量改动（皮肤、终端等自研能力），上游合并的 PR 无法直接 `git merge`，只能把改动**手工搬过来**（下文叫「移植 / port」）。
+> - **验证方式**：本项目按 `AGENTS.md` 约定，前端改动用真实浏览器（Playwright）做 e2e 验证，配合 `tsc --noEmit`、`npm run lint` 和单元测试。
+> - 正文里提到的方法名 / 文件路径，都能在本仓库源码里找到，方便对照。
 
-## 已合并的 PR
+## 已移植的上游 PR 清单
 
-| 上游 PR | 主题 | 本 fork 提交 | 验证 | 备注 |
-|---|---|---|---|---|
-| **#519** | skills 开关写坏 SKILL.md 修复 | `04ac5bc` | e2e 双向 toggle | 显式 `disable-model-invocation: false` → 原地改，不产生重复 key |
-| **#590** | 大图附件压缩 + toolResult 图片渲染 | `04ac5bc` | e2e 2000px PNG→1024 JPEG | 防多轮历史 413；`deferMedia` 已移除 |
-| **#517** | 内置斜杠命令派发优化 | `04ac5bc` | e2e `/copy` 一次回车执行 | 精确命令直接执行；流式仅保留只读 builtin |
-| **#536** | 文件管理器路径粘贴/拖入 | `04ac5bc` | e2e file://→本地路径 | 新增 `lib/clipboard-paths.ts` |
-| **#587** | 会话历史尾部窗口分页 + BranchNavigator 爆栈修复 | `b5f18d9` | e2e 4382 条会话分页加载 | 见下方「与上游的差异」 |
-| **#516** | 打开单会话不扫全量目录 | `5aa515f` | 单测 + 功能 e2e | 见下方「与上游的差异」 |
+以下 PR 的改动已经合入本仓库（提交 hash 见「本仓库提交」列）。
 
-## 与上游的差异（必要修正，非原样照搬）
+### #519 — 修复「关闭技能开关会把 SKILL.md 写坏」
 
-### #587 — 增加服务端 `hasMore` 标记
+- **问题**：`PATCH /api/skills` 开关 `disable-model-invocation` 时，若某 SKILL.md 里已显式写了 `disable-model-invocation: false`，旧代码用「值是否为真」判断 key 是否存在，于是把 `false` 当成「没有这个 key」，禁用时会在文件里**再写一行** `disable-model-invocation: true`，形成重复 key → YAML 解析失败 → 该技能从装载列表消失且 UI 无法再修复。
+- **改动**：把开关逻辑抽到 `lib/skill-frontmatter.ts`（`setDisableModelInvocation`），改为「按 key 是否**存在**」判断，原地更新已有的行，只在前置块内编辑。
+- **本仓库提交**：`04ac5bc`
 
-上游用 `rendered.length >= visibleCount` 推断「窗口已满」从而显示加载更多哨兵。但本 fork 的 **process-group 渲染会把多条 entry 折叠成少数组件**，导致一条 4382 条会话的 50-entry 尾部只剩 **47 条 UI 消息**（< 50），哨兵永不出现、无法继续分页（e2e 已实测复现）。
+### #590 — 大图附件压缩 + 渲染 toolResult 里的图片
 
-因此本 fork 改为**服务端返回 `hasMore`**（`lib/session-reader.ts` 的 `hasOlderHistory()`，以 entry 链长度为准），客户端 ChatWindow 用它决定是否显示哨兵。注意：滚到顶部且始终停在顶部时会连续加载多页（受 `hasMore` 上限约束），这是预期的「上滚持续加载」行为。
+- **问题**：原样把大图 base64 塞进会话历史，多轮累积会超网关请求体上限（HTTP 413）；且工具返回的图片在消息里不显示。
+- **改动**：`components/ChatInput.tsx` 上传前把最长边超 1024px 的图降采样并转 JPEG（`compressImageFile`）；`components/MessageView.tsx` 渲染 toolResult 内的图片块；`hooks/useAgentSession.ts` 去掉 `deferMedia`，让历史里的图片来源随上下文返回。
+- **本仓库提交**：`04ac5bc`
 
-### #526 vs #516 — 同一优化的竞争 PR，选 #516
+### #517 — 内置斜杠（`/`）命令派发优化
 
-两者都是「路径缓存 miss 时不扫全量目录」。比较后选 **#516**：
-- **#516**：只优化正向 `resolveSessionPath`（按 `<timestamp>_<id>.jsonl` 目录后缀定位 + 首行 header 校验），不碰 `loadAllSessions`。
-- **#526**：额外优化反向 `resolveSessionIdByPath`，并把 `loadAllSessions` 改成按 realpath 只保留默认 sessions 目录内路径——**可能误伤符号链接 / 自定义布局的会话**，风险更高。
+- **问题**：斜杠菜单打开且输入恰好等于某个内置命令（如 `/copy`）时，第一次回车只「套用补全」而不是执行，要再按一次才执行；并且 agent 运行中会把所有内置命令都隐藏。
+- **改动**：`components/ChatInput.tsx` 精确匹配时一次回车直接执行；运行中仅保留只读命令（`/copy`、`/session`），Tab 仍走补全。
+- **本仓库提交**：`04ac5bc`
 
-取了 #516 的低风险实现，正向热点路径收益相同（PR 基准 7ms vs 322ms）。
+### #536 — 支持从文件管理器复制/粘贴路径
 
-## 已审查但未合并/未采用的 PR
+- **改动**：新增 `lib/clipboard-paths.ts`（解析 `file://` URI、各平台剪贴板格式），并接入聊天输入框、目录选择器、插件面板、终端等粘贴场景。
+- **本仓库提交**：`04ac5bc`
 
-| PR | 说明 | 未采用原因 |
-|---|---|---|
-| **#526** | 同上 | #516 的低风险替代，见上 |
-| **#581**（issue） | 斜杠面板中途触发 + 多 skill 选择 | 上游未实现（仅 issue 开放）；#319 对应的 feature request 被 `not_planned`。涉及 pi 侧仅展开首个 `/skill:` 的限制，需自行设计，工作量大，暂缓 |
-| **#517**（已合） | — | — |
+### #587 — 会话历史分页加载 + 修递归爆栈
 
-## 待办 / 下次考虑
+- **问题**：超大会话（数千条消息）加载时要**整体传输**全部历史，且 `components/BranchNavigator.tsx` 用递归遍历树，线性深链会话会爆调用栈（`Maximum call stack size exceeded`）。
+- **改动**：`lib/session-reader.ts` 的 `buildSessionContext` 支持 `tail` 切片（新增 `sliceActiveBranch`，迭代式回卷）；`app/api/sessions/[id]/route.ts` 与 `[id]/context/route.ts` 解析 `?tail` / `?before` 分页参数；`hooks/useAgentSession.ts` 支持向前补页；`components/ChatWindow.tsx` 顶部「加载更早」处触发取上一页；`BranchNavigator.tsx` 的树遍历改为迭代。
+- **与上游的差异**：见下方专属说明。
+- **本仓库提交**：`b5f18d9`
 
-- T2 大功能移植（分歧大、成本高，逐项确认后做）：#522（分隔条）、#458（会话分组）、#510（ask_user）、#470（MCP 管理）。
-- T3 安全小补丁：#544（Origin 兼容）、#520（SVG CSP）。
+### #516 — 打开单个会话时不扫全量目录
 
----
+- **问题**：路径缓存 miss 时，`resolveSessionPath` 会回退到 `listAllSessions()`，即解析目录里所有 `.jsonl`，打开一个会话很慢。
+- **改动**：`lib/session-reader.ts` 新增 `findSessionPathByName`——按 `<timestamp>_<id>.jsonl` 的目录后缀定位候选文件，再读首行 header **校验 id**（不信任文件名），miss 才回退全量扫描。
+- **与上游（竞争 PR #526）的关系**：见下方专属说明。
+- **本仓库提交**：`5aa515f`
+
+## 与上游刻意不同的地方（改动了原 PR 逻辑，阅读者需知悉）
+
+### #587 分页 —— 额外增加服务端 `hasMore` 标记
+
+- **为什么偏离**：上游实现里，`components/ChatWindow.tsx` 用「已渲染条数 ≥ 可见窗口」推断「是否还有更早的历史可加载」。但本仓库的聊天渲染会把一次工具的多个 entry **折叠成一个「Process details」块**，导致已加载的 50 条 entry 实际只产出几十个 UI 片段；当这个数字 < 50 时上层的判断就判定「没有更早」，顶部「加载更早」入口永不出现，用户无法继续向上翻历史（本仓库在一条 4382 条消息的会话上实测复现）。
+- **本仓库做法**：改为服务端计算并返回 `hasMore`（`lib/session-reader.ts` 的 `hasOlderHistory()`，按 entry 链长度判断），客户端用这个布尔值决定是否显示「加载更早」。
+- **注意**：用户停在顶部不动时，每次补页后入口仍在可视区，会连续加载多页直至 `hasMore` 为假——这是「上滚持续加载」的预期行为。
+
+### #516 与 #526 —— 竞争 PR，本仓库选 #516
+
+- 上游有两个对同一问题的 PR：#516 和 #526。二者核心思路相同（路径缓存 miss 时按文件名定位单条会话）。
+- **为什么选 #516**：[#526](https://github.com/agegr/pi-web/pull/526) 额外改写了 `loadAllSessions`，只保留解析后位于默认 sessions 目录内的路径（用 `realpathSync` 过滤），这可能**误伤符号链接目录或自定义布局里的会话**；#516 不动列表逻辑、只优化正向查询，风险更低，热点路径的收益相同（PR 自测 7ms vs 322ms）。
+
+## 已审查但未采用的上游改动
+
+- **#526**：见上，被 #516 取代。
+- **#581 / #319（斜杠面板中途触发 + 一次选多个 skill）**：上游至今未实现（#319 对应的 feature request 被标记 `not_planned`，仅 #581 作为 issue 存在）。要实现它需在应用层额外处理「pi 核心只展开消息开头的第一个 `/skill:`」这个限制，工作量与自制逻辑较多，暂缓（如之后要做，需单独设计）。
+
+## 尚未移植的候选（按意愿而非优先级分组的清单，供后续排期）
+
+- 大功能、动 UI 布局：`#522`（会话列表/文件浏览器间拖拽调分隔比例）、`#458`（侧边栏会话分组）。
+- 大功能、动输入与插件：`#510`（内置 ask_user 工具 + 行内确认卡片）、`#470`（插件面板里管理 MCP server）。
+- 安全小补丁：`#544`（容忍 Chromium 去掉 Origin 端口）、`#520`（内联 SVG 预览加 script 拦截 CSP）。
 
 ## 移植流程备忘
 
-1. 取 PR：`https://github.com/agegr/pi-web/pull/<n>.patch`
-2. 逐 PR 移植 → `tsc --noEmit` + `npm run lint` + 单测
-3. **浏览器 e2e**（playwright + chrome-devtools，dev server 在 `npm run dev` / 30143）
-4. 若对上游逻辑有偏离，必须在本文件「与上游的差异」记录原因
+若要继续从上游搬 PR：
+
+1. 取补丁：`https://github.com/agegr/pi-web/pull/<编号>.patch`
+2. 逐 PR 移植 → `tsc --noEmit` + `npm run lint` + 相关单元测试
+3. 浏览器 e2e（`npm run dev`，默认端口 30143）
+4. **任何对上游逻辑的偏离，都必须在本文件「与上游刻意不同」一节补一条说明**，写明为什么偏离、本仓库怎么做。
