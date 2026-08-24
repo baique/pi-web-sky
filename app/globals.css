@@ -74,16 +74,25 @@
      tint reads as "transparent, no glass" on real GPUs. Near-opaque base +
      blur keeps them looking frosted everywhere without depending on the
      compositor actually applying backdrop-filter. */
-  --panel-glass: rgba(250, 250, 251, 0.9);
+  --panel-glass: rgba(250, 250, 251, 0.75);
   /* Per-surface splits of --panel-glass: todo task board and the chat
      timeline rail are tuned independently on purpose — do NOT merge them
      back into one token. */
-  --panel-glass-todo: rgba(250, 250, 251, 0.9);
-  --panel-glass-minimap: rgba(250, 250, 251, 0.9);
+  --panel-glass-todo: rgba(250, 250, 251, 0.75);
+  --panel-glass-minimap: rgba(250, 250, 251, 0.75);
   /* Terminal body is transparent — the pane uses the message-bubble glass
      (--bubble-alpha / --glass-blur-bubble sliders) as its backdrop. */
   --glass-blur: 8px;
   --glass-blur-heavy: 12px;
+  /* 分层模糊 token：每类玻璃面用一个值，组件只引用 token 不写死 px。
+     取值刻意对齐近两年已调好的观感——勿改数值，改值请先改文档再改这里。
+     - --glass-blur            : 轻浮层/输入关联菜单（8px）
+     - --glass-blur-heavy      : chrome（顶栏/侧栏/composer/状态栏，12px）
+     - --glass-blur-panel      : 浮动大面板（终端/统计/配置/导航，10px）
+     - --glass-blur-popover    : 下拉小菜单/通知（10px）
+     - --glass-blur-bubble     : 消息气泡（18px，随用户滑块） */
+  --glass-blur-panel: 10px;
+  --glass-blur-popover: 10px;
 
   /* Composer action-tint text — light theme keeps brighter amber/indigo so
      they stay vivid on light glass. */
@@ -142,9 +151,9 @@ html.dark {
   --glass-bg-strong: rgba(34, 34, 37, 0.78);
   --glass-saturate: 140%;
   --glass-bg-input: rgba(34, 34, 37, 0.52);
-  --panel-glass: rgba(34, 34, 37, 0.9);
-  --panel-glass-todo: rgba(34, 34, 37, 0.9);
-  --panel-glass-minimap: rgba(34, 34, 37, 0.9);
+  --panel-glass: rgba(34, 34, 37, 0.75);
+  --panel-glass-todo: rgba(34, 34, 37, 0.75);
+  --panel-glass-minimap: rgba(34, 34, 37, 0.75);
   /* Terminal body is transparent — the pane uses the message-bubble glass
      (--bubble-alpha / --glass-blur-bubble sliders) as its backdrop. */
   --glass-blur: 8px;
@@ -255,6 +264,41 @@ body {
   border-radius: 2px;
 }
 
+/* ── 统一玻璃配方 —— 新的面板/浮层直接套以下 class，勿再写死 px ──
+   分层约定（每层 = 背景 token + 模糊 token + 饱和 token，全部受主题与
+   reduced-transparency/contrast 统一降级控制）：
+   - chrome  顶栏/侧栏/composer/状态栏     → --frame-glass/--side-panel + --glass-blur-heavy
+   - L-panel 浮动大面板(终端/统计/配置/导航) → --panel-glass + --glass-blur-panel
+   - L-popover 下拉小菜单/通知             → --glass-bg-strong(60%) + --glass-blur-popover
+   - 气泡    消息/工具调用                 → --*-bg-glass + --glass-blur-bubble
+   class 只给玻璃核心（背景+滤镜），边框/圆角/阴影由各组件自行管理，
+   避免与组件内联样式冲突。 */
+.glass-panel {
+  background: var(--panel-glass);
+  backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate));
+  transform: translateZ(0);
+}
+.glass-popover {
+  background: color-mix(in srgb, var(--glass-bg-strong) 60%, transparent);
+  backdrop-filter: blur(var(--glass-blur-popover)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-popover)) saturate(var(--glass-saturate));
+  transform: translateZ(0);
+}
+/* 贴顶栏向下展开面板的标准外壳：L-panel 玻璃 + 三边边框(顶贴栏) +
+   底部圆角 + 统一阴影。顶部所有“点开向下展开”的弹层一律套此类。
+   内容面板内部布局(padding/宽高/滚动)仍由各组件内联自管。 */
+.glass-top-panel {
+  background: var(--frame-glass);
+  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  transform: translateZ(0);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10);
+}
+
 .extension-status-shelf {
   display: flex;
   position: relative;
@@ -305,7 +349,9 @@ body {
   scrollbar-gutter: stable;
   border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   border-radius: 8px 8px 0 0;
-  background: color-mix(in srgb, var(--glass-bg) 62%, transparent);
+  background: var(--frame-glass);
+  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
   box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.10);
 }
 
@@ -1577,8 +1623,13 @@ span.token.table {
     --glass-bg-strong: var(--bg);
     --frame-glass: var(--bg);
     --side-panel: var(--frame-glass);
+    --panel-glass: var(--bg);
+    --panel-glass-todo: var(--bg);
+    --panel-glass-minimap: var(--bg);
     --glass-blur: 0px;
     --glass-blur-heavy: 0px;
+    --glass-blur-panel: 0px;
+    --glass-blur-popover: 0px;
     --glass-blur-bubble: 0px;
   }
   html.dark {
@@ -1592,8 +1643,13 @@ span.token.table {
     --glass-bg-strong: var(--bg);
     --frame-glass: var(--bg);
     --side-panel: var(--frame-glass);
+    --panel-glass: var(--bg);
+    --panel-glass-todo: var(--bg);
+    --panel-glass-minimap: var(--bg);
     --glass-blur: 0px;
     --glass-blur-heavy: 0px;
+    --glass-blur-panel: 0px;
+    --glass-blur-popover: 0px;
     --glass-blur-bubble: 0px;
   }
 }
@@ -1634,7 +1690,7 @@ span.token.table {
 }
 /* Materialize, don't just fade — blur+scale arrive together. */
 .terminal-panel-top { transform-origin: top right; animation: terminal-panel-in-top 0.15s ease-out both; border-radius: 0 0 10px 10px !important; border-top: none !important; }
-.terminal-panel-bottombar { transform-origin: bottom right; animation: terminal-panel-in-bottombar 0.15s ease-out both; }
+.terminal-panel-bottombar { transform-origin: bottom right; animation: terminal-panel-in-bottombar 0.15s ease-out both; border-radius: 10px 10px 0 0 !important; border-bottom: none !important; }
 
 /* Panel stays mounted while closed — hide instead of tearing down xterm. */
 .terminal-panel-hidden { display: none; }

@@ -314,6 +314,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
       <div style={{ height: "100%", display: "flex", alignItems: "stretch" }}>
         <button
           ref={btnRef}
+          data-top-panel-trigger
           onClick={() => onToggle ? onToggle() : setOpenInternal((v) => !v)}
           style={{
             display: hideInlineButton ? "none" : "flex",
@@ -346,10 +347,8 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
             top: dropdownPos.top,
             left: dropdownPos.left,
             width: dropdownPos.width,
-            background: "var(--bg-panel)",
-            borderBottom: "1px solid var(--border)",
             zIndex: 500,
-          }}>
+          }} className="glass-top-panel">
             {hasContent ? (
               <div style={{ padding: "4px 12px 8px 12px", maxHeight: 260, overflowY: "auto" }}>
                 {topLevel.map((child, idx) => (

@@ -2464,9 +2464,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 justifyContent: "flex-end",
                 border: "1px solid color-mix(in srgb, var(--border) 72%, transparent)",
                 borderRadius: 10,
-                background: "color-mix(in srgb, var(--bg-panel) 92%, var(--bg))",
+                background: "color-mix(in srgb, var(--glass-bg-strong) 60%, transparent)",
                 boxShadow: "0 8px 24px rgba(0,0,0,0.14)",
-                backdropFilter: "blur(10px)",
+                backdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
               } : null),
             }}>
             {!isStreaming && onThinkingLevelChange && (

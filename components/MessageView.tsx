@@ -994,7 +994,12 @@ function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; re
         overflow: "hidden",
         fontSize: 12,
         border: isError ? "1px solid rgba(248,113,113,0.45)" : "1px solid rgba(34,197,94,0.25)",
-        background: isError ? "rgba(248,113,113,0.05)" : "rgba(34,197,94,0.04)",
+        // 玻璃背景（气泡变量 --tool-bg-glass + --glass-blur-bubble）——
+        // 透明度随 --bubble-alpha 滑块、磨砂随气泡 blur，与消息气泡同一套控制。
+        // 失败块不再是“透明底+红字”，而是 frosted 玻璃底 + 红边框/红字标识。
+        background: "color-mix(in srgb, var(--tool-bg-glass) 62%, transparent)",
+        backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+        WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
       }}
     >
       {/* ── Tool call header ── */}

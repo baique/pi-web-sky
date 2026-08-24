@@ -781,10 +781,10 @@ export function McpConfigPanel({
         maxHeight: "min(72vh, 600px)",
         display: "flex",
         flexDirection: "column",
-        // 面板玻璃（同任务/会话统计面板，见 --panel-glass-todo）
-        background: "var(--panel-glass-todo)",
-        backdropFilter: "blur(16px) saturate(var(--glass-saturate))",
-        WebkitBackdropFilter: "blur(16px) saturate(var(--glass-saturate))",
+        // L-panel 玻璃：MCP 配置面板（见 --panel-glass / --glass-blur-panel）
+        background: "var(--panel-glass)",
+        backdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
+        WebkitBackdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
         transform: "translateZ(0)",
         border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
         borderTop: "none",

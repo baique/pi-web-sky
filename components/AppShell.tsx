@@ -2070,7 +2070,9 @@ export function AppShell() {
         overflow: hidden;
         transform-origin: top right;
         animation: session-info-pop 360ms ease-out both;
-        will-change: transform, opacity, filter, background, box-shadow;
+        /* 不设 will-change：会压住 glass-top-panel 的 backdrop-filter，
+           导致浏览器在合成层不渲染毛玻璃模糊（此前会话信息面板 blur 失效）。
+           动画很短，去掉优化提示无感知损失。 */
       }
       .session-info-popover::after {
         content: "";
@@ -2129,21 +2131,14 @@ export function AppShell() {
           ref={bgMenuRef}
           role="menu"
           aria-label={translate("bg.title")}
+          className="glass-top-panel"
           style={{
             position: "fixed",
             top: bgMenuPos.top,
             left: bgMenuPos.left,
             zIndex: 600,
             width: 264,
-            // 面板玻璃（同任务/会话统计面板，见 --panel-glass-todo）
-            background: "var(--panel-glass-todo)",
-            backdropFilter: "blur(16px) saturate(var(--glass-saturate))",
-            WebkitBackdropFilter: "blur(16px) saturate(var(--glass-saturate))",
-            transform: "translateZ(0)",
-            border: "1px solid var(--border)",
-            borderTop: "none",
-            borderRadius: "0 0 12px 12px",
-            boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
+            // 顶部下拉标准外壳 .glass-top-panel（L-panel 玻璃+三边边框+圆角+阴影）
             padding: 12,
             fontFamily: "inherit",
           }}
@@ -2588,9 +2583,9 @@ export function AppShell() {
                     zIndex: 20,
                     display: "flex",
                     alignItems: "stretch",
-                    background: "color-mix(in srgb, var(--bg-panel) 94%, var(--bg))",
+                    background: "color-mix(in srgb, var(--glass-bg-strong) 60%, transparent)",
                     boxShadow: "4px 0 18px rgba(0,0,0,0.12)",
-                    backdropFilter: "blur(10px)",
+                    backdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
                   }}
                 >
                   {renderChatToolbarActions(true)}
@@ -2646,13 +2641,8 @@ export function AppShell() {
                 <div
                   role="menu"
                   aria-label={translate("common.language")}
+                  className="glass-top-panel"
                   style={{
-                    background: "color-mix(in srgb, var(--glass-bg-strong) 55%, transparent)",
-                    backdropFilter: "blur(10px) saturate(140%)",
-                    WebkitBackdropFilter: "blur(10px) saturate(140%)",
-                    borderLeft: "1px solid var(--border)",
-                    borderRight: "1px solid var(--border)",
-                    borderBottom: "1px solid var(--border)",
                     overflow: "hidden",
                     padding: 4,
                   }}
@@ -2671,9 +2661,11 @@ export function AppShell() {
                         display: "flex", alignItems: "center",
                         width: "100%", height: 34, padding: "0 10px",
                         border: "none", borderRadius: 4,
-                        background: locale === plugin.id ? "var(--bg-selected)" : "transparent",
-                        color: "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12,
+                        // 选中 = accent 淡蓝底 + accent 字；hover = 浅灰 --bg-hover，两者可清晰区分
+                        background: locale === plugin.id ? "var(--side-selected)" : "transparent",
+                        color: locale === plugin.id ? "var(--accent)" : "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12,
                         transition: "background 0.1s",
+                        fontWeight: locale === plugin.id ? 600 : 400,
                       }}
                       onMouseEnter={(e) => {
                         if (locale !== plugin.id) e.currentTarget.style.background = "var(--bg-hover)";
@@ -2688,12 +2680,7 @@ export function AppShell() {
                 </div>
               )}
               {activeTopPanel === "system" && (
-                <div style={{
-                  background: "color-mix(in srgb, var(--glass-bg-strong) 55%, transparent)",
-                  backdropFilter: "blur(10px) saturate(140%)",
-                  WebkitBackdropFilter: "blur(10px) saturate(140%)",
-                  borderBottom: "1px solid var(--border)",
-                }}>
+                <div className="glass-top-panel">
                   {systemPrompt ? (
                     <div style={{
                       maxHeight: "min(600px, 75vh)",
@@ -2719,14 +2706,7 @@ export function AppShell() {
                 </div>
               )}
               {activeTopPanel === "session" && (
-                <div className="session-info-popover" style={{
-                  // 面板玻璃（同任务/会话统计，见 --panel-glass-todo）
-                  background: "var(--panel-glass-todo)",
-                  backdropFilter: "blur(16px) saturate(var(--glass-saturate))",
-                  WebkitBackdropFilter: "blur(16px) saturate(var(--glass-saturate))",
-                  transform: "translateZ(0)",
-                  borderBottom: "1px solid var(--border)",
-                  boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
+                <div className="session-info-popover glass-top-panel" style={{
                   padding: "12px 16px",
                   // Cap the width so the stats panel never stretches across the
                   // whole top bar on wide screens; hug the top-right corner.
@@ -2920,12 +2900,11 @@ export function AppShell() {
                 maxHeight: "min(440px, calc(100dvh - 44px))",
                 overflowY: "auto",
                 zIndex: 500,
-                // Floating-panel glass (see --panel-glass-todo in globals.css):
-                // denser than bubbles so wallpaper colour blocks never read
-                // through it, blur kept on top when the compositor applies it.
+                // L-panel 玻璃：会话统计/Todo 面板（专属 --panel-glass-todo，
+                // blur 仅收敛到 --glass-blur-panel token，不写死 px）。
                 background: "var(--panel-glass-todo)",
-                backdropFilter: "blur(16px) saturate(var(--glass-saturate))",
-                WebkitBackdropFilter: "blur(16px) saturate(var(--glass-saturate))",
+                backdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
+                WebkitBackdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
                 transform: "translateZ(0)",
                 border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
                 borderRadius: "0 0 12px 12px",

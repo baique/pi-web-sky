@@ -461,11 +461,12 @@ export function TerminalPanel({
           };
         })()
       : {
-          // Bottom-bar entry: rise above the trigger, right-aligned with a
-          // breathing margin so the panel does not hug the viewport edge.
+          // Bottom-bar entry: rise above the trigger, flush with the bottom
+          // bar top (no margin — same flush rule as the top dropdown hugging
+          // the top bar). bottom = 底栏顶到视口底.
           position: "fixed",
           right: anchorRect ? Math.max(24, window.innerWidth - anchorRect.right) : 24,
-          bottom: anchorRect ? window.innerHeight - anchorRect.top + 6 : 40,
+          bottom: anchorRect ? window.innerHeight - anchorRect.top : 35,
           width: Math.min(780, window.innerWidth - 48),
           height: Math.min(465, window.innerHeight - 120),
           zIndex: 1040,
@@ -477,10 +478,10 @@ export function TerminalPanel({
       className={`terminal-panel terminal-panel-${origin}${isMobile ? " terminal-panel-mobile" : ""}${hidden ? " terminal-panel-hidden" : ""}`}
       style={{
         ...panelStyle,
-        // 面板玻璃（同任务/会话统计面板，见 --panel-glass-todo）
-        background: "var(--panel-glass-todo)",
-        backdropFilter: "blur(16px) saturate(var(--glass-saturate))",
-        WebkitBackdropFilter: "blur(16px) saturate(var(--glass-saturate))",
+        // L-panel 玻璃：终端面板（见 --panel-glass / --glass-blur-panel）
+        background: "var(--panel-glass)",
+        backdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
+        WebkitBackdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
       }}
       role="region"
       aria-label={t("terminal.title")}

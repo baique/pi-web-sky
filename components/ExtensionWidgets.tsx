@@ -56,6 +56,8 @@ export function ExtensionWidgets({ widgets }: { widgets: ExtensionWidgetItem[] }
   const [updatingWidgetKeys, setUpdatingWidgetKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const triggersRef = useRef<HTMLDivElement | null>(null);
+  const panelsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const nextContents = snapshotExtensionWidgetContents(widgets);
@@ -101,6 +103,19 @@ export function ExtensionWidgets({ widgets }: { widgets: ExtensionWidgetItem[] }
     updateClearTimersRef.current.clear();
   }, []);
 
+  // 点击面板/触发器之外的任意处自动收起展开的扩展面板（同顶栏下拉的 outside-close）。
+  useEffect(() => {
+    if (!expandedWidgetKey) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (panelsRef.current?.contains(target)) return;
+      if (triggersRef.current?.contains(target)) return;
+      setExpandedWidgetKey(null);
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [expandedWidgetKey]);
+
   if (widgets.length === 0) return null;
 
   const expandedWidget = widgets.find((widget) => (
@@ -115,7 +130,7 @@ export function ExtensionWidgets({ widgets }: { widgets: ExtensionWidgetItem[] }
   return (
     <>
       {expandedWidget && (
-        <div className="extension-widget-panels">
+        <div ref={panelsRef} className="extension-widget-panels">
           {(() => {
             const widget = expandedWidget;
             const index = widgets.indexOf(widget);
@@ -137,7 +152,7 @@ export function ExtensionWidgets({ widgets }: { widgets: ExtensionWidgetItem[] }
           })()}
         </div>
       )}
-      <div className="extension-widget-triggers" aria-label={t("chat.extensionWidgets")}>
+      <div ref={triggersRef} className="extension-widget-triggers" aria-label={t("chat.extensionWidgets")}>
         {widgets.map((widget, index) => {
           const expandable = widget.lines.length > 1;
           const expanded = expandable && widget.key === expandedWidget?.key;

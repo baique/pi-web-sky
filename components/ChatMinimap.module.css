@@ -15,8 +15,8 @@
      so 0.78 keeps a real glass feel without going opaque. Blur + saturate
      keep frosting it wherever the compositor applies the filter. */
   background: var(--glass-bg-strong);
-  backdrop-filter: blur(16px) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(16px) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate));
   transform: translateZ(0);
   border-left: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
   box-shadow: -10px 0 26px rgba(0, 0, 0, 0.07);
