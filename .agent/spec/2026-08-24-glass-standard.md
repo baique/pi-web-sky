@@ -42,6 +42,8 @@
 | 消息气泡（用户/助手/工具）与工具调用块 | 气泡变量（见 §4.4）|
 | 常驻骨架（顶栏 / 侧栏 / 输入条 / 状态栏） | chrome token（见 §4.5）|
 
+区分 `.glass-top-panel` 与 `.glass-popover` 只看一条：**凡是“贴栏（顶栏/底栏）展开”的下拉/面板 → `.glass-top-panel`；凡“不贴栏、独立浮起”的轻量元素（通知/toast、浮动小菜单、移动端浮层）→ `.glass-popover`**。
+
 > 例外几乎没有：气泡只出现在消息区；`--panel-glass-todo` 只给顶栏 Todo 面板，不得挪用。
 
 ---
@@ -55,11 +57,17 @@
   background: var(--frame-glass);
   backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
   border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-  border-top: none;          /* 贴栏侧不留边 */
-  border-radius: 0 0 12px 12px;  /* 底部圆角；底部弹出则反之为 10px 10px 0 0 */
+  border-top: none;              /* 贴顶栏：上不留边 */
+  border-radius: 0 0 12px 12px;  /* 顶栏：顶部齐边、底部圆角 */
 }
 ```
-用法：`<div className="glass-top-panel">内容</div>`。**贴顶栏**用默认（顶无边、底圆角）；**贴底栏**时把 `border-top:none` 换 `border-bottom:none`、圆角换成顶部圆角。
+- **贴顶栏**（顶栏下拉）：直接 `<div className="glass-top-panel">`，如上默认。
+- **贴底栏**（底部工具栏向上弹出）：叠一条覆盖规则——下不留边、顶部圆角：
+  ```html
+  <div className="glass-top-panel"
+       style={{ borderBottom: "none", borderRadius: "12px 12px 0 0" }}>…</div>
+  ```
+  现有终端 bottombar、底部扩展面板即此写法，照抄即可。
 
 ### 4.2 浮动大面板 — `.glass-panel`
 ```css
@@ -86,6 +94,8 @@ background: "color-mix(in srgb, var(--tool-bg-glass) 62%, transparent)"; // 工�
 backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))";
 ```
 工具调用块（含失败的 bash）同样用 `--tool-bg-glass` + `--glass-blur-bubble`，失败仅靠红边框/红字标识，背景仍是玻璃。
+
+> 失败语义色（错误边框/文字红）沿用项目既有的警示红，不属于玻璃 token 范畴；**玻璃背景与磨砂必须用气泡 token**，失败时不要把背景换成红色。
 
 ### 4.5 常驻骨架 — chrome token
 ```js
@@ -121,7 +131,7 @@ backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))";
 
 ## 6. 硬性约束（违反会产生 bug，必读）
 
-1. **浮在顶栏之上的下拉，必须 portal 渲染到 `<body>`**，并用触发按钮的 rect 锚定位置。原因：顶栏的 `backdrop-filter` 会让它的 `position:fixed` 后代以顶栏为包含块，内联渲染会导致面板定位偏移/被裁。参见项目内现有语言/系统/Todo 面板的写法。
+1. **浮在顶栏之上的下拉，必须 portal 渲染到 `<body>`**，并用触发按钮的 rect 锚定位置。原因：顶栏的 `backdrop-filter` 会让它的 `position:fixed` 后代以顶栏为包含块，内联渲染会导致面板定位偏移/被裁。参考实现：`components/AppShell.tsx` 里的语言/系统提示/Todo 面板。
 2. **不要嵌套 `backdrop-filter`**：父级已有模糊时，子元素再挂 `backdrop-filter` 不会重新采样背景，只会得到实心色块。需要时把子元素背景 alpha 调低，让整体读作玻璃。
 3. **背景/模糊一律用 token**：写死 `rgba`/`px` 会脱离主题与 §6 的无障碍兜底。
 4. ⚠️ 兜底自动生效的前提是**你用了 token**：`@media (prefers-reduced-transparency: reduce)` 与 `@media (prefers-contrast: more)` 会把所有玻璃 token 打回实心。只要引用 token，就免费获得"减弱透明/高对比"下的安全降级；不引用 token 则失效。

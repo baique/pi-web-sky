@@ -1,5 +1,7 @@
 # Pi Web — Sky Edition (@baique/pi-web-sky)
 
+[![npm version](https://img.shields.io/npm/v/@baique/pi-web-sky.svg)](https://www.npmjs.com/package/@baique/pi-web-sky)
+
 > **Sky 皮肤版**：基于 [pi-web](https://github.com/earendil-works/pi)（经 [@agegr/pi-web](https://github.com/agegr/pi-web) 二开）的独立发行版，MIT 协议。
 > 在原生 pi-web 之上新增了 Sky 皮肤：毛玻璃气泡与面板、JetBrains Mono 消息字体、加深/提亮文字对比度、右上角 todo 面板、右下角堆叠弱通知。
 
