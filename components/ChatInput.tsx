@@ -378,7 +378,8 @@ function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: s
 }
 
 function ModelNoticeBanner({ tone, title, body }: { tone: "error" | "warning"; title: string; body: string }) {
-  const color = tone === "error" ? "239,68,68" : "234,179,8";
+  const barColor = tone === "error" ? "#ef4444" : "#f59e0b";
+  const iconColor = tone === "error" ? "#dc2626" : "#d97706";
   return (
     <div
       role="alert"
@@ -390,10 +391,10 @@ function ModelNoticeBanner({ tone, title, body }: { tone: "error" | "warning"; t
         marginBottom: 8,
         padding: "7px 10px",
         overflowY: "auto",
-        border: `1px solid rgba(${color},0.3)`,
-        borderRadius: 6,
-        background: `rgba(${color},0.07)`,
-        color: `rgb(${color})`,
+        background: `color-mix(in srgb, var(--bg-panel) 92%, ${barColor} 8%)`,
+        borderLeft: `3px solid ${barColor}`,
+        borderRadius: 4,
+        color: "var(--text)",
         fontSize: 11,
         lineHeight: 1.45,
       }}
@@ -403,7 +404,7 @@ function ModelNoticeBanner({ tone, title, body }: { tone: "error" | "warning"; t
         height="13"
         viewBox="0 0 24 24"
         fill="none"
-        stroke="currentColor"
+        stroke={iconColor}
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -1556,11 +1557,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         {retryInfo && (
           <div style={{
             marginBottom: 8, padding: "5px 10px",
-            background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.25)",
-            borderRadius: 6, fontSize: 12, color: "rgba(180,130,0,0.9)",
+            background: "color-mix(in srgb, var(--bg-panel) 92%, #f59e0b 8%)",
+            borderLeft: "3px solid #f59e0b", borderRadius: 4,
+            fontSize: 12, color: "var(--text)",
             display: "flex", alignItems: "center", gap: 6,
           }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
               <path d="M3 3v5h5" />
             </svg>
@@ -1570,11 +1572,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         {compactResultText && (
           <div style={{
             marginBottom: 8, padding: "5px 10px",
-            background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.24)",
-            borderRadius: 6, fontSize: 12, color: "rgba(5,150,105,0.95)",
+            background: "color-mix(in srgb, var(--bg-panel) 92%, #10b981 8%)",
+            borderLeft: "3px solid #10b981", borderRadius: 4,
+            fontSize: 12, color: "var(--text)",
             display: "flex", alignItems: "center", gap: 6,
           }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <polyline points="20 6 9 17 4 12" />
             </svg>
             {compactResultText}
@@ -1586,10 +1589,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             style={{
               marginBottom: 8,
               padding: "7px 10px",
-              background: "rgba(239,68,68,0.07)",
-              border: "1px solid rgba(239,68,68,0.3)",
-              borderRadius: 6,
-              color: "#ef4444",
+              background: "color-mix(in srgb, var(--bg-panel) 92%, #ef4444 8%)",
+              borderLeft: "3px solid #ef4444", borderRadius: 4,
+              color: "var(--text)",
               fontFamily: "var(--font-mono)",
               fontSize: 12,
               lineHeight: 1.5,

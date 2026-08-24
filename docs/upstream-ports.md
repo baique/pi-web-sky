@@ -48,6 +48,20 @@
 - **与上游（竞争 PR #526）的关系**：见下方专属说明。
 - **本仓库提交**：`5aa515f`
 
+### #544 — 容忍 Chromium 去掉 Origin 端口
+
+- **问题**：Chromium 150+ 对同源请求的非默认端口会省略 Origin 头里的端口，旧代码按「完整 canonical origin（含端口）相等」校验，于是把所有合法的 pi-web API 请求误判为跨站 → 页面报 `Error: HTTP 403`、侧边栏会话列表空白。
+- **改动**：`lib/request-security.ts` 的 `isApiRequestOriginAllowed` 改为**只比较 hostname**（hostname 大小写不敏感），以 Host 头为准（Host 是请求实际去往哪里的权威来源）；host 白名单仍能拦截 DNS rebinding 和跨 loopback 名攻击。
+- **与上游**：原样移植，无偏离。
+- **验证**：单测新增「Origin 剥端口放行 / 跨名与 rebind 仍拒绝」；e2e 用 `Origin: http://127.0.0.1`（无端口）请求 → 200，跨主机名 → 403。
+
+### #520 — 内联 SVG 预览加 script 拦截 CSP
+
+- **问题**：`streamFile()` 用 `image/svg+xml` 内联输出，既无 `Content-Security-Policy` 也无 `X-Content-Type-Options`。SVG 是唯一会作为 document 执行的预览类型——仓库里的 SVG 若被直接导航（例如透过 transcript 里的链接）打开，可在 Pi Web origin 里跑脚本，进而访问任意 `/api` 路由（`PI_WEB_PASSWORD` 开启时还能碰到 Basic Auth 凭据）。
+- **改动**：`app/api/files/[...path]/route.ts` 的 `streamFile`：所有 streamed 响应统一加 `X-Content-Type-Options: nosniff`；`contentType === "image/svg+xml"` 时加 `Content-Security-Policy: default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'` 和 `Referrer-Policy: no-referrer`（与 DOCX 预览同一策略）。CSP 不影响 `<img>` 嵌入，应用内预览不变。
+- **与上游**：原样移植，无偏离。
+- **验证**：单测 3 条（nosniff / SVG CSP 指令 / 三种响应形态共享 headers）；e2e 直接导航带 `<script>` 的恶意 SVG → `window.__E2E520_EXECUTED__` 未执行；PNG 预览回归正常。
+
 ## 与上游刻意不同的地方（改动了原 PR 逻辑，阅读者需知悉）
 
 ### #587 分页 —— 额外增加服务端 `hasMore` 标记
@@ -70,7 +84,6 @@
 
 - 大功能、动 UI 布局：`#522`（会话列表/文件浏览器间拖拽调分隔比例）、`#458`（侧边栏会话分组）。
 - 大功能、动输入与插件：`#510`（内置 ask_user 工具 + 行内确认卡片）、`#470`（插件面板里管理 MCP server）。
-- 安全小补丁：`#544`（容忍 Chromium 去掉 Origin 端口）、`#520`（内联 SVG 预览加 script 拦截 CSP）。
 
 ## 移植流程备忘
 
