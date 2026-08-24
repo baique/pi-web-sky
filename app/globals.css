@@ -1619,8 +1619,9 @@ span.token.table {
   overflow: hidden;
   /* Glass shell + the frosted backdrop come from inline styles on the
      component (same recipe as message bubbles: --assistant-bg-rgb tint,
-     blur/alpha from the user's bubble sliders). Keep only layout here. */
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+     blur/alpha from the user's bubble sliders). Keep only layout here.
+     No drop shadow: on light wallpapers the 32px dark blur reads as a
+     stray halo around a floating pane. */
 }
 
 @keyframes terminal-panel-in-top {

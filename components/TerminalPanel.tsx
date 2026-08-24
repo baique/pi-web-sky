@@ -270,12 +270,16 @@ export function TerminalPanel({
     attach(activeId);
     const a = attachedRef.current.get(activeId);
     if (!a) return;
+    // While hidden we only pre-create the Terminal + SSE (listed above);
+    // opening/fitting needs a visible container — xterm's character
+    // measurement fails in display:none, so a pre-opened terminal would have
+    // to re-measure anyway and open at 80x24 until fit lands. Opening here,
+    // on show, measures immediately and fits within a frame.
+    if (hidden) return;
     if (!a.term.element) {
       a.term.open(el);
     }
     a.term.element?.classList.add("terminal-attaching");
-    // Hidden (display:none) → no geometry to fit; the next show re-runs this.
-    if (hidden) return;
     fitWhenReady(activeId);
     const ro = new ResizeObserver(() => {
       if (!hiddenRef.current && activeIdRef.current === activeId) fitWhenReady(activeId);
@@ -284,11 +288,14 @@ export function TerminalPanel({
     return () => { ro.disconnect(); };
   }, [activeId, attach, hidden, fitWhenReady]);
 
-  // Initial load: list sessions, activate newest. Re-runs on every show —
-  // the panel stays mounted while hidden, so showing is the moment to
-  // re-sync the session list (states may have changed while hidden).
+  // Session bootstrap + warm-up: runs once on mount (even while hidden) so
+  // the backing pty/SSE are ready before the user opens the panel — opening
+  // then only has to fit. Afterwards re-sync on every show (hidden→false);
+  // closing stays silent.
+  const initializedRef = useRef(false);
   useEffect(() => {
-    if (hidden) return;
+    if (initializedRef.current && hidden) return; // booted; re-sync only when visible
+    if (!initializedRef.current) initializedRef.current = true;
     void refreshList().then(() => {
       setLoadedOnce(true);
       setSessions((cur) => {
@@ -355,21 +362,20 @@ export function TerminalPanel({
     }
   }, [activeCwd, refreshList]);
 
-  // Auto-create the first terminal when the server has none yet — opening the
-  // panel should just work, not present an empty state. One attempt only;
-  // failures surface via the manual create button. Setting autoCreatedRef in
-  // every non-creating branch matters: if a session existed on open, deleting
-  // it must NOT auto-spawn a replacement (the user asked to close it).
-  // Runs on show only — the panel now lives mounted while hidden.
+  // Auto-create the first terminal when the server has none yet — the panel
+  // should just work on first open, not present an empty state. One attempt
+  // only, run in the background even while the panel is hidden so the pty is
+  // ready before the user opens it; failures surface via the manual create
+  // button. Setting autoCreatedRef in every non-creating branch matters: if a
+  // session existed, deleting it must NOT auto-spawn a replacement.
   const autoCreatedRef = useRef(false);
   useEffect(() => {
-    if (hidden) return;
     if (autoCreatedRef.current) return;
     if (!loadedOnce || creating) return;
     autoCreatedRef.current = true;
     if (sessions.length > 0) return; // sessions already exist — no auto-create
     void createSession();
-  }, [hidden, loadedOnce, creating, sessions.length, createSession]);
+  }, [loadedOnce, creating, sessions.length, createSession]);
 
   const closeSession = useCallback(async (id: string) => {
     // Optimistic removal: drop the chip immediately so one click always
