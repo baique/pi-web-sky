@@ -1635,6 +1635,9 @@ span.token.table {
 .terminal-panel-top { transform-origin: top right; animation: terminal-panel-in-top 0.15s ease-out both; }
 .terminal-panel-bottombar { transform-origin: bottom right; animation: terminal-panel-in-bottombar 0.15s ease-out both; }
 
+/* Panel stays mounted while closed — hide instead of tearing down xterm. */
+.terminal-panel-hidden { display: none; }
+
 .terminal-panel-mobile { inset: 10px; width: auto !important; height: auto !important; animation: terminal-panel-in-bottombar 0.15s ease-out both; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1733,6 +1736,11 @@ html.dark .terminal-tabs { border-bottom-color: color-mix(in srgb, var(--text) 6
 
 .terminal-body { flex: 1; min-height: 0; padding: 6px 8px 8px; position: relative; }
 .terminal-body .xterm { height: 100%; }
+/* Mask the terminal surface until the first successful fit: the renderer
+   measures cell size asynchronously, so the first fit() can silently no-op
+   and leave an 80x24 layout stretched across the panel (cursor pinned near
+   the bottom). Opacity-hidden until geometry is stable, then faded in. */
+.terminal-body .xterm.terminal-attaching { opacity: 0; }
 .terminal-body .xterm-viewport { background-color: transparent !important; }
 
 .terminal-placeholder {

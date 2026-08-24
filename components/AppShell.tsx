@@ -3101,14 +3101,13 @@ export function AppShell() {
       </div>
     </div>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
-    {terminalOpen && (
-      <TerminalPanel
-        origin={terminalOrigin}
-        anchorRect={terminalAnchor}
-        activeCwd={selectedSession?.cwd ?? effectiveNewSessionCwd ?? null}
-        onClose={() => setTerminalOpen(false)}
-      />
-    )}
+    <TerminalPanel
+      origin={terminalOrigin}
+      anchorRect={terminalAnchor}
+      activeCwd={selectedSession?.cwd ?? effectiveNewSessionCwd ?? null}
+      hidden={!terminalOpen}
+      onClose={() => setTerminalOpen(false)}
+    />
     {projectTrustDialogOpen && projectTrustCwd && (
       <ProjectTrustDialog
         cwd={projectTrustCwd}

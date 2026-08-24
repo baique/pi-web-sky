@@ -37,6 +37,8 @@ interface Attached {
   es: EventSource | null;
   offset: number | null; // last byte offset seen; null = never attached
   reconnectTimer: ReturnType<typeof setTimeout> | null;
+  /** Retry handle while the renderer's cell measurement is pending (fit no-ops before it). */
+  fitTimer: ReturnType<typeof setTimeout> | null;
   /** Preserve keyboard byte order: HTTP POSTs can otherwise arrive out of order. */
   inputQueue: Promise<void>;
   disposed: boolean;
@@ -66,6 +68,7 @@ export function TerminalPanel({
   origin,
   anchorRect,
   activeCwd,
+  hidden,
   onClose,
 }: {
   /** "top": dropdown below the topbar button. "bottombar": rises from the bottom bar item. */
@@ -74,6 +77,8 @@ export function TerminalPanel({
   anchorRect?: { top: number; left: number; right: number; bottom: number } | null;
   /** cwd for new terminals: the active session's project path. */
   activeCwd: string | null;
+  /** Panel stays mounted while hidden (show/hide, no teardown) — xterm instances and SSE survive. */
+  hidden: boolean;
   onClose: () => void;
 }) {
   const isMobile = useIsMobile();
@@ -88,6 +93,8 @@ export function TerminalPanel({
   const attachedRef = useRef<Map<string, Attached>>(new Map());
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = activeId;
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
 
   // Sessions we are in the middle of deleting client-side. Any refreshList
   // that lands before the DELETE round-trips must not resurrect the chip.
@@ -164,7 +171,7 @@ export function TerminalPanel({
           })
           .catch(() => {});
       });
-      a = { term, fit, es: null, offset: null, reconnectTimer: null, inputQueue: Promise.resolve(), disposed: false };
+      a = { term, fit, es: null, offset: null, reconnectTimer: null, fitTimer: null, inputQueue: Promise.resolve(), disposed: false };
       attachedRef.current.set(id, a);
     }
 
@@ -196,6 +203,54 @@ export function TerminalPanel({
     };
   }, [buildTheme, refreshList]);
 
+  // Report the client's current cols/rows to the pty (idempotent POST).
+  const reportResize = useCallback((id: string) => {
+    const a = attachedRef.current.get(id);
+    if (!a) return;
+    void fetch(`/api/terminal/${id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "resize", cols: a.term.cols, rows: a.term.rows }),
+    });
+  }, []);
+
+  // Fit once the renderer's cell measurement is ready. Right after open(),
+  // proposeDimensions() returns undefined (cell size is still 0 mid async
+  // measure), so fit() silently no-ops and the terminal stays at its 80x24
+  // defaults — stretched across the panel with the cursor near the bottom,
+  // only fixed once a later resize lands. Retry on a short timer, and keep
+  // the surface opacity-hidden until the first successful fit so that frame
+  // is never painted. Hidden panels have no geometry (display:none → 0px),
+  // so bail — the show effect re-fits.
+  const fitWhenReady = useCallback((id: string, attempts = 0): void => {
+    const a = attachedRef.current.get(id);
+    const el = containerRef.current;
+    if (!a || !el || hiddenRef.current || a.disposed) return;
+    let prop: { cols: number; rows: number } | undefined;
+    try { prop = a.fit.proposeDimensions(); } catch { /* not rendered yet */ }
+    if (prop && prop.cols > 2 && prop.rows > 1) {
+      if (a.fitTimer) { clearTimeout(a.fitTimer); a.fitTimer = null; }
+      try { a.fit.fit(); } catch { /* panel hidden mid-fit */ }
+      reportResize(id);
+      a.term.element?.classList.remove("terminal-attaching");
+      a.term.focus();
+      // One more pass on the next frame: pixel rounding can leave the first
+      // fit a column short; the follow-up keeps cols/rows exact.
+      requestAnimationFrame(() => {
+        if (a.disposed || hiddenRef.current) return;
+        try { a.fit.fit(); } catch { /* panel hidden mid-frame */ }
+      });
+      return;
+    }
+    if (attempts >= 60) { // ~2s of retries — give up until the next trigger
+      if (a.fitTimer) { clearTimeout(a.fitTimer); a.fitTimer = null; }
+      a.term.element?.classList.remove("terminal-attaching");
+      return;
+    }
+    if (a.fitTimer) clearTimeout(a.fitTimer);
+    a.fitTimer = setTimeout(() => fitWhenReady(id, attempts + 1), 30);
+  }, [reportResize]);
+
   // Mount the active xterm into the DOM + keep it fitted.
   useEffect(() => {
     const el = containerRef.current;
@@ -205,38 +260,23 @@ export function TerminalPanel({
     if (!a) return;
     if (!a.term.element) {
       a.term.open(el);
-      a.term.focus();
     }
-    const doFit = () => {
-      try {
-        a!.fit.fit();
-        const { cols, rows } = a!.term;
-        void fetch(`/api/terminal/${activeId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "resize", cols, rows }),
-        });
-      } catch { /* panel hidden mid-fit */ }
-    };
-    doFit();
-    // Double-fit on the next frame: right after the first fit the xterm
-    // scrollback geometry can be stale (first line rendered at the panel
-    // bottom) until a second geometry pass. A rAF re-fit runs after the
-    // browser has laid the fixed panel out; a late pass after the enter
-    // animation also absorbs SSE history written in the first frames.
-    const raf = requestAnimationFrame(() => {
-      try { a!.fit.fit(); } catch { /* panel hidden mid-frame */ }
+    a.term.element?.classList.add("terminal-attaching");
+    // Hidden (display:none) → no geometry to fit; the next show re-runs this.
+    if (hidden) return;
+    fitWhenReady(activeId);
+    const ro = new ResizeObserver(() => {
+      if (!hiddenRef.current && activeIdRef.current === activeId) fitWhenReady(activeId);
     });
-    const lateFit = setTimeout(() => {
-      try { a!.fit.fit(); } catch { /* panel hidden */ }
-    }, 250);
-    const ro = new ResizeObserver(doFit);
     ro.observe(el);
-    return () => { ro.disconnect(); cancelAnimationFrame(raf); clearTimeout(lateFit); };
-  }, [activeId, attach, sessions.length]);
+    return () => { ro.disconnect(); };
+  }, [activeId, attach, hidden, fitWhenReady]);
 
-  // Initial load: list sessions, activate newest.
+  // Initial load: list sessions, activate newest. Re-runs on every show —
+  // the panel stays mounted while hidden, so showing is the moment to
+  // re-sync the session list (states may have changed while hidden).
   useEffect(() => {
+    if (hidden) return;
     void refreshList().then(() => {
       setLoadedOnce(true);
       setSessions((cur) => {
@@ -244,13 +284,15 @@ export function TerminalPanel({
         return cur;
       });
     });
-  }, [refreshList]);
+  }, [hidden, refreshList]);
 
-  // Light poll while open — keeps running/exit state honest without extra SSE.
+  // Light poll while VISIBLE — keeps running/exit state honest without
+  // extra SSE. Paused while hidden (panel itself is the only consumer).
   useEffect(() => {
+    if (hidden) return;
     const iv = setInterval(() => void refreshList(), 5000);
     return () => clearInterval(iv);
-  }, [refreshList]);
+  }, [refreshList, hidden]);
 
   // Prune client attachments for sessions the server no longer knows.
   useEffect(() => {
@@ -259,6 +301,7 @@ export function TerminalPanel({
       if (live.has(id)) continue;
       a.disposed = true;
       if (a.reconnectTimer) clearTimeout(a.reconnectTimer);
+      if (a.fitTimer) clearTimeout(a.fitTimer);
       a.es?.close();
       a.term.dispose();
       attachedRef.current.delete(id);
@@ -273,6 +316,7 @@ export function TerminalPanel({
     for (const [, a] of attachedRef.current) {
       a.disposed = true;
       if (a.reconnectTimer) clearTimeout(a.reconnectTimer);
+      if (a.fitTimer) clearTimeout(a.fitTimer);
       a.es?.close();
       a.term.dispose();
     }
@@ -304,14 +348,16 @@ export function TerminalPanel({
   // failures surface via the manual create button. Setting autoCreatedRef in
   // every non-creating branch matters: if a session existed on open, deleting
   // it must NOT auto-spawn a replacement (the user asked to close it).
+  // Runs on show only — the panel now lives mounted while hidden.
   const autoCreatedRef = useRef(false);
   useEffect(() => {
+    if (hidden) return;
     if (autoCreatedRef.current) return;
     if (!loadedOnce || creating) return;
     autoCreatedRef.current = true;
     if (sessions.length > 0) return; // sessions already exist — no auto-create
     void createSession();
-  }, [loadedOnce, creating, sessions.length, createSession]);
+  }, [hidden, loadedOnce, creating, sessions.length, createSession]);
 
   const closeSession = useCallback(async (id: string) => {
     // Optimistic removal: drop the chip immediately so one click always
@@ -407,7 +453,7 @@ export function TerminalPanel({
   const panel = (
     <div
       ref={rootRef}
-      className={`terminal-panel terminal-panel-${origin}${isMobile ? " terminal-panel-mobile" : ""}`}
+      className={`terminal-panel terminal-panel-${origin}${isMobile ? " terminal-panel-mobile" : ""}${hidden ? " terminal-panel-hidden" : ""}`}
       style={panelStyle}
       role="region"
       aria-label={t("terminal.title")}

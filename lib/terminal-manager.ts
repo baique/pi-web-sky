@@ -44,14 +44,30 @@ function registry(): Registry {
   return g.__piTerminals;
 }
 
+/**
+ * Drop the excess prefix of a ring buffer, cutting just after the last
+ * newline at/at-before the overflow point. Replays start from the buffer
+ * head, so a byte-granular cut can land inside a multi-byte char or an ANSI
+ * escape sequence — xterm does NOT tolerate that (garbage chars at the top
+ * of the terminal after a re-attach). Falls back to the plain cut when the
+ * overflow lands in a newline-free run (no way to align; rare and benign).
+ * Returns [kept, droppedBytes].
+ */
+export function trimRingBuffer(buffer: string, maxBytes: number): [string, number] {
+  if (buffer.length <= maxBytes) return [buffer, 0];
+  let drop = buffer.length - maxBytes;
+  const nl = buffer.lastIndexOf("\n", drop);
+  if (nl >= 0) drop = nl + 1;
+  return [buffer.slice(drop), drop];
+}
+
 /** Append output to the ring buffer and fan out to live SSE listeners. */
 function pushOutput(s: TerminalSession, data: string) {
   s.buffer += data;
   if (s.buffer.length > RING_BUFFER_BYTES) {
-    const drop = s.buffer.length - RING_BUFFER_BYTES;
-    // ponytail: drop at an arbitrary char boundary — xterm tolerates it.
-    s.buffer = s.buffer.slice(drop);
-    s.baseOffset += drop;
+    const [kept, dropped] = trimRingBuffer(s.buffer, RING_BUFFER_BYTES);
+    s.buffer = kept;
+    s.baseOffset += dropped;
   }
   for (const fn of s.listeners) fn(data);
 }
