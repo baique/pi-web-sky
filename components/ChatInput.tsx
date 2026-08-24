@@ -27,6 +27,7 @@ import { DraftStash } from "./DraftStash";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import type { ToolPreset } from "@/lib/tool-presets";
+import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -156,21 +157,38 @@ function formatTokenCount(tokens: number): string {
   return tokens.toLocaleString();
 }
 
-type SlashCommandPaletteItem = SlashCommandInfo | {
+type BuiltinSlashCommand = {
   name: string;
   description: string;
   source: "builtin";
+  availableWhileStreaming?: boolean;
 };
+
+type SlashCommandPaletteItem = SlashCommandInfo | BuiltinSlashCommand;
 
 type SlashCommandSource = SlashCommandPaletteItem["source"];
 
-const BUILTIN_SLASH_COMMANDS: SlashCommandPaletteItem[] = [
+const BUILTIN_SLASH_COMMANDS: BuiltinSlashCommand[] = [
   { name: "compact", description: "chat.commandCompact", source: "builtin" },
   { name: "reload", description: "chat.commandReload", source: "builtin" },
   { name: "name", description: "chat.commandName", source: "builtin" },
-  { name: "session", description: "chat.commandSession", source: "builtin" },
-  { name: "copy", description: "chat.commandCopy", source: "builtin" },
+  { name: "session", description: "chat.commandSession", source: "builtin", availableWhileStreaming: true },
+  { name: "copy", description: "chat.commandCopy", source: "builtin", availableWhileStreaming: true },
 ];
+
+function getBuiltinSlashCommand(message: string): BuiltinSlashCommand | undefined {
+  const match = message.trim().match(/^\/([^\s]+)(?:\s|$)/);
+  if (!match) return undefined;
+  return BUILTIN_SLASH_COMMANDS.find((command) => command.name === match[1]);
+}
+
+export function canRunBuiltinSlashCommandWhileStreaming(message: string): boolean {
+  return getBuiltinSlashCommand(message)?.availableWhileStreaming === true;
+}
+
+export function isExactSlashCommand(message: string, commandName: string): boolean {
+  return message.trim() === `/${commandName}`;
+}
 
 const SLASH_SOURCES: SlashCommandSource[] = ["builtin", "extension", "prompt", "skill"];
 
@@ -234,6 +252,41 @@ export function buildSlashCommandLayout(
     commands: groups.flatMap((group) => group.items.map(({ command }) => command)),
     groups,
   };
+}
+
+// 在上传前把图降采样到最长边 ≤1024px 并转 JPEG。过大的原始 base64 会让
+// 请求体（尤其多轮历史里反复累积的大图）超网关限制而报 413；模型内部本就
+// 会把图压缩到几百像素，降采样不影响识别质量，却能大幅减小请求体。
+const CLIENT_MAX_IMAGE_SIDE = 1024;
+const CLIENT_JPEG_QUALITY = 0.85;
+
+async function compressImageFile(file: File): Promise<{ data: string; mimeType: string }> {
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) {
+    // Can't decode; fall back to the original file so the image is still sent.
+    const raw = await file.arrayBuffer();
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(raw)));
+    return { data: base64, mimeType: file.type };
+  }
+  const longest = Math.max(bitmap.width, bitmap.height);
+  const needsResize = longest > CLIENT_MAX_IMAGE_SIDE;
+  const scale = needsResize ? CLIENT_MAX_IMAGE_SIDE / longest : 1;
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    bitmap.close();
+    const raw = await file.arrayBuffer();
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(raw)));
+    return { data: base64, mimeType: file.type };
+  }
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close();
+  const dataUrl = canvas.toDataURL("image/jpeg", CLIENT_JPEG_QUALITY);
+  return { data: dataUrl.split(",")[1] ?? "", mimeType: "image/jpeg" };
 }
 
 function imageToDraftImage(image: AttachedImage): ChatDraftImage {
@@ -654,18 +707,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     try {
       const newImages = await Promise.all(
         imageFiles.map(
-          (file) =>
-            new Promise<AttachedImage>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = () => {
-                const result = reader.result as string;
-                // result is "data:<mime>;base64,<data>"
-                const base64 = result.split(",")[1];
-                resolve({ data: base64, mimeType: file.type, previewUrl: URL.createObjectURL(file) });
-              };
-              reader.onerror = reject;
-              reader.readAsDataURL(file);
-            })
+          async (file) => {
+            const compressed = await compressImageFile(file);
+            return {
+              data: compressed.data,
+              mimeType: compressed.mimeType,
+              previewUrl: URL.createObjectURL(file),
+            };
+          }
         )
       );
       setAttachedImages((prev) => {
@@ -758,21 +807,24 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     };
   }, []);
 
+  const runBuiltinCommand = useCallback(async (msg: string): Promise<boolean> => {
+    if (attachedImages.length || !msg.startsWith("/") || !onBuiltinCommand) return false;
+    const result = await onBuiltinCommand(msg);
+    if (!result.handled) return false;
+    if (!result.error) clearInput();
+    return true;
+  }, [attachedImages.length, clearInput, onBuiltinCommand]);
+
   const handleSend = useCallback(async () => {
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
-    if (isStreaming) return;
     onAudioUnlock?.();
-    if (!attachedImages.length && msg.startsWith("/") && onBuiltinCommand) {
-      const result = await onBuiltinCommand(msg);
-      if (result.handled) {
-        if (!result.error) clearInput();
-        return;
-      }
-    }
+    const builtinAllowed = !isStreaming || canRunBuiltinSlashCommandWhileStreaming(msg);
+    if (builtinAllowed && await runBuiltinCommand(msg)) return;
+    if (isStreaming) return;
     clearInput();
     onSend(msg, attachedImages.length ? attachedImages : undefined);
-  }, [value, attachedImages, isStreaming, onBuiltinCommand, onSend, clearInput, onAudioUnlock]);
+  }, [value, attachedImages, isStreaming, runBuiltinCommand, onSend, clearInput, onAudioUnlock]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -780,7 +832,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   const filteredSlashCommands = (() => {
     if (slashQuery === null) return [];
-    const commands = [...(isStreaming ? [] : BUILTIN_SLASH_COMMANDS), ...(slashCommands ?? [])];
+    const builtinCommands = isStreaming
+      ? BUILTIN_SLASH_COMMANDS.filter((command) => command.availableWhileStreaming)
+      : BUILTIN_SLASH_COMMANDS;
+    const commands = [...builtinCommands, ...(slashCommands ?? [])];
     return [...commands]
       .filter((command) => {
         const name = command.name.toLowerCase();
@@ -992,6 +1047,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
     onAudioUnlock?.();
+    if (!attachedImages.length && onBuiltinCommand && canRunBuiltinSlashCommandWhileStreaming(msg)) {
+      void runBuiltinCommand(msg);
+      return;
+    }
     const streamingBehavior = mode === "steer" ? "steer" : "followUp";
     if (msg.startsWith("/") && onPromptWithStreamingBehavior) {
       clearInput();
@@ -1004,7 +1063,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     } else if (mode === "followup" && onFollowUp) {
       onFollowUp(msg, attachedImages.length ? attachedImages : undefined);
     }
-  }, [value, attachedImages, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock]);
+  }, [value, attachedImages, onBuiltinCommand, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, runBuiltinCommand]);
 
   const getNextSlashIndex = useCallback((direction: "up" | "down" | "left" | "right") => {
     const lastIndex = displayedSlashCommands.length - 1;
@@ -1113,9 +1172,22 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           setSlashMenuOpen(false);
           return;
         }
-        if ((e.key === "Tab" || sendShortcut) && displayedSlashCommands[slashActiveIndex]) {
+        const selectedCommand = displayedSlashCommands[slashActiveIndex];
+        if (e.key === "Tab" && selectedCommand) {
           e.preventDefault();
-          applySlashCommand(displayedSlashCommands[slashActiveIndex]);
+          applySlashCommand(selectedCommand);
+          return;
+        }
+        if (sendShortcut && selectedCommand) {
+          e.preventDefault();
+          const canSubmitNow = !isStreaming
+            || (selectedCommand.source === "builtin" && selectedCommand.availableWhileStreaming === true);
+          if (canSubmitNow && isExactSlashCommand(value, selectedCommand.name)) {
+            setSlashMenuOpen(false);
+            void handleSend();
+          } else {
+            applySlashCommand(selectedCommand);
+          }
           return;
         }
       }
@@ -1184,11 +1256,32 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = Array.from(e.clipboardData?.items ?? []);
     const imageItems = items.filter((item) => item.type.startsWith("image/"));
-    if (!imageItems.length) return;
-    e.preventDefault();
-    const files = imageItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
-    processImageFiles(files);
-  }, [processImageFiles]);
+    if (imageItems.length > 0) {
+      e.preventDefault();
+      const files = imageItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
+      processImageFiles(files);
+      return;
+    }
+
+    const paths = extractPathsFromClipboardData(e.clipboardData, { fallbackToFileName: true });
+    if (paths.length > 0) {
+      e.preventDefault();
+      const pastedText = formatPathsForInput(paths);
+      const ta = textareaRef.current;
+      const start = ta?.selectionStart ?? value.length;
+      const end = ta?.selectionEnd ?? value.length;
+      const nextValue = value.slice(0, start) + pastedText + value.slice(end);
+      setValue(nextValue);
+      requestAnimationFrame(() => {
+        if (ta) {
+          const nextCursor = start + pastedText.length;
+          ta.selectionStart = nextCursor;
+          ta.selectionEnd = nextCursor;
+          handleInput();
+        }
+      });
+    }
+  }, [processImageFiles, value, handleInput]);
 
   useEffect(() => {
     if (slashQuery === null) {

@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, CustomMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
+import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
 import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { MessageView } from "./MessageView";
@@ -1327,7 +1328,8 @@ function ExtensionCustomPanel({
           }}
           onPaste={(event) => {
             event.preventDefault();
-            const text = event.clipboardData.getData("text");
+            const paths = extractPathsFromClipboardData(event.clipboardData);
+            const text = paths.length > 0 ? formatPathsForInput(paths) : event.clipboardData.getData("text");
             if (text) onInput(request, asBracketedPaste(text));
           }}
           style={{

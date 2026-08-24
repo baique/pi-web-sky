@@ -1063,6 +1063,11 @@ function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; re
           />
         )
       )}
+
+      {/* ── Tool result images: render image blocks from result.content ── */}
+      {expanded && result && (
+        <ToolResultImages content={result.content} isError={isError} />
+      )}
     </div>
   );
 }
@@ -1607,6 +1612,50 @@ function imageSource(img: ImageContent): string {
   }
   return flat.data ? `data:${flat.mimeType};base64,${flat.data}` : "";
 }
+
+/** Renders image/image_url blocks carried inside a tool result message. */
+function ToolResultImages({ content, isError }: {
+  content: readonly unknown[];
+  isError?: boolean;
+}) {
+  const images = (content ?? []).filter(
+    (b): b is Record<string, unknown> => typeof b === "object" && b !== null && (b as { type?: unknown }).type === "image",
+  );
+  if (images.length === 0) return null;
+  return (
+    <div style={{
+      display: "flex",
+      gap: 6,
+      flexWrap: "wrap",
+      padding: "8px 10px",
+      borderTop: isError ? "1px solid rgba(248,113,113,0.25)" : "1px solid rgba(34,197,94,0.15)",
+      background: "var(--bg)",
+    }}>
+      {images.map((img, i) => {
+        const flat = img as unknown as { data?: string; mimeType?: string };
+        const src = (img.source)
+          ? (img.source as { type: string; media_type?: string; data?: string; url?: string }).type === "base64"
+            ? `data:${(img.source as { media_type?: string }).media_type};base64,${(img.source as { data?: string }).data}`
+            : (img.source as { url?: string }).url ?? ""
+          : flat.data
+            ? `data:${flat.mimeType};base64,${flat.data}`
+            : "";
+        if (!src) return null;
+        return (
+          <ImagePreview key={i} src={src}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={src}
+              alt=""
+              style={{ maxWidth: 220, maxHeight: 220, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid var(--border)" }}
+            />
+          </ImagePreview>
+        );
+      })}
+    </div>
+  );
+}
+
 
 function safeJson(value: unknown): string {
   try {
