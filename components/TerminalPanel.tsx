@@ -90,6 +90,7 @@ export function TerminalPanel({
   const [loadedOnce, setLoadedOnce] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const viewRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const attachedRef = useRef<Map<string, Attached>>(new Map());
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = activeId;
@@ -263,28 +264,33 @@ export function TerminalPanel({
     a.fitTimer = setTimeout(() => fitWhenReady(id, attempts + 1), 30);
   }, [reportResize]);
 
-  // Mount the active xterm into the DOM + keep it fitted.
+  // Attach the active xterm to its own stable host and keep it fitted. Do not
+  // open into terminal-body and move it later: React's dev/prod commit timing
+  // differs, and that reparenting race is what lets a new release terminal
+  // paint at the bottom before it settles at the top.
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || !activeId) return;
+    const host = activeId ? viewRefs.current.get(activeId) : undefined;
+    if (!el || !host || !activeId) return;
     attach(activeId);
     const a = attachedRef.current.get(activeId);
     if (!a) return;
-    // While hidden we only pre-create the Terminal + SSE (listed above);
-    // opening/fitting needs a visible container — xterm's character
-    // measurement fails in display:none, so a pre-opened terminal would have
-    // to re-measure anyway and open at 80x24 until fit lands. Opening here,
-    // on show, measures immediately and fits within a frame.
+    // While hidden we pre-create Terminal + SSE, but deliberately do not open
+    // xterm into a display:none host: character measurement needs visibility.
     if (hidden) return;
     if (!a.term.element) {
-      a.term.open(el);
+      a.term.open(host);
+    } else if (a.term.element.parentElement !== host) {
+      // Recovery for a hot-reloaded/legacy attachment; steady state never
+      // reparents because each session owns one permanent host.
+      host.appendChild(a.term.element);
     }
     a.term.element?.classList.add("terminal-attaching");
     fitWhenReady(activeId);
     const ro = new ResizeObserver(() => {
       if (!hiddenRef.current && activeIdRef.current === activeId) fitWhenReady(activeId);
     });
-    ro.observe(el);
+    ro.observe(host);
     return () => { ro.disconnect(); };
   }, [activeId, attach, hidden, fitWhenReady]);
 
@@ -453,7 +459,7 @@ export function TerminalPanel({
             top: (anchorRect?.bottom ?? anchorRect?.top ?? 46) + 2,
             left,
             width,
-            height: 460,
+            height: 465,
             zIndex: 1040,
           };
         })()
@@ -464,7 +470,7 @@ export function TerminalPanel({
           right: anchorRect ? Math.max(24, window.innerWidth - anchorRect.right) : 24,
           bottom: anchorRect ? window.innerHeight - anchorRect.top + 6 : 40,
           width: Math.min(780, window.innerWidth - 48),
-          height: Math.min(460, window.innerHeight - 120),
+          height: Math.min(465, window.innerHeight - 120),
           zIndex: 1040,
         };
 
@@ -552,11 +558,8 @@ export function TerminalPanel({
           <div
             key={s.id}
             ref={(el) => {
-              // Move the live xterm element into place when this becomes active.
-              if (el && s.id === activeId && !el.firstChild) {
-                const a = attachedRef.current.get(s.id);
-                if (a?.term.element) el.appendChild(a.term.element);
-              }
+              if (el) viewRefs.current.set(s.id, el);
+              else viewRefs.current.delete(s.id);
             }}
             data-terminal-view={s.id}
             style={{ display: s.id === activeId ? "block" : "none", height: "100%" }}
