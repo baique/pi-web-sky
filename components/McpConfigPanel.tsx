@@ -27,7 +27,7 @@ function ScopeTag({ scope }: { scope: McpScope }) {
         borderRadius: 3,
         flexShrink: 0,
         background: scope === "project" ? "rgba(99,102,241,0.12)" : "rgba(120,120,120,0.12)",
-        color: scope === "project" ? "rgba(99,102,241,0.85)" : "var(--text-dim)",
+        color: scope === "project" ? "rgba(99,102,241,0.85)" : "var(--text-meta)",
       }}
     >
       {scope}
@@ -176,7 +176,7 @@ function McpServerDetail({
   const otherScope = server.scope === "project" ? "global" : "project";
   const target =
     server.kind === "url" ? server.url : server.kind === "socket" ? server.socket : server.command;
-  const row: React.CSSProperties = { color: "var(--text-dim)" };
+  const row: React.CSSProperties = { color: "var(--text-meta)" };
   const val: React.CSSProperties = {
     color: "var(--text-muted)",
     fontFamily: "var(--font-mono)",
@@ -209,7 +209,7 @@ function McpServerDetail({
                 padding: "1px 5px",
                 borderRadius: 3,
                 background: "rgba(120,120,120,0.12)",
-                color: "var(--text-dim)",
+                color: "var(--text-meta)",
               }}
             >
               {t("mcp.disabledBadge")}
@@ -271,11 +271,11 @@ function McpServerDetail({
           {Object.keys(server.options).length ? JSON.stringify(server.options) : "—"}
         </div>
         <div style={row}>{t("mcp.fieldSource")}</div>
-        <div style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
+        <div style={{ color: "var(--text-meta)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
           {shortenPath(server.source)}
         </div>
         <div style={row}>{t("mcp.fieldCwd")}</div>
-        <div style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
+        <div style={{ color: "var(--text-meta)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
           {shortenPath(cwd)}
         </div>
       </div>
@@ -429,7 +429,7 @@ function AddMcpServer({
         <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
           {isEdit ? t("mcp.editTitle", { name: initial?.name ?? "" }) : t("mcp.addTitle")}
         </div>
-        <div style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+        <div style={{ fontSize: 12, color: "var(--text-meta)", fontFamily: "var(--font-mono)" }}>
           {scope === "project" ? `${shortenPath(cwd)}/.pi/mcp.json` : "~/.pi/agent/mcp.json"}
         </div>
       </div>
@@ -606,6 +606,30 @@ export function McpConfigPanel({
     if (!hidden) void load();
   }, [hidden, load]);
 
+  // Close on outside click or Escape (same as the other topbar panels).
+  useEffect(() => {
+    if (hidden) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target)) return;
+      // The trigger button manages the toggle — exclude it so a click there
+      // toggles instead of (close + reopen) racing.
+      const el = target as HTMLElement;
+      if (el.closest?.("#mcp-topbar-btn")) return;
+      onClose();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      onClose();
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [hidden, onClose]);
+
   const runAction = useCallback(
     async (action: string, payload: Record<string, unknown>): Promise<McpResponse | null> => {
       if (!effectiveCwd) return null;
@@ -751,16 +775,21 @@ export function McpConfigPanel({
       style={{
         position: "fixed",
         zIndex: 130,
-        top: (anchorRect?.bottom ?? anchorRect?.top ?? 46) + 4,
-        right: 24,
-        width: "min(880px, calc(100vw - 48px))",
-        maxHeight: "min(76vh, 640px)",
+        top: (anchorRect?.bottom ?? anchorRect?.top ?? 46),
+        left: anchorRect ? anchorRect.left : 24,
+        width: 780,
+        maxHeight: "min(72vh, 600px)",
         display: "flex",
         flexDirection: "column",
-        background: "var(--bg-panel)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        boxShadow: "0 12px 44px rgba(0,0,0,0.28)",
+        // 面板玻璃（同任务/会话统计面板，见 --panel-glass-todo）
+        background: "var(--panel-glass-todo)",
+        backdropFilter: "blur(16px) saturate(var(--glass-saturate))",
+        WebkitBackdropFilter: "blur(16px) saturate(var(--glass-saturate))",
+        transform: "translateZ(0)",
+        border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+        borderTop: "none",
+        borderRadius: "0 0 12px 12px",
+        boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
         overflow: "hidden",
       }}
     >
@@ -772,9 +801,10 @@ export function McpConfigPanel({
           justifyContent: "space-between",
           gap: 12,
           padding: "10px 16px",
-          borderBottom: "1px solid var(--border)",
+          borderBottom: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
           flexShrink: 0,
-          background: "var(--bg)",
+          // 透明 header：让面板玻璃背景透出
+          background: "transparent",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
@@ -801,10 +831,10 @@ export function McpConfigPanel({
           style={{
             display: "flex",
             flexDirection: "column",
-            width: 240,
+            width: 168,
             flexShrink: 0,
-            borderRight: "1px solid var(--border)",
-            background: "var(--bg)",
+            borderRight: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+            background: "transparent",
           }}
         >
           <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingTop: 8 }}>
@@ -813,7 +843,7 @@ export function McpConfigPanel({
                 padding: "4px 8px 3px",
                 fontSize: 10,
                 fontWeight: 600,
-                color: "var(--text-dim)",
+                color: "var(--text-meta)",
                 textTransform: "uppercase",
               }}
             >
@@ -826,7 +856,7 @@ export function McpConfigPanel({
             ) : !data && actionError ? (
               <div style={{ padding: "10px 8px", fontSize: 11, color: "#ef4444" }}>{actionError}</div>
             ) : (data?.servers.length ?? 0) === 0 ? (
-              <div style={{ padding: "10px 8px", fontSize: 11, color: "var(--text-dim)" }}>
+              <div style={{ padding: "10px 8px", fontSize: 11, color: "var(--text-meta)" }}>
                 {t("mcp.emptyList")}
               </div>
             ) : (
@@ -837,7 +867,7 @@ export function McpConfigPanel({
                       padding: "4px 8px 3px",
                       fontSize: 10,
                       fontWeight: 600,
-                      color: "var(--text-dim)",
+                      color: "var(--text-meta)",
                       textTransform: "uppercase",
                     }}
                   >
@@ -877,7 +907,7 @@ export function McpConfigPanel({
                             width: 7,
                             height: 7,
                             borderRadius: "50%",
-                            background: server.disabled ? "var(--text-dim)" : "var(--accent)",
+                            background: server.disabled ? "var(--text-meta)" : "var(--accent)",
                           }}
                         />
                         <div style={{ minWidth: 0, flex: 1 }}>
@@ -897,7 +927,7 @@ export function McpConfigPanel({
                           <div
                             style={{
                               fontSize: 10,
-                              color: "var(--text-dim)",
+                              color: "var(--text-meta)",
                               overflow: "hidden",
                               textOverflow: "ellipsis",
                               whiteSpace: "nowrap",
@@ -943,7 +973,7 @@ export function McpConfigPanel({
                 width: "100%",
                 cursor: "pointer",
                 background: addMode ? "var(--bg-selected)" : "none",
-                color: addMode ? "var(--accent)" : "var(--text-dim)",
+                color: addMode ? "var(--accent)" : "var(--text-meta)",
                 fontSize: 12,
               }}
               onMouseEnter={(e) => {
@@ -1016,7 +1046,7 @@ export function McpConfigPanel({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color: "var(--text-dim)",
+                color: "var(--text-meta)",
                 fontSize: 13,
               }}
             >

@@ -1633,7 +1633,7 @@ span.token.table {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 /* Materialize, don't just fade — blur+scale arrive together. */
-.terminal-panel-top { transform-origin: top right; animation: terminal-panel-in-top 0.15s ease-out both; }
+.terminal-panel-top { transform-origin: top right; animation: terminal-panel-in-top 0.15s ease-out both; border-radius: 0 0 10px 10px !important; border-top: none !important; }
 .terminal-panel-bottombar { transform-origin: bottom right; animation: terminal-panel-in-bottombar 0.15s ease-out both; }
 
 /* Panel stays mounted while closed — hide instead of tearing down xterm. */

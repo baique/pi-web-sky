@@ -447,16 +447,13 @@ export function TerminalPanel({
     : origin === "top"
       ? (() => {
           const width = Math.min(780, window.innerWidth - 48);
-          const triggerCenter = anchorRect
-            ? (anchorRect.left + anchorRect.right) / 2
-            : window.innerWidth / 2;
-          const left = Math.max(24, Math.min(
-            triggerCenter - width / 2,
-            window.innerWidth - width - 24,
-          ));
+          // Left-align with the trigger button (topbar terminal entry).
+          const left = anchorRect
+            ? Math.max(24, Math.min(anchorRect.left, window.innerWidth - width - 24))
+            : window.innerWidth - width - 24;
           return {
             position: "fixed",
-            top: (anchorRect?.bottom ?? anchorRect?.top ?? 46) + 2,
+            top: (anchorRect?.bottom ?? anchorRect?.top ?? 46),
             left,
             width,
             height: 465,
@@ -480,15 +477,10 @@ export function TerminalPanel({
       className={`terminal-panel terminal-panel-${origin}${isMobile ? " terminal-panel-mobile" : ""}${hidden ? " terminal-panel-hidden" : ""}`}
       style={{
         ...panelStyle,
-        // Same glass recipe as the message bubbles: translucent bed tinted with
-        // --assistant-bg-rgb, alpha + blur driven by the user's bubble sliders
-        // (--bubble-alpha, --glass-blur-bubble). Inline like MessageView so the
-        // frosted backdrop applies reliably instead of depending on stylesheet
-        // cascade. The xterm surface is transparent, so this panel glass
-        // carries the whole terminal.
-        background: "rgba(var(--assistant-bg-rgb, 252, 252, 253), var(--bubble-alpha, 0.44))",
-        backdropFilter: "blur(var(--glass-blur-bubble, 18px)) saturate(var(--glass-saturate, 80%))",
-        WebkitBackdropFilter: "blur(var(--glass-blur-bubble, 18px)) saturate(var(--glass-saturate, 80%))",
+        // 面板玻璃（同任务/会话统计面板，见 --panel-glass-todo）
+        background: "var(--panel-glass-todo)",
+        backdropFilter: "blur(16px) saturate(var(--glass-saturate))",
+        WebkitBackdropFilter: "blur(16px) saturate(var(--glass-saturate))",
       }}
       role="region"
       aria-label={t("terminal.title")}

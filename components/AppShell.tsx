@@ -282,7 +282,7 @@ export function AppShell() {
     if (left + panelWidth > window.innerWidth - 8) {
       left = Math.max(8, window.innerWidth - panelWidth - 8);
     }
-    setBgMenuPos({ left, top: rect.bottom + 6 });
+    setBgMenuPos({ left, top: rect.bottom });
     setBgMenuOpen((v) => !v);
   }, []);
 
@@ -402,6 +402,7 @@ export function AppShell() {
   // Single active panel — only one dropdown open at a time
   const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | "language" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const topPanelRef = useRef<HTMLDivElement | null>(null);
 
   const toggleTopPanel = useCallback((
     panel: "branches" | "system" | "session" | "language",
@@ -536,6 +537,31 @@ export function AppShell() {
     setTerminalOrigin(origin);
     setTerminalOpen((open) => origin === terminalOrigin ? !open : true);
   }, [terminalOrigin]);
+
+  // Close active top panel (session stats / language / system / branches)
+  // on outside click or Escape.
+  useEffect(() => {
+    if (!activeTopPanel) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (topPanelRef.current?.contains(target)) return;
+      // Trigger buttons manage the toggle themselves — a click on one must
+      // not be treated as an outside-click close (close + reopen race).
+      const el = target as HTMLElement;
+      if (el.closest?.("button[data-top-panel-trigger]")) return;
+      setActiveTopPanel(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setActiveTopPanel(null);
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [activeTopPanel]);
 
   const handleSidebarToggle = useCallback(() => {
     if (isMobile) {
@@ -1369,6 +1395,7 @@ export function AppShell() {
     <button
       ref={languageBtnRef}
       type="button"
+      data-top-panel-trigger
       onClick={() => toggleTopPanel("language", mobile)}
       title={translate("common.language")}
       aria-label={translate("common.language")}
@@ -1610,6 +1637,7 @@ export function AppShell() {
         {mobile ? (
           <button
             type="button"
+            data-top-panel-trigger
             onClick={() => toggleTopPanel("branches", true)}
             title={translate("i18n.branches")}
             aria-label={translate("i18n.branches")}
@@ -1648,6 +1676,7 @@ export function AppShell() {
         <button
           ref={systemBtnRef}
           type="button"
+          data-top-panel-trigger
           onClick={() => handleSystemPromptToggle(mobile)}
           disabled={mobile && !showChat}
           title={translate("system.prompt")}
@@ -1740,6 +1769,7 @@ export function AppShell() {
     return (
       <button
         type="button"
+        data-top-panel-trigger
         onClick={() => toggleTopPanel("session")}
         disabled={!showChat || covered}
         tabIndex={covered ? -1 : undefined}
@@ -2105,10 +2135,15 @@ export function AppShell() {
             left: bgMenuPos.left,
             zIndex: 600,
             width: 264,
-            background: "var(--bg-panel)",
+            // 面板玻璃（同任务/会话统计面板，见 --panel-glass-todo）
+            background: "var(--panel-glass-todo)",
+            backdropFilter: "blur(16px) saturate(var(--glass-saturate))",
+            WebkitBackdropFilter: "blur(16px) saturate(var(--glass-saturate))",
+            transform: "translateZ(0)",
             border: "1px solid var(--border)",
-            borderRadius: 12,
-            boxShadow: "0 12px 32px -8px rgba(0,0,0,0.28)",
+            borderTop: "none",
+            borderRadius: "0 0 12px 12px",
+            boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
             padding: 12,
             fontFamily: "inherit",
           }}
@@ -2596,7 +2631,9 @@ export function AppShell() {
               and overflows the viewport. A portal keeps position:fixed
               relative to the viewport. */}
           {activeTopPanel && topPanelPos && createPortal((
-            <div style={{
+            <div
+              ref={topPanelRef}
+              style={{
               position: "fixed",
               top: topPanelPos.top,
               left: topPanelPos.left,
@@ -2683,11 +2720,13 @@ export function AppShell() {
               )}
               {activeTopPanel === "session" && (
                 <div className="session-info-popover" style={{
-                  background: "color-mix(in srgb, var(--glass-bg-strong) 55%, transparent)",
-                  backdropFilter: "blur(10px) saturate(140%)",
-                  WebkitBackdropFilter: "blur(10px) saturate(140%)",
+                  // 面板玻璃（同任务/会话统计，见 --panel-glass-todo）
+                  background: "var(--panel-glass-todo)",
+                  backdropFilter: "blur(16px) saturate(var(--glass-saturate))",
+                  WebkitBackdropFilter: "blur(16px) saturate(var(--glass-saturate))",
+                  transform: "translateZ(0)",
                   borderBottom: "1px solid var(--border)",
-                  boxShadow: "0 10px 28px rgba(0,0,0,0.16)",
+                  boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
                   padding: "12px 16px",
                   // Cap the width so the stats panel never stretches across the
                   // whole top bar on wide screens; hug the top-right corner.
@@ -2753,7 +2792,7 @@ export function AppShell() {
                           }}>
                             {sectionRows.map(([label, value]) => (
                               <div key={`${title}:${label}`} style={{ display: "contents" }}>
-                                <div style={{ color: "var(--text-dim)", whiteSpace: "nowrap" }}>{label}</div>
+                                <div style={{ color: "var(--text-meta)", whiteSpace: "nowrap" }}>{label}</div>
                                 <div style={{
                                   color: "var(--text-muted)",
                                   minWidth: 0,
@@ -2781,7 +2820,7 @@ export function AppShell() {
                             width: 22,
                             height: 22,
                             marginTop: -2,
-                            color: copied ? "var(--accent)" : "var(--text-dim)",
+                            color: copied ? "var(--accent)" : "var(--text-meta)",
                             background: "transparent",
                             border: "1px solid var(--border)",
                             borderRadius: 4,
@@ -2795,7 +2834,7 @@ export function AppShell() {
                             e.currentTarget.style.background = "var(--bg-hover)";
                           }}
                           onMouseLeave={(e) => {
-                            e.currentTarget.style.color = copied ? "var(--accent)" : "var(--text-dim)";
+                            e.currentTarget.style.color = copied ? "var(--accent)" : "var(--text-meta)";
                             e.currentTarget.style.borderColor = "var(--border)";
                             e.currentTarget.style.background = "transparent";
                           }}
@@ -2819,7 +2858,7 @@ export function AppShell() {
                         <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", columnGap: 12, rowGap: 8, alignItems: "start" }}>
                           {sessionRows.map((row) => (
                             <div key={`session-info:${row.label}`} style={{ display: "contents" }}>
-                              <div style={{ color: "var(--text-dim)", whiteSpace: "nowrap" }}>{row.label}</div>
+                              <div style={{ color: "var(--text-meta)", whiteSpace: "nowrap" }}>{row.label}</div>
                               <div style={{
                                 color: "var(--text-muted)",
                                 minWidth: 0,
@@ -2901,7 +2940,7 @@ export function AppShell() {
                 fontSize: 12, fontWeight: 650, color: "var(--text)",
               }}>
                 {translate("todo.title")}
-                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-meta)", fontWeight: 500 }}>
                   {sessionTodos.filter((t) => t.status === "completed").length}/{sessionTodos.length} {translate("todo.completed")}
                 </span>
               </div>
@@ -2915,7 +2954,7 @@ export function AppShell() {
                     const done = todo.status === "completed";
                     const priorityColor = todo.priority === "high" ? "#ef4444"
                       : todo.priority === "medium" ? "rgba(234,179,8,0.9)"
-                      : "var(--text-dim)";
+                      : "var(--text-meta)";
                     return (
                       <div
                         key={todo.id ?? todo.content}
@@ -2942,7 +2981,7 @@ export function AppShell() {
                         <span style={{
                           flex: 1, minWidth: 0,
                           fontSize: 12, lineHeight: 1.4,
-                          color: done ? "var(--text-dim)" : "var(--text)",
+                          color: done ? "var(--text-meta)" : "var(--text)",
                           textDecoration: done ? "line-through" : "none",
                           wordBreak: "break-word",
                         }}>
@@ -3028,8 +3067,8 @@ export function AppShell() {
                 <div>
                    <div style={{ fontSize: 18, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>{translate("workspace.getStarted")}</div>
                   <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.8 }}>
-                     <span style={{ color: "var(--text-dim)", marginRight: 6 }}>1.</span>{translate("workspace.selectProject")}<br />
-                     <span style={{ color: "var(--text-dim)", marginRight: 6 }}>2.</span>{translate("workspace.addModels")}
+                     <span style={{ color: "var(--text-meta)", marginRight: 6 }}>1.</span>{translate("workspace.selectProject")}<br />
+                     <span style={{ color: "var(--text-meta)", marginRight: 6 }}>2.</span>{translate("workspace.addModels")}
                   </div>
                 </div>
               </div>
@@ -3132,7 +3171,7 @@ export function AppShell() {
               )}
             />
           ) : (
-            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-meta)", fontSize: 12 }}>
                {translate("files.noneOpen")}
             </div>
           )}
