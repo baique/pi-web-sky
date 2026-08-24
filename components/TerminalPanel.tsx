@@ -119,7 +119,10 @@ export function TerminalPanel({
     const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
     const dark = document.documentElement.classList.contains("dark");
     return {
-      background: v("--terminal-bg", dark ? "rgba(12, 12, 14, 0.86)" : "rgba(250, 250, 251, 0.92)"),
+      // The xterm surface is transparent — the panel's bubble-glass (inline,
+      // driven by --bubble-alpha/--glass-blur-bubble) carries the background;
+      // text keeps the theme foreground for contrast.
+      background: "transparent",
       foreground: v("--text", dark ? "#d4d4d4" : "#1f2328"),
       cursor: v("--accent", "#3b82f6"),
       cursorAccent: v("--bg", dark ? "#1e1e1e" : "#ffffff"),
@@ -454,7 +457,18 @@ export function TerminalPanel({
     <div
       ref={rootRef}
       className={`terminal-panel terminal-panel-${origin}${isMobile ? " terminal-panel-mobile" : ""}${hidden ? " terminal-panel-hidden" : ""}`}
-      style={panelStyle}
+      style={{
+        ...panelStyle,
+        // Same glass recipe as the message bubbles: translucent bed tinted with
+        // --assistant-bg-rgb, alpha + blur driven by the user's bubble sliders
+        // (--bubble-alpha, --glass-blur-bubble). Inline like MessageView so the
+        // frosted backdrop applies reliably instead of depending on stylesheet
+        // cascade. The xterm surface is transparent, so this panel glass
+        // carries the whole terminal.
+        background: "rgba(var(--assistant-bg-rgb, 252, 252, 253), var(--bubble-alpha, 0.44))",
+        backdropFilter: "blur(var(--glass-blur-bubble, 18px)) saturate(var(--glass-saturate, 80%))",
+        WebkitBackdropFilter: "blur(var(--glass-blur-bubble, 18px)) saturate(var(--glass-saturate, 80%))",
+      }}
       role="region"
       aria-label={t("terminal.title")}
     >
