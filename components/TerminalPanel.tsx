@@ -119,10 +119,13 @@ export function TerminalPanel({
     const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
     const dark = document.documentElement.classList.contains("dark");
     return {
-      // The xterm surface is transparent — the panel's bubble-glass (inline,
-      // driven by --bubble-alpha/--glass-blur-bubble) carries the background;
-      // text keeps the theme foreground for contrast.
-      background: "transparent",
+      // The tiny black-canvas trap: xterm fills its surface with
+      // theme.background, and an unparsable "transparent" falls back to
+      // solid black that CSS can't wash off. Feed it the exact bubble-glass
+      // color the panel uses (--assistant-bg-rgb over --bubble-alpha), so
+      // the terminal paints the same frosted surface in both themes and
+      // follows the bubble alpha/blur sliders.
+      background: `rgba(${v("--assistant-bg-rgb", dark ? "36, 36, 39" : "252, 252, 253")}, ${v("--bubble-alpha", dark ? "0.55" : "0.44")})`,
       foreground: v("--text", dark ? "#d4d4d4" : "#1f2328"),
       cursor: v("--accent", "#3b82f6"),
       cursorAccent: v("--bg", dark ? "#1e1e1e" : "#ffffff"),
@@ -131,8 +134,9 @@ export function TerminalPanel({
     };
   }, []);
 
-  // Live theme switching: re-theme every attached terminal when the
-  // theme class on <html> flips, instead of waiting for a new terminal.
+  // Live theme switching: re-theme every attached terminal when the theme
+  // class on <html> flips or the bubble-glass sliders rewrite the inline
+  // style variables, instead of waiting for a new terminal.
   useEffect(() => {
     const observer = new MutationObserver(() => {
       const theme = buildTheme();
@@ -140,7 +144,7 @@ export function TerminalPanel({
         if (a.term) a.term.options.theme = theme;
       }
     });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
     return () => observer.disconnect();
   }, [buildTheme]);
 
@@ -245,9 +249,14 @@ export function TerminalPanel({
       });
       return;
     }
-    if (attempts >= 60) { // ~2s of retries — give up until the next trigger
+    // Keep retrying instead of giving up: bailing out shows the unfitted
+    // 80x24 first frame (cursor pinned near the bottom) until some later
+    // pass fixes it — the "jumps up after ~1-2s" symptom on slow first
+    // measures. Only surface after a long stall as a last resort.
+    if (attempts >= 300) { // ~9s of retries
       if (a.fitTimer) { clearTimeout(a.fitTimer); a.fitTimer = null; }
       a.term.element?.classList.remove("terminal-attaching");
+      console.warn(`[terminal] fit did not settle for ${id} after ~9s; showing as-is`);
       return;
     }
     if (a.fitTimer) clearTimeout(a.fitTimer);
