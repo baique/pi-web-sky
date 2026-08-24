@@ -46,6 +46,8 @@ export interface SessionData {
     model: { provider: string; modelId: string } | null;
     todos?: TodoItem[];
   };
+  /** Whether there is older history beyond the current paging window. */
+  hasMore?: boolean;
 }
 
 interface AgentEvent {
@@ -275,6 +277,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
+  const [hasOlderChat, setHasOlderChat] = useState(false);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [entryIds, setEntryIds] = useState<string[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -488,6 +491,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setMessages(persistedMessages);
       setEntryIds(d.context.entryIds ?? []);
       setTodos(d.context.todos ?? []);
+      setHasOlderChat(d.hasMore ?? false);
       setCurrentModelOverride((current) => modelSwitchPendingRef.current ? current : null);
       setError(null);
       if (d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
@@ -528,17 +532,28 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, []);
 
-  const loadContext = useCallback(async (sid: string, leafId: string | null) => {
+  const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null) => {
     try {
       const params = new URLSearchParams({ deferThinking: "1" });
       if (leafId) params.set("leafId", leafId);
+      // Page upward: ask the server for the `tail` ancestors preceding `before`,
+      // then prepend them. Omitting `before` fetches the most-recent `tail`.
+      if (before) params.set("before", before);
       const url = `/api/sessions/${encodeURIComponent(sid)}/context?${params}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[]; todos?: TodoItem[] } };
-      setMessages(d.context.messages);
-      setEntryIds(d.context.entryIds ?? []);
-      setTodos(d.context.todos ?? []);
+      const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[]; todos?: TodoItem[] }; hasMore?: boolean };
+      setHasOlderChat(d.hasMore ?? false);
+      if (before) {
+        // Older page: prepend so scroll position stays anchored. Todos reflect
+        // current session state, so leave them unchanged on a history page.
+        setMessages((prev) => [...d.context.messages, ...prev]);
+        setEntryIds((prev) => [...d.context.entryIds, ...prev]);
+      } else {
+        setMessages(d.context.messages);
+        setEntryIds(d.context.entryIds ?? []);
+        setTodos(d.context.todos ?? []);
+      }
     } catch (e) {
       console.error("Failed to load context:", e);
     }
@@ -1945,8 +1960,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
     handleBuiltinSlashCommand,
-    handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages,
-    scrollToBottom, scrollUserMsgToTop,
+    handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages, loadContext,
+    scrollToBottom, scrollUserMsgToTop, hasOlderChat,
     dispatch, setAgentRunning, setForkingEntryId,
     bashRunning, pendingBash,
     // Subscriptions

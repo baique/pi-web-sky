@@ -20,7 +20,6 @@ import type { TodoItem } from "@/lib/types";
 import type { AppUpdateResponse } from "@/lib/api-types";
 import {
   captureScrollDistance,
-  getNextVisibleCount,
   getPromptAnchorSpacerHeight,
   getVisibleRenderWindow,
   isScrollAtTail,
@@ -299,7 +298,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
     handleBuiltinSlashCommand,
-    handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, scrollUserMsgToTop, scrollToBottom,
+    handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, scrollUserMsgToTop, scrollToBottom, loadContext, activeLeafId, hasOlderChat,
   } = useAgentSession({
     session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsPanelOpen,
@@ -323,28 +322,44 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const prevScrollDistanceRef = useRef<number | null>(null);
+  const loadingOlderRef = useRef(false);
   // Drives the back-to-latest button in the ChatInput toolbar row.
   const [atBottom, setAtBottom] = useState(true);
 
   // IntersectionObserver on the sentinel div at the top of the message list.
-  // When it becomes visible, load the next page of older messages.
+  // When it becomes visible, fetch the previous page of older messages from the
+  // server and prepend it (loadContext handles anchoring + dedupe via `before`).
   useEffect(() => {
     const sentinel = sentinelRef.current;
     const container = scrollContainerRef.current;
     if (!sentinel || !container) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting) {
-          // Save distance from top before prepending to restore scroll later
-          prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
-          setVisibleCount((prev) => getNextVisibleCount(prev));
-        }
+        if (!entries[0]?.isIntersecting) return;
+        // Skip while a page is already loading or nothing older exists.
+        if (loadingOlderRef.current) return;
+        const oldestId = entryIds[0];
+        if (!oldestId) return;
+        const sid = session?.id ?? sessionIdRef.current;
+        if (!sid) return;
+        loadingOlderRef.current = true;
+        // Save distance from top before prepending to restore scroll later.
+        prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
+        void loadContext(sid, activeLeafId, oldestId).finally(() => {
+          loadingOlderRef.current = false;
+        });
       },
       { root: container, threshold: 0 }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [visibleCount, messages.length, scrollContainerRef]);
+  }, [entryIds, session, activeLeafId, loadContext, sessionIdRef, scrollContainerRef]);
+
+  // Keep the rendered window at least as large as what's loaded, so prepended
+  // (older) pages stay visible instead of being sliced off the top.
+  useEffect(() => {
+    setVisibleCount((current) => Math.max(current, messages.length));
+  }, [messages.length]);
 
   // After visibleCount increases (more messages prepended), restore the
   // scroll position so the viewport doesn't jump.
@@ -927,7 +942,11 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 }
                 idx = endIdx;
               }
-              const { startIndex, hasMore } = getVisibleRenderWindow(rendered.length, visibleCount);
+              const { startIndex } = getVisibleRenderWindow(rendered.length, visibleCount);
+              // Show the sentinel when the window is full: older history may exist
+              // beyond the loaded tail (`hasOlderChat`, decided server-side) or
+              // more loaded messages are still hidden above the window.
+              const hasMore = startIndex > 0 || hasOlderChat;
               return (
                 <>
                   {hasMore && (

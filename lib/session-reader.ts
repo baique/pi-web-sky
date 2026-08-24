@@ -245,12 +245,18 @@ export function extractTodosFromEntries(entries: SessionEntry[]): TodoItem[] {
 export function buildSessionContext(
   entries: SessionEntry[],
   leafId?: string | null,
-  options: { deferThinking?: boolean; deferToolResultImages?: boolean } = {},
+  options: { deferThinking?: boolean; deferToolResultImages?: boolean; tail?: number; excludeLeaf?: boolean } = {},
 ): SessionContext {
+  const { tail, excludeLeaf } = options;
+  // Restrict the input to the active leaf's ancestor chain, capped at `tail`.
+  // SDK buildSessionContext only consumes this chain, so feeding it the full
+  // forest forces O(n) work and, for a linear session, O(n) recursion depth in
+  // any caller that rebuilds the path. Slicing here bounds both to O(tail).
+  const sliced = tail && tail > 0 ? sliceActiveBranch(entries, leafId ?? null, tail, excludeLeaf) : entries;
   const byId = new Map<string, SessionEntry>();
-  for (const e of entries) byId.set(e.id, e);
+  for (const e of sliced) byId.set(e.id, e);
 
-  const piEntries = entries as unknown as PiSessionEntry[];
+  const piEntries = sliced as unknown as PiSessionEntry[];
   const piCtx = piBuildSessionContext(piEntries, leafId, byId as unknown as Map<string, PiSessionEntry>);
 
   const contextEntries = piBuildContextEntries(
@@ -282,6 +288,65 @@ export function buildSessionContext(
     model: piCtx.model,
     todos,
   };
+}
+
+/**
+ * Extract the ancestor chain from `leafId` back toward the root, capped at
+ * `tail` entries (most-recent first after the final reverse). Iterative: a
+ * linear session's chain length equals its entry count, so a recursive walk
+ * would overflow the stack. The result is still a valid prefix of the active
+ * branch — older history is loaded on demand via pagination.
+ */
+export function sliceActiveBranch(
+  entries: SessionEntry[],
+  leafId: string | null,
+  tail: number,
+  excludeLeaf = false,
+): SessionEntry[] {
+  if (tail <= 0) return entries;
+  const byId = new Map<string, SessionEntry>();
+  for (const e of entries) byId.set(e.id, e);
+
+  let leaf = leafId ? byId.get(leafId) : entries[entries.length - 1];
+  // Pagination: `before` is the oldest entry already loaded, so the next page
+  // must start at its parent to avoid duplicating `before` when prepended.
+  if (excludeLeaf && leaf?.parentId) leaf = byId.get(leaf.parentId);
+  if (!leaf) return [];
+  const chain: SessionEntry[] = [];
+  let current: SessionEntry | undefined = leaf;
+  while (current && chain.length < tail) {
+    chain.push(current);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  chain.reverse();
+  return chain;
+}
+
+/**
+ * Whether paging `tail` ancestors from `leafId` (or its parent when
+ * `excludeLeaf` is set) would hit a cap — i.e. there is older history beyond
+ * the current window. The `tail` is measured on *entries*, and UI messages can
+ * filter entries down further, so the client cannot infer this from its own
+ * message count; the server is the source of truth.
+ */
+export function hasOlderHistory(
+  entries: SessionEntry[],
+  leafId: string | null,
+  tail: number,
+  excludeLeaf = false,
+): boolean {
+  if (tail <= 0) return false;
+  const byId = new Map<string, SessionEntry>();
+  for (const e of entries) byId.set(e.id, e);
+  let cur: SessionEntry | undefined = leafId ? byId.get(leafId) : entries[entries.length - 1];
+  if (excludeLeaf && cur?.parentId) cur = byId.get(cur.parentId);
+  let count = 0;
+  while (cur) {
+    count++;
+    if (count > tail) return true;
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+  }
+  return false;
 }
 
 function parseEntryTimestamp(timestamp: string): number | undefined {
@@ -352,9 +417,13 @@ function entryToUiMessage(
         ? omitToolResultBase64Images(normalizeToolCalls(entry.message))
         : normalizeToolCalls(entry.message);
       if (!options.deferThinking || message.role !== "assistant") return message;
+      // Real sessions may store assistant content as a string (not a block array),
+      // so guard the block-level transform instead of assuming an array.
+      const content = message.content;
+      if (!Array.isArray(content)) return message;
       return {
         ...message,
-        content: message.content.map((block) => (
+        content: content.map((block) => (
           block.type === "thinking" && block.thinking.trim() !== ""
             ? { ...block, thinking: "", deferred: true }
             : block
