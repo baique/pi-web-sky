@@ -62,6 +62,13 @@
 - **与上游**：原样移植，无偏离。
 - **验证**：单测 3 条（nosniff / SVG CSP 指令 / 三种响应形态共享 headers）；e2e 直接导航带 `<script>` 的恶意 SVG → `window.__E2E520_EXECUTED__` 未执行；PNG 预览回归正常。
 
+### #470 — 插件面板里管理 MCP server
+
+- **问题**：本仓库此前只能在状态条看 MCP 启用了几个 server，没有 UI 管理 mcp.json（增删改查/测试连通）的入口。
+- **改动**：新增 `app/api/mcp/route.ts`（GET 读全局+项目 mcp.json 合并；POST 支持 add/remove/enable/disable/update/move/test/get 8 个 action，test 会真实 spawn/请求握手并列出工具数）；`lib/api-types.ts` 加 `McpResponse`/`McpScope`/`McpServerInfo`；UI 独立组件 `components/McpConfigPanel.tsx`。
+- **与上游的差异**：上游把 MCP 管理**塞进插件面板**（PluginsConfig 内加 plugins/mcp 双 tab）。本仓库 PluginsConfig 已自研（资源明细/粘贴支持等）且上游 patch 无法直接 apply，改把 MCP UI 做成**独立面板组件** `McpConfigPanel`（McpServerDetail/AddMcpServer/列表逻辑全部复用上游代码），挂在**顶栏 Terminal 按钮旁**的新入口按钮，portal 锚定触发按钮、仿终端弹窗样式。API 层（route.ts/types）原样移植。
+- **本仓库提交**：（未提交）
+
 ## 与上游刻意不同的地方（改动了原 PR 逻辑，阅读者需知悉）
 
 ### #587 分页 —— 额外增加服务端 `hasMore` 标记
@@ -83,7 +90,7 @@
 ## 尚未移植的候选（按意愿而非优先级分组的清单，供后续排期）
 
 - 大功能、动 UI 布局：`#522`（会话列表/文件浏览器间拖拽调分隔比例）、`#458`（侧边栏会话分组）。
-- 大功能、动输入与插件：`#510`（内置 ask_user 工具 + 行内确认卡片）、`#470`（插件面板里管理 MCP server）。
+- 大功能、动输入与插件：`#510`（内置 ask_user 工具 + 行内确认卡片）。
 
 ## 移植流程备忘
 

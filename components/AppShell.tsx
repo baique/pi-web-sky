@@ -13,6 +13,7 @@ import { openFileTab, saveFileViewerState } from "./file-tab-state";
 import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { PluginsConfig } from "./PluginsConfig";
+import { McpConfigPanel } from "./McpConfigPanel";
 // ssr:false — xterm.js touches browser globals at import time.
 const TerminalPanel = dynamic(() => import("./TerminalPanel").then((m) => m.TerminalPanel), { ssr: false });
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
@@ -204,6 +205,9 @@ export function AppShell() {
   const [terminalOrigin, setTerminalOrigin] = useState<"top" | "bottombar">("top");
   const [terminalAnchor, setTerminalAnchor] = useState<{ top: number; left: number; right: number; bottom: number } | null>(null);
   const terminalBtnRef = useRef<HTMLButtonElement | null>(null);
+  // MCP manager panel — topbar entry next to the terminal button.
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const mcpBtnRef = useRef<HTMLButtonElement | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [mobileToolbarMoreOpen, setMobileToolbarMoreOpen] = useState(false);
   const [bgMenuOpen, setBgMenuOpen] = useState(false);
@@ -1680,6 +1684,7 @@ export function AppShell() {
           {!mobile && <span>{translate("system.label")}</span>}
         </button>
         {!mobile && renderTerminalButton()}
+        {!mobile && renderMcpButton()}
         {mobile && renderThemeButton(true)}
         {mobile && renderLanguageButton(true)}
         {mobile && renderBackgroundButton(true)}
@@ -1919,6 +1924,40 @@ export function AppShell() {
           <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
         </svg>
         <span>{translate("terminal.title")}</span>
+      </button>
+    );
+  };
+
+  const renderMcpButton = () => {
+    const open = mcpOpen;
+    return (
+      <button
+        type="button"
+        id="mcp-topbar-btn"
+        ref={mcpBtnRef}
+        onClick={() => setMcpOpen((open) => !open)}
+        title="MCP"
+        aria-label="MCP"
+        aria-expanded={open}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: "auto", height: "100%", padding: "0 10px", gap: 5,
+          background: open ? "var(--bg-selected)" : "none",
+          border: "none",
+          borderTop: open ? "2px solid var(--accent)" : "2px solid transparent",
+          borderLeft: "1px solid var(--border)",
+          color: open ? "var(--text)" : "var(--text-muted)",
+          cursor: "pointer", flexShrink: 0, transition: "color 0.12s, background 0.12s",
+          fontSize: 11, whiteSpace: "nowrap",
+        }}
+        onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
+        onMouseLeave={(event) => { event.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)"; }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" />
+        </svg>
+        <span>MCP</span>
       </button>
     );
   };
@@ -3107,6 +3146,17 @@ export function AppShell() {
       activeCwd={selectedSession?.cwd ?? effectiveNewSessionCwd ?? null}
       hidden={!terminalOpen}
       onClose={() => setTerminalOpen(false)}
+    />
+    <McpConfigPanel
+      anchorRect={mcpOpen ? (() => {
+        const el = mcpBtnRef.current;
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { top: r.top, left: r.left, right: r.right, bottom: r.bottom };
+      })() : null}
+      cwd={selectedSession?.cwd ?? effectiveNewSessionCwd ?? null}
+      hidden={!mcpOpen}
+      onClose={() => setMcpOpen(false)}
     />
     {projectTrustDialogOpen && projectTrustCwd && (
       <ProjectTrustDialog
