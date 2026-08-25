@@ -1174,7 +1174,7 @@ function ThinkingBlock({ block, duration, isStreaming, sessionId, entryId, block
             paddingLeft: 10,
             color: error ? "#f87171" : "var(--text-muted)",
             fontSize: 12,
-            lineHeight: 1.2,
+            lineHeight: 1.3,
             whiteSpace: "pre-wrap",
           }}
         >
