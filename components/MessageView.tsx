@@ -1094,16 +1094,9 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        borderRadius: "var(--bubble-inner-radius)",
-        overflow: "hidden",
         fontSize: 13,
-        // 折叠 = 轻行融入正文；展开 = 浮现玻璃块承载内容（与工具块同一语义，
-        // 不用整圈边框把玻璃切块）。
-        border: expanded ? "1px solid var(--bubble-border)" : "1px solid transparent",
-        background: expanded
-          ? (hovered ? "var(--bubble-tool-bg-hover)" : "var(--bubble-tool-bg)")
-          : (hovered ? "var(--bubble-tool-bg-fold)" : "transparent"),
-        transition: "background 0.12s",
+        // 方案 A：零背景零边框，纯文本 + 左侧细线标识思考区。
+        // 思考是长文本阅读区，不用卡片/玻璃，最长文也舒服。
       }}
     >
       <button
@@ -1113,10 +1106,10 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
           alignItems: "center",
           gap: 6,
           width: "100%",
-          padding: "6px 10px",
+          padding: "2px 0",
           background: "none",
           border: "none",
-          color: expanded || hovered ? "var(--text-muted)" : "var(--text-dim)",
+          color: hovered ? "var(--text-muted)" : "var(--text-dim)",
           cursor: "pointer",
           fontSize: 12,
           textAlign: "left",
@@ -1145,13 +1138,13 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
       {expanded && (
         <div
           style={{
-            borderTop: "1px solid var(--bubble-hairline)",
-            padding: "8px 10px",
+            margin: "2px 0 4px 20px",
+            borderLeft: "2px solid var(--bubble-hairline)",
+            paddingLeft: 10,
             color: error ? "#f87171" : "var(--text-muted)",
             fontSize: 12,
-            lineHeight: 1.6,
+            lineHeight: 1.3,
             whiteSpace: "pre-wrap",
-            background: "transparent",
           }}
         >
            {loading ? t("i18n.loadingThinking") : error ?? (block.deferred ? content : block.thinking)}

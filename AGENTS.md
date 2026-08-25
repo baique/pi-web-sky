@@ -240,7 +240,8 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 ```
 
 组件约定（工具块 `ToolCallBlock` / 思考块 `ThinkingBlock`）：
-- 折叠态是无背景的轻行，展开才浮现玻璃块（`--bubble-tool-bg`）；两态 header 的 padding 必须一致，避免展开时边距 / 高度跳变。
+- 工具块：折叠态是无背景的轻行，展开才浮现玻璃块（`--bubble-tool-bg`）；两态 header 的 padding 必须一致，避免展开时边距 / 高度跳变。
+- 思考块：折叠态同样是轻行（✧ 图标 + 思考 + 时长）；展开后是**纯文本注记**——零背景零边框，仅左侧一条细线标识思考区。思考是长文本阅读区，不用玻璃 / 卡片，最长文也舒服。
 - 工具 / 思考块**不加整圈彩色边框**，状态用圆点 / 图标表达，只用一根极淡 `--bubble-border` 中性描边。
 - header 内不两端对齐：时长紧跟文字（不用 `marginLeft:auto`）。
 
