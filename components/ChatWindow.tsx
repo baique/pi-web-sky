@@ -698,25 +698,46 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
         />
       )}
 
-      {/* Transient notices (extension notify, errors, compact results) — a
-          subtle toast stack pinned to the bottom-right, above the input area. */}
-      <div
-        style={{
-          position: "fixed",
-          right: 51,
-          bottom: isMobile ? 168 : 118,
-          zIndex: 250,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "flex-end",
-          maxWidth: "min(100vw - 48px, 340px)",
-          maxHeight: "calc(100dvh - 220px)",
-          overflowY: "auto",
-          pointerEvents: "none",
-        }}
-      >
-        <NoticeShelf notices={notices} />
-      </div>
+      {/* Transient notices (extension notify, errors, compact results)
+          Desktop: pinned bottom-right above the input area.
+          Mobile: top-centered to avoid the input zone and keyboard. */}
+      {isMobile ? (
+        <div
+          style={{
+            position: "fixed",
+            left: "50%",
+            top: 60,
+            transform: "translateX(-50%)",
+            zIndex: 250,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            maxWidth: "calc(100vw - 32px)",
+            overflowY: "auto",
+            pointerEvents: "none",
+          }}
+        >
+          <NoticeShelf notices={notices} floating />
+        </div>
+      ) : (
+        <div
+          style={{
+            position: "fixed",
+            right: 51,
+            bottom: 118,
+            zIndex: 250,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            maxWidth: "min(100vw - 48px, 340px)",
+            maxHeight: "calc(100dvh - 220px)",
+            overflowY: "auto",
+            pointerEvents: "none",
+          }}
+        >
+          <NoticeShelf notices={notices} />
+        </div>
+      )}
 
       {isEmptyNew ? (
         <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
@@ -1013,15 +1034,16 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   );
 }
 
-function NoticeShelf({ notices }: { notices: NoticeItem[] }) {
+function NoticeShelf({ notices, floating }: { notices: NoticeItem[]; floating?: boolean }) {
   if (notices.length === 0) return null;
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
-        alignItems: "flex-end",
+        alignItems: floating ? "center" : "flex-end",
         gap: 6,
+        padding: floating ? "0 16px" : 0,
       }}
     >
       {notices.map((notice) => {
@@ -1051,14 +1073,14 @@ function NoticeShelf({ notices }: { notices: NoticeItem[] }) {
               boxShadow: "0 2px 12px -4px rgba(15,23,42,0.16)",
               fontSize: 12.5,
               lineHeight: 1.55,
-              transformOrigin: "bottom right",
+              transformOrigin: floating ? "top center" : "bottom right",
               animation: notice.exiting
                 ? "notice-shelf-out 0.18s ease-in forwards"
                 : "notice-shelf-in 0.18s ease-out both",
               padding: "8px 12px",
               pointerEvents: "auto",
             }}
-          >
+            >
             <span
               style={{
                 flexShrink: 0,
