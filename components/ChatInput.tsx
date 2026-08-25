@@ -2369,8 +2369,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
                     // Height cap: the panel opens upward from the button. Keep it from
                     // overflowing above the viewport top (modelDropdownRect.top is the
-                    // button's viewport-space top captured at click time).
-                    const maxH = Math.max(120, Math.min(modelDropdownRect.top - 8, viewportHeight * 0.6));
+                    // button's viewport-space top captured at click time). Clamp so it
+                    // never exceeds the usable space above the button, while keeping the
+                    // list shorter than the old 60%-of-viewport ceiling.
+                    const spaceAbove = Math.max(0, modelDropdownRect.top - 8);
+                    const cap = Math.min(viewportHeight * 0.5, 440);
+                    const maxH = Math.max(Math.min(120, spaceAbove), Math.min(cap, spaceAbove));
                     // Anchor to the dropdownRef wrapper (position: relative). Do NOT use
                     // `position: fixed` with viewport-space coords here: the bottom-bar
                     // ancestor has backdrop-filter, which becomes the containing block
