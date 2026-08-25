@@ -865,10 +865,11 @@ function AssistantMessageView({
                 padding: "8px 14px",
               }
             : {}),
-          // 吸附态：灵动岛风格 —— 上方直角贴合顶边，下边圆角成胶囊，磨砂柔和
+          // 吸附态：灵动岛风格 —— 上方直角贴合顶边，下边圆角成胶囊，磨砂柔和、更透
           ...(stuck
             ? {
-                background: "var(--panel-glass)",
+                // 特意调透：用更透明的玻璃（约 0.52 alpha），磨砂弱、通透
+                background: "color-mix(in srgb, var(--glass-bg) 70%, transparent)",
                 backdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-saturate))",
                 WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-saturate))",
                 borderBottomLeftRadius: 18,
