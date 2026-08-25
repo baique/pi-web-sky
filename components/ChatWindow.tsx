@@ -9,10 +9,12 @@ import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantB
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { MessageView } from "./MessageView";
 import { PinnedBubble, type PinnedMessageItem } from "./PinnedBubble";
+import { ThinkingOrb } from "thinking-orbs";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { useI18n } from "@/hooks/useI18n";
+import { useTheme } from "@/hooks/useTheme";
 import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -72,6 +74,11 @@ function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, 
   if (phase?.kind === "waiting_model") return t("chat.waitingModel");
   if (phase?.kind === "running_command") return t("chat.runningCommand");
   return null;
+}
+
+/** 状态行的思考球：等待模型 = breathing，执行工具/命令 = working */
+function orbModeForPhase(phase: AgentPhase): "breathing" | "working" {
+  return phase?.kind === "waiting_model" ? "breathing" : "working";
 }
 
 const CHAT_COLUMN_PADDING = 16;
@@ -260,6 +267,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
 
 export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal }: Props) {
   const { t } = useI18n();
+  const { isDark } = useTheme();
   const isMobile = useIsMobile();
 
   // Wrap onAgentEnd to play the completion sound. This is more reliable than
@@ -1034,14 +1042,16 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
             )}
 
             {agentRunning && !hasStreamingContent && agentPhase && (
-              <div className="break-words py-2 text-[13px]" style={{ color: "#ffffff", mixBlendMode: "exclusion" }}>
-                <span className="animate-[pulse_1.5s_infinite]">{phaseLabel(agentPhase, t)}</span>
+              <div className="chat-status-pill my-2" role="status" aria-live="polite">
+                <ThinkingOrb state={orbModeForPhase(agentPhase)} size={20} theme={isDark ? "dark" : "light"} style={isDark ? undefined : { filter: "brightness(0.57) contrast(1.15)" }} />
+                <span>{phaseLabel(agentPhase, t)}</span>
               </div>
             )}
 
             {bashRunning && !pendingBash && (
-              <div className="py-2 text-[13px]" style={{ color: "#ffffff", mixBlendMode: "exclusion" }}>
-                 <span className="animate-[pulse_1.5s_infinite]">{t("chat.runningCommand")}</span>
+              <div className="chat-status-pill my-2" role="status" aria-live="polite">
+                <ThinkingOrb state="working" size={20} theme={isDark ? "dark" : "light"} style={isDark ? undefined : { filter: "brightness(0.57) contrast(1.15)" }} />
+                <span>{t("chat.runningCommand")}</span>
               </div>
             )}
 

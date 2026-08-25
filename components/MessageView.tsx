@@ -5,11 +5,13 @@ import { MarkdownBody } from "./MarkdownBody";
 import { ImagePreview } from "./ImagePreview";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
+import { useTheme } from "@/hooks/useTheme";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { getAssistantErrorMessage, isEmptyThinkingBlock } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
 import { isEditToolName } from "@/lib/tool-names";
 import { TurnWrittenFiles } from "./TurnWrittenFiles";
+import { ThinkingOrb } from "thinking-orbs";
 import type { WrittenFile } from "@/lib/turn-written-files";
 import { skillExpansionToCommand } from "@/lib/slash-display";
 import type {
@@ -1040,7 +1042,7 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
     return <TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} />;
   }
   if (block.type === "thinking") {
-    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
+    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} isStreaming={isStreaming} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
   }
   if (block.type === "toolCall") {
     const tc = block as ToolCallContent;
@@ -1055,14 +1057,16 @@ function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent
   return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
 }
 
-function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
+function ThinkingBlock({ block, duration, isStreaming, sessionId, entryId, blockIndex }: {
   block: ThinkingContent;
   duration?: number;
+  isStreaming?: boolean;
   sessionId?: string;
   entryId?: string;
   blockIndex: number;
 }) {
   const { t } = useI18n();
+  const { isDark } = useTheme();
   const [expanded, setExpanded] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [content, setContent] = useState<string | null>(null);
@@ -1109,30 +1113,57 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
           padding: "2px 0",
           background: "none",
           border: "none",
-          color: hovered ? "var(--text-muted)" : "var(--text-dim)",
+          color: hovered ? "var(--text-meta)" : "var(--text-muted)",
           cursor: "pointer",
-          fontSize: 12,
+          fontSize: 13,
+          lineHeight: 1,
           textAlign: "left",
           transition: "color 0.12s",
         }}
       >
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{ flexShrink: 0, opacity: 0.8 }}
-          aria-hidden="true"
-        >
-          <path d="M12 3c.4 4 2.1 5.7 6.1 6.1-4 .4-5.7 2.1-6.1 6.1-.4-4-2.1-5.7-6.1-6.1 4-.4 5.7-2.1 6.1-6.1Z" />
-        </svg>
+        {isStreaming ? (
+          // 思考生成中 → 思考球 loading（与 agent 状态行同一视觉语言）
+          <span
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 20,
+              height: 20,
+              flexShrink: 0,
+            }}
+          >
+            <ThinkingOrb state="breathing" size={20} theme={isDark ? "dark" : "light"} style={isDark ? undefined : { filter: "brightness(0.57) contrast(1.15)" }} />
+          </span>
+        ) : (
+          <span
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 16,
+              height: 16,
+              flexShrink: 0,
+            }}
+            aria-hidden="true"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 3c.4 4 2.1 5.7 6.1 6.1-4 .4-5.7 2.1-6.1 6.1-.4-4-2.1-5.7-6.1-6.1 4-.4 5.7-2.1 6.1-6.1Z" />
+            </svg>
+          </span>
+        )}
         <span>{t("i18n.thinking")}</span>
         {duration !== undefined && (
-          <span style={{ fontSize: 11, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
         )}
       </button>
       {expanded && (
@@ -1143,11 +1174,16 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
             paddingLeft: 10,
             color: error ? "#f87171" : "var(--text-muted)",
             fontSize: 12,
-            lineHeight: 1.3,
+            lineHeight: 1.2,
             whiteSpace: "pre-wrap",
           }}
         >
-           {loading ? t("i18n.loadingThinking") : error ?? (block.deferred ? content : block.thinking)}
+           {loading ? (
+             <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+               <ThinkingOrb state="searching" size={20} theme={isDark ? "dark" : "light"} style={isDark ? undefined : { filter: "brightness(0.57) contrast(1.15)" }} />
+               {t("i18n.loadingThinking")}
+             </span>
+           ) : error ?? (block.deferred ? content : block.thinking)}
         </div>
       )}
     </div>

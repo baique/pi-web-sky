@@ -1938,3 +1938,35 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
 @media (prefers-reduced-transparency: reduce) {
   .terminal-bar-toggle { background: var(--bg-panel); }
 }
+
+/* ── Chat status pill: agent running / waiting-for-model indicator ──
+   玻璃胶囊 + accent 呼吸圆点。动画只动 opacity / transform（GPU 友好）；
+   prefers-reduced-motion 降级为静止圆点 + 保留淡入。 */
+@keyframes chat-status-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.chat-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 5px 12px;
+  border-radius: 999px;
+  /* 近实底（同代码块）：浅色接近白、深色接近深，保证 orb + 文字任何主题都清楚 */
+  background: var(--bubble-code-bg);
+  border: 1px solid var(--bubble-border);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px -8px rgba(15, 23, 42, 0.10);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  animation: chat-status-in 0.22s cubic-bezier(0.23, 1, 0.32, 1);
+}
+.chat-status-pill > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-status-pill { animation: none; }
+}
