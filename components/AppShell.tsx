@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -2027,6 +2027,23 @@ export function AppShell() {
     );
   };
 
+  // 终端面板左侧栏的“当前项目名” —— 与服务端为终端会话附的 projectLabel 对齐
+  //（项目根 basename，worktree 追加 ·分支名）。有激活会话时取会话信息；否则退化为
+  // 新会话 cwd 的 basename（非 git 子目录场景可能不一致，属可接受边界）。
+  const activeProjectLabel = useMemo(() => {
+    const info = selectedSession;
+    if (info) {
+      const root = info.projectRoot ?? info.cwd;
+      const base = root.split(/[\\/]/).filter(Boolean).pop() ?? root;
+      return info.worktreeBranch ? `${base}·${info.worktreeBranch}` : base;
+    }
+    if (effectiveNewSessionCwd) {
+      const base = effectiveNewSessionCwd.split(/[\\/]/).filter(Boolean).pop() ?? effectiveNewSessionCwd;
+      return base;
+    }
+    return null;
+  }, [selectedSession, effectiveNewSessionCwd]);
+
   return (
     <>
     <style>{`
@@ -3162,6 +3179,7 @@ export function AppShell() {
       origin={terminalOrigin}
       anchorRect={terminalAnchor}
       activeCwd={selectedSession?.cwd ?? effectiveNewSessionCwd ?? null}
+      activeProjectLabel={activeProjectLabel}
       hidden={!terminalOpen}
       onClose={() => setTerminalOpen(false)}
     />

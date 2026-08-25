@@ -8,6 +8,7 @@ import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipbo
 import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { MessageView } from "./MessageView";
+import { PinnedBubble, type PinnedMessageItem } from "./PinnedBubble";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
@@ -325,6 +326,54 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   const loadingOlderRef = useRef(false);
   // Drives the back-to-latest button in the ChatInput toolbar row.
   const [atBottom, setAtBottom] = useState(true);
+
+  // Pinned message windows — floating snapshot copies of individual bubbles.
+  // Session-scoped and ephemeral: live in React state only, cleared on refresh
+  // by design (no localStorage). Array order = stacking; last = on top.
+  const [pins, setPins] = useState<PinnedMessageItem[]>([]);
+  const pinCountRef = useRef(0);
+
+  const handlePin = useCallback((message: AgentMessage, entryId?: string, anchorY?: number) => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // Default pin size 300×500, shrunk only when the viewport is smaller
+    // than that (keeps the initial bubble fully on screen).
+    const w = Math.min(300, Math.max(240, vw - 40));
+    const h = Math.min(500, Math.max(200, vh - 60));
+    const offset = (pinCountRef.current % 8) * 22;
+    pinCountRef.current += 1;
+    setPins((prev) => [...prev, {
+      id: `pin-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      message,
+      entryId,
+      x: Math.max(0, vw - w - 20 - offset),
+      // Float's top follows the message's current y on screen, so the pin
+      // appears to pop out of the message rather than at a fixed corner.
+      y: Math.min(Math.max(0, anchorY ?? 16), Math.max(0, vh - h)),
+      w,
+      h,
+    }]);
+  }, []);
+
+  const handleClosePin = useCallback((id: string) => {
+    setPins((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
+  const handleMovePin = useCallback((id: string, patch: Partial<PinnedMessageItem>) => {
+    setPins((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }, []);
+
+  const handleActivatePin = useCallback((id: string) => {
+    setPins((prev) => {
+      if (prev.length <= 1) return prev;
+      const idx = prev.findIndex((p) => p.id === id);
+      if (idx === -1 || idx === prev.length - 1) return prev;
+      const next = [...prev];
+      const [item] = next.splice(idx, 1);
+      next.push(item);
+      return next;
+    });
+  }, []);
 
   // IntersectionObserver on the sentinel div at the top of the message list.
   // When it becomes visible, fetch the previous page of older messages from the
@@ -854,6 +903,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     onNavigate={sessionBusy ? undefined : handleNavigate}
                     prevAssistantEntryId={sessionBusy ? undefined : prevAssistantEntryId}
                     onEditContent={handleEditContent}
+                    onPin={handlePin}
                     showTimestamp={showTimestamp}
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
                     sessionId={session?.id ?? sessionIdRef.current ?? undefined}
@@ -1030,6 +1080,25 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       </div>
       </>
       )}
+      {pins.map((pin, idx) => (
+        <PinnedBubble
+          key={pin.id}
+          item={pin}
+          render={{
+            toolResults: toolResultsMap,
+            modelNames,
+            cwd: messageCwd,
+            sessionId: session?.id ?? sessionIdRef.current ?? undefined,
+            entryId: pin.entryId,
+            onOpenFile,
+          }}
+          zIndex={3000 + idx}
+          active={idx === pins.length - 1}
+          onClose={handleClosePin}
+          onActivate={handleActivatePin}
+          onMove={handleMovePin}
+        />
+      ))}
     </div>
   );
 }

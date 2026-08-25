@@ -19,6 +19,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 
 export interface TerminalMeta {
   id: string;
+  name: string;
   cwd: string;
   projectLabel: string;
   running: boolean;
@@ -68,6 +69,7 @@ export function TerminalPanel({
   origin,
   anchorRect,
   activeCwd,
+  activeProjectLabel,
   hidden,
   onClose,
 }: {
@@ -77,6 +79,8 @@ export function TerminalPanel({
   anchorRect?: { top: number; left: number; right: number; bottom: number } | null;
   /** cwd for new terminals: the active session's project path. */
   activeCwd: string | null;
+  /** 当前项目名（服务端终端会话的 projectLabel 同格式）。左侧栏只展示该项目终端。 */
+  activeProjectLabel: string | null;
   /** Panel stays mounted while hidden (show/hide, no teardown) — xterm instances and SSE survive. */
   hidden: boolean;
   onClose: () => void;
@@ -87,7 +91,18 @@ export function TerminalPanel({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loadedOnce, setLoadedOnce] = useState(false);
+  /** SSE 断开且服务端探活失败（后台重启/断网）的会话 id —— 芯片显示“失联”状态，可一键批量清理。 */
+  const [disconnectedIds, setDisconnectedIds] = useState<Set<string>>(new Set());
+  // 「等待新鲜同步」门闩：每次成功的列表同步（refreshList 落地）会解除并推进 syncTick，
+  // 按项目评估只在解除后执行，避免用隐藏/加载期的陈旧 sessions 误自动创建重复终端。
+  const resyncNeededRef = useRef(true);
+  const syncVersionRef = useRef(0);
+  const [syncTick, setSyncTick] = useState(0);
+  // 自动创建护栏：用户手动关闭过某项目的终端（×）→ 该项目不再自动补建；
+  // autoCreateRequested 避免同一可见时段内重复发起；切换项目/重新打开面板后重新评估。
+  const userClosedLabelsRef = useRef<Set<string>>(new Set());
+  const autoCreateRequestedRef = useRef<string | null>(null);
+  const lastAutoEvaluateLabelRef = useRef<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -101,6 +116,33 @@ export function TerminalPanel({
   // that lands before the DELETE round-trips must not resurrect the chip.
   const pendingDeleteRef = useRef<Set<string>>(new Set());
 
+  // 左侧栏：只展示当前项目（按 projectLabel 匹配）的终端；下拉选展示全部。
+  const visibleSessions = useMemo(() => {
+    if (!activeProjectLabel) return [];
+    return sessions.filter((s) => s.projectLabel === activeProjectLabel);
+  }, [sessions, activeProjectLabel]);
+
+  // 全部终端按项目名分组 —— 喂给最右侧的下拉选。
+  const groups = useMemo(() => {
+    const map = new Map<string, TerminalMeta[]>();
+    for (const s of sessions) {
+      const arr = map.get(s.projectLabel) ?? [];
+      arr.push(s);
+      map.set(s.projectLabel, arr);
+    }
+    return [...map.entries()];
+  }, [sessions]);
+
+  // 左侧 chips：当前项目终端；若经下拉选切到了其它项目的终端，则把它也钉在最前面并
+  // 高亮 —— 保证“当前终端”在 tab 区始终有可辨识的代表，切换时名称随之更新。
+  const chipSessions = useMemo(() => {
+    if (!activeId || !visibleSessions.some((s) => s.id === activeId)) {
+      const active = activeId ? sessions.find((s) => s.id === activeId) : undefined;
+      return active ? [active, ...visibleSessions] : visibleSessions;
+    }
+    return visibleSessions;
+  }, [visibleSessions, sessions, activeId]);
+
   const refreshList = useCallback(async () => {
     try {
       const res = await fetch("/api/terminal");
@@ -108,6 +150,10 @@ export function TerminalPanel({
       if (Array.isArray(d.terminals)) {
         const pending = pendingDeleteRef.current;
         setSessions(d.terminals.filter((t) => !pending.has(t.id)));
+        // 一次成功的同步落地：解除“等待新鲜同步”门闩，允许按项目评估/聚焦。
+        resyncNeededRef.current = false;
+        syncVersionRef.current += 1;
+        setSyncTick((n) => n + 1);
       }
     } catch { /* transient */ }
   }, []);
@@ -186,6 +232,15 @@ export function TerminalPanel({
     const since = a.offset !== null ? `?since=${a.offset}` : "";
     const es = new EventSource(`/api/terminal/${id}/events${since}`);
     a.es = es;
+    es.onopen = () => {
+      // 成功（重）连 —— 清除“失联”标记。
+      setDisconnectedIds((cur) => {
+        if (!cur.has(id)) return cur;
+        const next = new Set(cur);
+        next.delete(id);
+        return next;
+      });
+    };
     es.addEventListener("output", (ev) => {
       const { d, o } = JSON.parse((ev as MessageEvent).data) as { d: string; o: number };
       a!.offset = o;
@@ -204,9 +259,14 @@ export function TerminalPanel({
       if (a!.reconnectTimer) clearTimeout(a!.reconnectTimer);
       a!.reconnectTimer = setTimeout(() => {
         fetch(`/api/terminal/${id}`).then((r) => {
-          if (r.ok) attach(id); // session still alive → re-attach
+          if (r.ok) attach(id); // session still alive → re-attach (onopen clears the disconnected mark)
           else { void refreshList(); } // gone → list refresh prunes the chip
-        }).catch(() => {});
+        }).catch(() => {
+          // Server unreachable (restart / network) — mark the chip disconnected so
+          // it can still be removed directly; the visible poll refreshList() prunes
+          // it once the server returns.
+          setDisconnectedIds((cur) => (cur.has(id) ? cur : new Set(cur).add(id)));
+        });
       }, 1500);
     };
   }, [buildTheme, refreshList]);
@@ -294,22 +354,16 @@ export function TerminalPanel({
     return () => { ro.disconnect(); };
   }, [activeId, attach, hidden, fitWhenReady]);
 
-  // Session bootstrap + warm-up: runs once on mount (even while hidden) so
-  // the backing pty/SSE are ready before the user opens the panel — opening
-  // then only has to fit. Afterwards re-sync on every show (hidden→false);
-  // closing stays silent.
-  const initializedRef = useRef(false);
+  // 面板可见 / 切换项目时触发一次同步：标记“需要新鲜数据”，并在可见时拉取最新列表。
+  // 自动创建/聚焦必须等这次同步落地（resyncNeeded=false）后再评估，否则会用隐藏期或
+  // 加载期的陈旧 sessions 误判“当前项目没有终端”而重复自动创建（见测试中的 dup 场景）。
   useEffect(() => {
-    if (initializedRef.current && hidden) return; // booted; re-sync only when visible
-    if (!initializedRef.current) initializedRef.current = true;
-    void refreshList().then(() => {
-      setLoadedOnce(true);
-      setSessions((cur) => {
-        if (!activeIdRef.current && cur.length > 0) setActiveId(cur[cur.length - 1].id);
-        return cur;
-      });
-    });
-  }, [hidden, refreshList]);
+    lastAutoEvaluateLabelRef.current = null;
+    autoCreateRequestedRef.current = null; // 每次显示/切换项目都重新评估一次
+    resyncNeededRef.current = true;
+    if (hidden) return; // 隐藏时只标记，显示时再由本 effect 触发拉取
+    void refreshList();
+  }, [hidden, activeProjectLabel, refreshList]);
 
   // Light poll while VISIBLE — keeps running/exit state honest without
   // extra SSE. Paused while hidden (panel itself is the only consumer).
@@ -330,6 +384,12 @@ export function TerminalPanel({
       a.es?.close();
       a.term.dispose();
       attachedRef.current.delete(id);
+      setDisconnectedIds((cur) => {
+        if (!cur.has(id)) return cur;
+        const next = new Set(cur);
+        next.delete(id);
+        return next;
+      });
       if (activeIdRef.current === id) {
         setActiveId(sessions.find((s) => s.id !== id)?.id ?? null);
       }
@@ -351,6 +411,8 @@ export function TerminalPanel({
   const createSession = useCallback(async () => {
     setCreating(true);
     setError(null);
+    // 手动新建说明用户想要该项目的终端 —— 解除该项目此前的自动补建封禁。
+    if (activeProjectLabel) userClosedLabelsRef.current.delete(activeProjectLabel);
     try {
       const res = await fetch("/api/terminal", {
         method: "POST",
@@ -366,24 +428,43 @@ export function TerminalPanel({
     } finally {
       setCreating(false);
     }
-  }, [activeCwd, refreshList]);
+  }, [activeCwd, activeProjectLabel, refreshList]);
 
-  // Auto-create the first terminal when the server has none yet — the panel
-  // should just work on first open, not present an empty state. One attempt
-  // only, run in the background even while the panel is hidden so the pty is
-  // ready before the user opens it; failures surface via the manual create
-  // button. Setting autoCreatedRef in every non-creating branch matters: if a
-  // session existed, deleting it must NOT auto-spawn a replacement.
-  const autoCreatedRef = useRef(false);
+  // 按项目聚焦 + 自动创建：仅在“一次新鲜同步落地后”（resyncNeeded=false，syncTick 驱动重跑）
+  // 评估一次，避免与同步拉取竞态。逻辑：
+  //  - 当前项目已有终端 → 聚焦最近一个；
+  //  - 没有且未被用户手动关闭过 → 自动补开一个（cwd = 当前会话路径）；
+  //  - 无当前项目 → 不自动创建，聚焦最近一个总终端（下拉可任选）。
   useEffect(() => {
-    if (autoCreatedRef.current) return;
-    if (!loadedOnce || creating) return;
-    autoCreatedRef.current = true;
-    if (sessions.length > 0) return; // sessions already exist — no auto-create
+    if (resyncNeededRef.current) return; // 还在等新鲜同步，先不评估
+    if (creating) return;
+    const label = activeProjectLabel;
+    if (!label) {
+      // 无当前项目：不自动创建；若还未选中任何终端，聚焦最近一个（下拉可任选）。
+      if (!activeIdRef.current && sessions.length > 0) {
+        setActiveId(sessions[sessions.length - 1].id);
+      }
+      return;
+    }
+    if (hidden) return;
+    if (lastAutoEvaluateLabelRef.current === label) return; // 本项目已评估过
+    lastAutoEvaluateLabelRef.current = label;
+    if (visibleSessions.length > 0) {
+      // 当前项目已有终端 —— 聚焦最近一个（若尚未聚焦在本项目上）。
+      if (!activeIdRef.current || !visibleSessions.some((s) => s.id === activeIdRef.current)) {
+        setActiveId(visibleSessions[visibleSessions.length - 1].id);
+      }
+      return;
+    }
+    if (userClosedLabelsRef.current.has(label)) return; // 用户手动关闭过 —— 尊重
+    if (autoCreateRequestedRef.current === label) return; // 本时段已尝试过
+    autoCreateRequestedRef.current = label;
     void createSession();
-  }, [loadedOnce, creating, sessions.length, createSession]);
+  }, [creating, activeProjectLabel, visibleSessions, sessions, hidden, syncTick, createSession]);
 
-  const closeSession = useCallback(async (id: string) => {
+  const closeSession = useCallback(async (id: string, projectLabel: string) => {
+    // 手动关闭 = “我不想要这里的终端” —— 按项目封禁自动补建（切换项目后重置）。
+    userClosedLabelsRef.current.add(projectLabel);
     // Optimistic removal: drop the chip immediately so one click always
     // closes it — the prune effect disposes the attachment right away,
     // which also stops stale resize/SSE requests to the dying session.
@@ -404,6 +485,22 @@ export function TerminalPanel({
       void refreshList();
     }
   }, [refreshList]);
+
+  // 批量清理失联终端（后台重启/断网后 SSE 探活失败的那些）：本地立即移除并
+  // 释放客户端资源（prune effect 会 dispose xterm/SSE/定时器），服务端 DELETE
+  // 尽力而为 —— 重启后这些会话本就不存在；若服务端仍持有则会由后续刷新恢复。
+  const cleanupDisconnected = useCallback(async () => {
+    const targets = [...disconnectedIds];
+    if (targets.length === 0) return;
+    for (const id of targets) {
+      pendingDeleteRef.current.add(id);
+      void fetch(`/api/terminal/${id}`, { method: "DELETE" })
+        .finally(() => { pendingDeleteRef.current.delete(id); });
+    }
+    setDisconnectedIds(new Set());
+    setSessions((cur) => cur.filter((s) => !targets.includes(s.id)));
+    void refreshList();
+  }, [disconnectedIds, refreshList]);
 
   // Outside click / Escape close.
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -430,17 +527,6 @@ export function TerminalPanel({
       document.removeEventListener("keydown", onKeyDown, true);
     };
   }, [onClose]);
-
-  // Group chips by project label, preserving creation order inside groups.
-  const groups = useMemo(() => {
-    const map = new Map<string, TerminalMeta[]>();
-    for (const s of sessions) {
-      const arr = map.get(s.projectLabel) ?? [];
-      arr.push(s);
-      map.set(s.projectLabel, arr);
-    }
-    return [...map.entries()];
-  }, [sessions]);
 
   const panelStyle: React.CSSProperties = isMobile
     ? { position: "fixed", inset: 10, zIndex: 1050 }
@@ -486,33 +572,29 @@ export function TerminalPanel({
       role="region"
       aria-label={t("terminal.title")}
     >
-      {/* Tab strip */}
+      {/* Tab strip: 左侧只放当前项目的终端；最右侧下拉选放全部（按项目分组） */}
       <div className="terminal-tabs">
         <div className="terminal-tab-scroll">
-          {groups.map(([label, items]) => (
-            <div key={label} className="terminal-group">
-              <span className="terminal-group-label">{label}</span>
-              {items.map((s) => (
-                <div
-                  key={s.id}
-                  className={`terminal-chip${s.id === activeId ? " is-active" : ""}${!s.running ? " is-dead" : ""}`}
-                  onClick={() => setActiveId(s.id)}
-                  role="tab"
-                  aria-selected={s.id === activeId}
-                >
-                  <span className={`terminal-dot${s.running ? "" : " is-dead"}`} />
-                  <span className="terminal-chip-cwd" title={s.cwd}>
-                    {s.cwd.split("/").filter(Boolean).pop() || s.cwd}
-                  </span>
-                  <button
-                    type="button"
-                    className="terminal-chip-close"
-                    title={t("terminal.close")}
-                    aria-label={t("terminal.close")}
-                    onClick={(e) => { e.stopPropagation(); void closeSession(s.id); }}
-                  >×</button>
-                </div>
-              ))}
+          {chipSessions.map((s) => (
+            <div
+              key={s.id}
+              className={`terminal-chip${s.id === activeId ? " is-active" : ""}${!s.running ? " is-dead" : ""}${disconnectedIds.has(s.id) ? " is-disconnected" : ""}`}
+              onClick={() => setActiveId(s.id)}
+              role="tab"
+              aria-selected={s.id === activeId}
+              title={`${s.projectLabel} — ${s.cwd}`}
+            >
+              <span className={`terminal-dot${!s.running ? " is-dead" : disconnectedIds.has(s.id) ? " is-disconnected" : ""}`} />
+              <span className="terminal-chip-cwd" title={s.cwd}>
+                {s.name || s.cwd.split(/[\\/]/).filter(Boolean).pop() || s.cwd}
+              </span>
+              <button
+                type="button"
+                className="terminal-chip-close"
+                title={t("terminal.close")}
+                aria-label={t("terminal.close")}
+                onClick={(e) => { e.stopPropagation(); void closeSession(s.id, s.projectLabel); }}
+              >×</button>
             </div>
           ))}
         </div>
@@ -528,6 +610,19 @@ export function TerminalPanel({
             <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
           </svg>
         </button>
+        {disconnectedIds.size > 0 && (
+          <button
+            type="button"
+            className="terminal-cleanup"
+            onClick={() => void cleanupDisconnected()}
+            title={t("terminal.cleanupDisconnected")}
+            aria-label={t("terminal.cleanupDisconnected")}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+          </button>
+        )}
         {!isMobile && (
           <button
             type="button"
@@ -541,6 +636,24 @@ export function TerminalPanel({
             </svg>
           </button>
         )}
+        <select
+          className="terminal-all-select"
+          value={activeId ?? ""}
+          onChange={(e) => { const id = e.target.value; if (id) setActiveId(id); }}
+          title={t("terminal.all")}
+          aria-label={t("terminal.all")}
+        >
+          <option value="" disabled>{t("terminal.all")}</option>
+          {groups.map(([label, items]) => (
+            <optgroup key={label} label={label}>
+              {items.map((s) => (
+                <option key={s.id} value={s.id} title={`${s.projectLabel} — ${s.cwd}`}>
+                  {s.name || s.cwd.split(/[\\/]/).filter(Boolean).pop() || s.cwd}{!s.running ? ` · ${t("terminal.exited")}` : ""}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
       </div>
 
       {error && <div className="terminal-error">{error}</div>}
@@ -558,7 +671,7 @@ export function TerminalPanel({
             style={{ display: s.id === activeId ? "block" : "none", height: "100%" }}
           />
         ))}
-        {sessions.length === 0 && (
+        {!activeId && (
           <div className="terminal-placeholder">
             <button type="button" onClick={() => void createSession()} disabled={creating}>
               {creating ? "…" : t("terminal.createFirst")}

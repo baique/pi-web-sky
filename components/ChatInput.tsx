@@ -378,47 +378,54 @@ function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: s
 }
 
 function ModelNoticeBanner({ tone, title, body }: { tone: "error" | "warning"; title: string; body: string }) {
-  const barColor = tone === "error" ? "#ef4444" : "#f59e0b";
-  const iconColor = tone === "error" ? "#dc2626" : "#d97706";
+  const [dismissed, setDismissed] = useState(false);
+  // 内容变化时重置，让新错误/警告重新显示；关闭仅对本次生效
+  useEffect(() => { setDismissed(false); }, [title, body]);
+  if (dismissed) return null;
+  const dotColor = tone === "error" ? "#ef4444" : "#f59e0b";
   return (
     <div
       role="alert"
       style={{
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 8,
-        maxHeight: 120,
+        position: "relative",
         marginBottom: 8,
-        padding: "7px 10px",
-        overflowY: "auto",
-        background: `color-mix(in srgb, var(--bg-panel) 92%, ${barColor} 8%)`,
-        borderLeft: `3px solid ${barColor}`,
-        borderRadius: 4,
+        padding: "8px 30px 8px 12px",
+        borderRadius: 10,
+        border: `1px solid color-mix(in srgb, ${dotColor} 45%, transparent)`,
+        background: "color-mix(in srgb, var(--glass-bg-strong) 60%, transparent)",
+        backdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
+        WebkitBackdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
         color: "var(--text)",
-        fontSize: 11,
-        lineHeight: 1.45,
+        fontSize: 12,
+        lineHeight: 1.5,
+        boxShadow: "0 2px 12px -4px rgba(15,23,42,0.16)",
+        animation: "notice-shelf-in 0.18s ease-out both",
       }}
     >
-      <svg
-        width="13"
-        height="13"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke={iconColor}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        style={{ flexShrink: 0, marginTop: 1 }}
-        aria-hidden="true"
-      >
-        <path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z" />
-        <line x1="12" y1="9" x2="12" y2="13" />
-        <line x1="12" y1="17" x2="12.01" y2="17" />
-      </svg>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontWeight: 600 }}>{title}</div>
-        <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{body}</div>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+        <span style={{ flexShrink: 0, width: 6, height: 6, borderRadius: "50%", marginTop: 6, background: dotColor }} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontWeight: 600 }}>{title}</div>
+          <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere" }}>{body}</div>
+        </div>
       </div>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        onClick={() => setDismissed(true)}
+        style={{
+          position: "absolute",
+          top: 6, right: 6,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: 20, height: 20, padding: 0,
+          border: "none", background: "transparent",
+          color: "var(--text-dim)", cursor: "pointer", borderRadius: 5,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M1 1l8 8M9 1l-8 8" /></svg>
+      </button>
     </div>
   );
 }
@@ -457,6 +464,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
+  // 压缩失败提示的“已关闭”状态；内容变化时重置，让新的失败重新显示
+  const [compactErrorDismissed, setCompactErrorDismissed] = useState(false);
+  useEffect(() => { setCompactErrorDismissed(false); }, [compactError]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [modelFilter, setModelFilter] = useState("");
@@ -1583,23 +1593,101 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {compactResultText}
           </div>
         )}
-        {compactError && (
+        {compactError && !compactErrorDismissed && (
           <div
             role="alert"
             style={{
+              position: "relative",
               marginBottom: 8,
-              padding: "7px 10px",
-              background: "color-mix(in srgb, var(--bg-panel) 92%, #ef4444 8%)",
-              borderLeft: "3px solid #ef4444", borderRadius: 4,
+              padding: "8px 30px 8px 12px",
+              borderRadius: 10,
+              border: "1px solid color-mix(in srgb, #ef4444 45%, transparent)",
+              background: "color-mix(in srgb, var(--glass-bg-strong) 60%, transparent)",
+              backdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
+              WebkitBackdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
               color: "var(--text)",
               fontFamily: "var(--font-mono)",
               fontSize: 12,
               lineHeight: 1.5,
-              whiteSpace: "pre-wrap",
-              overflowWrap: "anywhere",
+              boxShadow: "0 2px 12px -4px rgba(15,23,42,0.16)",
+              animation: "notice-shelf-in 0.18s ease-out both",
             }}
           >
-            {compactError}
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+              <span style={{ flexShrink: 0, width: 6, height: 6, borderRadius: "50%", marginTop: 5, background: "#ef4444" }} />
+              <div style={{ minWidth: 0, flex: 1, whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere" }}>{compactError}</div>
+            </div>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              onClick={() => setCompactErrorDismissed(true)}
+              style={{
+                position: "absolute",
+                top: 6, right: 6,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 20, height: 20, padding: 0,
+                border: "none", background: "transparent",
+                color: "var(--text-dim)", cursor: "pointer", borderRadius: 5,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M1 1l8 8M9 1l-8 8" /></svg>
+            </button>
+          </div>
+        )}
+        {/* 压缩状态条：点击压缩后，在输入框上方以毛玻璃呼吸提示正在压缩，并提供停止压缩 */}
+        {isCompacting && (
+          <div
+            className="compaction-status"
+            role="status"
+            style={{
+              marginBottom: 8,
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "7px 12px",
+              borderRadius: 10,
+              border: "1px solid color-mix(in srgb, var(--accent) 42%, transparent)",
+              background: "color-mix(in srgb, var(--glass-bg-strong) 60%, transparent)",
+              backdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
+              WebkitBackdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
+              color: "var(--text)",
+              fontSize: 12.5,
+              lineHeight: 1.4,
+              boxShadow: "0 2px 12px -4px rgba(15,23,42,0.16)",
+              animation: "compaction-breathe 1.8s ease-in-out infinite",
+            }}
+          >
+            <span
+              className="compaction-status-dot"
+              style={{
+                flexShrink: 0, width: 8, height: 8, borderRadius: "50%",
+                background: "var(--accent)",
+                animation: "compaction-dot-breathe 1.4s ease-in-out infinite",
+              }}
+            />
+            <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {t("chat.compacting")}
+            </span>
+            <button
+              type="button"
+              onClick={onAbortCompaction}
+              style={{
+                flexShrink: 0,
+                background: "transparent",
+                border: "none",
+                borderRadius: 6,
+                padding: "3px 8px",
+                color: "var(--accent)",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            >
+              {t("chat.stopCompaction")}
+            </button>
           </div>
         )}
         {/* ── Composer：草稿 + 输入 + 底部工具，一块整体玻璃面板 ── */}
@@ -2644,41 +2732,38 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {!isStreaming && onCompact && (
               <div>
                 <button
-                  onClick={isCompacting ? onAbortCompaction : onCompact}
-                  disabled={isStreaming && !isCompacting}
+                  onClick={onCompact}
+                  disabled={isCompacting}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
                     padding: isMobile ? "0 6px" : "8px 12px",
                     width: isMobile ? "auto" : undefined,
                     height: 32,
-                    background: isCompacting ? "rgba(239,68,68,0.08)" : "none",
+                    background: "none",
                     border: "none",
                     borderRadius: 9,
-                    color: isCompacting ? "#ef4444" : "var(--text-muted)",
-                    cursor: (isStreaming && !isCompacting) ? "not-allowed" : "pointer",
-                    fontSize: 12, opacity: (isStreaming && !isCompacting) ? 0.5 : 1,
+                    color: isCompacting ? "var(--text-dim)" : "var(--text-muted)",
+                    cursor: isCompacting ? "not-allowed" : "pointer",
+                    fontSize: 12, opacity: isCompacting ? 0.5 : 1,
                     transition: "background 0.12s, color 0.12s",
                   }}
                   onMouseEnter={(e) => {
-                    if (isStreaming && !isCompacting) return;
-                    e.currentTarget.style.background = isCompacting ? "rgba(239,68,68,0.16)" : "var(--bg-hover)";
-                    e.currentTarget.style.color = isCompacting ? "#ef4444" : "var(--text)";
+                    if (isCompacting) return;
+                    e.currentTarget.style.background = "var(--bg-hover)";
+                    e.currentTarget.style.color = "var(--text)";
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.background = isCompacting ? "rgba(239,68,68,0.08)" : "none";
-                    e.currentTarget.style.color = isCompacting ? "#ef4444" : "var(--text-muted)";
+                    e.currentTarget.style.background = "none";
+                    e.currentTarget.style.color = "var(--text-muted)";
                   }}
-                   title={isCompacting ? t("chat.stopCompaction") : t("chat.compactContext")}
-                   aria-label={isCompacting ? t("chat.stopCompaction") : t("chat.compactContext")}
+                   title={t("chat.compactContext")}
+                   aria-label={t("chat.compactContext")}
                 >
-                  {isCompacting ? (
-                    <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="2" y="2" width="6" height="6" rx="1" fill="currentColor" /></svg>{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{t("chat.compacting")}</span>}</>
-                  ) : (
-                    <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
-                      <line x1="10" y1="14" x2="3" y2="21" /><line x1="21" y1="3" x2="14" y2="10" />
-                    </svg>{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{t("chat.compact")}</span>}</>
-                  )}
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
+                    <line x1="10" y1="14" x2="3" y2="21" /><line x1="21" y1="3" x2="14" y2="10" />
+                  </svg>
+                  {(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{t("chat.compact")}</span>}
                 </button>
               </div>
             )}

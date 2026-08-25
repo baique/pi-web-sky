@@ -1373,6 +1373,16 @@ span.token.table {
   50% { opacity: 0.5; }
 }
 
+/* 压缩状态条：毛玻璃呼吸强调（正进行压缩时） */
+@keyframes compaction-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
+  50% { box-shadow: 0 0 16px 1px color-mix(in srgb, var(--accent) 22%, transparent); }
+}
+@keyframes compaction-dot-breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.85); }
+}
+
 @keyframes notice-shelf-in {
   from {
     opacity: 0;
@@ -1398,6 +1408,12 @@ span.token.table {
 @media (prefers-reduced-motion: reduce) {
   .notice-shelf-item {
     animation-duration: 0.001ms !important;
+  }
+  .compaction-status {
+    animation: none !important;
+  }
+  .compaction-status-dot {
+    animation: none !important;
   }
 }
 
@@ -1762,6 +1778,7 @@ html.dark .terminal-tabs { border-bottom-color: color-mix(in srgb, var(--text) 6
   flex-shrink: 0;
 }
 .terminal-dot.is-dead { background: #6b7280; }
+.terminal-dot.is-disconnected { background: #f59e0b; box-shadow: 0 0 0 1px color-mix(in srgb, #f59e0b 40%, transparent); }
 
 .terminal-chip-cwd { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
 
@@ -1778,6 +1795,54 @@ html.dark .terminal-tabs { border-bottom-color: color-mix(in srgb, var(--text) 6
 .terminal-chip-close:hover, .terminal-close:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
 .terminal-new, .terminal-close { width: 30px; margin-right: 2px; align-self: center; height: 24px; }
 .terminal-new:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
+
+/* 失联芯片（后台重启/断网后 SSE 探活失败）+ 批量清理按钮 */
+.terminal-chip.is-disconnected { opacity: 0.72; }
+.terminal-cleanup {
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: none;
+  width: 30px; height: 24px; margin-right: 2px; align-self: center;
+  color: color-mix(in srgb, #f59e0b 85%, transparent);
+  cursor: pointer; border-radius: 4px;
+  transition: color 0.1s, background 0.1s;
+  flex-shrink: 0;
+}
+.terminal-cleanup:hover { color: #f59e0b; background: color-mix(in srgb, #f59e0b 14%, transparent); }
+
+/* 最右侧“全部终端”分组下拉选（自定义箭头 + 随亮/暗主题的弹出列表） */
+.terminal-all-select {
+  appearance: none;
+  -webkit-appearance: none;
+  align-self: center;
+  height: 24px;
+  max-width: 150px;
+  margin-right: 2px;
+  padding: 0 22px 0 8px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text);
+  color-scheme: light; /* 让原生弹出列表（option）也随主题 */
+  background-color: color-mix(in srgb, var(--text) 7%, transparent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 10px 10px;
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  border-radius: 5px;
+  cursor: pointer;
+  outline: none;
+  flex-shrink: 0;
+  transition: background-color 0.1s, border-color 0.1s;
+}
+html.dark .terminal-all-select { color-scheme: dark; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); }
+.terminal-all-select:hover {
+  background-color: color-mix(in srgb, var(--text) 11%, transparent);
+  border-color: color-mix(in srgb, var(--text) 20%, transparent);
+}
+.terminal-all-select:focus-visible { border-color: var(--accent); }
+.terminal-all-select option, .terminal-all-select optgroup {
+  color: var(--text); background: var(--bg-panel);
+}
 
 .terminal-error {
   flex-shrink: 0;

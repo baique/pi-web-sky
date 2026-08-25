@@ -192,6 +192,17 @@ interface Props {
   prevTimestamp?: number;
   sessionId?: string;
   /**
+   * Pin this message as a floating copy (snapshot).
+   * @param anchorY optional viewport y of the message, used as the float's initial top.
+   */
+  onPin?: (message: AgentMessage, entryId?: string, anchorY?: number) => void;
+  /**
+   * Bare mode: render only the message body content — no model label, no
+   * usage/statistics footer, no action buttons or timestamps. Used by the
+   * pinned-message floating windows.
+   */
+  bare?: boolean;
+  /**
    * Files this turn wrote, derived by the caller from the whole turn's
    * successful write/edit tool calls. ChatWindow computes this because the
    * saved-message path splits tool calls into their own entries, leaving the
@@ -246,12 +257,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId, writtenFiles }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId, writtenFiles, onPin, bare }: Props) {
   if (message.role === "user") {
-    return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} />;
+    return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} onPin={onPin} bare={bare} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} writtenFiles={writtenFiles} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} writtenFiles={writtenFiles} onPin={onPin} bare={bare} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -282,10 +293,12 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.onEditContent === next.onEditContent
     && prev.showTimestamp === next.showTimestamp
     && prev.prevTimestamp === next.prevTimestamp
-    && prev.sessionId === next.sessionId;
+    && prev.sessionId === next.sessionId
+    && prev.onPin === next.onPin
+    && prev.bare === next.bare;
 });
 
-function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent }: {
+function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, onPin, bare }: {
   message: UserMessage;
   cwd?: string;
   onOpenFile?: (filePath: string) => void;
@@ -295,6 +308,8 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   onNavigate?: (entryId: string) => void;
   prevAssistantEntryId?: string;
   onEditContent?: (message: UserMessage) => void;
+  onPin?: (message: AgentMessage, entryId?: string, anchorY?: number) => void;
+  bare?: boolean;
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
@@ -377,7 +392,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             background: "var(--user-bg-glass)",
             backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
             WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-            border: "1px solid var(--user-border-glass)",
+            border: bare ? "none" : "1px solid var(--user-border-glass)",
             borderRadius: 12,
             padding: "8px 12px",
             fontSize: 14,
@@ -458,7 +473,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
       </div>
 
       {/* Bottom row: action buttons + timestamp */}
-      {(time || canFork || canNavigate || true) && (
+      {!bare && (time || canFork || canNavigate || true) && (
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "flex-end",
           gap: 6, marginTop: 3,
@@ -470,6 +485,31 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             pointerEvents: hovered ? "auto" : "none",
             transition: "opacity 0.12s",
           }}>
+            {onPin && (
+              <button
+                onClick={(e) => onPin(message, entryId, e.currentTarget.getBoundingClientRect().top)}
+                title={t("i18n.pinTitle")}
+                style={{
+                  display: "flex", alignItems: "center", gap: 4,
+                  padding: "3px 8px", height: 22,
+                  background: "none", border: "none",
+                  borderRadius: 5,
+                  color: "#ffffff",
+                  cursor: "pointer",
+                  fontSize: 11, fontWeight: 400,
+                  whiteSpace: "nowrap",
+                  transition: "color 0.12s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.fontWeight = "600"; e.currentTarget.style.textDecoration = "underline"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.fontWeight = "400"; e.currentTarget.style.textDecoration = "none"; }}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 17v5" />
+                  <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0-2-2 3 3 0 0 0-3 3V9a4 4 0 0 1-1 2.65" />
+                </svg>
+                {t("i18n.pin")}
+              </button>
+            )}
             <button
               onClick={copyContent}
                title={t("i18n.copyMessage")}
@@ -581,6 +621,8 @@ function AssistantMessageView({
   sessionId,
   entryId,
   writtenFiles,
+  onPin,
+  bare,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -593,6 +635,8 @@ function AssistantMessageView({
   sessionId?: string;
   entryId?: string;
   writtenFiles?: WrittenFile[];
+  onPin?: (message: AgentMessage, entryId?: string, anchorY?: number) => void;
+  bare?: boolean;
 }) {
   const { t } = useI18n();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
@@ -736,10 +780,12 @@ function AssistantMessageView({
           background: "var(--assistant-card-glass)",
           backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
           WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-          border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+          border: bare ? "none" : "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
           boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
         }}
       >
+      {!bare && (
+      <>
       {/* Model label — inside the bubble, meta-level contrast */}
       <div
         style={{
@@ -780,9 +826,38 @@ function AssistantMessageView({
             </>
           );
         })()}
+        {onPin && (
+          <button
+            onClick={(e) => onPin(message, entryId, e.currentTarget.getBoundingClientRect().top)}
+            title={t("i18n.pinTitle")}
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              marginLeft: "auto",
+              padding: "2px 8px", height: 22,
+              background: "none", border: "none", borderRadius: 5,
+              color: "var(--text-meta)",
+              cursor: "pointer",
+              fontSize: 11, fontWeight: 400,
+              whiteSpace: "nowrap",
+              opacity: hovered ? 1 : 0,
+              pointerEvents: hovered ? "auto" : "none",
+              transition: "opacity 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-meta)"; }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 17v5" />
+              <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0-2-2 3 3 0 0 0-3 3V9a4 4 0 0 1-1 2.65" />
+            </svg>
+            {t("i18n.pin")}
+          </button>
+        )}
       </div>
       {/* Hairline divider under the model name */}
       <div style={{ height: 1, background: "color-mix(in srgb, var(--border) 55%, transparent)", margin: "6px -14px 0" }} />
+      </>
+      )}
 
         {blockItems.map(({ block, originalIndex }) => (
           <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
@@ -813,7 +888,7 @@ function AssistantMessageView({
           <TurnWrittenFiles files={writtenFiles} onOpenFile={onOpenFile} />
         )}
 
-        {!isStreaming && (message.usage || time || textContent) && (
+        {!bare && !isStreaming && (message.usage || time || textContent) && (
           <>
             {/* Hairline divider above the footer row */}
             <div style={{ height: 1, background: "color-mix(in srgb, var(--border) 55%, transparent)", margin: "2px -14px 0" }} />
@@ -1088,7 +1163,7 @@ function PairedDiffResult({ diff }: {
     <div
       style={{
         borderTop: "1px solid rgba(34,197,94,0.15)",
-        background: "var(--bg)",
+        background: "color-mix(in srgb, var(--tool-bg-glass) 55%, transparent)",
       }}
     >
       <SplitPatchView text={diff.text} />
@@ -1323,7 +1398,7 @@ function PairedResult({ text, isEmpty, isError }: {
     <div
       style={{
         borderTop: `1px solid ${isError ? "rgba(248,113,113,0.3)" : "rgba(34,197,94,0.15)"}`,
-        background: isError ? "rgba(248,113,113,0.04)" : "var(--bg-subtle)",
+        background: "color-mix(in srgb, var(--tool-bg-glass) 55%, transparent)",
       }}
     >
       <pre
@@ -1358,10 +1433,13 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
     <div style={{ marginBottom: 20 }}>
       <div
         style={{
-          border: "1px solid var(--border)",
-          borderRadius: 8,
+          borderRadius: 12,
           overflow: "hidden",
-          background: "var(--bg)",
+          background: "var(--assistant-card-glass)",
+          backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+          WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+          border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+          boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
         }}
       >
         <div
@@ -1370,8 +1448,7 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
             alignItems: "center",
             gap: 8,
             padding: "7px 10px",
-            borderBottom: "1px solid var(--border)",
-            background: "var(--bg-panel)",
+            borderBottom: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
             color: "var(--text-muted)",
           }}
         >
@@ -1455,10 +1532,15 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
     <div style={{ marginBottom: 20 }}>
       <div
         style={{
-          border: "1px solid var(--border)",
-          borderRadius: 8,
+          borderRadius: 12,
           overflow: "hidden",
-          background: isHiddenDisplay ? "var(--bg-subtle)" : "var(--bg)",
+          background: isHiddenDisplay
+            ? "color-mix(in srgb, var(--assistant-card-glass) 62%, transparent)"
+            : "var(--assistant-card-glass)",
+          backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+          WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+          border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+          boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
           opacity: isHiddenDisplay && !contentExpanded ? 0.82 : 1,
         }}
       >
@@ -1468,10 +1550,9 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
             alignItems: "center",
             gap: 8,
             padding: "7px 10px",
-            borderBottom: "1px solid var(--border)",
-            background: "var(--bg-panel)",
+            borderBottom: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
             color: "var(--text-muted)",
-            fontSize: 12,
+            fontSize: 11,
           }}
         >
           <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 650 }}>
@@ -1528,8 +1609,8 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
             alignItems: "center",
             gap: 8,
             padding: "4px 9px",
-            borderTop: "1px solid var(--border)",
-            background: "var(--bg-subtle)",
+            borderTop: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
+            background: "color-mix(in srgb, var(--tool-bg-glass) 66%, transparent)",
           }}
         >
           {text || detailsText ? (
@@ -1575,8 +1656,8 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
             style={{
               margin: 0,
               padding: "9px 10px",
-              borderTop: "1px solid var(--border)",
-              background: "var(--bg)",
+              borderTop: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
+              background: "color-mix(in srgb, var(--assistant-card-glass) 55%, transparent)",
               color: "var(--text-muted)",
               fontSize: 12,
               lineHeight: 1.5,

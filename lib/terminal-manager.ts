@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { randomUUID, randomBytes } from "crypto";
 import type { IPty } from "@lydell/node-pty";
 
 type IPtyModule = typeof import("@lydell/node-pty");
@@ -16,6 +16,8 @@ export const MAX_TERMINALS = 12;
 
 export interface TerminalSessionMeta {
   id: string;
+  /** 展示用名称：默认 `<cwd basename>-<4位随机nanoid>`，创建时生成、持久稳定，用于区分同项目多终端。 */
+  name: string;
   cwd: string;
   projectRoot: string | null;
   projectLabel: string;
@@ -24,6 +26,15 @@ export interface TerminalSessionMeta {
   running: boolean;
   exitCode: number | null;
   createdAt: number;
+}
+
+/** URL 安全字母表上的 4 位随机串（近似 nanoid 的短 id）。 */
+const ID4_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+export function randomId4(): string {
+  const bytes = randomBytes(4);
+  let out = "";
+  for (let i = 0; i < 4; i++) out += ID4_ALPHABET[bytes[i] % ID4_ALPHABET.length];
+  return out;
 }
 
 interface TerminalSession extends TerminalSessionMeta {
@@ -93,7 +104,7 @@ export function fullBuffer(id: string): { data: string; startOffset: number } | 
 
 function toMeta(s: TerminalSession): TerminalSessionMeta {
   return {
-    id: s.id, cwd: s.cwd, projectRoot: s.projectRoot, projectLabel: s.projectLabel,
+    id: s.id, name: s.name, cwd: s.cwd, projectRoot: s.projectRoot, projectLabel: s.projectLabel,
     cols: s.cols, rows: s.rows, running: s.running, exitCode: s.exitCode,
     createdAt: s.createdAt,
   };
@@ -151,8 +162,10 @@ export async function createTerminal(opts: {
   });
 
   const id = randomUUID();
+  const base = opts.cwd.split(/[\\/]/).filter(Boolean).pop() || "term";
   const session: TerminalSession = {
     id,
+    name: `${base}-${randomId4()}`,
     cwd: opts.cwd,
     projectRoot: opts.projectRoot,
     projectLabel: opts.projectLabel,

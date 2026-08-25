@@ -16,7 +16,8 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **文字对比度**：浅色偏青蓝深色、深色偏白
 - **右上角 todo 面板**：窄面板展示会话 pi-todo 状态，运行中 6s 轮询 + 展开前即时刷新
 - **右下角堆叠弱通知**：扩展/错误等瞬时提示以小卡片堆叠在右下角，自动消失
-- **内置多会话终端**：从顶栏或底部状态栏一键唤出，xterm.js + 服务端 pty，SSE 流式输出，刷新页面后会话保留
+- **内置多会话终端**：两栏面板——左侧只放当前项目的终端，右侧下拉选分组列出所有项目的终端；打开面板或切换项目时若当前项目还没有终端会自动补开一个，每个终端以 `<项目名>-<4位随机>` 命名。xterm.js + 服务端 pty、SSE 流式输出，刷新后会话保留；后台重启后失联终端会标记并支持一键清理
+- **消息钉**：把任意消息气泡钉成置顶浮窗，可全局拖拽移动、自由缩放，钉住的消息快照在工作时始终可见
 - **可定制壁纸**：图片/视频壁纸，支持横向位置拖动调整、平铺重复、边缘色彩填充与一键重置
 - **气泡玻璃可调**：背景设置中提供滑块，可分别调节消息气泡的透明度与磨砂强度，刷新后保留
 
@@ -30,7 +31,8 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **Git worktrees**: switch checkouts from the sidebar while keeping sessions from the same repository grouped together.
 - **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
 - **MCP server management**: add, remove, enable, disable, update and test MCP servers from a dedicated top-bar panel (global and project `mcp.json`), including a live connectivity test that lists the tools each server exposes.
-- **Built-in multi-session terminal**: launch a terminal panel from the top bar or the bottom status bar; xterm.js sessions stream over SSE, run side by side, and survive page refreshes.
+- **Built-in multi-session terminal**: a two-column panel — the left column lists only the current project's terminals, and the right column is a grouped dropdown of every terminal across projects. Opening the panel (or switching projects) auto-starts a terminal for the current project when none exists, and each session is named `<project>-<4-char nanoid>`. xterm.js streams over SSE and sessions survive page refreshes; if the backend restarts, disconnected terminals are flagged and can be batch-cleaned with one click.
+- **Message pinning**: pin any message bubble into an always-on-top floating window over the chat — drag it anywhere and resize it freely, so a pinned snapshot of the message stays visible while you keep working.
 - **Customisable wallpaper**: use an image or video as the background, drag it horizontally to reposition, tile it, fill side gaps with edge-sampled colours, and reset on demand.
 - **Adjustable bubble glass**: sliders in the wallpaper menu control message-bubble opacity and frost blur independently, persisted across refreshes.
 - **English and Simplified Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.

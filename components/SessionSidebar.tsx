@@ -2229,27 +2229,8 @@ function SessionItem({
             </div>
           </div>
 
-          {/* Collapse toggle — always visible when has children */}
-          {hasChildren && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onToggleCollapse?.(); }}
-              title={collapsed ? "Expand forks" : "Collapse forks"}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 20, height: 20, padding: 0, flexShrink: 0,
-                background: "none", border: "none",
-                color: "var(--text-dim)", cursor: "pointer",
-                transform: collapsed ? "rotate(-90deg)" : "none",
-                transition: "transform 0.15s",
-              }}
-            >
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="2 3.5 5 6.5 8 3.5" />
-              </svg>
-            </button>
-          )}
-
-          {/* Action buttons — shown on hover */}
+          {/* Action buttons — shown on hover. Placed BEFORE the collapse toggle
+              so the toggle keeps a fixed rightmost position while hovering. */}
           {hovered && !session.transient && (
             <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
               <button
@@ -2304,6 +2285,27 @@ function SessionItem({
                 </svg>
               </button>
             </div>
+          )}
+
+          {/* Collapse toggle — always visible, stays rightmost so its position
+              does not shift when the hover action buttons appear */}
+          {hasChildren && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleCollapse?.(); }}
+              title={collapsed ? "Expand forks" : "Collapse forks"}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 20, height: 20, padding: 0, flexShrink: 0,
+                background: "none", border: "none",
+                color: "var(--text-dim)", cursor: "pointer",
+                transform: collapsed ? "rotate(-90deg)" : "none",
+                transition: "transform 0.15s",
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="2 3.5 5 6.5 8 3.5" />
+              </svg>
+            </button>
           )}
         </>
       )}
