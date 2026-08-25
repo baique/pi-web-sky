@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useRef, useEffect, useMemo } from "react";
+import { memo, useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { MarkdownBody } from "./MarkdownBody";
 import { ImagePreview } from "./ImagePreview";
 import { copyText } from "@/lib/clipboard";
@@ -647,6 +647,55 @@ function AssistantMessageView({
   const providerError = getAssistantErrorMessage(message, { isStreaming });
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
+  // 超长的 AI 消息：头部（模型名行）sticky 吸附顶部，点击可滚回本消息开头。
+  // 只有当消息高度超过滚动区约一屏时才启用，避免短消息还要对头做吸附。
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [oversize, setOversize] = useState(false);
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el || bare) {
+      setOversize(false);
+      return;
+    }
+    const upd = () => {
+      const container = el.closest('[class*="overflow-y-auto"]') as HTMLElement | null;
+      const threshold = (container ? container.clientHeight : typeof window !== "undefined" ? window.innerHeight : 600) * 0.9;
+      setOversize(el.offsetHeight > threshold);
+    };
+    upd();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(upd);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [bare]);
+  const scrollToCardTop = () => {
+    const el = cardRef.current;
+    if (!el) return;
+    const container = el.closest('[class*="overflow-y-auto"]') as HTMLElement | null;
+    if (!container) return;
+    const top = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+    container.scrollTo({ top: Math.max(0, top - 8), behavior: "smooth" });
+  };
+  // 磨砂加深只在“吸附状态”出现（CSS sticky 无法感知吸附，用 JS 判）。
+  // 吸附时头被钉在容器顶部 => head 顶部约等于容器可视顶；否则为普通位置。
+  const headRef = useRef<HTMLDivElement>(null);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    if (!oversize || bare) return;
+    const el = cardRef.current;
+    if (!el) return;
+    const container = el.closest('[class*="overflow-y-auto"]') as HTMLElement | null;
+    if (!container) return;
+    const containerTop = container.getBoundingClientRect().top;
+    const check = () => {
+      const hr = headRef.current ? headRef.current.getBoundingClientRect().top : null;
+      if (hr == null) return;
+      setStuck(Math.abs(hr - containerTop) < 6);
+    };
+    container.addEventListener("scroll", check, { passive: true });
+    check();
+    return () => container.removeEventListener("scroll", check);
+  }, [oversize, bare]);
   const streamStartRef = useRef<number | null>(null);
   const [tps, setTps] = useState<number | null>(null);
   const blockItemsRef = useRef(blockItems);
@@ -771,6 +820,7 @@ function AssistantMessageView({
       onMouseLeave={() => setHovered(false)}
     >
       <div
+        ref={cardRef}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -786,14 +836,46 @@ function AssistantMessageView({
       >
       {!bare && (
       <>
-      {/* Model label — inside the bubble, meta-level contrast */}
+      {/* Model label — inside the bubble, meta-level contrast.
+          超长时 sticky 吸附顶部，点击头部空白处滚回本消息开头（点击内部按钮不受影响）。 */}
       <div
+        ref={headRef}
+        onClick={oversize
+          ? (e) => {
+              if ((e.target as HTMLElement).closest("button")) return;
+              scrollToCardTop();
+            }
+          : undefined}
+        title={oversize ? "回到本消息开头" : undefined}
         style={{
           fontSize: 11,
           color: "var(--text-meta)",
           display: "flex",
           alignItems: "center",
           gap: 6,
+          // 超长时才需要 sticky 定位（吸附行为）；定位始终有，但背景仅在吸附态加深
+          ...(oversize
+            ? {
+                position: "sticky" as const,
+                // 抵消滚动容器 pt-4 顶部留白，让吸附头真正贴到可视顶
+                top: -14,
+                zIndex: 30,
+                cursor: "pointer",
+                margin: "-8px -14px 0",
+                padding: "8px 14px",
+              }
+            : {}),
+          // 吸附态：灵动岛风格 —— 上方直角贴合顶边，下边圆角成胶囊，磨砂柔和
+          ...(stuck
+            ? {
+                background: "var(--panel-glass)",
+                backdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-saturate))",
+                WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-saturate))",
+                borderBottomLeftRadius: 18,
+                borderBottomRightRadius: 18,
+                boxShadow: "0 6px 18px -10px rgba(15,23,42,0.25)",
+              }
+            : {}),
         }}
       >
         {message.provider && (
