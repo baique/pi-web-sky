@@ -532,11 +532,12 @@ export function TerminalPanel({
     ? { position: "fixed", inset: 10, zIndex: 1050 }
     : origin === "top"
       ? (() => {
-          const width = Math.min(780, window.innerWidth - 48);
+          const vw = document.documentElement.clientWidth || window.innerWidth;
+          const width = Math.min(780, vw - 48);
           // Left-align with the trigger button (topbar terminal entry).
           const left = anchorRect
-            ? Math.max(24, Math.min(anchorRect.left, window.innerWidth - width - 24))
-            : window.innerWidth - width - 24;
+            ? Math.max(24, Math.min(anchorRect.left, vw - width - 24))
+            : vw - width - 24;
           return {
             position: "fixed",
             top: (anchorRect?.bottom ?? anchorRect?.top ?? 46),

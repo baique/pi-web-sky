@@ -767,6 +767,15 @@ export function McpConfigPanel({
 
   const mcpBusy = busyKey !== null;
 
+  // 顶部弹窗通用定位：宽度自适应（窄屏/小窗自动收窄），双向夹取到视口内——
+  // 锚点太靠右导致越界时往对向（左）挪，保证面板始终完整展示不被遮挡。
+  const MARGIN = 24;
+  const vw = typeof window !== "undefined" ? document.documentElement.clientWidth : 0;
+  const panelWidth = Math.min(780, vw - MARGIN * 2);
+  const panelLeft = anchorRect
+    ? Math.max(MARGIN, Math.min(anchorRect.left, vw - panelWidth - MARGIN))
+    : vw - panelWidth - MARGIN;
+
   const panel: React.ReactNode = (
     <div
       ref={panelRef}
@@ -776,8 +785,8 @@ export function McpConfigPanel({
         position: "fixed",
         zIndex: 130,
         top: (anchorRect?.bottom ?? anchorRect?.top ?? 46),
-        left: anchorRect ? anchorRect.left : 24,
-        width: 780,
+        left: panelLeft,
+        width: panelWidth,
         maxHeight: "min(72vh, 600px)",
         display: "flex",
         flexDirection: "column",
