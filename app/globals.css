@@ -133,6 +133,8 @@
   --bubble-tool-bg-fold: color-mix(in srgb, var(--tool-bg-glass) 28%, transparent);
   --bubble-code-bg: color-mix(in srgb, var(--tool-bg-glass) 58%, transparent);  /* 代码块：玻璃加深层（与工具块同款，透出磨砂非实心） */
   --bubble-th-bg: color-mix(in srgb, var(--tool-bg-glass) 45%, transparent);    /* 表格表头：更透的玻璃加深层 */
+  --bubble-file-bg: color-mix(in srgb, var(--bg) 98%, var(--bg-panel));         /* 文件预览阅读区：近实玻璃底（高可读） */
+  --bubble-file-chrome: color-mix(in srgb, var(--bg) 93%, var(--bg-panel));     /* 预览区 chrome：工具栏/顶栏/行号加深层 */
 
   /* Backdrop desaturation: light theme washes wallpaper colours toward a
      neutral backing (real frosted glass), dark theme keeps the richer

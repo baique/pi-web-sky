@@ -1064,6 +1064,7 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
 }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1090,13 +1091,19 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
 
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
-        border: "1px solid color-mix(in srgb, var(--border) 50%, transparent)",
-        borderRadius: 10,
+        borderRadius: "var(--bubble-inner-radius)",
         overflow: "hidden",
         fontSize: 13,
-        background: "color-mix(in srgb, var(--tool-bg-glass) 62%, transparent)",
-        boxShadow: "0 1px 3px rgba(15,23,42,0.05)",
+        // 折叠 = 轻行融入正文；展开 = 浮现玻璃块承载内容（与工具块同一语义，
+        // 不用整圈边框把玻璃切块）。
+        border: expanded ? "1px solid var(--bubble-border)" : "1px solid transparent",
+        background: expanded
+          ? (hovered ? "var(--bubble-tool-bg-hover)" : "var(--bubble-tool-bg)")
+          : (hovered ? "var(--bubble-tool-bg-fold)" : "transparent"),
+        transition: "background 0.12s",
       }}
     >
       <button
@@ -1106,30 +1113,45 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
           alignItems: "center",
           gap: 6,
           width: "100%",
-          padding: "7px 10px",
+          padding: "6px 10px",
           background: "none",
           border: "none",
-          color: "var(--text-muted)",
+          color: expanded || hovered ? "var(--text-muted)" : "var(--text-dim)",
           cursor: "pointer",
           fontSize: 12,
           textAlign: "left",
+          transition: "color 0.12s",
         }}
       >
-         <span>{t("i18n.thinking")}</span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ flexShrink: 0, opacity: 0.8 }}
+          aria-hidden="true"
+        >
+          <path d="M12 3c.4 4 2.1 5.7 6.1 6.1-4 .4-5.7 2.1-6.1 6.1-.4-4-2.1-5.7-6.1-6.1 4-.4 5.7-2.1 6.1-6.1Z" />
+        </svg>
+        <span>{t("i18n.thinking")}</span>
         {duration !== undefined && (
-          <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
+          <span style={{ fontSize: 11, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
         )}
       </button>
       {expanded && (
         <div
           style={{
+            borderTop: "1px solid var(--bubble-hairline)",
             padding: "8px 10px",
             color: error ? "#f87171" : "var(--text-muted)",
             fontSize: 12,
             lineHeight: 1.6,
             whiteSpace: "pre-wrap",
-            background: "color-mix(in srgb, var(--tool-bg-glass) 66%, transparent)",
-            borderTop: "1px solid color-mix(in srgb, var(--border) 45%, transparent)",
+            background: "transparent",
           }}
         >
            {loading ? t("i18n.loadingThinking") : error ?? (block.deferred ? content : block.thinking)}

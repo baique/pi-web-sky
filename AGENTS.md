@@ -221,6 +221,29 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 --font-mono
 ```
 
+### 消息气泡内层级 token（`--bubble-*`）
+
+气泡内所有表面共用一套层级 token，定义在 `:root`（引用 `--border` / `--tool-bg-glass` 的会自动跟随明暗主题，无需在 `.dark` 重复）。整体调观感改这一处即可，组件里不要散落 magic number：
+
+```
+--bubble-pad-x / -pad-y / -pad-end   气泡内边距
+--bubble-gap                         气泡内块间距
+--bubble-radius                      气泡卡片圆角（12）
+--bubble-inner-radius                气泡内嵌套块（工具/思考/代码）圆角（7）
+--bubble-meta-fs / -title-fs         元信息 vs 强调行（模型名）字号
+--bubble-border                      气泡边框色（border 60%）
+--bubble-hairline                    所有 hairline 分隔线（border 55%）
+--bubble-tool-bg / -hover / -fold    工具/思考块玻璃底三态（58/80/28%）
+--bubble-code-bg                     代码块近实底（bg 92% + panel）
+--bubble-th-bg                       表格表头 / 代码 header 次级底（bg-panel）
+--bubble-file-bg / -file-chrome      文件预览阅读区近实底 / chrome 加深层
+```
+
+组件约定（工具块 `ToolCallBlock` / 思考块 `ThinkingBlock`）：
+- 折叠态是无背景的轻行，展开才浮现玻璃块（`--bubble-tool-bg`）；两态 header 的 padding 必须一致，避免展开时边距 / 高度跳变。
+- 工具 / 思考块**不加整圈彩色边框**，状态用圆点 / 图标表达，只用一根极淡 `--bubble-border` 中性描边。
+- header 内不两端对齐：时长紧跟文字（不用 `marginLeft:auto`）。
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
