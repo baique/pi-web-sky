@@ -113,6 +113,27 @@
   --tool-bg-glass: rgba(var(--tool-bg-rgb), var(--bubble-alpha));
   --glass-blur-bubble: 18px;
 
+  /* ── Chat bubble interior tokens ──
+     气泡内所有表面共用的层级语言：间距 / 圆角 / 边框 / hairline /
+     meta 字号 / 嵌套块玻璃底。要整体调观感，改这一处即可，组件里
+     不要散落 magic number。引用 --border / --tool-bg-glass 的 token
+     会自动跟随主题，无需在 .dark 重复。 */
+  --bubble-pad-x: 14px;      /* 气泡左右内边距 */
+  --bubble-pad-y: 7px;       /* 气泡顶部内边距 */
+  --bubble-pad-end: 8px;     /* 气泡底部留白 */
+  --bubble-gap: 8px;         /* 气泡内块间距 */
+  --bubble-radius: 12px;     /* 气泡卡片圆角 */
+  --bubble-inner-radius: 7px;/* 气泡内嵌套块（工具/代码）圆角 */
+  --bubble-meta-fs: 11px;    /* 元信息：时长/usage/工具行 */
+  --bubble-title-fs: 12px;   /* 强调行：模型名 */
+  --bubble-border: color-mix(in srgb, var(--border) 60%, transparent);
+  --bubble-hairline: color-mix(in srgb, var(--border) 55%, transparent);
+  --bubble-tool-bg: color-mix(in srgb, var(--tool-bg-glass) 58%, transparent);
+  --bubble-tool-bg-hover: color-mix(in srgb, var(--tool-bg-glass) 80%, transparent);
+  --bubble-tool-bg-fold: color-mix(in srgb, var(--tool-bg-glass) 28%, transparent);
+  --bubble-code-bg: color-mix(in srgb, var(--tool-bg-glass) 58%, transparent);  /* 代码块：玻璃加深层（与工具块同款，透出磨砂非实心） */
+  --bubble-th-bg: color-mix(in srgb, var(--tool-bg-glass) 45%, transparent);    /* 表格表头：更透的玻璃加深层 */
+
   /* Backdrop desaturation: light theme washes wallpaper colours toward a
      neutral backing (real frosted glass), dark theme keeps the richer
      boost it already looks good with. */
@@ -573,8 +594,14 @@ pre, code {
 .markdown-body h1 { font-size: 1.16em; }
 .markdown-body h2 { font-size: 1.08em; }
 .markdown-body h3 { font-size: 0.98em; color: color-mix(in srgb, var(--text) 88%, var(--text-muted)); }
-.markdown-body ul, .markdown-body ol {
+.markdown-body ul {
   padding-left: 22px;
+  margin: 5px 0 8px;
+  list-style-position: outside;
+}
+.markdown-body ol {
+  /* ol 序号渲染在容器左侧 padding 区内，给足空间否则数字被气泡/圆角裁剪 */
+  padding-left: 30px;
   margin: 5px 0 8px;
   list-style-position: outside;
 }
@@ -668,7 +695,7 @@ pre, code {
   overflow-x: auto;
   overflow-y: hidden;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--bubble-inner-radius);
 }
 .markdown-body table {
   border-collapse: separate;
@@ -685,7 +712,7 @@ pre, code {
 }
 .markdown-body tr:last-child td { border-bottom: 0; }
 .markdown-body th {
-  background: var(--bg-panel);
+  background: var(--bubble-th-bg);
   color: color-mix(in srgb, var(--text) 88%, var(--text-muted));
   font-weight: 650;
 }
@@ -807,14 +834,14 @@ pre, code {
   max-width: 100%;
   margin: 6px 0;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--bubble-inner-radius);
   overflow: hidden;
-  background: var(--bg);
+  background: var(--bubble-code-bg);
   box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 42%, transparent);
 }
 .markdown-code-header {
   padding: 5px 10px;
-  background: var(--bg-panel);
+  background: var(--bubble-th-bg);
   border-bottom: 1px solid var(--border);
   color: var(--text-dim);
   font-size: 11px;
@@ -861,7 +888,7 @@ pre, code {
 .mermaid-block {
   padding: 12px;
   overflow-x: auto;
-  background: color-mix(in srgb, var(--bg) 92%, var(--bg-panel));
+  background: var(--bubble-code-bg);
 }
 .mermaid-block svg {
   display: block;

@@ -681,7 +681,12 @@ function AssistantMessageView({
   const headRef = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(false);
   useEffect(() => {
-    if (!oversize || bare) return;
+    if (!oversize || bare) {
+      // 消息高度回落（如收起工具）→ 退出吸附态时把 stuck 一并重置，
+      // 否则吸附条背景/圆角会残留不回正常态。
+      setStuck(false);
+      return;
+    }
     const el = cardRef.current;
     if (!el) return;
     const container = el.closest('[class*="overflow-y-auto"]') as HTMLElement | null;
@@ -824,13 +829,13 @@ function AssistantMessageView({
         style={{
           display: "flex",
           flexDirection: "column",
-          gap: 8,
-          padding: "8px 14px",
-          borderRadius: 12,
+          gap: "var(--bubble-gap)",
+          padding: "var(--bubble-pad-y) var(--bubble-pad-x) var(--bubble-pad-end)",
+          borderRadius: "var(--bubble-radius)",
           background: "var(--assistant-card-glass)",
           backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
           WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-          border: bare ? "none" : "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+          border: bare ? "none" : "1px solid var(--bubble-border)",
           boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
         }}
       >
@@ -861,8 +866,11 @@ function AssistantMessageView({
                 top: -14,
                 zIndex: 30,
                 cursor: "pointer",
-                margin: "-8px -14px 0",
-                padding: "8px 14px",
+                // 只做横向扩展以占满宽度；坚决不加上下 padding/margin，
+                // 否则可吸附态的高度会比不可吸附态多出 16px，展开工具等
+                // 任何尺寸变化都会让模型名行跳变。
+                margin: "0 -14px",
+                padding: "0 14px",
               }
             : {}),
           // 吸附态：灵动岛风格 —— 上方直角贴合顶边，下边圆角成胶囊，磨砂柔和、更透
@@ -872,6 +880,8 @@ function AssistantMessageView({
                 background: "color-mix(in srgb, var(--glass-bg) 70%, transparent)",
                 backdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-saturate))",
                 WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-saturate))",
+                // 吸附条上下各留 7px，让胶囊看起来更饱满、更高一些
+                padding: "7px 14px",
                 borderBottomLeftRadius: 18,
                 borderBottomRightRadius: 18,
                 boxShadow: "0 6px 18px -10px rgba(15,23,42,0.25)",
@@ -880,7 +890,7 @@ function AssistantMessageView({
         }}
       >
         {message.provider && (
-          <span>{modelNames?.[`${message.provider}:${message.model}`] ?? modelNames?.[message.model] ?? message.model}</span>
+          <span style={{ fontSize: "var(--bubble-title-fs)", fontWeight: 600 }}>{modelNames?.[`${message.provider}:${message.model}`] ?? modelNames?.[message.model] ?? message.model}</span>
         )}
         {isStreaming && (() => {
           const est = Math.round(estimatedTokens);
@@ -938,7 +948,7 @@ function AssistantMessageView({
         )}
       </div>
       {/* Hairline divider under the model name */}
-      <div style={{ height: 1, background: "color-mix(in srgb, var(--border) 55%, transparent)", margin: "6px -14px 0" }} />
+      <div style={{ height: 1, background: "var(--bubble-hairline)", margin: "6px -14px 0" }} />
       </>
       )}
 
@@ -974,7 +984,7 @@ function AssistantMessageView({
         {!bare && !isStreaming && (message.usage || time || textContent) && (
           <>
             {/* Hairline divider above the footer row */}
-            <div style={{ height: 1, background: "color-mix(in srgb, var(--border) 55%, transparent)", margin: "2px -14px 0" }} />
+            <div style={{ height: 1, background: "var(--bubble-hairline)", margin: "2px -14px 0" }} />
             <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
               {message.usage && (
                 <span style={{ fontSize: 11, color: "var(--text-meta)" }}>
@@ -1133,6 +1143,7 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
 function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const inputStr = getToolCallInputText(block);
   const isStreamingInput = block.rawInput !== undefined;
   const isEditTool = isEditToolName(block.toolName);
@@ -1147,38 +1158,59 @@ function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; re
 
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
-        borderRadius: 7,
+        borderRadius: expanded ? "var(--bubble-inner-radius)" : 5,
         overflow: "hidden",
         fontSize: 12,
-        border: isError ? "1px solid rgba(248,113,113,0.45)" : "1px solid rgba(34,197,94,0.25)",
-        // 玻璃背景（气泡变量 --tool-bg-glass + --glass-blur-bubble）——
-        // 透明度随 --bubble-alpha 滑块、磨砂随气泡 blur，与消息气泡同一套控制。
-        // 失败块不再是“透明底+红字”，而是 frosted 玻璃底 + 红边框/红字标识。
-        background: "color-mix(in srgb, var(--tool-bg-glass) 62%, transparent)",
-        backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-        WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+        border: expanded ? "1px solid var(--bubble-border)" : "1px solid transparent",
+        // 折叠态不渲染玻璃块：就是一行融入正文的文本（圆点+名称+秒数），
+        // 展开时才浮现玻璃承载参数/结果。
+        background: expanded
+          ? (hovered ? "var(--bubble-tool-bg-hover)" : "var(--bubble-tool-bg)")
+          : (hovered ? "var(--bubble-tool-bg-fold)" : "transparent"),
+        backdropFilter: expanded
+          ? "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))"
+          : "none",
+        WebkitBackdropFilter: expanded
+          ? "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))"
+          : "none",
+        transition: "background 0.12s",
       }}
     >
-      {/* ── Tool call header ── */}
+      {/* ── Tool call header ── 状态用左侧圆点；圆点/名称/参数预览/秒数在折叠、展开两态布局一致不跳变，仅背景浮现 + 下方内容展开 */}
       <button
         onClick={() => setExpanded((v) => !v)}
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 7,
+          gap: 6,
           width: "100%",
           padding: "6px 10px",
           background: "none",
           border: "none",
-          color: "var(--text-muted)",
+          color: "var(--text-meta)",
           cursor: "pointer",
           fontSize: 12,
           textAlign: "left",
           minWidth: 0,
         }}
       >
-        <span style={{ color: isError ? "#f87171" : "#16a34a", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 11, flexShrink: 0 }}>
+        <span
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: 999,
+            flexShrink: 0,
+            background: isError ? "#f87171" : "#22c55e",
+            boxShadow: isError
+              ? "0 0 0 3px rgba(248,113,113,0.15)"
+              : "0 0 0 3px rgba(34,197,94,0.15)",
+          }}
+          aria-hidden="true"
+        />
+        <span style={{ color: "var(--text-meta)", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 11, flexShrink: 0 }}>
           {block.toolName}
         </span>
         <span style={{ color: "var(--text-meta)", fontFamily: "var(--font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
@@ -1194,22 +1226,23 @@ function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; re
 
       {/* ── Expanded: input args ── */}
       {expanded && (isStreamingInput || !isEditTool) && (
-        <pre
-          style={{
-            margin: 0,
-            padding: "8px 10px",
-            color: "var(--text)",
-            fontSize: 12,
-            lineHeight: 1.5,
-            overflow: "auto",
-            background: "var(--bg-subtle)",
-            borderTop: isError ? "1px solid rgba(248,113,113,0.25)" : "1px solid rgba(34,197,94,0.2)",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-all",
-          }}
-        >
-          {inputStr}
-        </pre>
+        <div style={{ borderTop: "1px solid var(--bubble-hairline)" }}>
+          <pre
+            style={{
+              margin: 0,
+              padding: "8px 10px",
+              color: "var(--text)",
+              fontSize: 12,
+              lineHeight: 1.5,
+              overflow: "auto",
+              background: "transparent",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-all",
+            }}
+          >
+            {inputStr}
+          </pre>
+        </div>
       )}
 
       {/* ── Paired result — only shown when expanded ── */}
@@ -1229,7 +1262,7 @@ function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; re
 
       {/* ── Tool result images: render image blocks from result.content ── */}
       {expanded && result && (
-        <ToolResultImages content={result.content} isError={isError} />
+        <ToolResultImages content={result.content} />
       )}
     </div>
   );
@@ -1245,8 +1278,7 @@ function PairedDiffResult({ diff }: {
   return (
     <div
       style={{
-        borderTop: "1px solid rgba(34,197,94,0.15)",
-        background: "color-mix(in srgb, var(--tool-bg-glass) 55%, transparent)",
+        borderTop: "1px solid var(--bubble-hairline)",
       }}
     >
       <SplitPatchView text={diff.text} />
@@ -1261,7 +1293,7 @@ function SplitPatchView({ text }: { text: string }) {
   const showFileHeaders = files.length > 1;
 
   return (
-    <div style={{ maxHeight: 560, overflowY: "auto", overflowX: "hidden", background: "var(--bg)" }}>
+    <div style={{ maxHeight: 560, overflowY: "auto", overflowX: "hidden" }}>
       {files.map((file, fileIndex) => (
         <div
           key={fileIndex}
@@ -1281,7 +1313,7 @@ function SplitPatchView({ text }: { text: string }) {
                 position: "sticky",
                 top: 0,
                 zIndex: 1,
-                background: "var(--bg-panel)",
+                background: "var(--bg-subtle)",
                 borderBottom: "1px solid var(--border)",
               }}
             >
@@ -1358,7 +1390,7 @@ function SplitDiffCellView({ cell, side }: { cell: SplitDiffCell; side: "left" |
           textAlign: "right",
           color: "var(--text-dim)",
           userSelect: "none",
-          background: "var(--bg-panel)",
+          background: "var(--bg-subtle)",
           borderRight: "1px solid var(--border)",
           flexShrink: 0,
         }}
@@ -1435,7 +1467,7 @@ function PatchTextView({ text }: { text: string }) {
                 width: 48,
                 padding: "0 8px",
                 color: "var(--text-dim)",
-                background: "var(--bg-panel)",
+                background: "var(--bg-subtle)",
                 borderRight: "1px solid var(--border)",
                 textAlign: "right",
                 userSelect: "none",
@@ -1480,8 +1512,7 @@ function PairedResult({ text, isEmpty, isError }: {
   return (
     <div
       style={{
-        borderTop: `1px solid ${isError ? "rgba(248,113,113,0.3)" : "rgba(34,197,94,0.15)"}`,
-        background: "color-mix(in srgb, var(--tool-bg-glass) 55%, transparent)",
+        borderTop: "1px solid var(--bubble-hairline)",
       }}
     >
       <pre
@@ -1493,7 +1524,7 @@ function PairedResult({ text, isEmpty, isError }: {
           lineHeight: 1.5,
           overflow: "auto",
           maxHeight: 400,
-          background: "var(--bg)",
+          background: "transparent",
           whiteSpace: "pre-wrap",
           wordBreak: "break-all",
           fontStyle: isEmpty ? "italic" : "normal",
@@ -1521,7 +1552,7 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
           background: "var(--assistant-card-glass)",
           backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
           WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-          border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+          border: "1px solid var(--bubble-border)",
           boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
         }}
       >
@@ -1531,7 +1562,7 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
             alignItems: "center",
             gap: 8,
             padding: "7px 10px",
-            borderBottom: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
+            borderBottom: "1px solid var(--bubble-hairline)",
             color: "var(--text-muted)",
           }}
         >
@@ -1622,7 +1653,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
             : "var(--assistant-card-glass)",
           backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
           WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-          border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+          border: "1px solid var(--bubble-border)",
           boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
           opacity: isHiddenDisplay && !contentExpanded ? 0.82 : 1,
         }}
@@ -1633,7 +1664,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
             alignItems: "center",
             gap: 8,
             padding: "7px 10px",
-            borderBottom: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
+            borderBottom: "1px solid var(--bubble-hairline)",
             color: "var(--text-muted)",
             fontSize: 11,
           }}
@@ -1692,7 +1723,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
             alignItems: "center",
             gap: 8,
             padding: "4px 9px",
-            borderTop: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
+            borderTop: "1px solid var(--bubble-hairline)",
             background: "color-mix(in srgb, var(--tool-bg-glass) 66%, transparent)",
           }}
         >
@@ -1739,7 +1770,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
             style={{
               margin: 0,
               padding: "9px 10px",
-              borderTop: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
+              borderTop: "1px solid var(--bubble-hairline)",
               background: "color-mix(in srgb, var(--assistant-card-glass) 55%, transparent)",
               color: "var(--text-muted)",
               fontSize: 12,
@@ -1783,9 +1814,8 @@ function imageSource(img: ImageContent): string {
 }
 
 /** Renders image/image_url blocks carried inside a tool result message. */
-function ToolResultImages({ content, isError }: {
+function ToolResultImages({ content }: {
   content: readonly unknown[];
-  isError?: boolean;
 }) {
   const images = (content ?? []).filter(
     (b): b is Record<string, unknown> => typeof b === "object" && b !== null && (b as { type?: unknown }).type === "image",
@@ -1797,8 +1827,7 @@ function ToolResultImages({ content, isError }: {
       gap: 6,
       flexWrap: "wrap",
       padding: "8px 10px",
-      borderTop: isError ? "1px solid rgba(248,113,113,0.25)" : "1px solid rgba(34,197,94,0.15)",
-      background: "var(--bg)",
+      borderTop: "1px solid var(--bubble-hairline)",
     }}>
       {images.map((img, i) => {
         const flat = img as unknown as { data?: string; mimeType?: string };
