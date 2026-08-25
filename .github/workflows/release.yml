@@ -1,0 +1,33 @@
+name: Release from tag
+
+# 推送 v* 版本 tag 时，自动把该 tag 的源码打包为 tarball 并创建 GitHub Release。
+# 配合 npm 发布（npm publish）使用：tag 即版本快照，release 附带源码产物。
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package source tarball
+        run: |
+          ARCHIVE="pi-web-sky-${GITHUB_REF_NAME}.tar.gz"
+          git archive --format=tar.gz --output="${ARCHIVE}" HEAD
+          echo "archive=${ARCHIVE}" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release with source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" "${ARCHIVE}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
