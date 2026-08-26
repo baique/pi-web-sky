@@ -1970,3 +1970,44 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
 @media (prefers-reduced-motion: reduce) {
   .chat-status-pill { animation: none; }
 }
+
+/* === 消息头吸附（MessageView）===
+   JS 只产出 data-state（off/long/stuck），样式全在此控制：
+   - off   短消息，普通行
+   - long  超长消息：sticky 定位允许吸附，无背景
+   - stuck 吸附中：上方直角贴合顶边、下边圆角成胶囊，磨砂柔和、更透。
+   关键：两态不改变文档流高度（padding/高度恒定）——
+   否则头部占位变化会反哺"超长"判定，在高度恰为一屏时形成反馈环闪烁。 */
+.chat-msg-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-meta);
+}
+
+.chat-msg-head[data-state="long"],
+.chat-msg-head[data-state="stuck"] {
+  position: sticky;
+  top: -14px; /* 抵消滚动容器 pt-4 顶部留白，让吸附头贴到可视顶 */
+  z-index: 30;
+  cursor: pointer;
+  /* 只做横向扩展占满宽度；不加上下 padding/margin，保持两态行高一致 */
+  margin: 0 -14px;
+  padding: 0 14px;
+}
+
+.chat-msg-head[data-state="stuck"] {
+  /* 定稿版本：strong 90% 磨砂 + 12px blur + 原投影（无光晕）
+     注意：background 必须带 fallback —— tailwind/Lightning CSS 会把
+     color-mix 拆进 @supports(color-mix(in lab,...))，无 fallback 时
+     不支持 lab 语法的浏览器会整条丢弃背景。 */
+  background: var(--glass-bg-strong);
+  background: color-mix(in srgb, var(--glass-bg-strong) 90%, transparent);
+  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  padding: 7px 14px;
+  border-bottom-left-radius: 18px;
+  border-bottom-right-radius: 18px;
+  box-shadow: 0 6px 18px -10px rgba(15, 23, 42, 0.25);
+}

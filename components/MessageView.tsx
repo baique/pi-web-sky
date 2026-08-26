@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
+import { memo, useState, useRef, useEffect, useMemo } from "react";
 import { MarkdownBody } from "./MarkdownBody";
 import { ImagePreview } from "./ImagePreview";
 import { copyText } from "@/lib/clipboard";
@@ -649,26 +649,70 @@ function AssistantMessageView({
   const providerError = getAssistantErrorMessage(message, { isStreaming });
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
-  // 超长的 AI 消息：头部（模型名行）sticky 吸附顶部，点击可滚回本消息开头。
-  // 只有当消息高度超过滚动区约一屏时才启用，避免短消息还要对头做吸附。
+  // 消息头吸附（模型名行）：JS 只负责产出单一状态枚举，样式全部由 CSS 按
+  // .chat-msg-head 的 data-state 控制 —— off 短消息 / long 可吸附 / stuck 吸附中。
   const cardRef = useRef<HTMLDivElement>(null);
-  const [oversize, setOversize] = useState(false);
-  useLayoutEffect(() => {
-    const el = cardRef.current;
-    if (!el || bare) {
-      setOversize(false);
+  const headRef = useRef<HTMLDivElement>(null);
+  const [headerState, setHeaderState] = useState<"off" | "long" | "stuck">("off");
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card || bare) {
+      setHeaderState("off");
       return;
     }
-    const upd = () => {
-      const container = el.closest('[class*="overflow-y-auto"]') as HTMLElement | null;
-      const threshold = (container ? container.clientHeight : typeof window !== "undefined" ? window.innerHeight : 600) * 0.9;
-      setOversize(el.offsetHeight > threshold);
+    const container = card.closest('[class*="overflow-y-auto"]') as HTMLElement | null;
+    if (!container) {
+      setHeaderState("off");
+      return;
+    }
+    // 判定吸附：头部顶部进入容器顶部留白区（pt-4 ≈ 16px）即视为被钉住。
+    // 不依赖精确偏移：钉住时 head 顶 ≈ 容器可视顶（sticky top:-14 抵消留白），
+    // 未钉住时最低也在留白之下（≥ +16px）；12px 是两者间的安全判据，
+    // 对边框/亚像素差异有容差，避免窄窗口导致 stuck 永不触发。
+    let oversize = false;
+    let raf = 0;
+
+    const update = () => {
+      raf = 0;
+      let next: "off" | "long" | "stuck" = "off";
+      const head = headRef.current;
+      if (oversize && head) {
+        const hr = head.getBoundingClientRect().top;
+        const ct = container.getBoundingClientRect().top;
+        next = hr - ct <= 12 ? "stuck" : "long";
+      }
+      setHeaderState((prev) => (prev === next ? prev : next));
     };
-    upd();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(upd);
-    ro.observe(el);
-    return () => ro.disconnect();
+    const schedule = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(update);
+    };
+
+    // 高度变化（工具展开/收起、流式增长）→ 判定"超长"是否成立。
+    // 带滞回：超过 90% 容器高进入，回落到 81% 才退出，
+    // 免疫高度恰在一屏临界点时 oversize 来回翻转。
+    const measure = () => {
+      const threshold = container.clientHeight * 0.9;
+      const h = card.offsetHeight;
+      if (h > threshold) oversize = true;
+      else if (h < threshold * 0.9) oversize = false;
+      schedule();
+    };
+
+    measure();
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(measure);
+      ro.observe(card);
+    }
+    container.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", measure, { passive: true });
+    return () => {
+      ro?.disconnect();
+      container.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", measure);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [bare]);
   const scrollToCardTop = () => {
     const el = cardRef.current;
@@ -678,31 +722,6 @@ function AssistantMessageView({
     const top = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
     container.scrollTo({ top: Math.max(0, top - 8), behavior: "smooth" });
   };
-  // 磨砂加深只在“吸附状态”出现（CSS sticky 无法感知吸附，用 JS 判）。
-  // 吸附时头被钉在容器顶部 => head 顶部约等于容器可视顶；否则为普通位置。
-  const headRef = useRef<HTMLDivElement>(null);
-  const [stuck, setStuck] = useState(false);
-  useEffect(() => {
-    if (!oversize || bare) {
-      // 消息高度回落（如收起工具）→ 退出吸附态时把 stuck 一并重置，
-      // 否则吸附条背景/圆角会残留不回正常态。
-      setStuck(false);
-      return;
-    }
-    const el = cardRef.current;
-    if (!el) return;
-    const container = el.closest('[class*="overflow-y-auto"]') as HTMLElement | null;
-    if (!container) return;
-    const containerTop = container.getBoundingClientRect().top;
-    const check = () => {
-      const hr = headRef.current ? headRef.current.getBoundingClientRect().top : null;
-      if (hr == null) return;
-      setStuck(Math.abs(hr - containerTop) < 6);
-    };
-    container.addEventListener("scroll", check, { passive: true });
-    check();
-    return () => container.removeEventListener("scroll", check);
-  }, [oversize, bare]);
   const streamStartRef = useRef<number | null>(null);
   const [tps, setTps] = useState<number | null>(null);
   const blockItemsRef = useRef(blockItems);
@@ -847,49 +866,15 @@ function AssistantMessageView({
           超长时 sticky 吸附顶部，点击头部空白处滚回本消息开头（点击内部按钮不受影响）。 */}
       <div
         ref={headRef}
-        onClick={oversize
+        className="chat-msg-head"
+        data-state={headerState}
+        onClick={headerState !== "off"
           ? (e) => {
               if ((e.target as HTMLElement).closest("button")) return;
               scrollToCardTop();
             }
           : undefined}
-        title={oversize ? "回到本消息开头" : undefined}
-        style={{
-          fontSize: 11,
-          color: "var(--text-meta)",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          // 超长时才需要 sticky 定位（吸附行为）；定位始终有，但背景仅在吸附态加深
-          ...(oversize
-            ? {
-                position: "sticky" as const,
-                // 抵消滚动容器 pt-4 顶部留白，让吸附头真正贴到可视顶
-                top: -14,
-                zIndex: 30,
-                cursor: "pointer",
-                // 只做横向扩展以占满宽度；坚决不加上下 padding/margin，
-                // 否则可吸附态的高度会比不可吸附态多出 16px，展开工具等
-                // 任何尺寸变化都会让模型名行跳变。
-                margin: "0 -14px",
-                padding: "0 14px",
-              }
-            : {}),
-          // 吸附态：灵动岛风格 —— 上方直角贴合顶边，下边圆角成胶囊，磨砂柔和、更透
-          ...(stuck
-            ? {
-                // 特意调透：用更透明的玻璃（约 0.52 alpha），磨砂弱、通透
-                background: "color-mix(in srgb, var(--glass-bg) 70%, transparent)",
-                backdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-saturate))",
-                WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-saturate))",
-                // 吸附条上下各留 7px，让胶囊看起来更饱满、更高一些
-                padding: "7px 14px",
-                borderBottomLeftRadius: 18,
-                borderBottomRightRadius: 18,
-                boxShadow: "0 6px 18px -10px rgba(15,23,42,0.25)",
-              }
-            : {}),
-        }}
+        title={headerState !== "off" ? "回到本消息开头" : undefined}
       >
         {message.provider && (
           <span style={{ fontSize: "var(--bubble-title-fs)", fontWeight: 600 }}>{modelNames?.[`${message.provider}:${message.model}`] ?? modelNames?.[message.model] ?? message.model}</span>
