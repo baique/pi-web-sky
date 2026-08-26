@@ -2385,9 +2385,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             background: "var(--frame-glass)",
             backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
             WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-            border: "1px solid color-mix(in srgb, var(--border) 30%, transparent)",
-            borderRadius: 10,
-            padding: "3px 6px",
+            borderRadius: 16,
           }}>
           {isStreaming ? (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
