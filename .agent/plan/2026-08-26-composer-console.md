@@ -13,8 +13,7 @@
 - 不新增任何样式 token：只用既有 `--frame-glass`、`--bubble-*`、`--text*`、`--border` 等（spec §6）
 - 不新增依赖包；thinking-orbs 已有
 - 移动端行为全部保持现状（NoticeShelf 顶部居中保留，spec §8）
-- 每个任务结束：`node_modules/.bin/tsc --noEmit` 通过 + 相关测试通过 + git commit
-- 测试运行：`npm test`（node --test）；组件逻辑测试放对应 `*.test.mjs`
+- 【用户裁定】前端功能不做单元测试（不写 *.test.mjs），用 e2e 代替：每任务结束 `node_modules/.bin/tsc --noEmit` 通过 + git commit；最终 Task 8 统一 playwright e2e 走查
 - 提交信息用中文 conventional commits
 
 ---
