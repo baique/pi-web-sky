@@ -669,71 +669,7 @@ function AssistantMessageView({
   const providerError = getAssistantErrorMessage(message, { isStreaming });
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
-  // 消息头吸附（模型名行）：JS 只负责产出单一状态枚举，样式全部由 CSS 按
-  // .chat-msg-head 的 data-state 控制 —— off 短消息 / long 可吸附 / stuck 吸附中。
   const cardRef = useRef<HTMLDivElement>(null);
-  const headRef = useRef<HTMLDivElement>(null);
-  const [headerState, setHeaderState] = useState<"off" | "long" | "stuck">("off");
-  useEffect(() => {
-    const card = cardRef.current;
-    if (!card || bare) {
-      setHeaderState("off");
-      return;
-    }
-    const container = card.closest('[class*="overflow-y-auto"]') as HTMLElement | null;
-    if (!container) {
-      setHeaderState("off");
-      return;
-    }
-    // 判定吸附：头部顶部进入容器顶部留白区（pt-4 ≈ 16px）即视为被钉住。
-    // 不依赖精确偏移：钉住时 head 顶 ≈ 容器可视顶（sticky top:-14 抵消留白），
-    // 未钉住时最低也在留白之下（≥ +16px）；12px 是两者间的安全判据，
-    // 对边框/亚像素差异有容差，避免窄窗口导致 stuck 永不触发。
-    let oversize = false;
-    let raf = 0;
-
-    const update = () => {
-      raf = 0;
-      let next: "off" | "long" | "stuck" = "off";
-      const head = headRef.current;
-      if (oversize && head) {
-        const hr = head.getBoundingClientRect().top;
-        const ct = container.getBoundingClientRect().top;
-        next = hr - ct <= 12 ? "stuck" : "long";
-      }
-      setHeaderState((prev) => (prev === next ? prev : next));
-    };
-    const schedule = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(update);
-    };
-
-    // 高度变化（工具展开/收起、流式增长）→ 判定"超长"是否成立。
-    // 带滞回：超过 90% 容器高进入，回落到 81% 才退出，
-    // 免疫高度恰在一屏临界点时 oversize 来回翻转。
-    const measure = () => {
-      const threshold = container.clientHeight * 0.9;
-      const h = card.offsetHeight;
-      if (h > threshold) oversize = true;
-      else if (h < threshold * 0.9) oversize = false;
-      schedule();
-    };
-
-    measure();
-    let ro: ResizeObserver | undefined;
-    if (typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver(measure);
-      ro.observe(card);
-    }
-    container.addEventListener("scroll", schedule, { passive: true });
-    window.addEventListener("resize", measure, { passive: true });
-    return () => {
-      ro?.disconnect();
-      container.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", measure);
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, [bare]);
   const scrollToCardTop = () => {
     const el = cardRef.current;
     if (!el) return;
@@ -882,24 +818,25 @@ function AssistantMessageView({
       >
       {!bare && (
       <>
-      {/* Sticky head — 平时无存在感（元信息已下沉到底部工具栏）；
-          仅超长消息吸附时浮现模型名，点击头部空白处滚回本消息开头。 */}
-      <div
-        ref={headRef}
-        className="chat-msg-head"
-        data-state={headerState}
-        onClick={headerState !== "off"
-          ? (e) => {
-              if ((e.target as HTMLElement).closest("button")) return;
-              scrollToCardTop();
-            }
-          : undefined}
-        title={headerState !== "off" ? "回到本消息开头" : undefined}
-      >
-        {headerState === "stuck" && message.provider && (
-          <span style={{ fontWeight: 500 }}>{modelNames?.[`${message.provider}:${message.model}`] ?? modelNames?.[message.model] ?? message.model}</span>
-        )}
-      </div>
+      {/* Sticky head —— 纯 CSS：sticky 条自身作为 scroll-state 容器，
+          吸顶时由 @container scroll-state(stuck: top) 浮现磨砂条与模型名；
+          点击头部滚回本消息开头。空置时高度 0，不占气泡空间。 */}
+      {!bare && (
+        <div
+          className="chat-msg-head"
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest("button")) return;
+            scrollToCardTop();
+          }}
+          title="回到本消息开头"
+        >
+          <div className="chat-msg-head-inner">
+            {message.provider && (
+              <span className="chat-msg-head-model">{modelNames?.[`${message.provider}:${message.model}`] ?? modelNames?.[message.model] ?? message.model}</span>
+            )}
+          </div>
+        </div>
+      )}
       </>
       )}
 
