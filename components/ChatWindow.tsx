@@ -814,10 +814,13 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               </div>
             </div>
             {chatInputElement}
+            {/* 终端开关：widget shelf 之外，独立一行（右对齐） */}
+            {!isMobile && (
+              <div className="terminal-toggle-row">{terminalBarToggle}</div>
+            )}
             <ExtensionStatusBar
               statuses={extensionStatuses}
               widgets={extensionWidgets}
-              tools={terminalBarToggle}
             />
           </div>
         </div>
@@ -1062,10 +1065,13 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
       <div className="relative">
         {chatInputElement}
+        {/* 终端开关：widget shelf 之外，独立一行（右对齐） */}
+        {!isMobile && (
+          <div className="terminal-toggle-row">{terminalBarToggle}</div>
+        )}
         <ExtensionStatusBar
           statuses={extensionStatuses}
           widgets={extensionWidgets}
-          tools={terminalBarToggle}
           notice={
             isMobile || !noticeBroadcast ? null : (
               <div style={{ flex: "0 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 8, padding: "0 10px", maxWidth: "min(46vw, 480px)" }}>
@@ -1206,6 +1212,9 @@ function ExtensionDialog({
         aria-modal="true"
         style={{
           width: "min(560px, 100%)",
+          maxHeight: "100%",
+          display: "flex",
+          flexDirection: "column",
           border: "1px solid var(--border)",
           borderRadius: 8,
           background: "var(--bg)",
@@ -1213,12 +1222,12 @@ function ExtensionDialog({
           overflow: "hidden",
         }}
       >
-        <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
+        <div style={{ flexShrink: 0, padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
           <div style={{ color: "var(--text)", fontSize: 14, fontWeight: 650 }}>{request.title}</div>
           <div style={{ marginTop: 3, color: "var(--text-dim)", fontSize: 11, fontFamily: "var(--font-mono)" }}>{t("chat.extensionRequest")}</div>
         </div>
 
-        <div style={{ padding: 14 }}>
+        <div style={{ padding: 14, flex: 1, minHeight: 0, overflowY: "auto" }}>
           {request.method === "confirm" && (
             <div style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{request.message}</div>
           )}
@@ -1294,7 +1303,7 @@ function ExtensionDialog({
           )}
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border)", background: "var(--bg-panel)" }}>
+        <div style={{ flexShrink: 0, display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border)", background: "var(--bg-panel)" }}>
           <button
             onClick={() => onRespond(request, { cancelled: true })}
             style={{
