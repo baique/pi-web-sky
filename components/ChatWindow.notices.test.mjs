@@ -3,13 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const source = await readFile(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
-const chatInputSource = await readFile(new URL("./ChatInput.tsx", import.meta.url), "utf8");
 
 test("renders temporary notices as a responsive toast stack (mobile only)", () => {
   // 桌面端浮动 NoticeShelf 已下线：公告改由 composer 顶栏播报槽承载
   assert.doesNotMatch(source, /right: 51,\s*bottom: 118/);
-  // 播报槽合成上移至 ChatWindow（useBroadcast 不带 quota；额度为顶栏模型后展示位）
-  assert.match(source, /useBroadcast\(\{ notices: effectiveNotices, phase: phaseInfo, retryText \}\)/);
+  // 播报槽合成上移至 ChatWindow（quota 由 useProviderQuota 提供额度数据）
+  assert.match(source, /useBroadcast\(\{ notices: effectiveNotices, phase: phaseInfo, retryText, quota: quotaInfo \}\)/);
   assert.match(source, /notice=\{\s*isMobile \|\| !noticeBroadcast \? null :/);
 
   // Mobile: top-centered with `left: "50%", top: 60`
