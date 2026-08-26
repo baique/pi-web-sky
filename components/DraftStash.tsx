@@ -117,40 +117,43 @@ export function DraftStashList({
           <div className={styles.list}>
             {items.map((item) => (
               <div key={item.id} className={styles.row}>
-                <button
-                  type="button"
-                  className={styles.btn}
-                  onClick={() => onPick(item.id)}
-                  title="回填到输入框"
-                  aria-label="回填到输入框"
-                >
-                  <svg
-                    width="11" height="11" viewBox="0 0 10 10" fill="none"
-                    stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
-                  >
-                    <path d="M9 5 H1" />
-                    <polyline points="4 1.5 1 5 4 8.5" />
-                  </svg>
-                </button>
                 <span className={styles.content} title={item.content}>
                   {item.content}
                 </span>
                 <span className={styles.time}>{formatRelativeTime(item.updatedAt)}</span>
-                <button
-                  type="button"
-                  className={`${styles.btn} ${styles.btnDanger}`}
-                  onClick={() => onDelete(item.id)}
-                  title="删除 TODO"
-                  aria-label="删除 TODO"
-                >
-                  <svg
-                    width="11" height="11" viewBox="0 0 10 10" fill="none"
-                    stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
+                {/* 注入 + 删除 归并在一侧，方便点击 */}
+                <span className={styles.rowActions}>
+                  <button
+                    type="button"
+                    className={styles.btn}
+                    onClick={() => onPick(item.id)}
+                    title="回填到输入框"
+                    aria-label="回填到输入框"
                   >
-                    <line x1="2" y1="2" x2="8" y2="8" />
-                    <line x1="8" y1="2" x2="2" y2="8" />
-                  </svg>
-                </button>
+                    <svg
+                      width="11" height="11" viewBox="0 0 10 10" fill="none"
+                      stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+                    >
+                      <path d="M9 5 H1" />
+                      <polyline points="4 1.5 1 5 4 8.5" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.btn} ${styles.btnDanger}`}
+                    onClick={() => onDelete(item.id)}
+                    title="删除 TODO"
+                    aria-label="删除 TODO"
+                  >
+                    <svg
+                      width="11" height="11" viewBox="0 0 10 10" fill="none"
+                      stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
+                    >
+                      <line x1="2" y1="2" x2="8" y2="8" />
+                      <line x1="8" y1="2" x2="2" y2="8" />
+                    </svg>
+                  </button>
+                </span>
               </div>
             ))}
           </div>
