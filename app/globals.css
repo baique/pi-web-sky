@@ -1951,7 +1951,6 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
   width: 110px;
   justify-content: center;
   border: none;
-  border-left: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   background: none;
   color: var(--text-muted);
   font-size: 11px;
