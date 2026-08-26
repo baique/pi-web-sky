@@ -189,8 +189,8 @@ export function ComposerHeader({
         display: "flex",
         alignItems: "center",
         gap: 8,
-        height: 34,
-        minHeight: 34,
+        height: 26,
+        minHeight: 26,
         padding: "0 6px",
         minWidth: 0,
       }}
