@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, useMemo, forwardRef, KeyboardEvent } from "react";
-import type { AgentPhase, BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
-import type { BroadcastNotice, QuotaInfo } from "@/hooks/useBroadcast";
+import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
+import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
+import type { PhaseBroadcast, QuotaInfo } from "@/hooks/useBroadcast";
 import type { SkillsResponse } from "@/lib/api-types";
 import type { TextContent, UserMessage } from "@/lib/types";
 import {
@@ -28,9 +28,7 @@ import { DraftStash } from "./DraftStash";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
-import { useBroadcast } from "@/hooks/useBroadcast";
-import { phaseLabel, orbModeForPhase } from "@/lib/agent-phase";
-import { ComposerHeader, NoticeInline } from "./ComposerHeader";
+import { ComposerHeader } from "./ComposerHeader";
 import type { ToolPreset } from "@/lib/tool-presets";
 import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
 
@@ -74,8 +72,9 @@ interface Props {
   availableThinkingLevels?: string[] | null;
   thinkingLevelMap?: Record<string, string | null> | null;
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
-  agentPhase?: AgentPhase | null;
-  broadcastNotices?: BroadcastNotice[] | null;
+  /** 左槽运行状态（ChatWindow 经 useBroadcast 合成后下发；移动端传 null） */
+  phase?: PhaseBroadcast | null;
+  /** 额度展示契约（预留；展示位在顶栏左槽模型选择后方） */
   quota?: QuotaInfo | null;
   queuedMessages?: QueuedMessages | null;
   inputHistory?: string[];
@@ -159,7 +158,7 @@ const THINKING_LEVEL_DESC_KEYS: Record<typeof THINKING_LEVELS[number], string> =
   medium: "chat.thinkingMedium", high: "chat.thinkingHigh", xhigh: "chat.thinkingXhigh", max: "chat.thinkingMax",
 };
 
-function formatTokenCount(tokens: number): string {
+export function formatTokenCount(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
   if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
   return tokens.toLocaleString();
@@ -353,8 +352,6 @@ function revokeImagePreview(image: AttachedImage): void {
   }
 }
 
-/** 右下角悬浮钮组合占位宽（发送/引导/后续最大态），用于文字遮挡判定 */
-const BTN_ZONE_WIDTH = 130;
 
 function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: string }) {
   return (
@@ -460,10 +457,10 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
-  onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
+  onCompact, onAbortCompaction, isCompacting, compactError, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
-  retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
-  agentPhase = null, broadcastNotices = null, quota = null,
+  queuedMessages, inputHistory = [], onRecallQueue,
+  phase = null, quota = null,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
   onBuiltinCommand,
   soundEnabled, onSoundToggle, onAudioUnlock,
@@ -886,7 +883,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     ? t(slashQuery ? "chat.match" : "chat.command")
     : t(slashQuery ? "chat.matches" : "chat.commands", { count: filteredSlashCommands.length });
   const hasInputText = Boolean(value.trim());
-  const canQueueStreamingMessage = hasInputText || attachedImages.length > 0;
 
   // ── @ file autocomplete ──────────────────────────────────────────────────
   // Recomputed from the text before the caret on every change/caret move.
@@ -1440,65 +1436,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     : null;
   const currentName = displayModelName;
 
-  const compactSavedTokens = compactResult
-    ? Math.max(0, compactResult.tokensBefore - compactResult.estimatedTokensAfter)
-    : 0;
-  const compactResultText = compactResult
-    ? `${compactResult.reason && compactResult.reason !== "manual" ? `${compactResult.reason[0].toUpperCase()}${compactResult.reason.slice(1)} ` : t("chat.compacted")} ${formatTokenCount(compactResult.tokensBefore)} -> ${formatTokenCount(compactResult.estimatedTokensAfter)} tokens (${t("chat.tokensSaved", { saved: formatTokenCount(compactSavedTokens) })})`
-    : null;
-
-  // 播报槽数据源：agent 阶段 / 重试 / 公告（含 compact 结果合成公告）/ 额度预留
-  const phaseInfo = useMemo(() => {
-    if (!agentPhase) return null;
-    const text = phaseLabel(agentPhase, t);
-    return text ? { text, orb: orbModeForPhase(agentPhase) } : null;
-  }, [agentPhase, t]);
-  const retryText = useMemo(
-    () => retryInfo ? `${t("chat.retrying", { attempt: retryInfo.attempt, max: retryInfo.maxAttempts })}${retryInfo.errorMessage ? ` — ${retryInfo.errorMessage}` : ""}` : null,
-    [retryInfo, t],
-  );
-  const effectiveNotices = useMemo(() => {
-    const arr = broadcastNotices ?? [];
-    return compactResultText
-      ? [...arr, { id: "compact-result", message: compactResultText, type: "info" as const }]
-      : arr;
-  }, [broadcastNotices, compactResultText]);
-  const { phase: phaseBroadcast, notice: noticeBroadcast, dismissError } = useBroadcast({ notices: effectiveNotices, phase: phaseInfo, retryText, quota });
   const queueCount = (queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0);
 
-  // 悬浮按钮区是否真的有文字流到其下方：
-  // 用 canvas 按输入框实际字体测量“最后一行”宽度，取其在底部行的余量，
-  // 若余量进入右下按钮区（宽约 130px）则需浮现玻璃底盖字，否则 100% 透明。
-  const [textareaWidth, setTextareaWidth] = useState(0);
-  const measureCtxRef = useRef<CanvasRenderingContext2D | null>(null);
-  useLayoutEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    const ro = new ResizeObserver(() => setTextareaWidth(ta.clientWidth));
-    ro.observe(ta);
-    setTextareaWidth(ta.clientWidth);
-    return () => ro.disconnect();
-  }, []);
-  const textUnderButtons = useMemo(() => {
-    const text = value.trimEnd();
-    if (!text) return false;
-    const ta = textareaRef.current;
-    if (!ta || !textareaWidth) return false;
-    if (!measureCtxRef.current) {
-      measureCtxRef.current = document.createElement("canvas").getContext("2d");
-    }
-    const ctx = measureCtxRef.current;
-    if (!ctx) return false;
-    const cs = getComputedStyle(ta);
-    ctx.font = cs.fontSize + " " + cs.fontFamily;
-    const seg = text.split("\n").pop() ?? "";
-    const segW = ctx.measureText(seg).width;
-    const contentW = textareaWidth;
-    if (segW <= contentW) return segW > contentW - BTN_ZONE_WIDTH;
-    // 换行：看该段最后一行余量
-    const rem = segW % contentW;
-    return rem > contentW - BTN_ZONE_WIDTH;
-  }, [value, textareaWidth]);
+
   // 顶栏左槽（空闲态）：模型选择器（自工具栏迁入；流式时该槽让位给运行状态）
   const modelSlot = (modelOptions.length > 0 || currentName || modelError) && onModelChange ? (
                   <div ref={dropdownRef} style={{ position: "relative", minWidth: 0 }}>
@@ -1582,8 +1522,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                         position: "absolute",
                         bottom: "calc(100% + 6px)",
                         ...panelPos,
-                        zIndex: 500, background: "var(--bg)", border: "1px solid var(--border)",
-                        borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
+                        zIndex: 500,
+                        /* 与输入台同标准玻璃（--frame-glass + heavy blur + saturate） */
+                        background: "var(--frame-glass)",
+                        backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+                        WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+                        border: "1px solid var(--border)",
+                        borderRadius: 10, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
                         overflow: "hidden", maxHeight: maxH, display: "flex", flexDirection: "column",
                         }}>
                         {showModelFilter && (
@@ -1782,62 +1727,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           </div>
         )}
         {/* 压缩状态条：点击压缩后，在输入框上方以毛玻璃呼吸提示正在压缩，并提供停止压缩 */}
-        {isCompacting && (
-          <div
-            className="compaction-status"
-            role="status"
-            style={{
-              marginBottom: 8,
-              display: "flex", alignItems: "center", gap: 8,
-              padding: "7px 12px",
-              borderRadius: 10,
-              border: "1px solid color-mix(in srgb, var(--accent) 42%, transparent)",
-              background: "color-mix(in srgb, var(--glass-bg-strong) 60%, transparent)",
-              backdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
-              WebkitBackdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
-              color: "var(--text)",
-              fontSize: 12.5,
-              lineHeight: 1.4,
-              boxShadow: "0 2px 12px -4px rgba(15,23,42,0.16)",
-              animation: "compaction-breathe 1.8s ease-in-out infinite",
-            }}
-          >
-            <span
-              className="compaction-status-dot"
-              style={{
-                flexShrink: 0, width: 8, height: 8, borderRadius: "50%",
-                background: "var(--accent)",
-                animation: "compaction-dot-breathe 1.4s ease-in-out infinite",
-              }}
-            />
-            <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {t("chat.compacting")}
-            </span>
-            <button
-              type="button"
-              onClick={onAbortCompaction}
-              style={{
-                flexShrink: 0,
-                background: "transparent",
-                border: "none",
-                borderRadius: 6,
-                padding: "3px 8px",
-                color: "var(--accent)",
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: "pointer",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-            >
-              {t("chat.stopCompaction")}
-            </button>
-          </div>
-        )}
         {/* ── Composer：草稿 + 输入 + 底部工具，一块整体玻璃面板 ── */}
         <div
           style={{
+            position: "relative",
             borderRadius: isMobile ? 14 : 16,
             background: "var(--frame-glass)",
             backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
@@ -1856,9 +1749,68 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             transition: "border-color 0.15s, box-shadow 0.15s",
           } as React.CSSProperties}
         >
+          {isCompacting && (
+            <div
+              className="compaction-status"
+              role="status"
+              style={{
+                position: "absolute",
+                top: 8,
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 80,
+                width: 220,
+                maxWidth: "calc(100vw - 48px)",
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "5px 12px",
+                borderRadius: 999,
+                border: "1px solid color-mix(in srgb, var(--accent) 34%, transparent)",
+                background: "color-mix(in srgb, var(--glass-bg-strong) 72%, transparent)",
+                backdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
+                WebkitBackdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
+                color: "var(--text)",
+                fontSize: 12,
+                lineHeight: 1.4,
+                boxShadow: "0 2px 12px -4px rgba(15,23,42,0.16)",
+                animation: "compaction-breathe 1.8s ease-in-out infinite",
+              }}
+            >
+              <span
+                className="compaction-status-dot"
+                style={{
+                  flexShrink: 0, width: 7, height: 7, borderRadius: "50%",
+                  background: "var(--accent)",
+                  animation: "compaction-dot-breathe 1.4s ease-in-out infinite",
+                }}
+              />
+              <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {t("chat.compacting")}
+              </span>
+              <button
+                type="button"
+                onClick={onAbortCompaction}
+                style={{
+                  flexShrink: 0,
+                  background: "transparent",
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "1px 6px",
+                  color: "var(--accent)",
+                  fontSize: 11,
+                  cursor: "pointer",
+                  transition: "color 0.12s, background 0.12s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              >
+                {t("chat.stopCompaction")}
+              </button>
+            </div>
+          )}
           <ComposerHeader
-            phase={phaseBroadcast}
+            phase={phase}
             modelSlot={modelSlot}
+            quota={quota}
             isDark={isDark}
             right={(
               <>
@@ -1881,6 +1833,29 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </button>
                 )}
                 <DraftStash />
+                {!atBottom && onScrollToBottom && (
+                  <button
+                    type="button"
+                    onClick={() => onScrollToBottom()}
+                    title={t("chat.scrollToLatest")}
+                    aria-label={t("chat.scrollToLatest")}
+                    style={{
+                      flexShrink: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      width: 20, height: 20, padding: 0, marginLeft: 2,
+                      background: "none", border: "none", borderRadius: 6,
+                      color: "var(--text-muted)", cursor: "pointer",
+                      transition: "color 0.12s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="7 13 12 18 17 13" />
+                      <polyline points="7 6 12 11 17 6" />
+                    </svg>
+                  </button>
+                )}
               </>
             )}
           />
@@ -2402,125 +2377,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             }}
           />
 
-          {/* 右下角悬浮操作区：流式=引导/后续，空闲=发送。
-              按钮区默认 100% 透明；仅当文字真的流到其下方时，才浮现
-              与面板完全同款的玻璃底（--frame-glass + 同款 blur/saturate）盖住字 */}
-          <div style={{
-            position: "absolute", right: 8, bottom: 6,
-            display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
-            background: textUnderButtons ? "var(--frame-glass)" : "transparent",
-            backdropFilter: textUnderButtons ? "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))" : "none",
-            WebkitBackdropFilter: textUnderButtons ? "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))" : "none",
-            borderRadius: 16,
-            padding: "3px 6px",
-            transition: "background 0.12s, backdrop-filter 0.12s",
-          }}
-          data-under={typeof textUnderButtons === "boolean" ? String(textUnderButtons) : "?"}
-        >
-          {isStreaming ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {onSteer && (
-                <button
-                  onClick={() => sendQueued("steer")}
-                  disabled={!canQueueStreamingMessage}
-                  title="Interrupt the current run and inject this message now"
-                  onMouseEnter={(e) => {
-                    if (e.currentTarget.disabled) return;
-                    e.currentTarget.style.background = "rgba(120,120,128,0.10)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (e.currentTarget.disabled) return;
-                    e.currentTarget.style.background = "transparent";
-                  }}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "6px 10px",
-                    background: "transparent",
-                    borderRadius: 8,
-                    color: canQueueStreamingMessage ? "color-mix(in srgb, var(--text) 20%, var(--text-muted))" : "var(--text-dim)",
-                    cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
-                    fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
-                    transition: "background 0.12s",
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M7 3 L11 7 L7 11" /><line x1="3" y1="7" x2="11" y2="7" />
-                  </svg>
-                  {t("chat.steer")}
-                </button>
-              )}
-              {onFollowUp && (
-                <button
-                  onClick={() => sendQueued("followup")}
-                  disabled={!canQueueStreamingMessage}
-                  title="Queue this message after the agent finishes"
-                  onMouseEnter={(e) => {
-                    if (e.currentTarget.disabled) return;
-                    e.currentTarget.style.background = "rgba(120,120,128,0.10)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (e.currentTarget.disabled) return;
-                    e.currentTarget.style.background = "transparent";
-                  }}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "6px 10px",
-                    background: "transparent",
-                    borderRadius: 8,
-                    color: canQueueStreamingMessage ? "color-mix(in srgb, var(--text) 20%, var(--text-muted))" : "var(--text-dim)",
-                    cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
-                    fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
-                    transition: "background 0.12s",
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="7" y1="3" x2="7" y2="8" /><polyline points="4.5 5.5 7 3 9.5 5.5" />
-                    <line x1="4" y1="11" x2="10" y2="11" />
-                  </svg>
-                  {t("chat.followUp")}
-                </button>
-              )}
-            </div>
-          ) : (
-            <button
-              onClick={handleSend}
-              disabled={!value.trim() && !attachedImages.length}
-              style={{
-                flexShrink: 0,
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "6px 10px",
-                borderRadius: 8,
-                background: "transparent",
-                color: (value.trim() || attachedImages.length) ? "color-mix(in srgb, var(--text) 20%, var(--text-muted))" : "var(--text-dim)",
-                cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
-                fontSize: 13,
-                fontWeight: 600,
-                letterSpacing: "-0.01em",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => {
-                if (e.currentTarget.disabled) return;
-                e.currentTarget.style.background = "rgba(120,120,128,0.10)";
-              }}
-              onMouseLeave={(e) => {
-                if (e.currentTarget.disabled) return;
-                e.currentTarget.style.background = "transparent";
-              }}
-              onMouseDown={(e) => {
-                if (!e.currentTarget.disabled) e.currentTarget.style.transform = "translateY(1px)";
-              }}
-              onMouseUp={(e) => {
-                e.currentTarget.style.transform = "none";
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="2" y1="7" x2="11" y2="7" />
-                <polyline points="7.5 3 12 7 7.5 11" />
-              </svg>
-              {t("chat.send")}
-            </button>
-          )}
-          </div>
           </div>
         </div>
 
@@ -2537,7 +2393,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           gridTemplateColumns: isMobile ? "minmax(0, 1fr) auto" : undefined,
           alignItems: "center",
           gap: 6,
-          padding: "6px 4px 4px",
+          /* 右侧留边距：发送/停止区不贴边 */
+          padding: "6px 14px 4px",
           marginTop: 4,
           borderRadius: 10,
           background: "color-mix(in srgb, var(--bg-panel) 45%, transparent)",
@@ -2573,7 +2430,268 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <polyline points="21 15 16 10 5 21" />
               </svg>
             </button>
-            <NoticeInline notice={noticeBroadcast} onDismissError={dismissError} isDark={isDark} style={{ flex: 1, minWidth: 0 }} />
+            {!isMobile && (
+              <>
+                {/* 不起眼的灰色竖线分隔 */}
+                <div aria-hidden="true" style={{ flexShrink: 0, width: 1, height: 18, margin: "0 6px", background: "color-mix(in srgb, var(--border) 70%, transparent)" }} />
+            {!isStreaming && onThinkingLevelChange && (
+                  <div ref={thinkingDropdownRef} style={{ position: "relative" }}>
+                    <button
+                      onClick={() => !isStreaming && setThinkingDropdownOpen((v) => !v)}
+                      disabled={isStreaming}
+                       title={t("chat.changeReasoning", { level: thinkingDisplayLabel })}
+                       aria-label={t("chat.changeReasoningLabel")}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                        padding: isMobile ? "0 6px" : "8px 12px",
+                        width: isMobile ? "auto" : undefined,
+                        height: 32,
+                        background: thinkingDropdownOpen ? "var(--bg-hover)" : "none",
+                        border: "none",
+                        borderRadius: 9,
+                        color: "var(--text-muted)",
+                        cursor: isStreaming ? "not-allowed" : "pointer",
+                        fontSize: 12,
+                        opacity: isStreaming ? 0.5 : 1,
+                        transition: "background 0.12s, color 0.12s",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (isStreaming) return;
+                        e.currentTarget.style.background = "var(--bg-hover)";
+                        e.currentTarget.style.color = "var(--text)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = thinkingDropdownOpen ? "var(--bg-hover)" : "none";
+                        e.currentTarget.style.color = "var(--text-muted)";
+                      }}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9.5 2A5.5 5.5 0 0 0 4 7.5c0 1.7.78 3.21 2 4.21V14a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1v-2.29c1.22-1 2-2.51 2-4.21A5.5 5.5 0 0 0 9.5 2z" />
+                        <line x1="7" y1="18" x2="12" y2="18" />
+                        <line x1="8" y1="21" x2="11" y2="21" />
+                      </svg>
+                      {(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{thinkingDisplayLabel}</span>}
+                    </button>
+                    {thinkingDropdownOpen && (
+                      <div style={{
+                        position: "absolute", bottom: "calc(100% + 6px)",
+                        ...(isMobile ? { left: 0 } : { right: 0 }),
+                        zIndex: 100, background: "var(--bg)", border: "1px solid var(--border)",
+                        borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
+                        overflow: "hidden", minWidth: 180,
+                      }}>
+                        {THINKING_LEVELS.filter((lvl) => {
+                          if (!availableThinkingLevels) return true;
+                          if (lvl === "auto") return true;
+                          return availableThinkingLevels.includes(lvl);
+                        }).map((lvl) => {
+                          const isActive = (thinkingLevel ?? "auto") === lvl;
+                           const desc = t(THINKING_LEVEL_DESC_KEYS[lvl]);
+                          const mappedVal = (lvl !== "auto" && thinkingLevelMap) ? thinkingLevelMap[lvl] : undefined;
+                          const displayLabel = (mappedVal != null && mappedVal !== lvl) ? mappedVal : lvl;
+                          const showOriginal = mappedVal != null && mappedVal !== lvl;
+                          return (
+                            <button
+                              key={lvl}
+                              onClick={() => { setThinkingDropdownOpen(false); if (!isActive) onThinkingLevelChange(lvl); }}
+                              style={{
+                                display: "flex", alignItems: "center", gap: 8,
+                                width: "100%", padding: "7px 12px",
+                                background: isActive ? "var(--bg-selected)" : "none",
+                                border: "none",
+                                color: isActive ? "var(--text)" : "var(--text-muted)",
+                                cursor: "pointer", fontSize: 12, textAlign: "left",
+                                fontWeight: isActive ? 600 : 400,
+                                whiteSpace: "nowrap",
+                              }}
+                              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                              onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
+                            >
+                              {isActive
+                                ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
+                                : <span style={{ width: 10, flexShrink: 0 }} />}
+                              <span style={{ flex: 1 }}>
+                                {displayLabel}
+                                {showOriginal && <span style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)", marginLeft: 5 }}>({lvl})</span>}
+                              </span>
+                              <span style={{ fontSize: 11, color: "var(--text-dim)", marginLeft: 8 }}>{desc}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!isStreaming && onToolPresetChange && (
+                  <div ref={toolDropdownRef} style={{ position: "relative" }}>
+                    <button
+                      onClick={() => !isStreaming && setToolDropdownOpen((v) => !v)}
+                      disabled={isStreaming}
+                       title={t("chat.changeToolPreset") + `: ${toolPresetLabel}`}
+                       aria-label={t("chat.changeToolPreset")}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                        padding: isMobile ? "0 6px" : "8px 12px",
+                        width: isMobile ? "auto" : undefined,
+                        height: 32,
+                        background: toolDropdownOpen ? "var(--bg-hover)" : "none",
+                        border: "none",
+                        borderRadius: 9,
+                        color: "var(--text-muted)",
+                        cursor: isStreaming ? "not-allowed" : "pointer",
+                        fontSize: 12,
+                        opacity: isStreaming ? 0.5 : 1,
+                        transition: "background 0.12s, color 0.12s",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (isStreaming) return;
+                        e.currentTarget.style.background = "var(--bg-hover)";
+                        e.currentTarget.style.color = "var(--text)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = toolDropdownOpen ? "var(--bg-hover)" : "none";
+                        e.currentTarget.style.color = "var(--text-muted)";
+                      }}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+                      </svg>
+                      {(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{toolPresetLabel}</span>}
+                    </button>
+                    {toolDropdownOpen && (
+                      <div style={{
+                        position: "absolute",
+                        bottom: "calc(100% + 6px)",
+                        right: isMobile ? undefined : 0,
+                        left: isMobile ? 0 : undefined,
+                        zIndex: 100, background: "var(--bg)", border: "1px solid var(--border)",
+                        borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
+                        overflow: "hidden", minWidth: 120,
+                      }}>
+                        {TOOL_PRESETS.map((lvl) => {
+                          const preset = TOOL_PRESET_MAP[lvl];
+                          const isActive = (toolPreset ?? "default") === preset;
+                          let desc: string;
+                          if (lvl === "off") desc = t("chat.noTools");
+                          else if (lvl === "read-only") desc = t("chat.readOnlyTools", { count: 4 });
+                          else if (lvl === "default") desc = t("chat.builtInTools", { count: 4 });
+                          else desc = t("chat.allBuiltInTools");
+                          return (
+                            <button
+                              key={lvl}
+                              onClick={() => { setToolDropdownOpen(false); if (!isActive) onToolPresetChange(preset); }}
+                              style={{
+                                display: "flex", alignItems: "center", gap: 8,
+                                width: "100%", padding: "7px 12px",
+                                background: isActive ? "var(--bg-selected)" : "none",
+                                border: "none",
+                                color: isActive ? "var(--text)" : "var(--text-muted)",
+                                cursor: "pointer", fontSize: 12, textAlign: "left",
+                                fontWeight: isActive ? 600 : 400,
+                                whiteSpace: "nowrap",
+                              }}
+                              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                              onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
+                            >
+                              {isActive
+                                ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
+                                : <span style={{ width: 10, flexShrink: 0 }} />}
+                              <span style={{ flex: 1 }}>{lvl}</span>
+                              <span style={{ fontSize: 11, color: "var(--text-dim)", marginLeft: 8 }}>{desc}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {!isStreaming && onCompact && (
+                  <div>
+                    <button
+                      onClick={onCompact}
+                      disabled={isCompacting}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                        padding: isMobile ? "0 6px" : "8px 12px",
+                        width: isMobile ? "auto" : undefined,
+                        height: 32,
+                        background: "none",
+                        border: "none",
+                        borderRadius: 9,
+                        color: isCompacting ? "var(--text-dim)" : "var(--text-muted)",
+                        cursor: isCompacting ? "not-allowed" : "pointer",
+                        fontSize: 12, opacity: isCompacting ? 0.5 : 1,
+                        transition: "background 0.12s, color 0.12s",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (isCompacting) return;
+                        e.currentTarget.style.background = "var(--bg-hover)";
+                        e.currentTarget.style.color = "var(--text)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "none";
+                        e.currentTarget.style.color = "var(--text-muted)";
+                      }}
+                       title={t("chat.compactContext")}
+                       aria-label={t("chat.compactContext")}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
+                        <line x1="10" y1="14" x2="3" y2="21" /><line x1="21" y1="3" x2="14" y2="10" />
+                      </svg>
+                      {(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{t("chat.compact")}</span>}
+                    </button>
+                  </div>
+                )}
+
+                {onSoundToggle !== undefined && (
+                  <button
+                    onClick={onSoundToggle}
+                     title={soundEnabled ? t("chat.disableSound") : t("chat.enableSound")}
+                     aria-label={soundEnabled ? t("chat.disableSound") : t("chat.enableSound")}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                      width: isMobile ? 32 : 32,
+                      height: 32,
+                      padding: 0,
+                      background: "none",
+                      border: "none",
+                      borderRadius: 9,
+                      color: soundEnabled ? "var(--text-muted)" : "var(--text-dim)",
+                      cursor: "pointer",
+                      opacity: soundEnabled ? 1 : 0.55,
+                      transition: "background 0.12s, color 0.12s, opacity 0.12s",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "var(--bg-hover)";
+                      e.currentTarget.style.color = "var(--text)";
+                      e.currentTarget.style.opacity = "1";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "none";
+                      e.currentTarget.style.color = soundEnabled ? "var(--text-muted)" : "var(--text-dim)";
+                      e.currentTarget.style.opacity = soundEnabled ? "1" : "0.55";
+                    }}
+                  >
+                    {soundEnabled ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                      </svg>
+                    ) : (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <line x1="23" y1="9" x2="17" y2="15" />
+                        <line x1="17" y1="9" x2="23" y2="15" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+
+              </>
+            )}
           </div>
 
           {/* spacer */}
@@ -2634,7 +2752,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </button>
             )}
             <div style={{
-              display: isMobile ? (controlsMenuOpen ? "flex" : "none") : "flex",
+              display: isMobile ? (controlsMenuOpen ? "flex" : "none") : "none",
               alignItems: "center",
               gap: isMobile ? 1 : 2,
               ...(isMobile ? {
@@ -3000,9 +3118,122 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </button>
             )}
             </div>
-          </div>
+            {/* 右槽（桌面）：空闲=发送（纯文本）；处理中=停止（玻璃圆钮）+（输入有内容时）引导/后续
+                顺序：停止 → 引导 → 后续 */}
+            {!isMobile && (
+              isStreaming ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <button
+                    onClick={onAbort}
+                    title={t("chat.stopAgent")}
+                    aria-label={t("chat.stopAgent")}
+                    style={{
+                      flexShrink: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      width: 32, height: 32, padding: 0,
+                      background: "var(--frame-glass)",
+                      backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+                      WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+                      border: "1px solid color-mix(in srgb, var(--border) 90%, transparent)",
+                      borderRadius: "50%",
+                      color: "#ef4444",
+                      cursor: "pointer",
+                      transition: "background 0.12s, border-color 0.12s",
+                      boxShadow: "0 1px 4px -1px rgba(15,23,42,0.16)",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--bg-hover) 55%, var(--frame-glass))"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "var(--frame-glass)"; }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                      <rect x="1.5" y="1.5" width="9" height="9" rx="2.2" fill="currentColor" />
+                    </svg>
+                  </button>
+                  {hasInputText && onSteer && (
+                    <button
+                      onClick={() => sendQueued("steer")}
+                      title="Interrupt the current run and inject this message now"
+                      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 5,
+                        padding: 0,
+                        background: "transparent",
+                        border: "none",
+                        color: "var(--text-muted)",
+                        cursor: "pointer",
+                        fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
+                        transition: "color 0.12s",
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M7 3 L11 7 L7 11" /><line x1="3" y1="7" x2="11" y2="7" />
+                      </svg>
+                      {t("chat.steer")}
+                    </button>
+                  )}
+                  {hasInputText && onFollowUp && (
+                    <button
+                      onClick={() => sendQueued("followup")}
+                      title="Queue this message after the agent finishes"
+                      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 5,
+                        padding: 0,
+                        background: "transparent",
+                        border: "none",
+                        color: "var(--text-muted)",
+                        cursor: "pointer",
+                        fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
+                        transition: "color 0.12s",
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="7" y1="3" x2="7" y2="8" /><polyline points="4.5 5.5 7 3 9.5 5.5" />
+                        <line x1="4" y1="11" x2="10" y2="11" />
+                      </svg>
+                      {t("chat.followUp")}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!value.trim() && !attachedImages.length}
+                  style={{
+                    flexShrink: 0,
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: 0,
+                    background: "transparent",
+                    border: "none",
+                    color: (value.trim() || attachedImages.length) ? "var(--text-muted)" : "var(--text-dim)",
+                    cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    letterSpacing: "-0.01em",
+                    transition: "color 0.12s",
+                    marginLeft: 6,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (e.currentTarget.disabled) return;
+                    e.currentTarget.style.color = "var(--text)";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (e.currentTarget.disabled) return;
+                    e.currentTarget.style.color = "var(--text-muted)";
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="2" y1="7" x2="11" y2="7" />
+                    <polyline points="7.5 3 12 7 7.5 11" />
+                  </svg>
+                  {t("chat.send")}
+                </button>
+              )
+            )}
           </div>
 
+          </div>
         </div>
       </div>
     </div>

@@ -147,11 +147,14 @@ export function ComposerHeader({
   phase,
   modelSlot,
   right,
+  quota,
   isDark,
 }: {
   phase: PhaseBroadcast | null;
   modelSlot?: ReactNode;
   right?: ReactNode;
+  /** 额度展示位：排在模型选择后方（数据适配器后置，当前恒空） */
+  quota?: QuotaInfo | null;
   isDark: boolean;
 }) {
   // 左槽：状态 ⇄ 模型选择
@@ -195,9 +198,26 @@ export function ComposerHeader({
         minWidth: 0,
       }}
     >
-      {/* 左槽：状态 ⇄ 模型选择 */}
+      {/* 左槽：状态 ⇄ 模型选择（额度排在模型后方） */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, height: 20 }}>
         {left}
+        {quota && !phase && (
+          <span
+            style={{
+              flexShrink: 0,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontSize: 12,
+              fontFamily: "var(--font-mono)",
+              lineHeight: "20px",
+              color: "var(--text-dim)",
+            }}
+          >
+            <QuotaView quota={quota} />
+          </span>
+        )}
       </div>
       {/* 最右：chips */}
       {right != null && (

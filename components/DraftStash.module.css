@@ -137,7 +137,8 @@
   gap: 1px;
   padding: 3px;
   margin: 2px;
-  background: color-mix(in srgb, var(--bg-panel) 85%, var(--bg));
+  /* 默认条目无特殊背景：与浮层底同色，保持平整 */
+  background: transparent;
   border-radius: 10px;
 }
 

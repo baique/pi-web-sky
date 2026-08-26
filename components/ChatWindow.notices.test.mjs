@@ -8,7 +8,9 @@ const chatInputSource = await readFile(new URL("./ChatInput.tsx", import.meta.ur
 test("renders temporary notices as a responsive toast stack (mobile only)", () => {
   // 桌面端浮动 NoticeShelf 已下线：公告改由 composer 顶栏播报槽承载
   assert.doesNotMatch(source, /right: 51,\s*bottom: 118/);
-  assert.match(chatInputSource, /useBroadcast\(\{ notices: effectiveNotices, phase: phaseInfo, retryText, quota \}\)/);
+  // 播报槽合成上移至 ChatWindow（useBroadcast 不带 quota；额度为顶栏模型后展示位）
+  assert.match(source, /useBroadcast\(\{ notices: effectiveNotices, phase: phaseInfo, retryText \}\)/);
+  assert.match(source, /notice=\{\s*isMobile \|\| !noticeBroadcast \? null :/);
 
   // Mobile: top-centered with `left: "50%", top: 60`
   const mobileMatch = source.match(
@@ -21,5 +23,5 @@ test("renders temporary notices as a responsive toast stack (mobile only)", () =
   assert.ok(floatingProp, "NoticeShelf should accept a floating prop");
 
   // 移动端不向顶栏下发公告数据（避免双重显示）
-  assert.match(source, /broadcastNotices=\{isMobile \? null : notices\}/);
+  assert.match(source, /phase=\{isMobile \? null : phaseBroadcast\}/);
 });

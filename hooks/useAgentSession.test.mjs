@@ -239,9 +239,9 @@ test("delegates event stream readiness and hides an empty agent phase", () => {
   assert.match(chatWindowSource, /streamState\.isStreaming && hasStreamingContent && streamState\.streamingMessage/);
   // 状态不再以胶囊插入消息流，改为下发 ChatInput 由顶栏播报槽承载（移动端不下发）
   assert.doesNotMatch(chatWindowSource, /chat-status-pill/);
-  assert.match(chatWindowSource, /agentPhase=\{isMobile \? null : agentPhase\}/);
-  assert.match(chatWindowSource, /broadcastNotices=\{isMobile \? null : notices\}/);
-  assert.match(chatInputSource, /useBroadcast\(\{ notices: effectiveNotices, phase: phaseInfo, retryText, quota \}\)/);
+  assert.match(chatWindowSource, /phase=\{isMobile \? null : phaseBroadcast\}/);
+  // 播报槽合成上移至 ChatWindow，通知渲染在底部 widget shelf
+  assert.match(chatWindowSource, /useBroadcast\(\{ notices: effectiveNotices, phase: phaseInfo, retryText \}\)/);
 });
 
 test("uses one absolute agent-readiness deadline instead of a five-second transport deadline", () => {

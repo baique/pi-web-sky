@@ -13,6 +13,11 @@ import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { useI18n } from "@/hooks/useI18n";
+import { useBroadcast } from "@/hooks/useBroadcast";
+import { useTheme } from "@/hooks/useTheme";
+import { phaseLabel, orbModeForPhase } from "@/lib/agent-phase";
+import { NoticeInline } from "./ComposerHeader";
+import { formatTokenCount } from "./ChatInput";
 import { useAgentSession, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -244,6 +249,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
 export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
+  const { isDark } = useTheme();
 
   // Wrap onAgentEnd to play the completion sound. This is more reliable than
   // wrapping handleAgentEventRef because useAgentSession overwrites that ref
@@ -287,6 +293,30 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsPanelOpen,
   });
+
+  // 播报槽（桌面）：状态与通知分槽合成，结果下发 ChatInput（左槽）与 widget shelf（通知）
+  const compactSavedTokens = compactResult
+    ? Math.max(0, compactResult.tokensBefore - compactResult.estimatedTokensAfter)
+    : 0;
+  const compactResultText = compactResult
+    ? `${compactResult.reason && compactResult.reason !== "manual" ? `${compactResult.reason[0].toUpperCase()}${compactResult.reason.slice(1)} ` : t("chat.compacted")} ${formatTokenCount(compactResult.tokensBefore)} -> ${formatTokenCount(compactResult.estimatedTokensAfter)} tokens (${t("chat.tokensSaved", { saved: formatTokenCount(compactSavedTokens) })})`
+    : null;
+  const phaseInfo = useMemo(() => {
+    if (!agentPhase) return null;
+    const text = phaseLabel(agentPhase, t);
+    return text ? { text, orb: orbModeForPhase(agentPhase) } : null;
+  }, [agentPhase, t]);
+  const retryText = useMemo(
+    () => retryInfo ? `${t("chat.retrying", { attempt: retryInfo.attempt, max: retryInfo.maxAttempts })}${retryInfo.errorMessage ? ` — ${retryInfo.errorMessage}` : ""}` : null,
+    [retryInfo, t],
+  );
+  const effectiveNotices = useMemo(() => {
+    const arr = notices ?? [];
+    return compactResultText
+      ? [...arr, { id: "compact-result", message: compactResultText, type: "info" as const }]
+      : arr;
+  }, [notices, compactResultText]);
+  const { phase: phaseBroadcast, notice: noticeBroadcast, dismissError } = useBroadcast({ notices: effectiveNotices, phase: phaseInfo, retryText });
   const sessionBusy = agentRunning || bashRunning;
 
   useEffect(() => {
@@ -656,8 +686,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       cwd={session?.cwd ?? newSessionCwd}
       atBottom={atBottom}
       onScrollToBottom={scrollToBottom}
-      agentPhase={isMobile ? null : agentPhase}
-      broadcastNotices={isMobile ? null : notices}
+      phase={isMobile ? null : phaseBroadcast}
     />
   );
 
@@ -1033,7 +1062,18 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
       <div className="relative">
         {chatInputElement}
-        <ExtensionStatusBar statuses={extensionStatuses} widgets={extensionWidgets} tools={terminalBarToggle} />
+        <ExtensionStatusBar
+          statuses={extensionStatuses}
+          widgets={extensionWidgets}
+          tools={terminalBarToggle}
+          notice={
+            isMobile || !noticeBroadcast ? null : (
+              <div style={{ flex: "0 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 8, padding: "0 10px", maxWidth: "min(46vw, 480px)" }}>
+                <NoticeInline notice={noticeBroadcast} onDismissError={dismissError} isDark={isDark} />
+              </div>
+            )
+          }
+        />
       </div>
       </>
       )}
