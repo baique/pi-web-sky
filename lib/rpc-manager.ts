@@ -91,16 +91,6 @@ type ExtensionBindingOptions = {
   forceEmptySystemPrompt?: boolean;
 };
 
-const RUNNING_STATE_EVENT_TYPES = new Set([
-  "agent_start",
-  "agent_end",
-  "agent_settled",
-  "auto_compaction_start",
-  "auto_compaction_end",
-  "compaction_start",
-  "compaction_end",
-]);
-
 const IDLE_RESET_EVENT_TYPES = new Set([
   "agent_end",
   "agent_settled",
@@ -220,10 +210,8 @@ export class AgentSessionWrapper {
       }
       if (IDLE_RESET_EVENT_TYPES.has(event.type)) this.resetIdleTimer();
       this.emit(event);
-      if (RUNNING_STATE_EVENT_TYPES.has(event.type)) notifyRunningChange();
     });
     this.resetIdleTimer();
-    notifyRunningChange();
   }
 
   setForceEmptySystemPrompt(force: boolean): void {
@@ -319,7 +307,6 @@ export class AgentSessionWrapper {
       return await operation();
     } finally {
       this.resetIdleTimer();
-      notifyRunningChange();
     }
   }
 
@@ -443,11 +430,9 @@ export class AgentSessionWrapper {
             promptSettled = true;
             this.pendingPromptCount = Math.max(0, this.pendingPromptCount - 1);
             this.resetIdleTimer();
-            notifyRunningChange();
           };
 
           this.pendingPromptCount += 1;
-          notifyRunningChange();
           let prompt: Promise<void>;
           try {
             prompt = this.inner.prompt(command.message as string, {
@@ -757,7 +742,6 @@ export class AgentSessionWrapper {
             }),
           },
         );
-        notifyRunningChange();
         try {
           const result = await execution;
           this.persistBashOnlySession();
@@ -765,7 +749,6 @@ export class AgentSessionWrapper {
         } finally {
           this.resetIdleTimer();
           invalidateSessionListCache();
-          notifyRunningChange();
         }
       }
 
@@ -793,11 +776,7 @@ export class AgentSessionWrapper {
     try {
       this.inner.dispose();
     } finally {
-      try {
-        this.onDestroyCallback?.();
-      } finally {
-        notifyRunningChange();
-      }
+      this.onDestroyCallback?.();
     }
   }
 
@@ -1378,7 +1357,6 @@ declare global {
   var __piSessions: Map<string, AgentSessionWrapper> | undefined;
   var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>> | undefined;
   var __piStartingSessionCwds: Map<string, number> | undefined;
-  var __piRunningListeners: Set<(ids: string[]) => void> | undefined;
 }
 
 function getRegistry(): Map<string, AgentSessionWrapper> {
@@ -1515,50 +1493,6 @@ export function getRunningRpcSessionIds(): string[] {
     if (session.isRunning()) ids.add(session.sessionId || sessionId);
   }
   return [...ids];
-}
-
-// ----------------------------------------------------------------------------
-// Running-status broadcaster
-//
-// Pushes the current set of running session ids to subscribers whenever any
-// session's running state may have changed. This lets the sidebar receive live
-// updates over SSE instead of polling. Listeners live on globalThis so they
-// survive Next.js hot-reload.
-// ----------------------------------------------------------------------------
-
-function getRunningListeners(): Set<(ids: string[]) => void> {
-  if (!globalThis.__piRunningListeners) globalThis.__piRunningListeners = new Set();
-  return globalThis.__piRunningListeners;
-}
-
-/** Subscribe to running-session-id changes. Returns an unsubscribe function. */
-export function subscribeRunningSessions(listener: (ids: string[]) => void): () => void {
-  const listeners = getRunningListeners();
-  listeners.add(listener);
-  return () => { listeners.delete(listener); };
-}
-
-let lastRunningSnapshot = "";
-
-/**
- * Recompute the running-session-id set and, if it changed since the last
- * notification, broadcast it to subscribers.
- */
-export function notifyRunningChange(): void {
-  const listeners = getRunningListeners();
-  if (listeners.size === 0) {
-    // A future subscriber receives its own initial snapshot. Clear this one so
-    // its first state transition cannot match stale state from an old listener.
-    lastRunningSnapshot = "";
-    return;
-  }
-  const ids = getRunningRpcSessionIds();
-  const snapshot = JSON.stringify([...ids].sort());
-  if (snapshot === lastRunningSnapshot) return;
-  lastRunningSnapshot = snapshot;
-  for (const listener of listeners) {
-    try { listener(ids); } catch { /* ignore listener errors */ }
-  }
 }
 
 /**

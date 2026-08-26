@@ -37,13 +37,62 @@ const IGNORED_NAMES = new Set([
 
 const IGNORED_SUFFIXES = [".pyc"];
 
-const FILE_REQUEST_TYPES = ["list", "read", "download", "meta", "preview", "watch"] as const;
+const FILE_REQUEST_TYPES = ["list", "read", "download", "meta", "preview", "watch", "search"] as const;
 type FileRequestType = typeof FILE_REQUEST_TYPES[number];
 const FILE_REQUEST_TYPE_SET = new Set<string>(FILE_REQUEST_TYPES);
 const MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_UPLOAD_TOTAL_BYTES = 100 * 1024 * 1024;
 // Multipart boundaries and headers are not file bytes, but must be bounded too.
 const MAX_UPLOAD_REQUEST_BYTES = MAX_UPLOAD_TOTAL_BYTES + 1024 * 1024;
+
+// Bounded recursive search: hard caps keep large projects from runaway scans.
+const SEARCH_MAX_ENTRIES = 20_000;
+const SEARCH_MAX_DEPTH = 12;
+const SEARCH_MAX_RESULTS = 50;
+
+function searchFiles(root: string, rawQuery: string): {
+  matches: { path: string; isDir: boolean }[];
+  truncated: boolean;
+} {
+  const query = rawQuery.toLowerCase();
+  const matches: { path: string; isDir: boolean }[] = [];
+  let visited = 0;
+  let truncated = false;
+  const stack: { abs: string; rel: string; depth: number }[] = [
+    { abs: root, rel: "", depth: 0 },
+  ];
+  while (stack.length > 0 && !truncated) {
+    const { abs, rel, depth } = stack.pop()!;
+    let dirents: fs.Dirent[];
+    try {
+      dirents = fs.readdirSync(abs, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const d of dirents) {
+      if (++visited > SEARCH_MAX_ENTRIES) {
+        truncated = true;
+        break;
+      }
+      if (IGNORED_NAMES.has(d.name) || IGNORED_SUFFIXES.some((s) => d.name.endsWith(s))) continue;
+      const childAbs = path.join(abs, d.name);
+      const isDir = resolveDirentIsDirectory(d, childAbs);
+      if (isDir === null) continue;
+      const childRel = rel ? `${rel}/${d.name}` : d.name;
+      if (childRel.toLowerCase().includes(query)) {
+        matches.push({ path: childRel, isDir });
+        if (matches.length >= SEARCH_MAX_RESULTS) {
+          truncated = true;
+          break;
+        }
+      }
+      if (isDir && depth + 1 < SEARCH_MAX_DEPTH) {
+        stack.push({ abs: childAbs, rel: childRel, depth: depth + 1 });
+      }
+    }
+  }
+  return { matches, truncated };
+}
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
   ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
@@ -620,6 +669,16 @@ export async function GET(
           "X-Accel-Buffering": "no",
         },
       });
+    }
+
+    // type === "search"
+    if (type === "search") {
+      if (!stat?.isDirectory()) {
+        return NextResponse.json({ error: "Not a directory" }, { status: 400 });
+      }
+      const query = (request.nextUrl.searchParams.get("q") ?? "").trim();
+      if (!query) return NextResponse.json({ matches: [], truncated: false });
+      return NextResponse.json(searchFiles(filePath, query));
     }
 
     // type === "list"

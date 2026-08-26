@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const agentEventsSource = await readFile(new URL("./[id]/events/route.ts", import.meta.url), "utf8");
-const runningEventsSource = await readFile(new URL("./running/events/route.ts", import.meta.url), "utf8");
 const agentEventStreamSource = await readFile(new URL("../../../lib/agent-event-stream.ts", import.meta.url), "utf8");
 
 test("agent SSE starts sessions asynchronously and disables response buffering", () => {
@@ -16,7 +15,7 @@ test("agent SSE starts sessions asynchronously and disables response buffering",
 });
 
 test("SSE routes reuse one TextEncoder per stream", () => {
-  for (const source of [agentEventStreamSource, runningEventsSource]) {
+  for (const source of [agentEventStreamSource]) {
     assert.equal((source.match(/new TextEncoder\(\)/g) ?? []).length, 1);
     assert.match(source, /controller\.enqueue\(encoder\.encode\(/);
   }

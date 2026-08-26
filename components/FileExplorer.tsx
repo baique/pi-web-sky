@@ -98,6 +98,16 @@ async function fetchEntries(dirPath: string): Promise<FileNode[]> {
   }));
 }
 
+async function searchFiles(cwd: string, query: string): Promise<{
+  matches: { path: string; isDir: boolean }[];
+  truncated: boolean;
+}> {
+  const params = new URLSearchParams({ type: "search", q: query });
+  const res = await fetch(`/api/files/${encodeFilePathForApi(cwd)}?${params.toString()}`);
+  if (!res.ok) throw new Error(`Search failed (HTTP ${res.status})`);
+  return res.json();
+}
+
 async function fetchGitStatus(cwd: string): Promise<GitStatusResponse> {
   const params = new URLSearchParams({ cwd });
   const res = await fetch(`/api/git/status?${params.toString()}`);
@@ -514,6 +524,60 @@ function ChangeRow({
   );
 }
 
+interface SearchMatch {
+  path: string;
+  isDir: boolean;
+}
+
+function SearchRow({
+  match,
+  cwd,
+  onOpenFile,
+}: {
+  match: SearchMatch;
+  cwd: string;
+  onOpenFile: OpenFileHandler;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const name = getFileName(match.path);
+  return (
+    <div
+      onClick={() => onOpenFile(joinFilePath(cwd, match.path), name)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      title={match.path}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        paddingLeft: 10,
+        paddingRight: 8,
+        height: 24,
+        cursor: "pointer",
+        background: hovered ? "var(--side-hover)" : "transparent",
+        borderRadius: 4,
+        userSelect: "none",
+      }}
+    >
+      <span style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+        {match.isDir ? <FolderIcon size={13} /> : getFileIcon(name, 13)}
+      </span>
+      <span
+        style={{
+          fontSize: 12,
+          color: "var(--text)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          flex: 1,
+        }}
+      >
+        {match.path}
+      </span>
+    </div>
+  );
+}
+
 export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({
   cwd,
   onOpenFile,
@@ -538,6 +602,8 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSummary, setUploadSummary] = useState<UploadSummary | null>(null);
   const [pendingConflict, setPendingConflict] = useState<PendingConflict | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchMatch[] | null>(null);
   const prevCwdRef = useRef<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}`;
@@ -681,6 +747,8 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       setUploadSummary(null);
       setPendingConflict(null);
       setUploadError(null);
+      setSearchQuery("");
+      setSearchResults(null);
     }
 
     setLoading(cwdChanged);
@@ -712,6 +780,21 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       });
     return () => { cancelled = true; };
   }, [cwd, refreshKey, treeRefreshKey]);
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchResults(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchFiles(cwd, query)
+        .then((r) => { if (!cancelled) setSearchResults(r.matches); })
+        .catch(() => { if (!cancelled) setSearchResults([]); });
+    }, 200);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [cwd, searchQuery]);
 
   useEffect(() => {
     onChangesCountChange?.(gitFiles.length);
@@ -871,7 +954,39 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
       {(changesCollapsed || gitFiles.length === 0) && (
         <div style={{ padding: "2px 4px" }}>
-          {loading ? (
+          <div style={{ padding: "0 6px 4px" }}>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") setSearchQuery(""); }}
+              placeholder={t("files.searchPlaceholder")}
+              aria-label={t("files.searchPlaceholder")}
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                height: 24,
+                padding: "0 8px",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                background: "var(--side-input)",
+                color: "var(--text)",
+                fontSize: 12,
+                outline: "none",
+              }}
+            />
+          </div>
+          {searchResults !== null ? (
+            searchResults.length > 0 ? (
+              searchResults.map((match) => (
+                <SearchRow key={match.path} match={match} cwd={cwd} onOpenFile={onOpenFile} />
+              ))
+            ) : (
+              <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>
+                {t("files.noFiles")}
+              </div>
+            )
+          ) : loading ? (
             <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>Loading files...</div>
           ) : error ? (
             <div style={{ padding: "8px 12px", fontSize: 11, color: "#f87171" }}>{error}</div>
