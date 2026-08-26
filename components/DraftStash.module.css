@@ -74,11 +74,13 @@
   overscroll-behavior: contain;
   z-index: 500;
   padding: 4px;
-  /* 高浓度：完全不透明 */
-  background: var(--bg);
+  /* 与模型选择弹窗一套：同玻璃配方、同圆角、同阴影 */
+  background: var(--frame-glass);
+  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18), 0 6px 24px rgba(0, 0, 0, 0.18);
+  border-radius: 10px;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.1);
 }
 
 .activeBar {
