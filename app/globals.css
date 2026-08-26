@@ -1914,17 +1914,32 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
 }
 .terminal-placeholder button:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
 
-/* 终端开关：widget shelf 之外独立一行（右对齐）。
-   旧版定位在 status shelf 左端的 border-left 已废弃。 */
-.terminal-toggle-row {
+/* 底部一行：widget（flex:1 占满） + 扩展按钮容器（flex:0 0 auto 自适应宽度）。 */
+.bottom-band {
   display: flex;
+  align-items: stretch;
+  min-width: 0;
+  gap: 1px;
+}
+
+/* widget：占用除扩展按钮容器之外的全部宽度 */
+.bottom-band .extension-status-shelf {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 扩展按钮容器：宽度随内容（目前=终端按钮） */
+.extension-actions {
+  display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  justify-content: flex-end;
-  padding: 0 14px;
+  justify-content: center;
+  min-width: 0;
   background: color-mix(in srgb, var(--bg-panel) 45%, transparent);
   border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   border-radius: 10px;
   margin-top: 4px;
+  padding: 0 4px;
 }
 .terminal-bar-toggle {
   display: flex;

@@ -814,14 +814,16 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               </div>
             </div>
             {chatInputElement}
-            {/* 终端开关：widget shelf 之外，独立一行（右对齐） */}
-            {!isMobile && (
-              <div className="terminal-toggle-row">{terminalBarToggle}</div>
-            )}
-            <ExtensionStatusBar
-              statuses={extensionStatuses}
-              widgets={extensionWidgets}
-            />
+            {/* 底部一行：widget（占满） + 扩展按钮容器（auto，目前=终端） */}
+            <div className="bottom-band">
+              <ExtensionStatusBar
+                statuses={extensionStatuses}
+                widgets={extensionWidgets}
+              />
+              {!isMobile && (
+                <div className="extension-actions">{terminalBarToggle}</div>
+              )}
+            </div>
           </div>
         </div>
       ) : (
@@ -1065,21 +1067,23 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
       <div className="relative">
         {chatInputElement}
-        {/* 终端开关：widget shelf 之外，独立一行（右对齐） */}
-        {!isMobile && (
-          <div className="terminal-toggle-row">{terminalBarToggle}</div>
-        )}
-        <ExtensionStatusBar
-          statuses={extensionStatuses}
-          widgets={extensionWidgets}
-          notice={
-            isMobile || !noticeBroadcast ? null : (
-              <div style={{ flex: "0 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 8, padding: "0 10px", maxWidth: "min(46vw, 480px)" }}>
-                <NoticeInline notice={noticeBroadcast} onDismissError={dismissError} isDark={isDark} />
-              </div>
-            )
-          }
-        />
+        {/* 底部一行：widget（占满；内部右侧=通知按需显隐） + 扩展按钮容器（auto，目前=终端） */}
+        <div className="bottom-band">
+          <ExtensionStatusBar
+            statuses={extensionStatuses}
+            widgets={extensionWidgets}
+            notice={
+              isMobile || !noticeBroadcast ? null : (
+                <div style={{ flex: "0 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 8, padding: "0 10px", maxWidth: "min(46vw, 480px)" }}>
+                  <NoticeInline notice={noticeBroadcast} onDismissError={dismissError} isDark={isDark} />
+                </div>
+              )
+            }
+          />
+          {!isMobile && (
+            <div className="extension-actions">{terminalBarToggle}</div>
+          )}
+        </div>
       </div>
       </>
       )}
