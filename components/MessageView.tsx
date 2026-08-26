@@ -882,8 +882,8 @@ function AssistantMessageView({
       >
       {!bare && (
       <>
-      {/* Model label — inside the bubble, meta-level contrast.
-          超长时 sticky 吸附顶部，点击头部空白处滚回本消息开头（点击内部按钮不受影响）。 */}
+      {/* Sticky head — 平时无存在感（元信息已下沉到底部工具栏）；
+          仅超长消息吸附时浮现模型名，点击头部空白处滚回本消息开头。 */}
       <div
         ref={headRef}
         className="chat-msg-head"
@@ -896,66 +896,10 @@ function AssistantMessageView({
           : undefined}
         title={headerState !== "off" ? "回到本消息开头" : undefined}
       >
-        {message.provider && (
-          <span style={{ fontSize: "var(--bubble-title-fs)", fontWeight: 600 }}>{modelNames?.[`${message.provider}:${message.model}`] ?? modelNames?.[message.model] ?? message.model}</span>
-        )}
-        {isStreaming && (() => {
-          const est = Math.round(estimatedTokens);
-          return (
-            <>
-
-              {est > 0 && (
-                <span style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text-meta)" }} title={t("i18n.estimatedTokens")}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 11, fontWeight: 400 }}>
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
-                    </svg>
-                    {est}
-                  </span>
-                  {tps !== null && (() => {
-                    const bg = tps >= 50 ? "#53b3cb" : tps >= 30 ? "#9bc53d" : tps >= 15 ? "#f9c22e" : "#e01a4f";
-                    const badgeText = tps >= 15 ? "#0f172a" : "#fff";
-                    return (
-                      <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 4, background: bg, color: badgeText, fontSize: 11, fontWeight: 400 }}>
-                        {tps.toFixed(1)} t/s
-                      </span>
-                    );
-                  })()}
-                </span>
-              )}
-            </>
-          );
-        })()}
-        {onPin && (
-          <button
-            onClick={(e) => onPin(message, entryId, e.currentTarget.getBoundingClientRect().top)}
-            title={t("i18n.pinTitle")}
-            style={{
-              display: "flex", alignItems: "center", gap: 4,
-              marginLeft: "auto",
-              padding: "2px 8px", height: 22,
-              background: "none", border: "none", borderRadius: 5,
-              color: "var(--text-meta)",
-              cursor: "pointer",
-              fontSize: 11, fontWeight: 400,
-              whiteSpace: "nowrap",
-              opacity: hovered ? 1 : 0,
-              pointerEvents: hovered ? "auto" : "none",
-              transition: "opacity 0.12s, color 0.12s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-meta)"; }}
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 17v5" />
-              <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0-2-2 3 3 0 0 0-3 3V9a4 4 0 0 1-1 2.65" />
-            </svg>
-            {t("i18n.pin")}
-          </button>
+        {headerState === "stuck" && message.provider && (
+          <span style={{ fontWeight: 500 }}>{modelNames?.[`${message.provider}:${message.model}`] ?? modelNames?.[message.model] ?? message.model}</span>
         )}
       </div>
-      {/* Hairline divider under the model name */}
-      <div style={{ height: 1, background: "var(--bubble-hairline)", margin: "6px -14px 0" }} />
       </>
       )}
 
@@ -988,56 +932,112 @@ function AssistantMessageView({
           <TurnWrittenFiles files={writtenFiles} onOpenFile={onOpenFile} />
         )}
 
-        {!bare && !isStreaming && (message.usage || time || textContent) && (
-          <>
-            {/* Hairline divider above the footer row */}
-            <div style={{ height: 1, background: "var(--bubble-hairline)", margin: "2px -14px 0" }} />
-            <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
-              {message.usage && (
-                <span style={{ fontSize: 11, color: "var(--text-meta)" }}>
-                  {formatUsage(message.usage)}
-                </span>
-              )}
-              {textContent && (
-                <button
-                  onClick={copyContent}
-                   title={t("i18n.copyMessage")}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 4,
-                    padding: "3px 8px", height: 22,
-                    background: "none", border: "none",
-                    borderRadius: 5,
-                    color: copied ? "var(--accent)" : "var(--text-muted)",
-                    cursor: "pointer",
-                    fontSize: 11, fontWeight: 400,
-                    whiteSpace: "nowrap",
-                    opacity: hovered ? 1 : 0,
-                    pointerEvents: hovered ? "auto" : "none",
-                    transition: "opacity 0.12s, color 0.12s",
-                  }}
-                  onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "var(--accent)"; }}
-                  onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-muted)"; }}
-                >
-                  {copied ? (
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  ) : (
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                    </svg>
-                  )}
-                   {copied ? t("i18n.copied") : t("i18n.copy")}
-                </button>
-              )}
-              {time && (
-                <span style={{ fontSize: 10, color: "var(--text-meta)", marginLeft: "auto" }}>{time}</span>
-              )}
-            </div>
-          </>
-        )}
       </div>
+
+      {/* 底部元信息工具栏 —— 气泡外，弱化存在感：
+          模型名 · 字数/统计 · 复制 · 钉 · 时间；按钮 hover 显现。
+          位于最外层 wrapper 内，hover 状态天然覆盖本行。 */}
+      {!bare && (message.provider || isStreaming || message.usage || time || textContent || onPin) && (
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginTop: 8,
+          paddingLeft: 4,
+          fontSize: 11,
+          color: "#ffffff",
+          // 与用户消息操作栏同款：白字 + exclusion 混合，浅壁纸自动变深、
+          // 深壁纸保持亮，不依赖固定色值
+          mixBlendMode: "exclusion",
+        }}>
+          {message.provider && (
+            <span style={{ whiteSpace: "nowrap" }}>
+              {modelNames?.[`${message.provider}:${message.model}`] ?? modelNames?.[message.model] ?? message.model}
+            </span>
+          )}
+          {isStreaming && (() => {
+            const est = Math.round(estimatedTokens);
+            if (est <= 0) return null;
+            return (
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }} title={t("i18n.estimatedTokens")}>
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
+                </svg>
+                {est}
+                {tps !== null && (
+                  <span>{tps.toFixed(1)} t/s</span>
+                )}
+              </span>
+            );
+          })()}
+          {!isStreaming && message.usage && (
+            <span>{formatUsage(message.usage)}</span>
+          )}
+          {textContent && (
+            <button
+              onClick={copyContent}
+              title={t("i18n.copyMessage")}
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "3px 8px", height: 22,
+                background: "none", border: "none",
+                borderRadius: 5,
+                color: copied ? "var(--accent)" : "#ffffff",
+                cursor: "pointer",
+                fontSize: 11, fontWeight: 400,
+                whiteSpace: "nowrap",
+                opacity: hovered ? 1 : 0,
+                pointerEvents: hovered ? "auto" : "none",
+                transition: "opacity 0.12s, color 0.12s",
+              }}
+              onMouseEnter={(e) => { if (!copied) { e.currentTarget.style.fontWeight = "600"; e.currentTarget.style.textDecoration = "underline"; } }}
+              onMouseLeave={(e) => { if (!copied) { e.currentTarget.style.fontWeight = "400"; e.currentTarget.style.textDecoration = "none"; } }}
+            >
+              {copied ? (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              )}
+              {copied ? t("i18n.copied") : t("i18n.copy")}
+            </button>
+          )}
+          {onPin && (
+            <button
+              onClick={(e) => onPin(message, entryId, e.currentTarget.getBoundingClientRect().top)}
+              title={t("i18n.pinTitle")}
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "3px 8px", height: 22,
+                background: "none", border: "none",
+                borderRadius: 5,
+                color: "#ffffff",
+                cursor: "pointer",
+                fontSize: 11, fontWeight: 400,
+                whiteSpace: "nowrap",
+                opacity: hovered ? 1 : 0,
+                pointerEvents: hovered ? "auto" : "none",
+                transition: "opacity 0.12s, color 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.fontWeight = "600"; e.currentTarget.style.textDecoration = "underline"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.fontWeight = "400"; e.currentTarget.style.textDecoration = "none"; }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 17v5" />
+              <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0-2-2 3 3 0 0 0-3 3V9a4 4 0 0 1-1 2.65" />
+            </svg>
+              {t("i18n.pin")}
+            </button>
+          )}
+          {time && (
+            <span style={{ marginLeft: "auto", fontSize: 10 }}>{time}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
