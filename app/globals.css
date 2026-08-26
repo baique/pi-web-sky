@@ -1919,7 +1919,7 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
   display: flex;
   align-items: stretch;
   min-width: 0;
-  gap: 1px;
+  /* 中间无间距：widget 与扩展按钮容器无缝衔接 */
 }
 
 /* widget：占用除扩展按钮容器之外的全部宽度 */
