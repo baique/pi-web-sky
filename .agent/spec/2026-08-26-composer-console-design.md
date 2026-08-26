@@ -56,7 +56,8 @@
 
 - ⏳ 排队计数 chip 在顶栏右侧，点击展开发件箱区。
 - 面板外散装横幅清零：Retry → P2 状态；Compact 结果 → P1 公告；排队面板 → §4 发件箱。
-- 顶栏底色用近实底层级 token（--bubble-code-bg 一档），文本 --text，播报 12px mono；
+- 顶栏不引入任何新样式：底色/边框/文字全部复用输入框区域已有 token
+  （面板同款 --frame-glass 玻璃体系与 --bubble-* 层级，近实底选 --bubble-code-bg 一档）；
   删除旧 `.chat-status-pill` 样式与消息流内两处胶囊渲染（浅色对比度问题随之根治）。
 
 ## §3 输入行与右下角按钮
@@ -82,8 +83,9 @@
 
 ## §6 浅色主题修复
 
-根因：旧胶囊玻璃浓度低于气泡。新顶栏一律近实底（bg 92% + panel 一档），
-明暗主题共用同一 token 层级，不再出现"深色正常浅色看不清"。
+根因：旧胶囊玻璃浓度低于气泡。原则：**不新增任何样式**，全部采用当前项目输入框
+部分已有的 token 与玻璃层级（见 §2），近实底选 `--bubble-code-bg` 档位，
+明暗主题自动跟随既有体系，不再出现“深色正常浅色看不清”。
 
 ## §7 额度预留位（本期只留座，不实现数据）
 
@@ -112,7 +114,7 @@ type QuotaInfo =
 | 删除消息流胶囊 ×2、NoticeShelf 桌面端删除、notices/retry 改喂数据 | `components/ChatWindow.tsx` |
 | 发件箱区、右下角锚定按钮、textarea padding | `components/ChatInput.tsx` |
 | DraftStash → TODO + 浮层化 | `components/DraftStash.tsx` |
-| token / i18n / 测试同步 | `app/globals.css`、i18n 资源、相关 `*.test.mjs` |
+| token / i18n / 测试同步（不新增样式 token） | i18n 资源、相关 `*.test.mjs` |
 
 ## 验证策略
 
