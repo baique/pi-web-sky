@@ -15,11 +15,14 @@ export type QuotaInfo =
   | { kind: "balance"; text: string }
   | { kind: "usage"; items: { label: string; pct: number; text: string }[] };
 
-export type Broadcast =
-  | { level: "error"; text: string } // P0 常驻直到用户关闭
-  | { level: "notice"; text: string; kind: BroadcastNotice["type"] } // P1 插播，随 notices 自身过期消失
-  | { level: "phase"; text: string; orb: "breathing" | "working" } // P2 运行状态/重试
-  | { level: "idle"; quota: QuotaInfo | null }; // P3 空闲信息
+/** 左槽：运行状态（重试文本已在上游合并为 working 态） */
+export type PhaseBroadcast = { text: string; orb: "breathing" | "working" };
+
+/** 右区：临时通知（P0 错误常驻 / P1 插播）与空闲信息（P3 额度） */
+export type NoticeBroadcast =
+  | { level: "error"; text: string }
+  | { level: "notice"; text: string; kind: BroadcastNotice["type"] }
+  | { level: "idle"; quota: QuotaInfo | null };
 
 /** 第一条 error 公告 id（notices 为旧→新序） */
 export function pickPinnedErrorId(notices: BroadcastNotice[]): string | null {
@@ -36,34 +39,15 @@ export function pickAnnouncement(notices: BroadcastNotice[]): BroadcastNotice | 
   return null;
 }
 
-export function resolveBroadcast(input: {
-  notices: BroadcastNotice[];
-  dismissedErrors: readonly string[];
-  phase: { text: string; orb: "breathing" | "working" } | null;
-  retryText: string | null;
-  quota: QuotaInfo | null;
-}): Broadcast {
-  const { notices, dismissedErrors, phase, retryText, quota } = input;
-  const errId = pickPinnedErrorId(notices);
-  if (errId && !dismissedErrors.includes(errId)) {
-    const err = notices.find((n) => n.id === errId);
-    if (err) return { level: "error", text: err.message };
-  }
-  const ann = pickAnnouncement(notices);
-  if (ann) return { level: "notice", text: ann.message, kind: ann.type };
-  if (retryText) return { level: "phase", text: retryText, orb: "working" };
-  if (phase) return { level: "phase", text: phase.text, orb: phase.orb };
-  return { level: "idle", quota };
-}
-
 /**
- * 播报槽：单一出口按 P0(error) > P1(公告) > P2(状态/重试) > P3(额度) 显示。
- * error 在 notices 过期移除后仍需常驻 → 记住最近出现的 error id，直到 dismiss。
+ * 播报槽：状态与通知分槽显示，不再互斥抢占。
+ * - 左槽 phase：重试 > agent 阶段；空闲时由调用方以模型选择等静态内容填充
+ * - 右区 notice：P0 错误（常驻直到关闭）> P1 公告插播 > P3 额度
  * 公告的排队与过期直接复用 useAgentSession 的 notice 机制，此处不重造。
  */
 export function useBroadcast(opts: {
   notices: BroadcastNotice[];
-  phase: { text: string; orb: "breathing" | "working" } | null;
+  phase: PhaseBroadcast | null;
   retryText: string | null;
   quota?: QuotaInfo | null;
 }) {
@@ -75,7 +59,6 @@ export function useBroadcast(opts: {
   useEffect(() => {
     if (currentErrId && currentErrId !== seenErrRef.current) {
       seenErrRef.current = currentErrId;
-      // 新 error 出现：记录 id；dismiss 后它过期移除、下一条 error 到来时重新 pin
       setDismissedErrors((prev) => (prev.includes(currentErrId) ? prev : [...prev.slice(-9), currentErrId]));
     }
     if (!currentErrId) seenErrRef.current = null;
@@ -88,8 +71,21 @@ export function useBroadcast(opts: {
     });
   }, [notices]);
 
-  return {
-    broadcast: resolveBroadcast({ notices, dismissedErrors, phase, retryText, quota }),
-    dismissError,
-  };
+  const phaseBroadcast: PhaseBroadcast | null = retryText
+    ? { text: retryText, orb: "working" }
+    : phase;
+
+  let noticeBroadcast: NoticeBroadcast;
+  const errId = currentErrId && !dismissedErrors.includes(currentErrId) ? currentErrId : null;
+  const err = errId ? notices.find((n) => n.id === errId) : null;
+  if (err) {
+    noticeBroadcast = { level: "error", text: err.message };
+  } else {
+    const ann = pickAnnouncement(notices);
+    noticeBroadcast = ann
+      ? { level: "notice", text: ann.message, kind: ann.type }
+      : { level: "idle", quota };
+  }
+
+  return { phase: phaseBroadcast, notice: noticeBroadcast, dismissError };
 }
