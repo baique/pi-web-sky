@@ -3127,26 +3127,23 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     onClick={onAbort}
                     title={t("chat.stopAgent")}
                     aria-label={t("chat.stopAgent")}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = "#dc2626"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = "#ef4444"; }}
                     style={{
-                      flexShrink: 0,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      width: 32, height: 32, padding: 0,
-                      background: "var(--frame-glass)",
-                      backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-                      WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-                      border: "1px solid color-mix(in srgb, var(--border) 90%, transparent)",
-                      borderRadius: "50%",
+                      display: "flex", alignItems: "center", gap: 5,
+                      padding: 0,
+                      background: "transparent",
+                      border: "none",
                       color: "#ef4444",
                       cursor: "pointer",
-                      transition: "background 0.12s, border-color 0.12s",
-                      boxShadow: "0 1px 4px -1px rgba(15,23,42,0.16)",
+                      fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
+                      transition: "color 0.12s",
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--bg-hover) 55%, var(--frame-glass))"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = "var(--frame-glass)"; }}
                   >
-                    <svg width="13" height="13" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                      <rect x="1.5" y="1.5" width="9" height="9" rx="2.2" fill="currentColor" />
+                    <svg width="13" height="13" viewBox="0 0 12 12" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+                      <rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor" />
                     </svg>
+                    {t("chat.stop")}
                   </button>
                   {hasInputText && onSteer && (
                     <button
