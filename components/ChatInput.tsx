@@ -2376,8 +2376,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             }}
           />
 
-          {/* 右下角悬浮操作区：流式=引导/后续，空闲=发送（按钮样式不变，仅位置浮动） */}
-          <div style={{ position: "absolute", right: 8, bottom: 6, display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          {/* 右下角悬浮操作区：流式=引导/后续，空闲=发送。
+              取巧：背景用与 composer 面板完全一致的玻璃配方（--frame-glass + 同款 blur/saturate），
+              视觉上与输入底融为一体，又能干净地盖住流到按钮下的文字 */}
+          <div style={{
+            position: "absolute", right: 8, bottom: 6,
+            display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+            background: "var(--frame-glass)",
+            backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+            WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+            border: "1px solid color-mix(in srgb, var(--border) 30%, transparent)",
+            borderRadius: 10,
+            padding: "3px 6px",
+          }}>
           {isStreaming ? (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {onSteer && (
