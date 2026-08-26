@@ -45,4 +45,5 @@ next-env.d.ts
 /.pi/
 /.playwright-mcp/
 *.png
+!docs/**/*.png
 .worktrees/
