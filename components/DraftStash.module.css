@@ -1,11 +1,11 @@
 .panel {
+  position: relative;
+  /* 入场动画的 transform 填充会创建堆叠上下文，必须自身提权，
+     否则浮层的 z-index 只在 chip 子树内生效，会被后面的输入行盖住 */
+  z-index: 30;
   flex-shrink: 0;
   min-width: 0;
-  width: 100%;
-  /* 无独立盒子装饰：背景/边框/圆角/阴影统一由外层 composer 面板承担。
-     宽度继承 composer（= 输入框列），与输入框严格同宽，不再手写对齐用的
-     margin 计算（旧实现会在宽屏/折叠 sidebar 时溢出）。 */
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 38%, transparent);
+  /* 顶栏右侧 chip 锚点；展开列表为向下弹出浮层，不推挤输入区 */
   animation: draft-stash-in 0.18s ease-out both;
 }
 
@@ -20,29 +20,32 @@
 
 /* 收起条：标题级入口（N 条草稿），点击展开/收起列表；不做 hover 变色 */
 .toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 10px;
+  gap: 6px;
+  /* 纯文本态：与模型选择器统一（12px mono、行高 20px、无胶囊背景） */
+  height: 20px;
+  padding: 0;
   border: none;
-  border-radius: 12px;
   background: none;
   color: var(--text-muted);
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  line-height: 20px;
   cursor: pointer;
   transition: color 0.12s;
 }
 .toggle:hover {
   color: var(--text);
 }
+.toggleOpen {
+  color: var(--text);
+}
 
 .toggleLabel {
-  flex: 1;
   min-width: 0;
-  text-align: left;
-  font-weight: 500;
+  font-weight: 400;
+  line-height: 20px;
 }
 
 .toggleArrow {
@@ -59,9 +62,23 @@
 
 /* 展开区：面板内的内凹窗（浅底 + 小圆角），与输入区分隔 */
 .expandArea {
-  margin-top: 2px;
-  padding-top: 2px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 38%, transparent);
+  position: absolute;
+  /* 向上展开：composer 贴近视口底部，向下会被裁切；上方是整个消息区 */
+  bottom: calc(100% + 6px);
+  right: 0;
+  /* 百分比宽度：随视口伸缩；窄屏钳制不溢出视口 */
+  width: clamp(280px, 34vw, 480px);
+  max-width: calc(100vw - 48px);
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: 500;
+  padding: 4px;
+  /* 高浓度：完全不透明 */
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18), 0 6px 24px rgba(0, 0, 0, 0.18);
 }
 
 .activeBar {
@@ -120,7 +137,7 @@
   gap: 1px;
   padding: 3px;
   margin: 2px;
-  background: color-mix(in srgb, var(--bg-panel) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 85%, var(--bg));
   border-radius: 10px;
 }
 
@@ -136,6 +153,14 @@
 }
 .row:hover {
   background: var(--bg-hover);
+}
+
+/* 注入 + 删除 同侧（行右侧） */
+.rowActions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 .row:hover .btn {
   color: var(--text);

@@ -6,6 +6,7 @@ const source = await readFile(new URL("./useAgentSession.ts", import.meta.url), 
 const chatWindowSource = await readFile(new URL("../components/ChatWindow.tsx", import.meta.url), "utf8");
 const chatInputSource = await readFile(new URL("../components/ChatInput.tsx", import.meta.url), "utf8");
 const appShellSource = await readFile(new URL("../components/AppShell.tsx", import.meta.url), "utf8");
+const agentPhaseSource = await readFile(new URL("../lib/agent-phase.ts", import.meta.url), "utf8");
 
 test("keeps the session event stream open through the idle grace window", () => {
   const finishSource = source.slice(
@@ -236,8 +237,11 @@ test("delegates event stream readiness and hides an empty agent phase", () => {
   assert.match(ensureSource, /eventConnectionRef\.current!\.maintain\(sid\)/);
   assert.match(chatWindowSource, /const hasStreamingContent = Boolean\(streamState\.streamingMessage\?\.content\.length\)/);
   assert.match(chatWindowSource, /streamState\.isStreaming && hasStreamingContent && streamState\.streamingMessage/);
-  assert.match(chatWindowSource, /agentRunning && !hasStreamingContent && agentPhase/);
-  assert.match(chatWindowSource, /return null;/);
+  // 状态不再以胶囊插入消息流，改为下发 ChatInput 由顶栏播报槽承载（移动端不下发）
+  assert.doesNotMatch(chatWindowSource, /chat-status-pill/);
+  assert.match(chatWindowSource, /agentPhase=\{isMobile \? null : agentPhase\}/);
+  assert.match(chatWindowSource, /broadcastNotices=\{isMobile \? null : notices\}/);
+  assert.match(chatInputSource, /useBroadcast\(\{ notices: effectiveNotices, phase: phaseInfo, retryText, quota \}\)/);
 });
 
 test("uses one absolute agent-readiness deadline instead of a five-second transport deadline", () => {
@@ -297,8 +301,9 @@ test("shows the latest streamed tool execution progress in the running phase", (
 
   assert.match(updateSource, /getToolExecutionProgress\(event\.partialResult\)/);
   assert.match(updateSource, /tools: \[\.\.\.tools\.filter\([\s\S]*?, updated\]/);
-  assert.match(chatWindowSource, /if \(latest\?\.progress\)/);
-  assert.match(chatWindowSource, /chat\.runningNamedTool[\s\S]*latest\.progress/);
+  // 阶段文案已抽到 lib/agent-phase.ts（供播报槽使用）
+  assert.match(agentPhaseSource, /if \(latest\?\.progress\)/);
+  assert.match(agentPhaseSource, /chat\.runningNamedTool[\s\S]*latest\.progress/);
 });
 
 test("plays the enabled sound once for each extension dialog", () => {

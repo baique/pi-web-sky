@@ -59,6 +59,7 @@ export function DraftStashList({
   onPick,
   onDelete,
   onCancelActive,
+  panelRef,
 }: {
   items: DraftItem[];
   expanded: boolean;
@@ -67,36 +68,47 @@ export function DraftStashList({
   onPick: (id: string) => void;
   onDelete: (id: string) => void;
   onCancelActive: () => void;
+  panelRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   if (items.length === 0) return null;
   return (
     <div
+      ref={panelRef}
       className={styles.panel}
       role="region"
-      aria-label="草稿暂存区"
+      aria-label="TODO 暂存区"
     >
       <button
         type="button"
-        className={styles.toggle}
+        className={`${styles.toggle}${expanded ? ` ${styles.toggleOpen}` : ""}`}
         onClick={onToggle}
         aria-expanded={expanded}
-        aria-label={expanded ? "收起草稿列表" : "展开草稿列表"}
+        aria-label={expanded ? "收起 TODO 列表" : "展开 TODO 列表"}
       >
-        <span className={styles.toggleLabel}>{items.length} 条草稿</span>
-        <span className={styles.toggleArrow}>{expanded ? "▴" : "▾"}</span>
+        <svg
+          width="12" height="12" viewBox="0 0 16 16" fill="none"
+          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
+          strokeLinejoin="round" aria-hidden="true"
+          style={{ display: "block", flexShrink: 0 }}
+        >
+          <rect x="2" y="2" width="12" height="12" rx="3" />
+          <path d="M5.5 8.2l1.8 1.8 3.4-3.6" />
+        </svg>
+        <span className={styles.toggleLabel}>TODO {items.length}</span>
+        <span className={styles.toggleArrow} aria-hidden="true">{expanded ? "▴" : "▾"}</span>
       </button>
       {expanded && (
         <div className={styles.expandArea}>
           {activeItem && (
             <div className={styles.activeBar}>
               <span className={styles.activeDot} />
-              <span className={styles.activeLabel}>正在编辑草稿</span>
+              <span className={styles.activeLabel}>正在编辑 TODO</span>
               <button
                 type="button"
                 className={styles.cancelBtn}
                 onClick={onCancelActive}
                 title="取消关联（内容保留在输入框）"
-                aria-label="取消草稿关联"
+                aria-label="取消 TODO 关联"
               >
                 ✕
               </button>
@@ -105,40 +117,43 @@ export function DraftStashList({
           <div className={styles.list}>
             {items.map((item) => (
               <div key={item.id} className={styles.row}>
-                <button
-                  type="button"
-                  className={styles.btn}
-                  onClick={() => onPick(item.id)}
-                  title="回填到输入框"
-                  aria-label="回填到输入框"
-                >
-                  <svg
-                    width="11" height="11" viewBox="0 0 10 10" fill="none"
-                    stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
-                  >
-                    <path d="M9 5 H1" />
-                    <polyline points="4 1.5 1 5 4 8.5" />
-                  </svg>
-                </button>
                 <span className={styles.content} title={item.content}>
                   {item.content}
                 </span>
                 <span className={styles.time}>{formatRelativeTime(item.updatedAt)}</span>
-                <button
-                  type="button"
-                  className={`${styles.btn} ${styles.btnDanger}`}
-                  onClick={() => onDelete(item.id)}
-                  title="删除草稿"
-                  aria-label="删除草稿"
-                >
-                  <svg
-                    width="11" height="11" viewBox="0 0 10 10" fill="none"
-                    stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
+                {/* 注入 + 删除 归并在一侧，方便点击 */}
+                <span className={styles.rowActions}>
+                  <button
+                    type="button"
+                    className={styles.btn}
+                    onClick={() => onPick(item.id)}
+                    title="回填到输入框"
+                    aria-label="回填到输入框"
                   >
-                    <line x1="2" y1="2" x2="8" y2="8" />
-                    <line x1="8" y1="2" x2="2" y2="8" />
-                  </svg>
-                </button>
+                    <svg
+                      width="11" height="11" viewBox="0 0 10 10" fill="none"
+                      stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+                    >
+                      <path d="M9 5 H1" />
+                      <polyline points="4 1.5 1 5 4 8.5" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.btn} ${styles.btnDanger}`}
+                    onClick={() => onDelete(item.id)}
+                    title="删除 TODO"
+                    aria-label="删除 TODO"
+                  >
+                    <svg
+                      width="11" height="11" viewBox="0 0 10 10" fill="none"
+                      stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
+                    >
+                      <line x1="2" y1="2" x2="8" y2="8" />
+                      <line x1="8" y1="2" x2="2" y2="8" />
+                    </svg>
+                  </button>
+                </span>
               </div>
             ))}
           </div>
@@ -152,6 +167,17 @@ export function DraftStash() {
   const [items, setItems] = useState<DraftItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // 浮层化后：点击组件外部关闭
+  useEffect(() => {
+    if (!expanded) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setExpanded(false);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [expanded]);
 
   const itemsRef = useRef(items);
   const activeIdRef = useRef(activeId);
@@ -271,6 +297,7 @@ export function DraftStash() {
       onPick={handlePick}
       onDelete={handleDelete}
       onCancelActive={() => setActiveId(null)}
+      panelRef={panelRef}
     />
   );
 }

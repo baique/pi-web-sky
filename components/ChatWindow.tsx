@@ -9,13 +9,11 @@ import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantB
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { MessageView } from "./MessageView";
 import { PinnedBubble, type PinnedMessageItem } from "./PinnedBubble";
-import { ThinkingOrb } from "thinking-orbs";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { useI18n } from "@/hooks/useI18n";
-import { useTheme } from "@/hooks/useTheme";
-import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
+import { useAgentSession, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -57,28 +55,6 @@ interface Props {
   unlockAudio?: () => void;
   terminalOpen?: boolean;
   onToggleTerminal?: () => void;
-}
-
-function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, string | number>) => string): string | null {
-  if (phase?.kind === "running_tools") {
-    const latest = phase.tools[phase.tools.length - 1];
-    if (latest?.progress) {
-      return `${t("chat.runningNamedTool", { name: latest.name })} ${latest.progress}`;
-    }
-    const names = phase.tools.map((t) => t.name);
-    if (names.length === 0) return t("chat.runningTool");
-    if (names.length === 1) return t("chat.runningNamedTool", { name: names[0] });
-    if (names.length <= 3) return t("chat.runningTools", { names: names.join(", ") });
-    return t("chat.runningToolsMore", { names: names.slice(0, 2).join(", "), count: names.length - 2 });
-  }
-  if (phase?.kind === "waiting_model") return t("chat.waitingModel");
-  if (phase?.kind === "running_command") return t("chat.runningCommand");
-  return null;
-}
-
-/** 状态行的思考球：等待模型 = breathing，执行工具/命令 = working */
-function orbModeForPhase(phase: AgentPhase): "breathing" | "working" {
-  return phase?.kind === "waiting_model" ? "breathing" : "working";
 }
 
 const CHAT_COLUMN_PADDING = 16;
@@ -267,7 +243,6 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
 
 export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal }: Props) {
   const { t } = useI18n();
-  const { isDark } = useTheme();
   const isMobile = useIsMobile();
 
   // Wrap onAgentEnd to play the completion sound. This is more reliable than
@@ -681,6 +656,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       cwd={session?.cwd ?? newSessionCwd}
       atBottom={atBottom}
       onScrollToBottom={scrollToBottom}
+      agentPhase={isMobile ? null : agentPhase}
+      broadcastNotices={isMobile ? null : notices}
     />
   );
 
@@ -756,9 +733,9 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       )}
 
       {/* Transient notices (extension notify, errors, compact results)
-          Desktop: pinned bottom-right above the input area.
-          Mobile: top-centered to avoid the input zone and keyboard. */}
-      {isMobile ? (
+          Desktop: 桌面端改由 composer 顶栏播报槽承载（ComposerHeader + useBroadcast），
+          此处仅移动端保留顶部居中 NoticeShelf。 */}
+      {isMobile && (
         <div
           style={{
             position: "fixed",
@@ -775,24 +752,6 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
           }}
         >
           <NoticeShelf notices={notices} floating />
-        </div>
-      ) : (
-        <div
-          style={{
-            position: "fixed",
-            right: 51,
-            bottom: 118,
-            zIndex: 250,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-end",
-            maxWidth: "min(100vw - 48px, 340px)",
-            maxHeight: "calc(100dvh - 220px)",
-            overflowY: "auto",
-            pointerEvents: "none",
-          }}
-        >
-          <NoticeShelf notices={notices} />
         </div>
       )}
 
@@ -1041,20 +1000,6 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
             })()}
             {streamState.isStreaming && hasStreamingContent && streamState.streamingMessage && (
               <MessageView message={streamState.streamingMessage as AgentMessage} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} />
-            )}
-
-            {agentRunning && !hasStreamingContent && agentPhase && (
-              <div className="chat-status-pill my-2" role="status" aria-live="polite">
-                <ThinkingOrb state={orbModeForPhase(agentPhase)} size={20} theme={isDark ? "dark" : "light"} style={isDark ? undefined : { filter: "brightness(0.57) contrast(1.15)" }} />
-                <span>{phaseLabel(agentPhase, t)}</span>
-              </div>
-            )}
-
-            {bashRunning && !pendingBash && (
-              <div className="chat-status-pill my-2" role="status" aria-live="polite">
-                <ThinkingOrb state="working" size={20} theme={isDark ? "dark" : "light"} style={isDark ? undefined : { filter: "brightness(0.57) contrast(1.15)" }} />
-                <span>{t("chat.runningCommand")}</span>
-              </div>
             )}
 
             {pendingBash && (

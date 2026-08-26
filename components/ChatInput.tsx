@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
-import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
+import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, useMemo, forwardRef, KeyboardEvent } from "react";
+import type { AgentPhase, BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
+import type { BroadcastNotice, QuotaInfo } from "@/hooks/useBroadcast";
 import type { SkillsResponse } from "@/lib/api-types";
 import type { TextContent, UserMessage } from "@/lib/types";
 import {
@@ -26,6 +27,10 @@ import { FolderIcon, getFileIcon } from "./FileIcons";
 import { DraftStash } from "./DraftStash";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
+import { useTheme } from "@/hooks/useTheme";
+import { useBroadcast } from "@/hooks/useBroadcast";
+import { phaseLabel, orbModeForPhase } from "@/lib/agent-phase";
+import { ComposerHeader, NoticeInline } from "./ComposerHeader";
 import type { ToolPreset } from "@/lib/tool-presets";
 import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
 
@@ -69,6 +74,9 @@ interface Props {
   availableThinkingLevels?: string[] | null;
   thinkingLevelMap?: Record<string, string | null> | null;
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
+  agentPhase?: AgentPhase | null;
+  broadcastNotices?: BroadcastNotice[] | null;
+  quota?: QuotaInfo | null;
   queuedMessages?: QueuedMessages | null;
   inputHistory?: string[];
   onRecallQueue?: () => void;
@@ -345,6 +353,9 @@ function revokeImagePreview(image: AttachedImage): void {
   }
 }
 
+/** 右下角悬浮钮组合占位宽（发送/引导/后续最大态），用于文字遮挡判定 */
+const BTN_ZONE_WIDTH = 130;
+
 function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: string }) {
   return (
     <div
@@ -452,6 +463,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
+  agentPhase = null, broadcastNotices = null, quota = null,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
   onBuiltinCommand,
   soundEnabled, onSoundToggle, onAudioUnlock,
@@ -463,6 +475,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 }: Props, ref) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
+  const { isDark } = useTheme();
+
+  // 发件箱展开态（排队 steer / follow-up 明细）
+  const [outboxOpen, setOutboxOpen] = useState(false);
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
   // 压缩失败提示的“已关闭”状态；内容变化时重置，让新的失败重新显示
   const [compactErrorDismissed, setCompactErrorDismissed] = useState(false);
@@ -1430,6 +1446,233 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const compactResultText = compactResult
     ? `${compactResult.reason && compactResult.reason !== "manual" ? `${compactResult.reason[0].toUpperCase()}${compactResult.reason.slice(1)} ` : t("chat.compacted")} ${formatTokenCount(compactResult.tokensBefore)} -> ${formatTokenCount(compactResult.estimatedTokensAfter)} tokens (${t("chat.tokensSaved", { saved: formatTokenCount(compactSavedTokens) })})`
     : null;
+
+  // 播报槽数据源：agent 阶段 / 重试 / 公告（含 compact 结果合成公告）/ 额度预留
+  const phaseInfo = useMemo(() => {
+    if (!agentPhase) return null;
+    const text = phaseLabel(agentPhase, t);
+    return text ? { text, orb: orbModeForPhase(agentPhase) } : null;
+  }, [agentPhase, t]);
+  const retryText = useMemo(
+    () => retryInfo ? `${t("chat.retrying", { attempt: retryInfo.attempt, max: retryInfo.maxAttempts })}${retryInfo.errorMessage ? ` — ${retryInfo.errorMessage}` : ""}` : null,
+    [retryInfo, t],
+  );
+  const effectiveNotices = useMemo(() => {
+    const arr = broadcastNotices ?? [];
+    return compactResultText
+      ? [...arr, { id: "compact-result", message: compactResultText, type: "info" as const }]
+      : arr;
+  }, [broadcastNotices, compactResultText]);
+  const { phase: phaseBroadcast, notice: noticeBroadcast, dismissError } = useBroadcast({ notices: effectiveNotices, phase: phaseInfo, retryText, quota });
+  const queueCount = (queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0);
+
+  // 悬浮按钮区是否真的有文字流到其下方：
+  // 用 canvas 按输入框实际字体测量“最后一行”宽度，取其在底部行的余量，
+  // 若余量进入右下按钮区（宽约 130px）则需浮现玻璃底盖字，否则 100% 透明。
+  const [textareaWidth, setTextareaWidth] = useState(0);
+  const measureCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  useLayoutEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const ro = new ResizeObserver(() => setTextareaWidth(ta.clientWidth));
+    ro.observe(ta);
+    setTextareaWidth(ta.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  const textUnderButtons = useMemo(() => {
+    const text = value.trimEnd();
+    if (!text) return false;
+    const ta = textareaRef.current;
+    if (!ta || !textareaWidth) return false;
+    if (!measureCtxRef.current) {
+      measureCtxRef.current = document.createElement("canvas").getContext("2d");
+    }
+    const ctx = measureCtxRef.current;
+    if (!ctx) return false;
+    const cs = getComputedStyle(ta);
+    ctx.font = cs.fontSize + " " + cs.fontFamily;
+    const seg = text.split("\n").pop() ?? "";
+    const segW = ctx.measureText(seg).width;
+    const contentW = textareaWidth;
+    if (segW <= contentW) return segW > contentW - BTN_ZONE_WIDTH;
+    // 换行：看该段最后一行余量
+    const rem = segW % contentW;
+    return rem > contentW - BTN_ZONE_WIDTH;
+  }, [value, textareaWidth]);
+  // 顶栏左槽（空闲态）：模型选择器（自工具栏迁入；流式时该槽让位给运行状态）
+  const modelSlot = (modelOptions.length > 0 || currentName || modelError) && onModelChange ? (
+                  <div ref={dropdownRef} style={{ position: "relative", minWidth: 0 }}>
+                    <button
+                      onClick={(e) => {
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        setModelDropdownRect({ top: rect.top, left: rect.left, width: rect.width });
+                        setModelDropdownOpen((open) => {
+                          if (open) setModelFilter("");
+                          return !open;
+                        });
+                      }}
+                      disabled={isStreaming || modelSwitching}
+                      aria-busy={modelSwitching || undefined}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6,
+                        padding: 0,
+                        height: 20,
+                        maxWidth: "100%",
+                        minWidth: 0,
+                        overflow: "hidden",
+                        background: "none",
+                        border: "none",
+                        color: "var(--text-muted)",
+                        cursor: isStreaming || modelSwitching ? "not-allowed" : "pointer",
+                        /* 纯文本态：与 loading 状态的左缘对齐；行高 20px 顶满槽位 */
+                        fontSize: 12,
+                        fontFamily: "var(--font-mono)",
+                        lineHeight: "20px",
+                        opacity: isStreaming ? 0.5 : 1,
+                        transition: "color 0.12s",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (isStreaming || modelSwitching) return;
+                        e.currentTarget.style.color = "var(--text)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = "var(--text-muted)";
+                      }}
+                      title={modelSwitching ? "Switching model" : modelOptions.length > 0 ? "Change model" : "No available models"}
+                    >
+                      {modelSwitching && (
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }} aria-hidden="true">
+                          <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                        </svg>
+                      )}
+                      <span style={{ display: "flex", alignItems: "baseline", minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                          {currentName ?? (modelOptions.length > 0 ? "Select model" : "No models")}
+                        </span>
+                        {model?.provider && (
+                          <>
+                            <span aria-hidden="true" style={{ flexShrink: 0, margin: "0 4px", color: "var(--text-dim)" }}>·</span>
+                            <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 11 }}>{model.provider}</span>
+                          </>
+                        )}
+                      </span>
+                    </button>
+                    {modelDropdownOpen && modelDropdownRect && (() => {
+                      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+                      // Height cap: the panel opens upward from the button. Keep it from
+                      // overflowing above the viewport top (modelDropdownRect.top is the
+                      // button's viewport-space top captured at click time). Clamp so it
+                      // never exceeds the usable space above the button, while keeping the
+                      // list shorter than the old 60%-of-viewport ceiling.
+                      const spaceAbove = Math.max(0, modelDropdownRect.top - 8);
+                      const cap = Math.min(viewportHeight * 0.5, 440);
+                      const maxH = Math.max(Math.min(120, spaceAbove), Math.min(cap, spaceAbove));
+                      // Anchor to the dropdownRef wrapper (position: relative). Do NOT use
+                      // `position: fixed` with viewport-space coords here: the bottom-bar
+                      // ancestor has backdrop-filter, which becomes the containing block
+                      // for fixed descendants, so left/bottom would be measured from the
+                      // bar's box instead of the viewport (panel lands way off to the
+                      // right). Positioning absolutely relative to the wrapper — like the
+                      // thinking/tool dropdowns — keeps it just above the button.
+                      const panelPos: React.CSSProperties = isMobile
+                        ? { left: 0, right: 0, width: "100%" }
+                        : { left: 0, width: "max-content", minWidth: modelDropdownRect.width };
+                      return (
+                        <div ref={modelDropdownPanelRef} style={{
+                        position: "absolute",
+                        bottom: "calc(100% + 6px)",
+                        ...panelPos,
+                        zIndex: 500, background: "var(--bg)", border: "1px solid var(--border)",
+                        borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
+                        overflow: "hidden", maxHeight: maxH, display: "flex", flexDirection: "column",
+                        }}>
+                        {showModelFilter && (
+                          <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+                            <input
+                              value={modelFilter}
+                              onChange={(e) => setModelFilter(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape") {
+                                  setModelFilter("");
+                                  setModelDropdownOpen(false);
+                                }
+                              }}
+                              placeholder={t("chat.filterModels")}
+                              aria-label={t("chat.filterModels")}
+                              autoFocus
+                              autoComplete="off"
+                              spellCheck={false}
+                              style={{
+                                width: "100%",
+                                minWidth: isMobile ? 0 : 220,
+                                fontSize: 11,
+                                fontFamily: "var(--font-mono)",
+                                padding: "5px 8px",
+                                border: "1px solid var(--border)",
+                                borderRadius: 5,
+                                outline: "none",
+                                background: "var(--bg)",
+                                color: "var(--text)",
+                                boxSizing: "border-box",
+                              }}
+                            />
+                          </div>
+                        )}
+                        <div style={{ minHeight: 0, overflowY: "auto" }}>
+                          {modelsByProvider.length === 0 ? (
+                            <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
+                              {modelFilter.trim() ? t("chat.noMatchingModels") : "No available models"}
+                            </div>
+                          ) : modelsByProvider.map((group, gi) => (
+                            <div key={group.provider}>
+                              {(modelsByProvider.length > 1) && (
+                                <div style={{
+                                  padding: "6px 12px 4px",
+                                  fontSize: 10, fontWeight: 600, color: "var(--text-dim)",
+                                  textTransform: "uppercase", letterSpacing: "0.07em",
+                                  borderTop: gi > 0 ? "1px solid var(--border)" : "none",
+                                }}>
+                                  {group.provider}
+                                </div>
+                              )}
+                              {group.options.map((opt) => {
+                                const isActive = opt.modelId === model?.modelId && opt.provider === model?.provider;
+                                return (
+                                  <button
+                                    key={`${opt.provider}:${opt.modelId}`}
+                                    onClick={() => {
+                                      setModelDropdownOpen(false);
+                                      setModelFilter("");
+                                      if (!isActive || isAutoModelSelection) onModelChange(opt.provider, opt.modelId);
+                                    }}
+                                    style={{
+                                      display: "flex", alignItems: "center", gap: 8,
+                                      width: "100%", padding: "7px 12px",
+                                      background: isActive ? "var(--bg-selected)" : "none",
+                                      border: "none",
+                                      color: isActive ? "var(--text)" : "var(--text-muted)",
+                                      cursor: "pointer", fontSize: 12, textAlign: "left",
+                                      fontWeight: isActive ? 600 : 400,
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                                    onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
+                                  >
+                                    {isActive
+                                      ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
+                                      : <span style={{ width: 10, flexShrink: 0 }} />}
+                                    {opt.name}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      );
+                    })()}
+                  </div>
+  ) : null;
   const thinkingDisplayLabel = (() => {
     const lvl = thinkingLevel ?? "auto";
     if (lvl === "auto" || !thinkingLevelMap) return lvl;
@@ -1495,104 +1738,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       <div style={{ maxWidth: 820, margin: "0 auto" }}>
         <ModelErrorBanner error={modelError} />
         <ModelScopeWarningBanner warnings={modelScopeWarnings} />
-        {/* Queued steering / follow-up messages (delivered by pi on upcoming turns) */}
-        {((queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0)) > 0 && (
-          <div style={{
-            marginBottom: 8,
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            background: "var(--bg-panel)",
-            padding: "5px 0",
-          }}>
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-              padding: "2px 8px 4px 10px",
-            }}>
-              <span style={{
-                fontSize: 10,
-                fontFamily: "var(--font-mono)",
-                color: "var(--text-dim)",
-                textTransform: "uppercase",
-                letterSpacing: 0.4,
-              }}>
-                {t("chat.queued", { count: (queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0) })}
-              </span>
-              {onRecallQueue && (
-                <button
-                  onClick={onRecallQueue}
-                   title={t("chat.recallTitle")}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "4px 12px",
-                    fontSize: 12,
-                    color: "var(--text)",
-                    background: "transparent",
-                    border: "1px solid var(--border)",
-                    borderRadius: 7,
-                    cursor: "pointer",
-                    transition: "background 0.12s, border-color 0.12s",
-                    whiteSpace: "nowrap",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "var(--bg-hover)";
-                    e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 45%, var(--border))";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "transparent";
-                    e.currentTarget.style.borderColor = "var(--border)";
-                  }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="9 14 4 9 9 4" />
-                    <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
-                  </svg>
-                   {t("chat.recall")}
-                </button>
-              )}
-            </div>
-            {queuedMessages?.steering.map((text, i) => (
-              <QueuedMessageRow key={`steer-${i}`} kind="steer" text={text} />
-            ))}
-            {queuedMessages?.followUp.map((text, i) => (
-              <QueuedMessageRow key={`followup-${i}`} kind="follow-up" text={text} />
-            ))}
-          </div>
-        )}
-        {/* Retry banner */}
-        {retryInfo && (
-          <div style={{
-            marginBottom: 8, padding: "5px 10px",
-            background: "color-mix(in srgb, var(--bg-panel) 92%, #f59e0b 8%)",
-            borderLeft: "3px solid #f59e0b", borderRadius: 4,
-            fontSize: 12, color: "var(--text)",
-            display: "flex", alignItems: "center", gap: 6,
-          }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-              <path d="M3 3v5h5" />
-            </svg>
-             {t("chat.retrying", { attempt: retryInfo.attempt, max: retryInfo.maxAttempts })}{retryInfo.errorMessage && <span style={{ opacity: 0.7, marginLeft: 4 }}>— {retryInfo.errorMessage}</span>}
-          </div>
-        )}
-        {compactResultText && (
-          <div style={{
-            marginBottom: 8, padding: "5px 10px",
-            background: "color-mix(in srgb, var(--bg-panel) 92%, #10b981 8%)",
-            borderLeft: "3px solid #10b981", borderRadius: 4,
-            fontSize: 12, color: "var(--text)",
-            display: "flex", alignItems: "center", gap: 6,
-          }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            {compactResultText}
-          </div>
-        )}
         {compactError && !compactErrorDismissed && (
           <div
             role="alert"
@@ -1704,15 +1849,130 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 ? "rgba(234,179,8,0.4)"
                 : "color-mix(in srgb, var(--border) 90%, transparent)"
             }`,
-            padding: "8px 8px 8px",
+            padding: "4px 8px 8px",
             boxShadow: composerFocused
               ? "0 0 14px 1px color-mix(in srgb, var(--border) 50%, transparent), 0 1px 2px rgba(15,23,42,0.05), 0 8px 24px -8px rgba(15,23,42,0.24)"
               : "0 1px 2px rgba(15,23,42,0.05), 0 2px 5px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.16)",
             transition: "border-color 0.15s, box-shadow 0.15s",
           } as React.CSSProperties}
         >
-          <DraftStash />
-
+          <ComposerHeader
+            phase={phaseBroadcast}
+            modelSlot={modelSlot}
+            isDark={isDark}
+            right={(
+              <>
+                {queueCount > 0 && (
+              <button
+                onClick={() => setOutboxOpen(true)}
+                title={t("chat.queued", { count: queueCount })}
+                style={{
+                  fontSize: 12,
+                  fontFamily: "var(--font-mono)",
+                  lineHeight: "20px",
+                  color: "var(--accent)",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "0 4px",
+                }}
+              >
+                ⏳ {queueCount}
+              </button>
+                )}
+                <DraftStash />
+              </>
+            )}
+          />
+          {queueCount > 0 && (
+            <div
+              style={{
+                margin: "0 4px 4px",
+                borderRadius: "var(--bubble-inner-radius)",
+                background: "var(--bubble-tool-bg)",
+                overflow: "hidden",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px" }}>
+                <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)", flex: 1, minWidth: 0 }}>
+                  {t("chat.queued", { count: queueCount })}
+                </span>
+                {onRecallQueue && (
+                  <button
+                    onClick={onRecallQueue}
+                    title={t("chat.recallTitle")}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "3px 10px",
+                      fontSize: 12,
+                      color: "var(--text)",
+                      background: "transparent",
+                      border: "1px solid var(--border)",
+                      borderRadius: 7,
+                      cursor: "pointer",
+                      transition: "background 0.12s, border-color 0.12s",
+                      whiteSpace: "nowrap",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "var(--bg-hover)";
+                      e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 45%, var(--border))";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "transparent";
+                      e.currentTarget.style.borderColor = "var(--border)";
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 14 4 9 9 4" />
+                      <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+                    </svg>
+                    {t("chat.recall")}
+                  </button>
+                )}
+                <button
+                  onClick={() => setOutboxOpen((o) => !o)}
+                  aria-expanded={outboxOpen}
+                  style={{
+                    flexShrink: 0,
+                    width: 22,
+                    height: 22,
+                    padding: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "none",
+                    border: "none",
+                    borderRadius: 5,
+                    color: "var(--text-dim)",
+                    cursor: "pointer",
+                    fontSize: 10,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "var(--bg-hover)";
+                    e.currentTarget.style.color = "var(--text)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "none";
+                    e.currentTarget.style.color = "var(--text-dim)";
+                  }}
+                >
+                  {outboxOpen ? "▴" : "▾"}
+                </button>
+              </div>
+              {outboxOpen && (
+                <>
+                  {queuedMessages?.steering.map((text, i) => (
+                    <QueuedMessageRow key={`steer-${i}`} kind="steer" text={text} />
+                  ))}
+                  {queuedMessages?.followUp.map((text, i) => (
+                    <QueuedMessageRow key={`followup-${i}`} kind="follow-up" text={text} />
+                  ))}
+                </>
+              )}
+            </div>
+          )}
           {/* Image previews — 属输入内容层，与输入行同组 */}
           {attachedImages.length > 0 && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "4px 4px 0" }}>
@@ -2083,6 +2343,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           <div
             style={{
               minWidth: 0,
+              position: "relative",
               display: "flex",
               gap: 8,
               alignItems: "center",
@@ -2141,8 +2402,23 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             }}
           />
 
+          {/* 右下角悬浮操作区：流式=引导/后续，空闲=发送。
+              按钮区默认 100% 透明；仅当文字真的流到其下方时，才浮现
+              与面板完全同款的玻璃底（--frame-glass + 同款 blur/saturate）盖住字 */}
+          <div style={{
+            position: "absolute", right: 8, bottom: 6,
+            display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+            background: textUnderButtons ? "var(--frame-glass)" : "transparent",
+            backdropFilter: textUnderButtons ? "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))" : "none",
+            WebkitBackdropFilter: textUnderButtons ? "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))" : "none",
+            borderRadius: 16,
+            padding: "3px 6px",
+            transition: "background 0.12s, backdrop-filter 0.12s",
+          }}
+          data-under={typeof textUnderButtons === "boolean" ? String(textUnderButtons) : "?"}
+        >
           {isStreaming ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {onSteer && (
                 <button
                   onClick={() => sendQueued("steer")}
@@ -2211,7 +2487,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               disabled={!value.trim() && !attachedImages.length}
               style={{
                 flexShrink: 0,
-                alignSelf: "flex-end",
                 display: "flex", alignItems: "center", gap: 6,
                 padding: "6px 10px",
                 borderRadius: 8,
@@ -2246,6 +2521,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             </button>
           )}
           </div>
+          </div>
         </div>
 
         {/* Bash mode status label */}
@@ -2267,8 +2543,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           background: "color-mix(in srgb, var(--bg-panel) 45%, transparent)",
         }}>
 
-          {/* LEFT: attach + model selector (idle) or steer/followup toggle (streaming) */}
-          <div style={{ flex: isMobile ? "1 1 auto" : "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
+          {/* LEFT: attach + 临时通知（P0/P1/P3） */}
+          <div style={{ flex: isMobile ? "1 1 auto" : "1 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
             <button
               onClick={() => fileInputRef.current?.click()}
              title={t("chat.attachImage")}
@@ -2297,190 +2573,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <polyline points="21 15 16 10 5 21" />
               </svg>
             </button>
-            {/* Model selector — visible always, disabled while the session or switch is busy */}
-            {(modelOptions.length > 0 || currentName || modelError) && onModelChange && (
-                <div ref={dropdownRef} style={{ position: "relative", flex: isMobile ? "1 1 auto" : undefined, minWidth: 0 }}>
-                  <button
-                    onClick={(e) => {
-                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                      setModelDropdownRect({ top: rect.top, left: rect.left, width: rect.width });
-                      setModelDropdownOpen((open) => {
-                        if (open) setModelFilter("");
-                        return !open;
-                      });
-                    }}
-                    disabled={isStreaming || modelSwitching}
-                    aria-busy={modelSwitching || undefined}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 6,
-                      justifyContent: isMobile ? "flex-start" : undefined,
-                      padding: isMobile ? "8px 10px" : "8px 12px",
-                      height: 32,
-                      width: isMobile ? "100%" : undefined,
-                      maxWidth: isMobile ? "100%" : 300,
-                      overflow: "hidden",
-                      background: modelDropdownOpen ? "var(--bg-hover)" : "none",
-                      border: "none",
-                      borderRadius: 9,
-                      color: "var(--text-muted)",
-                      cursor: isStreaming || modelSwitching ? "not-allowed" : "pointer",
-                      fontSize: 12,
-                      opacity: isStreaming ? 0.5 : 1,
-                      transition: "background 0.12s, color 0.12s",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (isStreaming || modelSwitching) return;
-                      e.currentTarget.style.background = "var(--bg-hover)";
-                      e.currentTarget.style.color = "var(--text)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = modelDropdownOpen ? "var(--bg-hover)" : "none";
-                      e.currentTarget.style.color = "var(--text-muted)";
-                    }}
-                    title={modelSwitching ? "Switching model" : modelOptions.length > 0 ? "Change model" : "No available models"}
-                  >
-                    {modelSwitching ? (
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }} aria-hidden="true">
-                        <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-                      </svg>
-                    ) : (
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="4" y="4" width="16" height="16" rx="2" />
-                        <rect x="9" y="9" width="6" height="6" />
-                        <line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" />
-                        <line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" />
-                        <line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" />
-                        <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
-                      </svg>
-                    )}
-                    <span style={{ display: "flex", alignItems: "baseline", minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" }}>
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                        {currentName ?? (modelOptions.length > 0 ? "Select model" : "No models")}
-                      </span>
-                      {model?.provider && (
-                        <>
-                          <span aria-hidden="true" style={{ flexShrink: 0, margin: "0 4px", color: "var(--text-dim)" }}>·</span>
-                          <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 11 }}>{model.provider}</span>
-                        </>
-                      )}
-                    </span>
-                  </button>
-                  {modelDropdownOpen && modelDropdownRect && (() => {
-                    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-                    // Height cap: the panel opens upward from the button. Keep it from
-                    // overflowing above the viewport top (modelDropdownRect.top is the
-                    // button's viewport-space top captured at click time). Clamp so it
-                    // never exceeds the usable space above the button, while keeping the
-                    // list shorter than the old 60%-of-viewport ceiling.
-                    const spaceAbove = Math.max(0, modelDropdownRect.top - 8);
-                    const cap = Math.min(viewportHeight * 0.5, 440);
-                    const maxH = Math.max(Math.min(120, spaceAbove), Math.min(cap, spaceAbove));
-                    // Anchor to the dropdownRef wrapper (position: relative). Do NOT use
-                    // `position: fixed` with viewport-space coords here: the bottom-bar
-                    // ancestor has backdrop-filter, which becomes the containing block
-                    // for fixed descendants, so left/bottom would be measured from the
-                    // bar's box instead of the viewport (panel lands way off to the
-                    // right). Positioning absolutely relative to the wrapper — like the
-                    // thinking/tool dropdowns — keeps it just above the button.
-                    const panelPos: React.CSSProperties = isMobile
-                      ? { left: 0, right: 0, width: "100%" }
-                      : { left: 0, width: "max-content", minWidth: modelDropdownRect.width };
-                    return (
-                      <div ref={modelDropdownPanelRef} style={{
-                      position: "absolute",
-                      bottom: "calc(100% + 6px)",
-                      ...panelPos,
-                      zIndex: 500, background: "var(--bg)", border: "1px solid var(--border)",
-                      borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
-                      overflow: "hidden", maxHeight: maxH, display: "flex", flexDirection: "column",
-                      }}>
-                      {showModelFilter && (
-                        <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-                          <input
-                            value={modelFilter}
-                            onChange={(e) => setModelFilter(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Escape") {
-                                setModelFilter("");
-                                setModelDropdownOpen(false);
-                              }
-                            }}
-                            placeholder={t("chat.filterModels")}
-                            aria-label={t("chat.filterModels")}
-                            autoFocus
-                            autoComplete="off"
-                            spellCheck={false}
-                            style={{
-                              width: "100%",
-                              minWidth: isMobile ? 0 : 220,
-                              fontSize: 11,
-                              fontFamily: "var(--font-mono)",
-                              padding: "5px 8px",
-                              border: "1px solid var(--border)",
-                              borderRadius: 5,
-                              outline: "none",
-                              background: "var(--bg)",
-                              color: "var(--text)",
-                              boxSizing: "border-box",
-                            }}
-                          />
-                        </div>
-                      )}
-                      <div style={{ minHeight: 0, overflowY: "auto" }}>
-                        {modelsByProvider.length === 0 ? (
-                          <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
-                            {modelFilter.trim() ? t("chat.noMatchingModels") : "No available models"}
-                          </div>
-                        ) : modelsByProvider.map((group, gi) => (
-                          <div key={group.provider}>
-                            {(modelsByProvider.length > 1) && (
-                              <div style={{
-                                padding: "6px 12px 4px",
-                                fontSize: 10, fontWeight: 600, color: "var(--text-dim)",
-                                textTransform: "uppercase", letterSpacing: "0.07em",
-                                borderTop: gi > 0 ? "1px solid var(--border)" : "none",
-                              }}>
-                                {group.provider}
-                              </div>
-                            )}
-                            {group.options.map((opt) => {
-                              const isActive = opt.modelId === model?.modelId && opt.provider === model?.provider;
-                              return (
-                                <button
-                                  key={`${opt.provider}:${opt.modelId}`}
-                                  onClick={() => {
-                                    setModelDropdownOpen(false);
-                                    setModelFilter("");
-                                    if (!isActive || isAutoModelSelection) onModelChange(opt.provider, opt.modelId);
-                                  }}
-                                  style={{
-                                    display: "flex", alignItems: "center", gap: 8,
-                                    width: "100%", padding: "7px 12px",
-                                    background: isActive ? "var(--bg-selected)" : "none",
-                                    border: "none",
-                                    color: isActive ? "var(--text)" : "var(--text-muted)",
-                                    cursor: "pointer", fontSize: 12, textAlign: "left",
-                                    fontWeight: isActive ? 600 : 400,
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
-                                  onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
-                                >
-                                  {isActive
-                                    ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
-                                    : <span style={{ width: 10, flexShrink: 0 }} />}
-                                  {opt.name}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    );
-                  })()}
-                </div>
-            )}
+            <NoticeInline notice={noticeBroadcast} onDismissError={dismissError} isDark={isDark} style={{ flex: 1, minWidth: 0 }} />
           </div>
 
           {/* spacer */}
