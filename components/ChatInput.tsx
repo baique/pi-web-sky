@@ -1649,7 +1649,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             broadcast={broadcast}
             onDismissError={dismissError}
             isDark={isDark}
-            right={queueCount > 0 ? (
+            right={(
+              <>
+                {queueCount > 0 && (
               <button
                 onClick={() => setOutboxOpen(true)}
                 title={t("chat.queued", { count: queueCount })}
@@ -1665,7 +1667,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               >
                 ⏳ {queueCount}
               </button>
-            ) : undefined}
+                )}
+                    </>
+            )}
           />
           {queueCount > 0 && (
             <div

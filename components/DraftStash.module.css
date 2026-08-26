@@ -1,11 +1,8 @@
 .panel {
+  position: relative;
   flex-shrink: 0;
   min-width: 0;
-  width: 100%;
-  /* 无独立盒子装饰：背景/边框/圆角/阴影统一由外层 composer 面板承担。
-     宽度继承 composer（= 输入框列），与输入框严格同宽，不再手写对齐用的
-     margin 计算（旧实现会在宽屏/折叠 sidebar 时溢出）。 */
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 38%, transparent);
+  /* 顶栏右侧 chip 锚点；展开列表为向下弹出浮层，不推挤输入区 */
   animation: draft-stash-in 0.18s ease-out both;
 }
 
@@ -20,28 +17,26 @@
 
 /* 收起条：标题级入口（N 条草稿），点击展开/收起列表；不做 hover 变色 */
 .toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 10px;
+  gap: 5px;
+  padding: 3px 8px;
   border: none;
-  border-radius: 12px;
+  border-radius: 7px;
   background: none;
   color: var(--text-muted);
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: 11px;
+  font-family: var(--font-mono);
   cursor: pointer;
-  transition: color 0.12s;
+  transition: color 0.12s, background 0.12s;
 }
 .toggle:hover {
   color: var(--text);
+  background: var(--bg-hover);
 }
 
 .toggleLabel {
-  flex: 1;
   min-width: 0;
-  text-align: left;
   font-weight: 500;
 }
 
@@ -59,9 +54,19 @@
 
 /* 展开区：面板内的内凹窗（浅底 + 小圆角），与输入区分隔 */
 .expandArea {
-  margin-top: 2px;
-  padding-top: 2px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 38%, transparent);
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 300px;
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: 500;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.10), 0 4px 16px rgba(0, 0, 0, 0.10);
 }
 
 .activeBar {

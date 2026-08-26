@@ -45,7 +45,7 @@ test("collapsed: shows only the count bar, no rows", () => {
   const html = renderToStaticMarkup(
     React.createElement(DraftStashList, { items: sampleItems, expanded: false, activeItem: null, ...baseProps }),
   );
-  assert.ok(html.includes("2 条草稿"));
+  assert.ok(html.includes("TODO 2"));
   assert.ok(html.includes("aria-expanded=\"false\""));
   // 折叠态不渲染行内回填/删除按钮
   assert.ok(!html.includes("aria-label=\"回填到输入框\""));
@@ -56,24 +56,24 @@ test("expanded: renders one row per draft with both action buttons", () => {
   const html = renderToStaticMarkup(
     React.createElement(DraftStashList, { items: sampleItems, expanded: true, activeItem: null, ...baseProps }),
   );
-  assert.ok(html.includes("2 条草稿"));
+  assert.ok(html.includes("TODO 2"));
   assert.ok(html.includes("aria-expanded=\"true\""));
   assert.ok(html.includes("第一条草稿"));
   assert.ok(html.includes("第二条草稿"));
   assert.equal((html.match(/aria-label="回填到输入框"/g) ?? []).length, 2);
-  assert.equal((html.match(/aria-label="删除草稿"/g) ?? []).length, 2);
-  assert.ok(html.includes("草稿暂存区"));
+  assert.equal((html.match(/aria-label="删除 TODO"/g) ?? []).length, 2);
+  assert.ok(html.includes("TODO 暂存区"));
 });
 
 test("renders the active-draft bar only when editing a draft", () => {
   const withoutActive = renderToStaticMarkup(
     React.createElement(DraftStashList, { items: sampleItems, expanded: true, activeItem: null, ...baseProps }),
   );
-  assert.ok(!withoutActive.includes("正在编辑草稿"));
+  assert.ok(!withoutActive.includes("正在编辑 TODO"));
 
   const withActive = renderToStaticMarkup(
     React.createElement(DraftStashList, { items: sampleItems, expanded: true, activeItem: sampleItems[0], ...baseProps }),
   );
-  assert.ok(withActive.includes("正在编辑草稿"));
-  assert.ok(withActive.includes("取消草稿关联"));
+  assert.ok(withActive.includes("正在编辑 TODO"));
+  assert.ok(withActive.includes("取消 TODO 关联"));
 });
