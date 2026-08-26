@@ -1749,64 +1749,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             transition: "border-color 0.15s, box-shadow 0.15s",
           } as React.CSSProperties}
         >
-          {isCompacting && (
-            <div
-              className="compaction-status"
-              role="status"
-              style={{
-                position: "absolute",
-                top: 8,
-                left: "50%",
-                transform: "translateX(-50%)",
-                zIndex: 80,
-                width: 220,
-                maxWidth: "calc(100vw - 48px)",
-                display: "flex", alignItems: "center", gap: 8,
-                padding: "5px 12px",
-                borderRadius: 999,
-                border: "1px solid color-mix(in srgb, var(--accent) 34%, transparent)",
-                background: "color-mix(in srgb, var(--glass-bg-strong) 72%, transparent)",
-                backdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
-                WebkitBackdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
-                color: "var(--text)",
-                fontSize: 12,
-                lineHeight: 1.4,
-                boxShadow: "0 2px 12px -4px rgba(15,23,42,0.16)",
-                animation: "compaction-breathe 1.8s ease-in-out infinite",
-              }}
-            >
-              <span
-                className="compaction-status-dot"
-                style={{
-                  flexShrink: 0, width: 7, height: 7, borderRadius: "50%",
-                  background: "var(--accent)",
-                  animation: "compaction-dot-breathe 1.4s ease-in-out infinite",
-                }}
-              />
-              <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {t("chat.compacting")}
-              </span>
-              <button
-                type="button"
-                onClick={onAbortCompaction}
-                style={{
-                  flexShrink: 0,
-                  background: "transparent",
-                  border: "none",
-                  borderRadius: 6,
-                  padding: "1px 6px",
-                  color: "var(--accent)",
-                  fontSize: 11,
-                  cursor: "pointer",
-                  transition: "color 0.12s, background 0.12s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-              >
-                {t("chat.stopCompaction")}
-              </button>
-            </div>
-          )}
           <ComposerHeader
             phase={phase}
             modelSlot={modelSlot}
