@@ -2376,17 +2376,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             }}
           />
 
-          {/* 右下角悬浮操作区：流式=引导/后续，空闲=发送（全宽输入，按钮悬浮带实底芯片） */}
-          <div style={{
-            position: "absolute", right: 8, bottom: 6,
-            display: "flex", alignItems: "center", gap: 2, flexShrink: 0,
-            background: "color-mix(in srgb, var(--bg) 88%, transparent)",
-            backdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
-            WebkitBackdropFilter: "blur(var(--glass-blur-popover)) saturate(var(--glass-saturate))",
-            borderRadius: 9,
-            padding: "2px 4px",
-            boxShadow: "0 1px 4px rgba(15,23,42,0.10)",
-          }}>
+          {/* 右下角悬浮操作区：流式=引导/后续，空闲=发送（按钮样式不变，仅位置浮动） */}
+          <div style={{ position: "absolute", right: 8, bottom: 6, display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
           {isStreaming ? (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {onSteer && (
