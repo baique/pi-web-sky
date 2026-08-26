@@ -669,15 +669,6 @@ function AssistantMessageView({
   const providerError = getAssistantErrorMessage(message, { isStreaming });
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
-  const cardRef = useRef<HTMLDivElement>(null);
-  const scrollToCardTop = () => {
-    const el = cardRef.current;
-    if (!el) return;
-    const container = el.closest('[class*="overflow-y-auto"]') as HTMLElement | null;
-    if (!container) return;
-    const top = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
-    container.scrollTo({ top: Math.max(0, top - 8), behavior: "smooth" });
-  };
   const streamStartRef = useRef<number | null>(null);
   const [tps, setTps] = useState<number | null>(null);
   const blockItemsRef = useRef(blockItems);
@@ -802,7 +793,6 @@ function AssistantMessageView({
       onMouseLeave={() => setHovered(false)}
     >
       <div
-        ref={cardRef}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -816,16 +806,6 @@ function AssistantMessageView({
           boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
         }}
       >
-      {!bare && (
-        <div
-          className="chat-msg-head"
-          onClick={(e) => {
-            if ((e.target as HTMLElement).closest("button")) return;
-            scrollToCardTop();
-          }}
-          title="回到本消息开头"
-        />
-      )}
 
         {blockItems.map(({ block, originalIndex }) => (
           <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
