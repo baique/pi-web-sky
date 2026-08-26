@@ -1929,13 +1929,17 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
 }
 
 /* 扩展按钮容器：宽度随内容（目前=终端按钮） */
-/* 扩展按钮容器：宽度随内容（目前=终端按钮）；无胶囊样式 */
+/* 扩展按钮容器：宽度随内容（目前=终端按钮）；背景与 widget shelf 完全一致，底部视觉统一 */
 .extension-actions {
   display: flex;
   flex: 0 0 auto;
   align-items: stretch;
   justify-content: center;
   min-width: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  background: var(--frame-glass);
+  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
 }
 
 /* 终端按钮：还原原始形态（shelf 左端项的扁平样式） */
