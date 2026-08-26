@@ -1,179 +1,108 @@
-# Pi Web — Sky Edition (@baique/pi-web-sky)
+# Pi Web — Sky 皮肤版（@baique/pi-web-sky）
 
 [![npm version](https://img.shields.io/npm/v/@baique/pi-web-sky.svg)](https://www.npmjs.com/package/@baique/pi-web-sky)
 
-> **Sky 皮肤版**：基于 [pi-web](https://github.com/earendil-works/pi)（经 [@agegr/pi-web](https://github.com/agegr/pi-web) 二开）的独立发行版，MIT 协议。
-> 在原生 pi-web 之上新增了 Sky 皮肤：毛玻璃气泡与面板、JetBrains Mono 消息字体、加深/提亮文字对比度、右上角 todo 面板、右下角堆叠弱通知。
+> 本项目是 [pi-web](https://github.com/earendil-works/pi)（经 [@agegr/pi-web](https://github.com/agegr/pi-web) 二次开发）的独立发行版，MIT 协议。
+> 与 pi 原生发行版共用本机配置与会话文件——浏览器里的界面，pi 内核与全部 `~/.pi/agent` 数据照旧。
 
-[中文文档](./README.zh-CN.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
+[pi 编程智能体](https://github.com/earendil-works/pi) 的本地浏览器界面：查找与继续会话、运行智能体、配置模型与资源、浏览项目文件。基于上游分叉，在原生 pi-web 之上重做了视觉与交互，并持续将上游高价值 PR 手工移植回来（见 [文档](docs/upstream-ports.md)）。
 
-Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi). Pi Web uses the same local configuration and session files as pi, so you can browse and resume conversations, run agent turns, configure models and resources, and inspect project files from a browser.
+## 快速开始
 
-## Sky skin（本版新增）
-
-- **毛玻璃界面**：消息气泡、输入框、工具栏、扩展区、顶栏统一 frosted-glass，壁纸可透出
-- **JetBrains Mono 消息字体**（Consolas 回退，中文兜底）
-- **文字对比度**：浅色偏青蓝深色、深色偏白
-- **右上角 todo 面板**：窄面板展示会话 pi-todo 状态，运行中 6s 轮询 + 展开前即时刷新
-- **右下角堆叠弱通知**：扩展/错误等瞬时提示以小卡片堆叠在右下角，自动消失
-- **内置多会话终端**：两栏面板——左侧只放当前项目的终端，右侧下拉选分组列出所有项目的终端；打开面板或切换项目时若当前项目还没有终端会自动补开一个，每个终端以 `<项目名>-<4位随机>` 命名。xterm.js + 服务端 pty、SSE 流式输出，刷新后会话保留；后台重启后失联终端会标记并支持一键清理
-- **消息钉**：把任意消息气泡钉成置顶浮窗，可全局拖拽移动、自由缩放，钉住的消息快照在工作时始终可见
-- **可定制壁纸**：图片/视频壁纸，支持横向位置拖动调整、平铺重复、边缘色彩填充与一键重置
-- **气泡玻璃可调**：背景设置中提供滑块，可分别调节消息气泡的透明度与磨砂强度，刷新后保留
-
-![Pi Web displaying a pi session with structured Markdown, tool calls, and project navigation](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
-
-## Features
-
-- **Session workspace**: browse, resume, rename, export, and delete conversations grouped by project, with running state, context usage, cost, and compaction details.
-- **Two ways to branch**: **New session** creates an independent session file from an earlier message; **Edit from here** creates a branch inside the current session.
-- **Project file tools**: browse and upload files, inspect Git diffs, and preview source, Markdown, images, audio, PDFs, and DOCX files with automatic refresh.
-- **Git worktrees**: switch checkouts from the sidebar while keeping sessions from the same repository grouped together.
-- **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
-- **MCP server management**: add, remove, enable, disable, update and test MCP servers from a dedicated top-bar panel (global and project `mcp.json`), including a live connectivity test that lists the tools each server exposes.
-- **Built-in multi-session terminal**: a two-column panel — the left column lists only the current project's terminals, and the right column is a grouped dropdown of every terminal across projects. Opening the panel (or switching projects) auto-starts a terminal for the current project when none exists, and each session is named `<project>-<4-char nanoid>`. xterm.js streams over SSE and sessions survive page refreshes; if the backend restarts, disconnected terminals are flagged and can be batch-cleaned with one click.
-- **Message pinning**: pin any message bubble into an always-on-top floating window over the chat — drag it anywhere and resize it freely, so a pinned snapshot of the message stays visible while you keep working.
-- **Customisable wallpaper**: use an image or video as the background, drag it horizontally to reposition, tile it, fill side gaps with edge-sampled colours, and reset on demand.
-- **Adjustable bubble glass**: sliders in the wallpaper menu control message-bubble opacity and frost blur independently, persisted across refreshes.
-- **English and Simplified Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.
-- **Security hardening**: streamed file responses carry `X-Content-Type-Options: nosniff`; inline SVG previews are served with a strict CSP and `Referrer-Policy: no-referrer` so a malicious SVG's `<script>` cannot execute inside the Pi Web origin; API Origin checks compare hostnames (tolerating Chromium dropping the port) while the host allow-list still blocks DNS rebinding and cross-loopback attacks.
-
-## Quick Start
-
-Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --version`, then run:
+需要 Node.js 22.19+，一行起服（默认打开浏览器，地址 `127.0.0.1:30143`）：
 
 ```bash
 npx @baique/pi-web-sky@latest
 ```
 
-The CLI opens a browser after the server is ready. If it does not, open [http://127.0.0.1:30143](http://127.0.0.1:30143). Pi Web listens only on `127.0.0.1` by default.
-
-If no model provider is configured yet, open the **Models** panel to sign in or add an API key.
-
-To install the `pi-web-sky` command globally:
+全局安装：
 
 ```bash
 npm install -g @baique/pi-web-sky@latest
 pi-web-sky
+# 更新：重启进程后重跑同样命令即可；卸载：npm uninstall -g @baique/pi-web-sky
 ```
 
-To update, stop the running process with `Ctrl+C` and run the same install command again. To uninstall, run `npm uninstall -g @baique/pi-web-sky`.
+首次使用先在 **Models** 面板登录或配置 API Key。默认仅监听 `127.0.0.1`；对外暴露意味着授权该进程执行高权限操作，请务必通过 `PI_WEB_PASSWORD` 开启 Basic Auth 并在 HTTPS/VPN 内网使用。
 
-## Configuration
+## 我们做了什么
 
-For port and hostname, command-line options override the corresponding environment variables. Either `--no-open` or `PI_WEB_NO_OPEN=1` disables automatic browser opening.
+以下是我们相对原生 pi-web 的主要工作（截图为实机效果，图随文走）。
 
-| Option or environment variable | Purpose | Default |
-| --- | --- | --- |
-| `--port <port>`, `-p <port>`, or `PORT` | Server port | `30143` |
-| `--hostname <host>`, `-H <host>`, or `PI_WEB_HOSTNAME` | Bind hostname | `127.0.0.1` |
-| `--no-open` or `PI_WEB_NO_OPEN=1` | Do not open a browser automatically | Browser opens |
-| `PI_WEB_ALLOWED_HOSTS` | Additional exact proxy or custom hostnames, comma-separated | Unset |
-| `PI_WEB_PASSWORD` | Enable HTTP Basic Auth; the username is always `pi` | Authentication disabled |
+### 玻璃感 UI
 
-For example:
+整站视觉重做为统一的毛玻璃体系——消息气泡、Composer 输入区、工具栏、侧边栏、todo 面板、悬浮面板与时间轴全部同款 frosted-glass，壁纸可透出。气泡与面板的模糊/饱和度按浅深主题分离调校（如浅色 `blur 12px + saturate 80%`、深色 `140%`），边框改为半透明文字色混合，消除壁纸上刺眼的纯白/纯黑描边。
 
-```bash
-pi-web-sky -p 8080 -H 0.0.0.0 --no-open
-```
+底层收敛为分层玻璃 token（`--bubble-*` 层级体系）与标准玻璃 class（`glass-top-panel/panel/popover`），组件不再散落硬编码 px/rgba；修复了 `backdrop-filter` 被根容器 z-index 截断导致毛玻璃失效、模型下拉被 containing block 劫持错位等坑。
 
-### Remote Access
+<!-- 截图：全局毛玻璃效果 -->
 
-Binding to a non-loopback address exposes an agent that can execute high-privilege actions. On a trusted LAN, require a long random password:
+### 背景图设置
 
-```bash
-PI_WEB_PASSWORD='a-long-random-password' pi-web --hostname 0.0.0.0
-```
+图片/视频壁纸，支持横向拖动调整位置、平铺重复、边缘色彩填充缝隙、一键重置位置。背景设置里另有两支滑块，可分别调节消息气泡的**透明度与磨砂强度**，刷新后保留——喜欢厚磨砂还是近透明的玻璃，随手可调。
 
-Basic Auth does not encrypt the password in transit. Do not expose Pi Web over plain HTTP to the internet; use HTTPS through a trusted reverse proxy or a trusted VPN. If a reverse proxy sends an external hostname, add that exact name to `PI_WEB_ALLOWED_HOSTS`. This allow-list does not change the address Pi Web binds to.
+<!-- 截图：壁纸设置 + 气泡玻璃滑块 -->
 
-### HTTP Proxy
+### 内置多会话终端
 
-Server-side model and API requests honor the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables.
+面板内置 xterm.js 终端，两栏布局——左侧只放当前项目的终端，右侧按下拉分组列出所有项目的终端；打开面板或切换项目时当前项目没有终端会自动补开一个，命名 `<项目名>-<4位随机>`。服务端 pty + SSE 流式输出，多会话并行，刷新页面后会话保留；后台重启后失联终端会标记并支持一键清理。配色随浅深主题切换，玻璃质感与消息气泡同源。
 
-On macOS or Linux:
+<!-- 截图：终端面板（两栏 + 多会话） -->
 
-```bash
-HTTP_PROXY=http://127.0.0.1:7890 \
-HTTPS_PROXY=http://127.0.0.1:7890 \
-NO_PROXY=localhost,127.0.0.1 \
-npx @baique/pi-web-sky@latest
-```
+### 输入框草稿暂存区
 
-On Windows PowerShell:
+输入内容随时 `Ctrl+S` 暂存、`Ctrl+Delete` 删除，跨会话持久，意外清空输入框也不慌；回填与正在输入的内容做冲突保护。Composer 重构为整体玻璃面板，草稿、输入框、工具条合一。
 
-```powershell
-$env:HTTP_PROXY = "http://127.0.0.1:7890"
-$env:HTTPS_PROXY = "http://127.0.0.1:7890"
-$env:NO_PROXY = "localhost,127.0.0.1"
-npx @baique/pi-web-sky@latest
-```
+<!-- 截图：草稿暂存区（Draft Stash） -->
 
-## Notes
+### thinking-orbs 思考球
 
-- **Agent data**: Pi Web reads pi data from `~/.pi/agent` by default, including session files under `sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`. Set `PI_CODING_AGENT_DIR` to use another pi agent directory.
-- **Filesystem access**: Pi Web must be able to read the agent data directory and the working directories recorded by its sessions. Run Pi Web in the same filesystem environment as pi when sharing existing sessions.
-- **Shared configuration**: the Models panel uses pi's model, settings, and credential storage, so changes are visible to both interfaces.
-- **File access boundary**: the file browser is limited to working directories selected in Pi Web and project or session roots it already knows about; it is not a general filesystem browser.
-- **Git worktrees**: see [Worktrees in Pi Web](./docs/worktrees.md) for switcher visibility, worktree creation, and removal behavior.
+集成 [thinking-orbs](https://www.npmjs.com/package/thinking-orbs)（MIT）：等待模型、执行工具的状态行与思考块加载态统一换成呼吸/工作动画球，浅色主题下单独做对比度修正。思考块展示改为**纯文本注记**——零背景零边框、仅左侧一条细线标识思考区，长文阅读更舒服；消息气泡材质统一收敛为冒泡层级 token 体系。
 
-### Downstream Session Context Menu
+<!-- 截图：思考块 + thinking-orbs 状态行 -->
 
-Electron wrappers and other downstream integrations can provide a session-row
-context menu without patching `SessionSidebar`. Listen for the cancelable
-`pi-web:session-row-contextmenu` browser event and call `preventDefault()`
-synchronously when the integration will handle it:
+### 消息体验细节
 
-```js
-window.addEventListener("pi-web:session-row-contextmenu", (event) => {
-  event.preventDefault();
-  const { id, path, cwd, name, clientX, clientY, refresh } = event.detail;
+- **从此处编辑对齐 pi 语义**：回滚目标改为取会话树上的真实 parent，任意用户消息（会话首条、压缩后的消息、连续用户消息）都可编辑回滚——首条回滚到会话起点，与 pi 的 `navigateTree` 行为一致；顺带修复了"首条消息无法新建会话"以及该路径下会话文件不落盘的缺陷。
+- **消息钉**：把任意消息气泡钉成置顶浮窗，可全局拖拽、自由缩放，关键上下文边干活边看。
+- **AI 消息头吸附**：超长回复的头条滚动时吸附为灵动岛胶囊（上直角下圆角、磨砂柔和），点击可滚回本条开头。
+- **todo 面板**：右上角窄面板实时展示会话 pi-todo 状态。
+- **右下角堆叠弱通知**：扩展/错误的瞬时提示以小卡片堆叠自动消失。
 
-  void openSessionMenu({ id, path, cwd, name, clientX, clientY }).then((changed) => {
-    if (changed) refresh();
-  });
-});
-```
+<!-- 截图：消息钉 / 标题吸附 / todo 面板 -->
 
-The detail object contains `id`, `path`, `cwd`, optional `name`, pointer
-coordinates, and a `refresh()` callback for actions that change the session
-list. If no listener cancels the extension event, Pi Web preserves the
-browser's native context menu. This hook is browser-side and independent of
-Pi agent extensions.
+### 移植上游修复（含自研补丁）
 
-## Development
+上游 PR 无法直接 merge（本仓库皮肤改造面大），以手工移植为主，全部经浏览器 e2e 验证：
+
+- **#519** 关闭技能开关把 SKILL.md 写坏（`false` 被当不存在致重复 key）
+- **#590** 大图上传压缩 + 渲染 toolResult 图片
+- **#517** 内置斜杠命令一次回车直接执行
+- **#536** 文件管理器复制/粘贴路径
+- **#587** 会话历史分页加载 + BranchNavigator 递归爆栈修复（额外补了服务端 `hasMore` 标记，修掉上游"折叠块导致上翻入口消失"的偏差）
+- **#516** 打开单个会话不再全量扫目录（7ms vs 322ms）
+- **#544** Origin 校验容忍 Chromium 剥端口（修复 403 白屏）
+- **#520** 内联 SVG 预览加 script 拦截 CSP
+- **#470** MCP 服务器管理面板（全局与项目 `mcp.json`，含连通性测试）
+
+### 安全与性能
+
+- 流式文件响应统一 `X-Content-Type-Options: nosniff`；SVG 预览附加严格 CSP（`default-src 'none'` 等）与 `Referrer-Policy`，恶意 SVG 的脚本无法在本站点执行
+- API Origin 校验只比较 hostname（容忍端口变化），host 白名单继续拦截 DNS rebinding 与跨 loopback 攻击
+- 消除 StrictMode 双发全量会话扫描，路径/列表缓存 TTL 30s → 5min，首开明显变快
+
+## 开发
 
 ```bash
 npm install
-npm run dev
-```
-
-The development server runs at [http://127.0.0.1:30143](http://127.0.0.1:30143). Run the common checks with:
-
-```bash
-npm test
+npm run dev          # http://127.0.0.1:30143
 node_modules/.bin/tsc --noEmit
 npm run lint
+node --test lib      # 单元测试
 ```
 
-Do not run `next build` or `npm run build` during normal development. It writes to `.next/` and can interfere with the development server; leave builds for release work.
+开发期不要跑 `next build`/`npm run build`（会污染 `.next/` 影响 dev）。发版、多语言 i18n、worktree 等细节见 [docs](docs/)。
 
-Contributor guides: [Internationalization](./docs/i18n.md) and [Release process](./docs/release.md).
-
-## Repository Layout
-
-```text
-app/             Next.js UI and API routes
-components/      React UI components
-hooks/           Client state and interaction hooks
-lib/             Session, agent, model, file, Git, and security logic
-public/          Static assets and PWA files
-bin/             npm CLI entrypoint and launch option parsing
-docs/            Focused user and contributor guides
-```
-
-See [AGENTS.md](./AGENTS.md) for the architecture notes and detailed file map.
-
-## License
+## 许可证
 
 [MIT](./LICENSE)
