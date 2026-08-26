@@ -30,7 +30,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
 import { useBroadcast } from "@/hooks/useBroadcast";
 import { phaseLabel, orbModeForPhase } from "@/lib/agent-phase";
-import { ComposerHeader } from "./ComposerHeader";
+import { ComposerHeader, NoticeInline } from "./ComposerHeader";
 import type { ToolPreset } from "@/lib/tool-presets";
 import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
 
@@ -1857,8 +1857,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         >
           <ComposerHeader
             phase={phaseBroadcast}
-            notice={noticeBroadcast}
-            onDismissError={dismissError}
             modelSlot={modelSlot}
             isDark={isDark}
             right={(
@@ -2543,8 +2541,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           background: "color-mix(in srgb, var(--bg-panel) 45%, transparent)",
         }}>
 
-          {/* LEFT: attach + model selector (idle) or steer/followup toggle (streaming) */}
-          <div style={{ flex: isMobile ? "1 1 auto" : "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
+          {/* LEFT: attach + 临时通知（P0/P1/P3） */}
+          <div style={{ flex: isMobile ? "1 1 auto" : "1 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
             <button
               onClick={() => fileInputRef.current?.click()}
              title={t("chat.attachImage")}
@@ -2573,6 +2571,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <polyline points="21 15 16 10 5 21" />
               </svg>
             </button>
+            <NoticeInline notice={noticeBroadcast} onDismissError={dismissError} isDark={isDark} style={{ flex: 1, minWidth: 0 }} />
           </div>
 
           {/* spacer */}
