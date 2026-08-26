@@ -2082,6 +2082,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           <div
             style={{
               minWidth: 0,
+              position: "relative",
               display: "flex",
               gap: 8,
               alignItems: "center",
@@ -2137,11 +2138,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               minHeight: 24,
               maxHeight: 200,
               overflow: "auto",
+              paddingRight: 110,
             }}
           />
 
+          {/* 右下角锚定操作区：流式=引导/后续，空闲=发送（纯文字钮，不遮挡文字） */}
+          <div style={{ position: "absolute", right: 8, bottom: 8, display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
           {isStreaming ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {onSteer && (
                 <button
                   onClick={() => sendQueued("steer")}
@@ -2210,7 +2214,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               disabled={!value.trim() && !attachedImages.length}
               style={{
                 flexShrink: 0,
-                alignSelf: "flex-end",
                 display: "flex", alignItems: "center", gap: 6,
                 padding: "6px 10px",
                 borderRadius: 8,
@@ -2244,6 +2247,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               {t("chat.send")}
             </button>
           )}
+          </div>
           </div>
         </div>
 
