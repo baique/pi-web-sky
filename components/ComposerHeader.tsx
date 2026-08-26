@@ -178,6 +178,8 @@ export function ComposerHeader({
 
   return (
     <div
+      role="status"
+      aria-live="polite"
       style={{
         display: "flex",
         alignItems: "center",
