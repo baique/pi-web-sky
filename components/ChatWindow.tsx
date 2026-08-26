@@ -14,6 +14,7 @@ import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { useI18n } from "@/hooks/useI18n";
 import { useBroadcast } from "@/hooks/useBroadcast";
+import { useProviderQuota } from "@/hooks/useProviderQuota";
 import { useTheme } from "@/hooks/useTheme";
 import { phaseLabel, orbModeForPhase } from "@/lib/agent-phase";
 import { NoticeInline } from "./ComposerHeader";
@@ -316,7 +317,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       ? [...arr, { id: "compact-result", message: compactResultText, type: "info" as const }]
       : arr;
   }, [notices, compactResultText]);
-  const { phase: phaseBroadcast, notice: noticeBroadcast, dismissError } = useBroadcast({ notices: effectiveNotices, phase: phaseInfo, retryText });
+  const quotaInfo = useProviderQuota(displayModelValue?.provider ?? null);
+  const { phase: phaseBroadcast, notice: noticeBroadcast, dismissError } = useBroadcast({ notices: effectiveNotices, phase: phaseInfo, retryText, quota: quotaInfo });
   const sessionBusy = agentRunning || bashRunning;
 
   useEffect(() => {
@@ -814,15 +816,12 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               </div>
             </div>
             {chatInputElement}
-            {/* 底部一行：widget（占满） + 扩展按钮容器（auto，目前=终端） */}
+            {/* 底部栏：始终存在以保持布局稳定；widget 空状态时内部返回 null */}
             <div className="bottom-band">
               <ExtensionStatusBar
                 statuses={extensionStatuses}
                 widgets={extensionWidgets}
               />
-              {!isMobile && (
-                <div className="extension-actions">{terminalBarToggle}</div>
-              )}
             </div>
           </div>
         </div>

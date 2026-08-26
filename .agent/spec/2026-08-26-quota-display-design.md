@@ -1,6 +1,6 @@
 # 余额查询功能（按提供商）— 设计
 
-> 2026-08-26 · 提供商：opencode-go、deepseek · 展示位：composer 顶栏左槽模型选择后方（已有预留）
+> 2026-08-26 · 提供商：opencode-go、deepseek · 展示位：底栏通知槽（NoticeInline 空闲态 P3；用户确认底部即可，顶栏预留位不用）
 
 ## 背景
 
@@ -43,13 +43,13 @@ GET https://api.deepseek.com/user/balance   Authorization: Bearer <auth.json key
 
 ### 前端适配
 
-- ChatWindow 内轻量 hook `useProviderQuota(provider)`：
+- ChatWindow 内轻量 hook `hooks/useProviderQuota.ts`：
   - provider 变化时触发查询 + 60s 轮询；非 ocg/ds 返回 null（区域留空）
-  - 映射为 `QuotaInfo` 传入 `useBroadcast({ quota })`
-- **ocg → usage 型**：主条显示最紧窗口（percent 最高者）`月 ▓▓▓▓▓▓▓░ 剩5%`；
-  悬停 title 展示三窗明细 + 各自重置时间
-- **ds → balance 型**：`¥10.91 · 谷(半价) 14:00转峰`
-- QuotaView 小改：支持 title 悬停明细，样式不变（纯文本 mono，复用现有 token）
+  - 映射为 `QuotaInfo` 传入 `useBroadcast({ quota })` → 空闲态经 NoticeInline 在底栏展示
+- **ocg → usage 型**：三窗平铺纯文本 `5h 24% · 周 84% · 月 95%`（不用进度条，用户确认）；
+  悬停 title 逐窗展示倒计时 + 重置时间
+- **ds → balance 型**：`¥10.91 · 峰 · 18:00转谷 (1h19m)`
+- QuotaView 小改：usage 分支多窗平铺 + title 悬停明细，样式不变（纯文本 mono，复用现有 token）
 
 ## 验证
 

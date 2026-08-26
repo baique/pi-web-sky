@@ -11,18 +11,26 @@ export const NOTICE_COLOR: Record<string, string> = {
   info: "var(--accent)",
 };
 
-/** 额度微缩条：`5h ▓▓░░ 2h10m`（纯字符实现，不新增样式） */
+/**
+ * 额度微缩条（纯文本，不新增样式）：
+ * - usage：多窗平铺 `5h 24% · 周 84% · 月 95%`，悬停看重置时间明细
+ * - balance：直接文本
+ */
 export function QuotaView({ quota }: { quota: QuotaInfo }) {
   if (quota.kind === "balance") {
     return <span>{quota.text}</span>;
   }
-  const item = quota.items[0];
-  if (!item) return null;
-  const filled = Math.max(0, Math.min(8, Math.round(item.pct * 8)));
-  const bar = "▓".repeat(filled) + "░".repeat(8 - filled);
+  if (quota.items.length === 0) return null;
+  const title = quota.items
+    .map((i) => i.detail ?? `${i.label} ${Math.round(i.pct * 100)}%`)
+    .join("\n");
   return (
-    <span>
-      {item.label} {bar} {item.text}
+    <span title={title} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+      {quota.items.map((item) => (
+        <span key={item.label} style={{ whiteSpace: "nowrap" }}>
+          {item.label} {item.text}
+        </span>
+      ))}
     </span>
   );
 }

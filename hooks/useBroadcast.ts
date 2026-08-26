@@ -10,10 +10,10 @@ export interface BroadcastNotice {
   exiting?: boolean;
 }
 
-/** 额度展示契约（本期仅预留渲染位，数据适配器后置） */
+/** 额度展示契约（渲染位 ComposerHeader.QuotaView；数据源 hooks/useProviderQuota） */
 export type QuotaInfo =
   | { kind: "balance"; text: string }
-  | { kind: "usage"; items: { label: string; pct: number; text: string }[] };
+  | { kind: "usage"; items: { label: string; pct: number; text: string; /** 悬停明细（多窗时逐行展示） */ detail?: string }[] };
 
 /** 左槽：运行状态（重试文本已在上游合并为 working 态） */
 export type PhaseBroadcast = { text: string; orb: "breathing" | "working" };
