@@ -64,7 +64,7 @@
 .expandArea {
   position: absolute;
   /* 向上展开：composer 贴近视口底部，向下会被裁切；上方是整个消息区 */
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + 12px);
   right: 0;
   /* 百分比宽度：随视口伸缩；窄屏钳制不溢出视口 */
   width: clamp(280px, 34vw, 480px);
@@ -155,7 +155,8 @@
   transition: background 0.12s;
 }
 .row:hover {
-  background: var(--bg-hover);
+  /* 玻璃淡色 hover（弹窗统一：非实心灰） */
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 /* 注入 + 删除 同侧（行右侧） */

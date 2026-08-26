@@ -1520,7 +1520,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       return (
                         <div ref={modelDropdownPanelRef} style={{
                         position: "absolute",
-                        bottom: "calc(100% + 6px)",
+                        bottom: "calc(100% + 12px)",
                         ...panelPos,
                         zIndex: 500,
                         /* 与输入台同标准玻璃（--frame-glass + heavy blur + saturate） */
@@ -1593,14 +1593,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                                     style={{
                                       display: "flex", alignItems: "center", gap: 8,
                                       width: "100%", padding: "7px 12px",
-                                      background: isActive ? "var(--bg-selected)" : "none",
+                                      background: isActive ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "none",
                                       border: "none",
                                       color: isActive ? "var(--text)" : "var(--text-muted)",
                                       cursor: "pointer", fontSize: 12, textAlign: "left",
                                       fontWeight: isActive ? 600 : 400,
                                       whiteSpace: "nowrap",
                                     }}
-                                    onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                                    onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "color-mix(in srgb, var(--text) 8%, transparent)"; }}
                                     onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
                                   >
                                     {isActive
@@ -2416,7 +2416,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     </button>
                     {thinkingDropdownOpen && (
                       <div style={{
-                        position: "absolute", bottom: "calc(100% + 6px)",
+                        position: "absolute", bottom: "calc(100% + 12px)",
                         ...(isMobile ? { left: 0 } : { right: 0 }),
                         zIndex: 100, background: "var(--bg)", border: "1px solid var(--border)",
                         borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
@@ -2439,14 +2439,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                               style={{
                                 display: "flex", alignItems: "center", gap: 8,
                                 width: "100%", padding: "7px 12px",
-                                background: isActive ? "var(--bg-selected)" : "none",
+                                background: isActive ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "none",
                                 border: "none",
                                 color: isActive ? "var(--text)" : "var(--text-muted)",
                                 cursor: "pointer", fontSize: 12, textAlign: "left",
                                 fontWeight: isActive ? 600 : 400,
                                 whiteSpace: "nowrap",
                               }}
-                              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "color-mix(in srgb, var(--text) 8%, transparent)"; }}
                               onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
                             >
                               {isActive
@@ -2503,7 +2503,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     {toolDropdownOpen && (
                       <div style={{
                         position: "absolute",
-                        bottom: "calc(100% + 6px)",
+                        bottom: "calc(100% + 12px)",
                         right: isMobile ? undefined : 0,
                         left: isMobile ? 0 : undefined,
                         zIndex: 100, background: "var(--bg)", border: "1px solid var(--border)",
@@ -2525,14 +2525,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                               style={{
                                 display: "flex", alignItems: "center", gap: 8,
                                 width: "100%", padding: "7px 12px",
-                                background: isActive ? "var(--bg-selected)" : "none",
+                                background: isActive ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "none",
                                 border: "none",
                                 color: isActive ? "var(--text)" : "var(--text-muted)",
                                 cursor: "pointer", fontSize: 12, textAlign: "left",
                                 fontWeight: isActive ? 600 : 400,
                                 whiteSpace: "nowrap",
                               }}
-                              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "color-mix(in srgb, var(--text) 8%, transparent)"; }}
                               onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
                             >
                               {isActive
@@ -2754,7 +2754,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 </button>
                 {thinkingDropdownOpen && (
                   <div style={{
-                    position: "absolute", bottom: "calc(100% + 6px)",
+                    position: "absolute", bottom: "calc(100% + 12px)",
                     ...(isMobile ? { left: 0 } : { right: 0 }),
                     zIndex: 100, background: "var(--bg)", border: "1px solid var(--border)",
                     borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
@@ -2777,14 +2777,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                           style={{
                             display: "flex", alignItems: "center", gap: 8,
                             width: "100%", padding: "7px 12px",
-                            background: isActive ? "var(--bg-selected)" : "none",
+                            background: isActive ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "none",
                             border: "none",
                             color: isActive ? "var(--text)" : "var(--text-muted)",
                             cursor: "pointer", fontSize: 12, textAlign: "left",
                             fontWeight: isActive ? 600 : 400,
                             whiteSpace: "nowrap",
                           }}
-                          onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                          onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "color-mix(in srgb, var(--text) 8%, transparent)"; }}
                           onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
                         >
                           {isActive
@@ -2841,7 +2841,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 {toolDropdownOpen && (
                   <div style={{
                     position: "absolute",
-                    bottom: "calc(100% + 6px)",
+                    bottom: "calc(100% + 12px)",
                     right: isMobile ? undefined : 0,
                     left: isMobile ? 0 : undefined,
                     zIndex: 100, background: "var(--bg)", border: "1px solid var(--border)",
@@ -2863,14 +2863,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                           style={{
                             display: "flex", alignItems: "center", gap: 8,
                             width: "100%", padding: "7px 12px",
-                            background: isActive ? "var(--bg-selected)" : "none",
+                            background: isActive ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "none",
                             border: "none",
                             color: isActive ? "var(--text)" : "var(--text-muted)",
                             cursor: "pointer", fontSize: 12, textAlign: "left",
                             fontWeight: isActive ? 600 : 400,
                             whiteSpace: "nowrap",
                           }}
-                          onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                          onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "color-mix(in srgb, var(--text) 8%, transparent)"; }}
                           onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
                         >
                           {isActive
