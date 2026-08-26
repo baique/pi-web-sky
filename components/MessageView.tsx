@@ -817,11 +817,6 @@ function AssistantMessageView({
         }}
       >
       {!bare && (
-      <>
-      {/* Sticky head —— 纯 CSS：sticky 条自身作为 scroll-state 容器，
-          吸顶时由 @container scroll-state(stuck: top) 浮现磨砂条与模型名；
-          点击头部滚回本消息开头。空置时高度 0，不占气泡空间。 */}
-      {!bare && (
         <div
           className="chat-msg-head"
           onClick={(e) => {
@@ -829,15 +824,7 @@ function AssistantMessageView({
             scrollToCardTop();
           }}
           title="回到本消息开头"
-        >
-          <div className="chat-msg-head-inner">
-            {message.provider && (
-              <span className="chat-msg-head-model">{modelNames?.[`${message.provider}:${message.model}`] ?? modelNames?.[message.model] ?? message.model}</span>
-            )}
-          </div>
-        </div>
-      )}
-      </>
+        />
       )}
 
         {blockItems.map(({ block, originalIndex }) => (

@@ -1978,53 +1978,19 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
    - stuck 吸附中：上方直角贴合顶边、下边圆角成胶囊，磨砂柔和、更透。
    关键：两态不改变文档流高度（padding/高度恒定）——
    否则头部占位变化会反哺"超长"判定，在高度恰为一屏时形成反馈环闪烁。 */
-/* 消息头吸附条 —— 纯 CSS 实现：sticky 元素作为 scroll-state 容器，
-   自身感知吸顶状态（Chrome 133+）；不支持的浏览器降级为隐形空条，功能无损。
-   高度 0 不占气泡空间；负 margin 抵消父容器上下 gap。 */
+/* 消息头粘性条 —— 以整个气泡为基准的吸附锚点，纯 CSS：
+   常驻窄磨砂带，短消息即气泡顶部呼吸区；长消息滚动时自动钉在视口顶，
+   正文从其下方滚过（backdrop-filter 糊字）。无需感知吸顶状态。
+   高度由 --bubble-sticky-strip-h 控制（默认 22px）。 */
 .chat-msg-head {
   position: sticky;
-  top: -14px; /* 抵消滚动容器 pt-4 顶部留白，让吸附头贴到可视顶 */
+  top: -14px; /* 抵消滚动容器 pt-4 顶部留白，吸附时贴到可视顶 */
   z-index: 30;
-  height: 0;
-  margin: calc(-1 * var(--bubble-gap)) 0;
+  height: var(--bubble-sticky-strip-h, 22px);
+  flex-shrink: 0;
   cursor: pointer;
-  container-type: scroll-state;
-}
-
-.chat-msg-head-inner {
-  position: absolute;
-  top: 0;
-  left: -14px; /* 铺满气泡宽（抵消 pad-x） */
-  right: -14px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 14px;
-  font-size: 11px;
-  color: var(--text-meta);
-  border-radius: 0 0 18px 18px;
-}
-
-.chat-msg-head-model {
-  display: none;
-  font-weight: 500;
-}
-
-@container scroll-state(stuck: top) {
-  .chat-msg-head-inner {
-    padding: 7px 14px;
-    /* 定稿版本：strong 90% 磨砂 + 12px blur + 原投影（无光晕）
-       注意：background 必须带 fallback —— tailwind/Lightning CSS 会把
-       color-mix 拆进 @supports(color-mix(in lab,...))，无 fallback 时
-       不支持 lab 语法的浏览器会整条丢弃背景。 */
-    background: var(--glass-bg-strong);
-    background: color-mix(in srgb, var(--glass-bg-strong) 90%, transparent);
-    backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
-    -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
-    box-shadow: 0 6px 18px -10px rgba(15, 23, 42, 0.25);
-  }
-
-  .chat-msg-head-model {
-    display: inline;
-  }
+  border-radius: var(--bubble-inner-radius);
+  background: color-mix(in srgb, var(--glass-bg-strong) 55%, transparent);
+  backdrop-filter: blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate));
 }
