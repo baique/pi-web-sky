@@ -1756,24 +1756,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             isDark={isDark}
             right={(
               <>
-                {queueCount > 0 && (
-              <button
-                onClick={() => setOutboxOpen(true)}
-                title={t("chat.queued", { count: queueCount })}
-                style={{
-                  fontSize: 12,
-                  fontFamily: "var(--font-mono)",
-                  lineHeight: "20px",
-                  color: "var(--accent)",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: "0 4px",
-                }}
-              >
-                ⏳ {queueCount}
-              </button>
-                )}
                 <DraftStash />
                 {!atBottom && onScrollToBottom && (
                   <button
@@ -1811,9 +1793,33 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 8px" }}>
-                <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)", flex: 1, minWidth: 0 }}>
-                  {t("chat.queued", { count: queueCount })}
-                </span>
+                {/* 点击"已排队 · N"= 展开/收起（与 TODO 同交互） */}
+                <button
+                  onClick={() => setOutboxOpen((o) => !o)}
+                  aria-expanded={outboxOpen}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    flex: 1, minWidth: 0,
+                    fontSize: 11,
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--text-muted)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                    textAlign: "left",
+                    transition: "color 0.12s",
+                  }}
+                >
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {t("chat.queued", { count: queueCount })}
+                  </span>
+                  <span aria-hidden="true" style={{ flexShrink: 0, fontSize: 9, color: "var(--text-dim)" }}>
+                    {outboxOpen ? "▴" : "▾"}
+                  </span>
+                </button>
                 {onRecallQueue && (
                   /* 移回（召回）输入框：plaintext 按钮，无边框无胶囊 */
                   <button
@@ -1842,35 +1848,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     {t("chat.recall")}
                   </button>
                 )}
-                <button
-                  onClick={() => setOutboxOpen((o) => !o)}
-                  aria-expanded={outboxOpen}
-                  style={{
-                    flexShrink: 0,
-                    width: 18,
-                    height: 18,
-                    padding: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: "none",
-                    border: "none",
-                    borderRadius: 5,
-                    color: "var(--text-dim)",
-                    cursor: "pointer",
-                    fontSize: 10,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "var(--bg-hover)";
-                    e.currentTarget.style.color = "var(--text)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "none";
-                    e.currentTarget.style.color = "var(--text-dim)";
-                  }}
-                >
-                  {outboxOpen ? "▴" : "▾"}
-                </button>
               </div>
               {outboxOpen && (
                 <>
