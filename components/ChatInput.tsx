@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
+import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, useMemo, forwardRef, KeyboardEvent } from "react";
 import type { AgentPhase, BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { BroadcastNotice, QuotaInfo } from "@/hooks/useBroadcast";
 import type { SkillsResponse } from "@/lib/api-types";
@@ -27,6 +27,10 @@ import { FolderIcon, getFileIcon } from "./FileIcons";
 import { DraftStash } from "./DraftStash";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
+import { useTheme } from "@/hooks/useTheme";
+import { useBroadcast } from "@/hooks/useBroadcast";
+import { phaseLabel, orbModeForPhase } from "@/lib/agent-phase";
+import { ComposerHeader } from "./ComposerHeader";
 import type { ToolPreset } from "@/lib/tool-presets";
 import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
 
@@ -468,6 +472,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 }: Props, ref) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
+  const { isDark } = useTheme();
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
   // 压缩失败提示的“已关闭”状态；内容变化时重置，让新的失败重新显示
   const [compactErrorDismissed, setCompactErrorDismissed] = useState(false);
@@ -1435,6 +1440,24 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const compactResultText = compactResult
     ? `${compactResult.reason && compactResult.reason !== "manual" ? `${compactResult.reason[0].toUpperCase()}${compactResult.reason.slice(1)} ` : t("chat.compacted")} ${formatTokenCount(compactResult.tokensBefore)} -> ${formatTokenCount(compactResult.estimatedTokensAfter)} tokens (${t("chat.tokensSaved", { saved: formatTokenCount(compactSavedTokens) })})`
     : null;
+
+  // 播报槽数据源：agent 阶段 / 重试 / 公告（含 compact 结果合成公告）/ 额度预留
+  const phaseInfo = useMemo(() => {
+    if (!agentPhase) return null;
+    const text = phaseLabel(agentPhase, t);
+    return text ? { text, orb: orbModeForPhase(agentPhase) } : null;
+  }, [agentPhase, t]);
+  const retryText = useMemo(
+    () => retryInfo ? `${t("chat.retrying", { attempt: retryInfo.attempt, max: retryInfo.maxAttempts })}${retryInfo.errorMessage ? ` — ${retryInfo.errorMessage}` : ""}` : null,
+    [retryInfo, t],
+  );
+  const effectiveNotices = useMemo(() => {
+    const arr = broadcastNotices ?? [];
+    return compactResultText
+      ? [...arr, { id: "compact-result", message: compactResultText, type: "info" as const }]
+      : arr;
+  }, [broadcastNotices, compactResultText]);
+  const { broadcast, dismissError } = useBroadcast({ notices: effectiveNotices, phase: phaseInfo, retryText, quota });
   const thinkingDisplayLabel = (() => {
     const lvl = thinkingLevel ?? "auto";
     if (lvl === "auto" || !thinkingLevelMap) return lvl;
@@ -1568,36 +1591,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             ))}
           </div>
         )}
-        {/* Retry banner */}
-        {retryInfo && (
-          <div style={{
-            marginBottom: 8, padding: "5px 10px",
-            background: "color-mix(in srgb, var(--bg-panel) 92%, #f59e0b 8%)",
-            borderLeft: "3px solid #f59e0b", borderRadius: 4,
-            fontSize: 12, color: "var(--text)",
-            display: "flex", alignItems: "center", gap: 6,
-          }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-              <path d="M3 3v5h5" />
-            </svg>
-             {t("chat.retrying", { attempt: retryInfo.attempt, max: retryInfo.maxAttempts })}{retryInfo.errorMessage && <span style={{ opacity: 0.7, marginLeft: 4 }}>— {retryInfo.errorMessage}</span>}
-          </div>
-        )}
-        {compactResultText && (
-          <div style={{
-            marginBottom: 8, padding: "5px 10px",
-            background: "color-mix(in srgb, var(--bg-panel) 92%, #10b981 8%)",
-            borderLeft: "3px solid #10b981", borderRadius: 4,
-            fontSize: 12, color: "var(--text)",
-            display: "flex", alignItems: "center", gap: 6,
-          }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            {compactResultText}
-          </div>
-        )}
         {compactError && !compactErrorDismissed && (
           <div
             role="alert"
@@ -1716,6 +1709,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             transition: "border-color 0.15s, box-shadow 0.15s",
           } as React.CSSProperties}
         >
+          <ComposerHeader broadcast={broadcast} onDismissError={dismissError} isDark={isDark} />
           <DraftStash />
 
           {/* Image previews — 属输入内容层，与输入行同组 */}
