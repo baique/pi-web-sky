@@ -146,11 +146,13 @@ export function DraftStashList({
                     aria-label="删除 TODO"
                   >
                     <svg
-                      width="11" height="11" viewBox="0 0 10 10" fill="none"
-                      stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
+                      width="12" height="12" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
                     >
-                      <line x1="2" y1="2" x2="8" y2="8" />
-                      <line x1="8" y1="2" x2="2" y2="8" />
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      <line x1="10" y1="11" x2="10" y2="17" />
+                      <line x1="14" y1="11" x2="14" y2="17" />
                     </svg>
                   </button>
                 </span>
