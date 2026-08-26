@@ -563,9 +563,16 @@ export class AgentSessionWrapper {
         let newSessionFile: string;
 
         if (!entry.parentId) {
-          // Fork before the first message: create an empty session linked to this one
+          // Fork before the first message: create an empty session linked to this one.
+          // SessionManager.create + newSession only reserve the in-memory path — the
+          // file is materialized lazily on the first assistant message. pi keeps the
+          // in-memory manager alive for this, but pi-web reads sessions from disk, so
+          // persist the empty header now or the returned session resolves nowhere.
           const newManager = SessionManager.create(sessionManager.getCwd(), sessionDir);
           newManager.newSession({ parentSession: currentSessionFile });
+          if (newManager.getSessionFile()) {
+            (newManager as unknown as { _rewriteFile(): void })._rewriteFile();
+          }
           newSessionFile = newManager.getSessionFile() as string;
         } else {
           // Fork after some history: copy path up to (but not including) the fork point

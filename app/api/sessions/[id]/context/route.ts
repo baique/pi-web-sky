@@ -9,7 +9,10 @@ export async function GET(
 ) {
   const { id } = await params;
   const url = new URL(req.url);
-  const leafId = url.searchParams.get("leafId") ?? undefined;
+  // `leafId=null` is an explicit root projection (rollback to session start);
+  // an absent param projects from the last entry instead.
+  const rawLeaf = url.searchParams.get("leafId");
+  const leafId = rawLeaf === "null" ? null : rawLeaf ?? undefined;
   const deferThinking = url.searchParams.has("deferThinking");
   const deferToolResultImages = url.searchParams.has("deferMedia");
   // `tail` caps the ancestor chain returned (default 50); `before` rewinds the

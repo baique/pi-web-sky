@@ -187,8 +187,11 @@ interface Props {
   entryId?: string;
   onFork?: (entryId: string) => void;
   forking?: boolean;
-  onNavigate?: (entryId: string) => void;
-  prevAssistantEntryId?: string;
+  onNavigate?: (entryId: string, displayLeafId?: string | null) => void;
+  /** Parent entry of this user message in the session tree; null = first message (rollback to root). */
+  parentEntryId?: string | null;
+  /** True when this message's entry is the current session leaf (nothing after it to roll back). */
+  isLeafEntry?: boolean;
   onEditContent?: (message: UserMessage) => void;
   showTimestamp?: boolean;
   prevTimestamp?: number;
@@ -259,9 +262,9 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId, writtenFiles, onPin, bare }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onNavigate, parentEntryId, isLeafEntry, onEditContent, showTimestamp, prevTimestamp, sessionId, writtenFiles, onPin, bare }: Props) {
   if (message.role === "user") {
-    return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} onPin={onPin} bare={bare} />;
+    return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} parentEntryId={parentEntryId} isLeafEntry={isLeafEntry} onEditContent={onEditContent} onPin={onPin} bare={bare} />;
   }
   if (message.role === "assistant") {
     return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} writtenFiles={writtenFiles} onPin={onPin} bare={bare} />;
@@ -291,7 +294,8 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.onFork === next.onFork
     && prev.forking === next.forking
     && prev.onNavigate === next.onNavigate
-    && prev.prevAssistantEntryId === next.prevAssistantEntryId
+    && prev.parentEntryId === next.parentEntryId
+    && prev.isLeafEntry === next.isLeafEntry
     && prev.onEditContent === next.onEditContent
     && prev.showTimestamp === next.showTimestamp
     && prev.prevTimestamp === next.prevTimestamp
@@ -300,15 +304,16 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.bare === next.bare;
 });
 
-function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, onPin, bare }: {
+function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onNavigate, parentEntryId, isLeafEntry, onEditContent, onPin, bare }: {
   message: UserMessage;
   cwd?: string;
   onOpenFile?: (filePath: string) => void;
   entryId?: string;
   onFork?: (entryId: string) => void;
   forking?: boolean;
-  onNavigate?: (entryId: string) => void;
-  prevAssistantEntryId?: string;
+  onNavigate?: (entryId: string, displayLeafId?: string | null) => void;
+  parentEntryId?: string | null;
+  isLeafEntry?: boolean;
   onEditContent?: (message: UserMessage) => void;
   onPin?: (message: AgentMessage, entryId?: string, anchorY?: number) => void;
   bare?: boolean;
@@ -371,7 +376,10 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
       })}
     </div>
   );
-  const canNavigate = !!prevAssistantEntryId && !!onNavigate;
+  // Every user message is a valid rollback/rewrite point — pi's navigateTree
+  // resolves the leaf to the message's parent (or root for the first message).
+  // The button is hidden only while the entry is unknown (transient/streaming).
+  const canNavigate = !!entryId && !!onNavigate;
 
   const copyContent = () => {
     copyText(copyTarget).then(() => {
@@ -551,7 +559,19 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             }}>
               {canNavigate && (
                 <button
-                  onClick={() => { onNavigate!(prevAssistantEntryId!); onEditContent?.(editTarget); }}
+                  onClick={() => {
+                    if (parentEntryId) {
+                      // Normal case: roll back to the message's parent entry.
+                      onNavigate!(parentEntryId);
+                    } else if (!isLeafEntry) {
+                      // First message with descendants: navigate to it and let pi
+                      // resolve the leaf to root; display the empty root context.
+                      onNavigate!(entryId!, null);
+                    }
+                    // isLeafEntry && no parent: nothing after it to roll back —
+                    // just prefill the editor (resend semantics).
+                    onEditContent?.(editTarget);
+                  }}
                    title={t("i18n.editFromHereTitle")}
                   style={{
                     display: "flex", alignItems: "center", gap: 4,

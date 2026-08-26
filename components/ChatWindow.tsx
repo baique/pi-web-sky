@@ -292,7 +292,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   }, [chatInputRef]);
 
   const {
-    loading, error, messages, entryIds, streamState,
+    loading, error, messages, entryIds, parentIds, streamState,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats, todos,
@@ -876,10 +876,11 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
               const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; showTimestamp?: boolean; writtenFiles?: WrittenFile[] } = {}): ReactNode => {
                 const msg = options.messageOverride ?? messages[idx];
-                const prevAssistantEntryId =
-                  msg.role === "user" && idx > 0 && messages[idx - 1].role === "assistant"
-                    ? entryIds[idx - 1]
-                    : undefined;
+                // Rollback point for "edit from here": the user message's parent entry
+                // (authoritative from the session tree, unlike a visible-list heuristic).
+                // null means the message is the session's first — pi rolls back to root.
+                const userParentId = msg.role === "user" ? (parentIds[idx] ?? null) : undefined;
+                const isCurrentLeaf = activeLeafId != null && activeLeafId === entryIds[idx];
                 const isVisible = msg.role === "user" || msg.role === "assistant";
                 const currentRefIdx = visibleRefIndexByMessage.get(idx);
                 const keyPrefix = options.keyPrefix ?? "message";
@@ -906,10 +907,11 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     cwd={messageCwd}
                     onOpenFile={onOpenFile}
                     entryId={entryIds[idx]}
-                    onFork={sessionBusy || isNew || (idx === 0 && msg.role === "user") ? undefined : handleFork}
+                    onFork={sessionBusy || isNew ? undefined : handleFork}
                     forking={forkingEntryId === entryIds[idx]}
                     onNavigate={sessionBusy ? undefined : handleNavigate}
-                    prevAssistantEntryId={sessionBusy ? undefined : prevAssistantEntryId}
+                    parentEntryId={sessionBusy ? undefined : userParentId}
+                    isLeafEntry={isCurrentLeaf}
                     onEditContent={handleEditContent}
                     onPin={handlePin}
                     showTimestamp={showTimestamp}

@@ -42,6 +42,7 @@ export interface SessionData {
   context: {
     messages: AgentMessage[];
     entryIds: string[];
+    parentIds: (string | null)[];
     thinkingLevel: string;
     model: { provider: string; modelId: string } | null;
     todos?: TodoItem[];
@@ -280,6 +281,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [hasOlderChat, setHasOlderChat] = useState(false);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [entryIds, setEntryIds] = useState<string[]>([]);
+  const [parentIds, setParentIds] = useState<(string | null)[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [streamState, dispatch] = useReducer(streamReducer, INITIAL_STREAMING_STATE);
   const [agentRunning, setAgentRunning] = useState(false);
@@ -490,6 +492,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setActiveLeafId(d.leafId);
       setMessages(persistedMessages);
       setEntryIds(d.context.entryIds ?? []);
+      setParentIds(d.context.parentIds ?? d.context.entryIds.map(() => null));
       setTodos(d.context.todos ?? []);
       setHasOlderChat(d.hasMore ?? false);
       setCurrentModelOverride((current) => modelSwitchPendingRef.current ? current : null);
@@ -535,23 +538,29 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null) => {
     try {
       const params = new URLSearchParams({ deferThinking: "1" });
-      if (leafId) params.set("leafId", leafId);
+      // Explicit null leaf: context is the empty root (rollback to session start).
+      // An absent param would project the last entry instead — wrong after navigate-tree to root.
+      if (leafId === null) params.set("leafId", "null");
+      else if (leafId) params.set("leafId", leafId);
       // Page upward: ask the server for the `tail` ancestors preceding `before`,
       // then prepend them. Omitting `before` fetches the most-recent `tail`.
       if (before) params.set("before", before);
       const url = `/api/sessions/${encodeURIComponent(sid)}/context?${params}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[]; todos?: TodoItem[] }; hasMore?: boolean };
+      const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[]; parentIds?: (string | null)[]; todos?: TodoItem[] }; hasMore?: boolean };
       setHasOlderChat(d.hasMore ?? false);
+      const parentFallback = (p?: (string | null)[]) => p ?? d.context.entryIds.map(() => null);
       if (before) {
         // Older page: prepend so scroll position stays anchored. Todos reflect
         // current session state, so leave them unchanged on a history page.
         setMessages((prev) => [...d.context.messages, ...prev]);
         setEntryIds((prev) => [...d.context.entryIds, ...prev]);
+        setParentIds((prev) => [...parentFallback(d.context.parentIds), ...prev]);
       } else {
         setMessages(d.context.messages);
         setEntryIds(d.context.entryIds ?? []);
+        setParentIds(parentFallback(d.context.parentIds));
         setTodos(d.context.todos ?? []);
       }
     } catch (e) {
@@ -1457,13 +1466,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [onSessionForked]);
 
-  const handleNavigate = useCallback(async (entryId: string) => {
+  const handleNavigate = useCallback(async (entryId: string, displayLeafId?: string | null) => {
     if (bashRunningRef.current) return;
     const sid = sessionIdRef.current;
     if (!sid) return;
-    sendAgentCommand(sid, { type: "navigate_tree", targetId: entryId }).catch(() => {});
-    setActiveLeafId(entryId);
-    await loadContext(sid, entryId);
+    // `displayLeafId` differs from the navigate target when the target is a
+    // user message entry: pi resolves the leaf to its parent (or root for the
+    // first message). Await the navigation before loading context so the
+    // projection reflects the post-navigation tree, not a stale snapshot.
+    const leaf = displayLeafId === undefined ? entryId : displayLeafId;
+    try {
+      await sendAgentCommand(sid, { type: "navigate_tree", targetId: entryId });
+    } catch (e) {
+      console.error("Navigate failed:", e);
+    }
+    setActiveLeafId(leaf);
+    await loadContext(sid, leaf);
   }, [loadContext]);
 
   const handleLeafChange = useCallback(async (leafId: string | null) => {
@@ -1942,7 +1960,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   return {
     // State
-    data, loading, error, activeLeafId, messages, entryIds, todos, streamState,
+    data, loading, error, activeLeafId, messages, entryIds, parentIds, todos, streamState,
     agentRunning, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, modelSwitching, sessionStats,

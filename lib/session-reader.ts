@@ -328,12 +328,14 @@ export function buildSessionContext(
   // fork/navigation targets aligned while preserving pi's compaction ordering.
   const messages: AgentMessage[] = [];
   const entryIds: string[] = [];
+  const parentIds: (string | null)[] = [];
   for (const entry of contextEntries) {
     const localEntry = entry as unknown as SessionEntry;
     const m = entryToUiMessage(localEntry, options);
     if (m) {
       messages.push(m);
       entryIds.push(localEntry.id);
+      parentIds.push(localEntry.parentId);
     }
   }
 
@@ -343,6 +345,7 @@ export function buildSessionContext(
   return {
     messages,
     entryIds,
+    parentIds,
     thinkingLevel: piCtx.thinkingLevel,
     model: piCtx.model,
     todos,

@@ -330,6 +330,8 @@ export interface TodoItem {
 export interface SessionContext {
   messages: AgentMessage[];
   entryIds: string[]; // parallel to messages — the session entry id for each message
+  /** Parallel to entryIds — the parent entry id of each message's session entry (null = root). */
+  parentIds: (string | null)[];
   thinkingLevel: string;
   model: { provider: string; modelId: string } | null;
   // Latest todo list published by pi (pi-todo.state custom entries), empty when none.
