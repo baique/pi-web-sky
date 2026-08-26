@@ -954,7 +954,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
       {(changesCollapsed || gitFiles.length === 0) && (
         <div style={{ padding: "2px 4px" }}>
-          <div style={{ padding: "0 6px 4px" }}>
+          <div style={{ padding: "0 4px 4px" }}>
             <input
               type="text"
               value={searchQuery}
@@ -964,15 +964,15 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
               aria-label={t("files.searchPlaceholder")}
               style={{
                 width: "100%",
-                boxSizing: "border-box",
-                height: 24,
-                padding: "0 8px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                padding: "5px 8px",
                 border: "1px solid var(--border)",
-                borderRadius: 4,
+                borderRadius: 5,
+                outline: "none",
                 background: "var(--side-input)",
                 color: "var(--text)",
-                fontSize: 12,
-                outline: "none",
+                boxSizing: "border-box",
               }}
             />
           </div>
