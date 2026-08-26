@@ -360,8 +360,8 @@ function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: s
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 8,
-        padding: "3px 10px",
+        gap: 6,
+        padding: "1px 8px",
         fontSize: 12,
         color: "var(--text-muted)",
         minWidth: 0,
@@ -372,7 +372,7 @@ function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: s
           flexShrink: 0,
           fontSize: 10,
           fontFamily: "var(--font-mono)",
-          padding: "1px 7px",
+          padding: "0 5px",
           borderRadius: 999,
           border: `1px solid ${kind === "steer" ? "color-mix(in srgb, var(--accent) 45%, transparent)" : "var(--border)"}`,
           color: kind === "steer" ? "var(--accent)" : "var(--text-dim)",
@@ -1804,42 +1804,36 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           {queueCount > 0 && (
             <div
               style={{
-                margin: "0 4px 4px",
+                margin: "0 4px 2px",
                 borderRadius: "var(--bubble-inner-radius)",
                 background: "var(--bubble-tool-bg)",
                 overflow: "hidden",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 8px" }}>
                 <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)", flex: 1, minWidth: 0 }}>
                   {t("chat.queued", { count: queueCount })}
                 </span>
                 {onRecallQueue && (
+                  /* 移回（召回）输入框：plaintext 按钮，无边框无胶囊 */
                   <button
                     onClick={onRecallQueue}
                     title={t("chat.recallTitle")}
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: 6,
-                      padding: "3px 10px",
+                      gap: 5,
+                      padding: 0,
                       fontSize: 12,
                       color: "var(--text)",
                       background: "transparent",
-                      border: "1px solid var(--border)",
-                      borderRadius: 7,
+                      border: "none",
                       cursor: "pointer",
-                      transition: "background 0.12s, border-color 0.12s",
+                      transition: "color 0.12s",
                       whiteSpace: "nowrap",
                     }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = "var(--bg-hover)";
-                      e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 45%, var(--border))";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "transparent";
-                      e.currentTarget.style.borderColor = "var(--border)";
-                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text)"; }}
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="9 14 4 9 9 4" />
@@ -1853,8 +1847,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   aria-expanded={outboxOpen}
                   style={{
                     flexShrink: 0,
-                    width: 22,
-                    height: 22,
+                    width: 18,
+                    height: 18,
                     padding: 0,
                     display: "flex",
                     alignItems: "center",
