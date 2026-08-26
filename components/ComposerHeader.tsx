@@ -166,6 +166,11 @@ export function ComposerHeader({
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
+            /* 与模型选择器统一：12px mono，行高 20px 顶满槽位保证垂直居中 */
+            fontSize: 12,
+            fontFamily: "var(--font-mono)",
+            lineHeight: "20px",
+            color: "var(--text)",
           }}
         >
           {phase.text}

@@ -1524,9 +1524,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                         border: "none",
                         color: "var(--text-muted)",
                         cursor: isStreaming || modelSwitching ? "not-allowed" : "pointer",
-                        /* 纯文本态：与 loading 状态的左缘对齐 */
+                        /* 纯文本态：与 loading 状态的左缘对齐；行高 20px 顶满槽位 */
                         fontSize: 12,
                         fontFamily: "var(--font-mono)",
+                        lineHeight: "20px",
                         opacity: isStreaming ? 0.5 : 1,
                         transition: "color 0.12s",
                       }}
@@ -1866,13 +1867,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 onClick={() => setOutboxOpen(true)}
                 title={t("chat.queued", { count: queueCount })}
                 style={{
-                  fontSize: 11,
+                  fontSize: 12,
                   fontFamily: "var(--font-mono)",
+                  lineHeight: "20px",
                   color: "var(--accent)",
                   background: "none",
                   border: "none",
                   cursor: "pointer",
-                  padding: "2px 4px",
+                  padding: "0 4px",
                 }}
               >
                 ⏳ {queueCount}
