@@ -1,7 +1,7 @@
 # Composer 控制台化重设计（状态播报 / 输入行 / 发件箱 / TODO / 额度预留）
 
 日期：2026-08-26
-状态：待用户审阅
+状态：已实施（含实施期决策变更，见文末回写）
 范围：桌面端先行，移动端本期不动（§8）
 
 ## 背景与痛点
@@ -121,3 +121,24 @@ type QuotaInfo =
 - 每阶段：`node_modules/.bin/tsc --noEmit` + 相关 `*.test.mjs`。
 - 最终：`npm run dev` + playwright e2e 走查——浅色主题对比度、播报槽抢占/回落、
   多行输入按钮不遮字、发件箱展开收起、TODO 浮层、流式 Steer/Follow-up 切换。
+
+## §10 实施偏差与决策变更回写（2026-08-26 当日实施后补记）
+
+以下为实施过程中用户拍板的方案调整，以此为准，正文对应条款视为被修订：
+
+| 条款 | 原设计 | 实际落地 |
+|---|---|---|
+| §1 播报槽 | 单槽四级抢占 | **分槽**：左槽 phase（重试 > agent 阶段），右槽 notices/chips；P0-P3 互斥抢占语义放弃（`useBroadcast` 分槽不再抢占） |
+| §1 P0 表现 | 顶栏左边线变红 2px、orb 停止动画 | 未做左边线；error 态 orb 保持 breathing 动画 |
+| §2 顶栏高度 | h≈34px | 实作 26px（文本统一 12px mono 行高 20px） |
+| §2 ⏳ 排队 chip | 顶栏右侧 chip 展开发件箱 | **撤除**（无单条召回 API）；排队计数改为发件箱面板内“已排队·N”点击展开收起 |
+| §2 横幅清零 | 面板外散装横幅全部收编 | Retry/Compact 结果已收编播报槽；但 compactError 横幅仍在面板外，压缩进行中提示改为**漂浮在消息主体区域上半部分**（非收编，换方案） |
+| §3 右下角按钮 | 绝对定位锚定输入区右下角，textarea 恒定右 padding ≈110px | **放弃**：发送/Steer/Follow-up 保持底栏工具栏右侧原位，textarea 不加恒定 padding |
+| §7 额度 | 本期只留座不实现数据 | 渲染位照留；**数据适配器已实现**：opencode-go 三时间窗（主条取最紧窗口）/ deepseek 余额+峰谷档位，悬停看各窗明细，60s 轮询（`hooks/useProviderQuota` + `app/api/quota`） |
+
+实施期新增（spec 外 scope）：
+
+- 桌面端临时通知改由**底部 widget shelf 就地显示**（NoticeInline 入 shelf），非顶栏播报槽承载；移动端维持顶部居中 NoticeShelf 不变。
+- 底部栏重排为常驻 `bottom-band`（widget 占满 + 扩展按钮容器 auto，min-height 36px 防塌陷）；欢迎页 bottom-band 不再渲染终端切换钮。
+- 发送/停止按钮改纯文本形态（去胶囊玻璃底）。
+- “回到最新”按钮在顶栏与消息工具栏各有一处入口（重复入口，待收敛）。

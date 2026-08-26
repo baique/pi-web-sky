@@ -1920,6 +1920,7 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
   align-items: stretch;
   min-width: 0;
   /* 中间无间距：widget 与扩展按钮容器无缝衔接 */
+  height: 36px;
 }
 
 /* widget：占用除扩展按钮容器之外的全部宽度 */

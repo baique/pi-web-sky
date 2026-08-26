@@ -390,14 +390,26 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   return (
     <div
-      style={{ marginBottom: 20, display: "flex", flexDirection: "column", alignItems: "flex-end" }}
+      style={{
+        marginBottom: 20,
+        display: bare ? "block" : "flex",
+        flexDirection: bare ? undefined : "column",
+        alignItems: bare ? undefined : "flex-end",
+      }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 6, maxWidth: "85%" }}>
+      <div
+        style={{
+          display: bare ? "block" : "flex",
+          alignItems: bare ? undefined : "flex-end",
+          gap: bare ? undefined : 6,
+          maxWidth: bare ? undefined : "85%",
+        }}
+      >
         <div
           style={{
-            flex: 1,
+            flex: bare ? undefined : 1,
             minWidth: 0,
             background: "var(--user-bg-glass)",
             backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
@@ -409,8 +421,8 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             lineHeight: 1.6,
             color: "var(--text)",
             wordBreak: "break-word",
-            maxHeight: USER_BUBBLE_MAX_HEIGHT,
-            overflowY: "auto",
+            maxHeight: bare ? undefined : USER_BUBBLE_MAX_HEIGHT,
+            overflowY: bare ? undefined : "auto",
           }}
         >
           {commandText ? (
@@ -479,11 +491,9 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
           </>
           )}
         </div>
-
       </div>
-
       {/* Bottom row: action buttons + timestamp */}
-      {!bare && (time || canFork || canNavigate || true) && (
+      {!bare && (
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "flex-end",
           gap: 6, marginTop: 3,
@@ -815,12 +825,10 @@ function AssistantMessageView({
           <div
             role="alert"
             style={{
-              marginTop: blockItems.length > 0 ? 0 : 0,
-              padding: "7px 10px",
-              border: "1px solid rgba(239,68,68,0.3)",
-              borderRadius: 6,
-              background: "rgba(239,68,68,0.07)",
-              color: "#ef4444",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "2px 0",
               fontFamily: "var(--font-mono)",
               fontSize: 12,
               lineHeight: 1.5,
@@ -828,7 +836,20 @@ function AssistantMessageView({
               overflowWrap: "anywhere",
             }}
           >
-            Error: {providerError}
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: 999,
+                flexShrink: 0,
+                background: "#f87171",
+                boxShadow: "0 0 0 3px rgba(248,113,113,0.15)",
+              }}
+              aria-hidden="true"
+            />
+            <span>
+              Error: {providerError}
+            </span>
           </div>
         )}
 
@@ -1019,17 +1040,18 @@ function ThinkingBlock({ block, duration, isStreaming, sessionId, entryId, block
           alignItems: "center",
           gap: 6,
           width: "100%",
-          padding: "2px 0",
-          background: "none",
+          padding: "2px 8px 2px 4px",
+          borderRadius: 6,
+          background: hovered ? "var(--bubble-tool-bg-fold)" : "transparent",
           border: "none",
           color: hovered ? "var(--text-meta)" : "var(--text-muted)",
           cursor: "pointer",
           fontSize: 13,
-          lineHeight: 1,
           textAlign: "left",
-          transition: "color 0.12s",
+          transition: "color 0.12s, background 0.12s",
         }}
       >
+        {/* 图标槽两态同尺寸（20×20），流式/静态切换不跳变；文字行高正常，垂直居中 */}
         {isStreaming ? (
           // 思考生成中 → 思考球 loading（与 agent 状态行同一视觉语言）
           <span
@@ -1050,23 +1072,29 @@ function ThinkingBlock({ block, duration, isStreaming, sessionId, entryId, block
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              width: 16,
-              height: 16,
+              width: 20,
+              height: 20,
               flexShrink: 0,
             }}
             aria-hidden="true"
           >
+            {/* Orbit：圆点绕轨，与思考球 loading 同一视觉血缘 */}
             <svg
-              width="14"
-              height="14"
+              width="16"
+              height="16"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="1.7"
               strokeLinecap="round"
               strokeLinejoin="round"
+              style={{ display: "block" }}
             >
-              <path d="M12 3c.4 4 2.1 5.7 6.1 6.1-4 .4-5.7 2.1-6.1 6.1-.4-4-2.1-5.7-6.1-6.1 4-.4 5.7-2.1 6.1-6.1Z" />
+              <circle cx="12" cy="12" r="3" />
+              <circle cx="19" cy="5" r="2" />
+              <circle cx="5" cy="19" r="2" />
+              <path d="M10.4 21.9a10 10 0 0 0 9.941-15.416" />
+              <path d="M13.5 2.1a10 10 0 0 0-9.841 15.416" />
             </svg>
           </span>
         )}
@@ -1074,11 +1102,25 @@ function ThinkingBlock({ block, duration, isStreaming, sessionId, entryId, block
         {duration !== undefined && (
           <span style={{ fontSize: 11, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
         )}
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          stroke="var(--text-dim)"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}
+          aria-hidden="true"
+        >
+          <polyline points="2 3.5 5 6.5 8 3.5" />
+        </svg>
       </button>
       {expanded && (
         <div
           style={{
-            margin: "2px 0 4px 20px",
+            margin: "2px 0 4px 30px",
             borderLeft: "2px solid var(--bubble-hairline)",
             paddingLeft: 10,
             color: error ? "#f87171" : "var(--text-muted)",

@@ -104,13 +104,32 @@ components/
   FileIcons.tsx       file icon helpers
   FileViewer.tsx      file content in a tab
   TabBar.tsx          tab bar (Chat + open file tabs)
+  ComposerHeader.tsx  composer resident top bar: left phase broadcast slot + right chips (outbox ⏳ / TODO) + quota slot
+  DraftStash.tsx      input draft stash (Ctrl+S stash / Ctrl+Delete delete, cross-session)
+  ExtensionStatusBar.tsx  bottom widget shelf container; hosts NoticeInline for temporary notices
+  ExtensionWidgets.tsx    renders extension-injected widgets
+  PinnedBubble.tsx    pinned-message floating bubble (global drag + resize)
+  TerminalPanel.tsx   multi-session web terminal panel (xterm.js + server-side pty)
+  McpConfigPanel.tsx  MCP server manager popover (global/project mcp.json, connectivity test)
+  DirectoryPicker.tsx cwd directory picker for new sessions
+  FrontmatterCard.tsx frontmatter card rendering in markdown
+  ImagePreview.tsx    image preview lightbox
+  MermaidBlock.tsx    mermaid diagram rendering
+  ProjectTrustDialog.tsx  project trust confirmation dialog
+  ProviderIcons.tsx   provider logo icons
+  PwaRegistration.tsx PWA service-worker registration
+  TurnWrittenFiles.tsx    files written this turn (buttons opening each in the viewer)
 
 hooks/
   useAgentSession.ts  messages + streaming + SSE + fork/navigate/reconciliation logic
   useAudio.ts         completion sound + browser AudioContext unlock
+  useBroadcast.ts     composer broadcast slots (left phase / right notices, P0-P3 priority)
   useDragDrop.ts      shared drag/drop state
   useIsMobile.ts      responsive breakpoint hook
+  useKeyboardShortcuts.ts  global keyboard shortcuts + module-level abort handler registry
+  useResizablePanel.ts    resizable side panel state
   useTheme.ts         theme state
+  useViewportHeight.ts    visual-viewport height sync while the mobile keyboard is open
 ```
 
 ---
