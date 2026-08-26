@@ -69,6 +69,36 @@
 - **与上游的差异**：上游把 MCP 管理**塞进插件面板**（PluginsConfig 内加 plugins/mcp 双 tab）。本仓库 PluginsConfig 已自研（资源明细/粘贴支持等）且上游 patch 无法直接 apply，改把 MCP UI 做成**独立面板组件** `McpConfigPanel`（McpServerDetail/AddMcpServer/列表逻辑全部复用上游代码），挂在**顶栏 Terminal 按钮旁**的新入口按钮，portal 锚定触发按钮、仿终端弹窗样式。API 层（route.ts/types）原样移植。
 - **本仓库提交**：（未提交）
 
+### 上游 v0.8.10 / v0.8.11 版本级变更（4 项，合并自发布说明而非单个 PR）
+
+以下 4 项来自上游 release notes（非独立可取 patch 的 PR），逐项手工移植，合并在同一个提交。
+
+#### 扩展选择对话框可滚动并限制在视口内（`03dad64`，#609）
+
+- **问题**：扩展通过 Extension UI 弹出的 `select` 对话框无上限地渲染全部选项，外层只有 `overflow: hidden`——选项多时直接溢出视口且无法滚动，选不到下面的选项。超长 `message`/`editor` 内容同理。
+- **改动**：`components/ChatWindow.tsx` 的 `ExtensionDialog`：弹窗卡片改为纵向 flex（`maxHeight: 100%`），中间内容区 `flex:1 + minHeight:0 + overflowY:auto`，header/footer 固定不参与滚动。
+- **注意**：该对话框仅在扩展调用 `ctx.select/confirm/input/editor` 时出现；当前已装扩展均未触发，属防御性修复。
+- **本仓库提交**：`1a05cb2`
+
+#### 删除无人消费的 `/api/agent/running/events` SSE 路由与广播器（`024be0b`）
+
+- **问题**：侧边栏实际用可见页轮询 `/api/agent/running`（2.5s），SSE 路由和 rpc-manager 里的 running-status 广播器（`subscribeRunningSessions`/`notifyRunningChange` + 每次事件全量重算快照）没有前端消费者，纯死代码 + 无谓开销。
+- **改动**：删路由、广播器及 rpc-manager 内 9 处 `notifyRunningChange()` 调用点与 `RUNNING_STATE_EVENT_TYPES`；保留轮询用的 `getRunningRpcSessionIds()`。相关单测同步收紧（断言源码中不再出现 `notifyRunningChange`）。
+- **本仓库提交**：`1a05cb2`
+
+#### 移除 `@lobehub/icons`，内联 provider 图标（`602b1b6`）
+
+- **问题**：只为约 30 个品牌图标引入 `@lobehub/icons` 及其传递依赖。
+- **改动**：新增 `components/ProviderIcons.tsx`——从包的编译产物提取 SVG path 数据生成本地组件（Mono 图标继承 `currentColor`，Color 图标 path 自带填充）；`ModelsConfig.tsx` 改引本地文件并从依赖中移除该包（净减 ~5300 行 lockfile）。
+- **与上游的差异**：实现方式未对照（上游同样为「本地化图标」思路）；生成脚本为一次性用后即删。
+- **本仓库提交**：`1a05cb2`
+
+#### 文件浏览器快速搜索（`b24ecad`）
+
+- **问题**：侧栏文件树只能逐层展开找文件，大项目里定位文件很慢。
+- **改动**：服务端在 `app/api/files/[...path]/route.ts` 新增 `type=search`：从目标目录有界递归遍历（上限 20000 条目 / 12 层深 / 50 结果），复用现有允许根校验与 `IGNORED_NAMES` 忽略表，大小写不敏感子串匹配相对路径；客户端 `FileExplorer.tsx` 树上方加搜索框（200ms 防抖，Esc 清空），命中时以平铺列表替代目录树，点击直接打开文件。
+- **本仓库提交**：`1a05cb2`
+
 ## 与上游刻意不同的地方（改动了原 PR 逻辑，阅读者需知悉）
 
 ### #587 分页 —— 额外增加服务端 `hasMore` 标记
