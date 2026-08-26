@@ -1668,7 +1668,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 ⏳ {queueCount}
               </button>
                 )}
-                    </>
+                <DraftStash />
+              </>
             )}
           />
           {queueCount > 0 && (
@@ -1760,8 +1761,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               )}
             </div>
           )}
-          <DraftStash />
-
           {/* Image previews — 属输入内容层，与输入行同组 */}
           {attachedImages.length > 0 && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "4px 4px 0" }}>
