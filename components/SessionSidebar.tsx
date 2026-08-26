@@ -471,10 +471,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, []);
 
   const initialLoadDone = useRef(false);
+  // Snapshot of the refreshKey at mount. The mount effect — including StrictMode's
+  // dev-only immediate replay — must never pass force: a second force=1 right
+  // after mount invalidates the server cache and starts a second full session
+  // scan, doubling the slow listing path on every page open. Only a later
+  // refreshKey change (session created/ended/deleted) requests force.
+  const initialRefreshKeyRef = useRef(refreshKey);
   useEffect(() => {
     const isFirst = !initialLoadDone.current;
     initialLoadDone.current = true;
-    loadSessions(isFirst, !isFirst);
+    loadSessions(isFirst, refreshKey !== initialRefreshKeyRef.current);
   }, [loadSessions, refreshKey]);
 
   // Browser storage is unavailable during server rendering. Restore the panel

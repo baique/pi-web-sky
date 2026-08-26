@@ -119,7 +119,7 @@ declare global {
   var __piSessionListCache: { data: SessionInfo[]; ts: number } | undefined;
 }
 
-const SESSION_LIST_CACHE_TTL_MS = 30_000;
+const SESSION_LIST_CACHE_TTL_MS = 300_000;
 
 export function invalidateSessionListCache(): void {
   globalThis.__piSessionListGeneration = (globalThis.__piSessionListGeneration ?? 0) + 1;
