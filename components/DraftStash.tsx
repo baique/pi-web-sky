@@ -80,17 +80,22 @@ export function DraftStashList({
     >
       <button
         type="button"
-        className={styles.toggle}
+        className={`${styles.toggle}${expanded ? ` ${styles.toggleOpen}` : ""}`}
         onClick={onToggle}
         aria-expanded={expanded}
         aria-label={expanded ? "收起 TODO 列表" : "展开 TODO 列表"}
       >
-        <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="1.5" y="1.5" width="11" height="11" rx="2.5" />
-          {activeItem && <path d="M4 7l2 2 4-4" />}
+        <svg
+          width="12" height="12" viewBox="0 0 16 16" fill="none"
+          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
+          strokeLinejoin="round" aria-hidden="true"
+          style={{ display: "block", flexShrink: 0 }}
+        >
+          <rect x="2" y="2" width="12" height="12" rx="3" />
+          <path d="M5.5 8.2l1.8 1.8 3.4-3.6" />
         </svg>
         <span className={styles.toggleLabel}>TODO {items.length}</span>
-        <span className={styles.toggleArrow}>{expanded ? "▴" : "▾"}</span>
+        <span className={styles.toggleArrow} aria-hidden="true">{expanded ? "▴" : "▾"}</span>
       </button>
       {expanded && (
         <div className={styles.expandArea}>

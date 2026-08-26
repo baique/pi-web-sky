@@ -22,10 +22,13 @@
 .toggle {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
+  gap: 6px;
+  /* 与顶栏左槽对齐：高度固定 20px（= orb 尺寸），与模型文本行一致 */
+  height: 20px;
+  padding: 0 8px;
   border: none;
-  border-radius: 7px;
+  /* 胶囊感与模型选择器一致（同圆角、同 hover/展开底色） */
+  border-radius: 9px;
   background: none;
   color: var(--text-muted);
   font-size: 11px;
@@ -34,6 +37,10 @@
   transition: color 0.12s, background 0.12s;
 }
 .toggle:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.toggleOpen {
   color: var(--text);
   background: var(--bg-hover);
 }

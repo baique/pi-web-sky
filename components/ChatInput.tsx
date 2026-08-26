@@ -353,6 +353,9 @@ function revokeImagePreview(image: AttachedImage): void {
   }
 }
 
+/** 右下角悬浮钮组合占位宽（发送/引导/后续最大态），用于文字遮挡判定 */
+const BTN_ZONE_WIDTH = 130;
+
 function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: string }) {
   return (
     <div
@@ -1462,6 +1465,40 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }, [broadcastNotices, compactResultText]);
   const { phase: phaseBroadcast, notice: noticeBroadcast, dismissError } = useBroadcast({ notices: effectiveNotices, phase: phaseInfo, retryText, quota });
   const queueCount = (queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0);
+
+  // 悬浮按钮区是否真的有文字流到其下方：
+  // 用 canvas 按输入框实际字体测量“最后一行”宽度，取其在底部行的余量，
+  // 若余量进入右下按钮区（宽约 130px）则需浮现玻璃底盖字，否则 100% 透明。
+  const [textareaWidth, setTextareaWidth] = useState(0);
+  const measureCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  useLayoutEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const ro = new ResizeObserver(() => setTextareaWidth(ta.clientWidth));
+    ro.observe(ta);
+    setTextareaWidth(ta.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  const textUnderButtons = useMemo(() => {
+    const text = value.trimEnd();
+    if (!text) return false;
+    const ta = textareaRef.current;
+    if (!ta || !textareaWidth) return false;
+    if (!measureCtxRef.current) {
+      measureCtxRef.current = document.createElement("canvas").getContext("2d");
+    }
+    const ctx = measureCtxRef.current;
+    if (!ctx) return false;
+    const cs = getComputedStyle(ta);
+    ctx.font = cs.fontSize + " " + cs.fontFamily;
+    const seg = text.split("\n").pop() ?? "";
+    const segW = ctx.measureText(seg).width;
+    const contentW = textareaWidth;
+    if (segW <= contentW) return segW > contentW - BTN_ZONE_WIDTH;
+    // 换行：看该段最后一行余量
+    const rem = segW % contentW;
+    return rem > contentW - BTN_ZONE_WIDTH;
+  }, [value, textareaWidth]);
   // 顶栏左槽（空闲态）：模型选择器（自工具栏迁入；流式时该槽让位给运行状态）
   const modelSlot = (modelOptions.length > 0 || currentName || modelError) && onModelChange ? (
                   <div ref={dropdownRef} style={{ position: "relative", minWidth: 0 }}>
@@ -1478,44 +1515,33 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       aria-busy={modelSwitching || undefined}
                       style={{
                         display: "flex", alignItems: "center", gap: 6,
-                        justifyContent: isMobile ? "flex-start" : undefined,
-                        padding: isMobile ? "8px 10px" : "8px 12px",
-                        height: 32,
-                        width: isMobile ? "100%" : undefined,
-                        maxWidth: isMobile ? "100%" : 300,
+                        padding: 0,
+                        height: 20,
+                        maxWidth: "100%",
+                        minWidth: 0,
                         overflow: "hidden",
-                        background: modelDropdownOpen ? "var(--bg-hover)" : "none",
+                        background: "none",
                         border: "none",
-                        borderRadius: 9,
                         color: "var(--text-muted)",
                         cursor: isStreaming || modelSwitching ? "not-allowed" : "pointer",
+                        /* 纯文本态：与 loading 状态的左缘对齐 */
                         fontSize: 12,
+                        fontFamily: "var(--font-mono)",
                         opacity: isStreaming ? 0.5 : 1,
-                        transition: "background 0.12s, color 0.12s",
+                        transition: "color 0.12s",
                       }}
                       onMouseEnter={(e) => {
                         if (isStreaming || modelSwitching) return;
-                        e.currentTarget.style.background = "var(--bg-hover)";
                         e.currentTarget.style.color = "var(--text)";
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.background = modelDropdownOpen ? "var(--bg-hover)" : "none";
                         e.currentTarget.style.color = "var(--text-muted)";
                       }}
                       title={modelSwitching ? "Switching model" : modelOptions.length > 0 ? "Change model" : "No available models"}
                     >
-                      {modelSwitching ? (
+                      {modelSwitching && (
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }} aria-hidden="true">
                           <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-                        </svg>
-                      ) : (
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="4" y="4" width="16" height="16" rx="2" />
-                          <rect x="9" y="9" width="6" height="6" />
-                          <line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" />
-                          <line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" />
-                          <line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" />
-                          <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
                         </svg>
                       )}
                       <span style={{ display: "flex", alignItems: "baseline", minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" }}>
@@ -2377,16 +2403,20 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           />
 
           {/* 右下角悬浮操作区：流式=引导/后续，空闲=发送。
-              取巧：背景用与 composer 面板完全一致的玻璃配方（--frame-glass + 同款 blur/saturate），
-              视觉上与输入底融为一体，又能干净地盖住流到按钮下的文字 */}
+              按钮区默认 100% 透明；仅当文字真的流到其下方时，才浮现
+              与面板完全同款的玻璃底（--frame-glass + 同款 blur/saturate）盖住字 */}
           <div style={{
             position: "absolute", right: 8, bottom: 6,
             display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
-            background: "var(--frame-glass)",
-            backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-            WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+            background: textUnderButtons ? "var(--frame-glass)" : "transparent",
+            backdropFilter: textUnderButtons ? "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))" : "none",
+            WebkitBackdropFilter: textUnderButtons ? "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))" : "none",
             borderRadius: 16,
-          }}>
+            padding: "3px 6px",
+            transition: "background 0.12s, backdrop-filter 0.12s",
+          }}
+          data-under={typeof textUnderButtons === "boolean" ? String(textUnderButtons) : "?"}
+        >
           {isStreaming ? (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {onSteer && (
