@@ -1929,25 +1929,25 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
 }
 
 /* 扩展按钮容器：宽度随内容（目前=终端按钮） */
+/* 扩展按钮容器：宽度随内容（目前=终端按钮）；无胶囊样式 */
 .extension-actions {
   display: flex;
   flex: 0 0 auto;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   min-width: 0;
-  background: color-mix(in srgb, var(--bg-panel) 45%, transparent);
-  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-  border-radius: 10px;
-  margin-top: 4px;
-  padding: 0 4px;
 }
+
+/* 终端按钮：还原原始形态（shelf 左端项的扁平样式） */
 .terminal-bar-toggle {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 10px;
+  padding: 0 10px;
+  width: 110px;
   justify-content: center;
   border: none;
+  border-left: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   background: none;
   color: var(--text-muted);
   font-size: 11px;
