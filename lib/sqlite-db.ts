@@ -26,8 +26,10 @@ export function dbPath(): string {
   return join(getAgentDir(), DB_FILE_NAME);
 }
 
-/** Inject a database for tests (e.g. `:memory:`). Overrides the singleton. */
+/** Inject a database for tests (e.g. `:memory:`). Overrides the singleton and
+ *  ensures the schema is present so callers can use it immediately. */
 export function setDbForTesting(db: DatabaseSync): void {
+  initSchema(db);
   globalThis.__piWebDb = db;
 }
 
