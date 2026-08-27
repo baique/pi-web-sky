@@ -10,7 +10,6 @@ import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { useI18n } from "@/hooks/useI18n";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
-import { BranchNavigator } from "./BranchNavigator";
 import { SessionTabs, type SidebarTab } from "./SessionTabs";
 import { TaskArea, type TaskGroupUi } from "./TaskArea";
 
@@ -105,10 +104,6 @@ interface Props {
    *  Lets the app play a cross-workspace completion tone. */
   onBackgroundTaskDone?: () => void;
   onRunningSessionIdsChange?: (ids: Set<string>) => void;
-  /** Branch navigation data — rendered at the bottom of the files tab. */
-  branchTree?: import("@/lib/types").SessionTreeNode[];
-  branchActiveLeafId?: string | null;
-  onBranchLeafChange?: (leafId: string | null) => void;
   /** A session should be spawned pre-assigned to this task (task row "+"). */
   onNewSessionFromTask?: (taskId: string) => void;
 }
@@ -401,7 +396,7 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, branchTree, branchActiveLeafId, onBranchLeafChange, onNewSessionFromTask }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1882,7 +1877,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
       ) : (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
-          {worktreeSection}
       {/* File Explorer section */}
       {(selectedCwdProp || selectedCwd) && (
         <div
@@ -2000,11 +1994,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           )}
         </div>
       )}
-          <BranchNavigator
-            tree={branchTree ?? []}
-            activeLeafId={branchActiveLeafId ?? null}
-            onLeafChange={onBranchLeafChange ?? (() => {})}
-          />
+          {worktreeSection}
         </div>
       )}
     </div>

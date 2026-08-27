@@ -50,10 +50,9 @@
 │     💬 修 bug                    │
 ├─────────────────────────────────┤
 │ ── 文件 tab（仅此一侧显示）──    │
-│   ▌ worktree 切换器（移入）      │ ← 原顶部 worktree 选择器整体搬入
 │   FileExplorer（现状）           │
 │   ───────────────────────        │
-│   ⑂ 分支选择（底部常驻）         │ ← BranchNavigator 非 inline 形态
+│   ▌ worktree 切换器（底部）      │ ← “分支选择”= worktree 切换器（main/其他分支）归入文件浏览器底部
 └─────────────────────────────────┘
 
 主顶栏（聊天区上方）：
@@ -126,7 +125,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS session_search USING fts5(
 ```
 Header（Pi 标题+新建+刷新）→ CWD 选择器 → [SessionTabs] →
   SessionTab: [TaskArea] + [临时会话区]   （两区各自 max-height + 独立滚动）
-  FilesTab:   [worktree 切换器（自顶部移入）] + [FileExplorer] + 底部 [BranchNavigator]
+  FilesTab:   [FileExplorer] + 底部 [worktree 切换器（自顶部移入，即需求中的“分支选择”）]
 ```
 
 - `SessionTabs`：分段胶囊（💬 会话 / 📄 文件），等宽两段，选中 accent 底 + 图标；localStorage 记忆 `pi-sidebar-tab`。
@@ -174,11 +173,10 @@ onNewSessionFromTask: (taskId: string) => void   // AppShell 处理 pending 归�
 - `handleSearchSelectSession(session)`：置 `suppressWorkspaceRestoreRef.current = true` → 调现有 `handleSelectSession(session)`（内含 invalidateWorkspaceRestore + router + sessionKey++）→ 侧边栏 `selectedCwdProp` 同步使 cwd 切换 → `handleCwdChange` 中：`if (suppressWorkspaceRestoreRef.current) { 清 ref; } else { restoreWorkspaceContext(newProject); }`；
 - 结果：切到目标目录并选中目标会话、文件 tab 清空、URL 更新，与手动点击行为一致。
 
-## 6. 分支与 worktree 选择器迁移
+## 6. 分支（worktree）选择器迁移
 
-- **worktree 切换器搬迁**：现状 Header 区的 `showWorktreeSwitcher` 下拉与 `inactiveWorktreeSelector` 整体移入**文件视图顶部**；顶部只保留路径（CWD/项目）选择器。
-- **分支导航**：AppShell 移除桌面 `renderChatToolbarActions(false)` 中的 `<BranchNavigator inline .../>` 和移动端 `hideInlineButton` 实例及 mobile toolbar 的 branches 按钮；清理 `activeTopPanel === "branches"` 与 `toggleTopPanel("branches")`。
-- `branchTree/branchActiveLeafId/branchLeafChangeFnRef` 数据链路**保留**，改传 SessionSidebar → 文件页底部 `<BranchNavigator tree activeLeafId onLeafChange />`（现有非 inline 形态自带折叠头）。
+- **需求中的“分支选择” = worktree 切换器**（选择 main / 其他 worktree 分支），不是顶栏的 BranchNavigator（会话内分支树导航，保持顶栏原样）。
+- worktree 切换器：现状 Header 区的 `showWorktreeSwitcher` 下拉与 `inactiveWorktreeSelector` 整体移入**文件浏览器底部**；顶部只保留路径（CWD/项目）选择器。
 
 ## 7. i18n
 
@@ -197,7 +195,7 @@ onNewSessionFromTask: (taskId: string) => void   // AppShell 处理 pending 归�
 | `components/SidebarGlobalSearch.tsx` | 新建：顶栏输入 + 结果 popover |
 | `components/SessionTabs.tsx` | 新建：分段 tab |
 | `components/TaskArea.tsx` | 新建：任务区 |
-| `components/SessionSidebar.tsx` | 重构：tabs 化 + 顶部只留路径选择器 + worktree/分支迁入文件页 + 任务区 + 临时区 + SessionItem 拖拽 |
+| `components/SessionSidebar.tsx` | 重构：tabs 化 + 顶部只留路径选择器 + worktree 迁入文件浏览器底部 + 任务区 + 临时区 + SessionItem 拖拽 |
 | `components/AppShell.tsx` | 顶栏搜索插槽；移除 BranchNavigator；pending 任务归属；suppress restore 守卫 |
 | `lib/i18n/messages/zh-CN.ts` · `en.ts` | 文案 |
 | 测试（必要功能测试，dev skill 原则） | `lib/task-store.test.mjs`（事务回滚）、`lib/session-search.test.mjs`（提取/索引/短查询/转义）、`app/api/tasks/runtime-route.test.mjs` |
