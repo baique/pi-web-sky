@@ -20,7 +20,7 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
 });
-const { ChatInput, ModelErrorBanner, ModelScopeWarningBanner, canRestoreUserMessage, canRunBuiltinSlashCommandWhileStreaming, filterModelOptions, getUpwardMenuMaxHeight, getUserMessageText, getUserMessageDraftImages, isExactSlashCommand } = await jiti.import("./ChatInput.tsx");
+const { ChatInput, ModelErrorBanner, ModelScopeWarningBanner, canRestoreUserMessage, combineRestoredMessage, canRunBuiltinSlashCommandWhileStreaming, filterModelOptions, getUpwardMenuMaxHeight, getUserMessageText, getUserMessageDraftImages, isExactSlashCommand } = await jiti.import("./ChatInput.tsx");
 const { clearDraft, getDraft, mergeRestoredSubmissionDraft, mergeRestoredSubmissionText, rekeyDraft, setDraft } = await jiti.import("../lib/draft-store.ts");
 const { I18nProvider } = await jiti.import("../hooks/useI18n.tsx");
 
@@ -183,6 +183,16 @@ test("does not restore a historical message over a pending image attachment", ()
   assert.equal(canRestoreUserMessage("", 1, 0), false);
   assert.equal(canRestoreUserMessage("", 0, 1), false);
   assert.equal(canRestoreUserMessage("draft", 0, 0), false);
+});
+
+test("prepends a restored message over a non-empty draft instead of dropping it", () => {
+  assert.equal(combineRestoredMessage("你好啊", "张三"), "你好啊\n\n张三");
+  // Content is not trimmed per side (matches prependText); only blank-ness filters.
+  assert.equal(combineRestoredMessage("hello", " world "), "hello\n\n world ");
+  // Blank draft: restored text only, no trailing blank line.
+  assert.equal(combineRestoredMessage("你好啊", "   "), "你好啊");
+  assert.equal(combineRestoredMessage("", "张三"), "张三");
+  assert.equal(combineRestoredMessage("", ""), "");
 });
 
 test("restores a cleared submission using the queued React state", () => {

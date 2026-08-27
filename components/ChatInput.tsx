@@ -322,6 +322,16 @@ export function canRestoreUserMessage(
   return !value.trim() && attachedImageCount === 0 && pendingImageCount === 0;
 }
 
+/**
+ * Combine a restored user message with an existing draft when the composer
+ * already has content. Mirrors the TUI queue-restore semantics (prependText):
+ * restored text first, then the typed draft, separated by a blank line.
+ * Either side may be empty; no trailing blank line is added.
+ */
+export function combineRestoredMessage(restoredText: string, draftText: string): string {
+  return [restoredText, draftText].filter((t) => t.trim()).join("\n\n");
+}
+
 export function getUserMessageText(message: UserMessage): string {
   if (typeof message.content === "string") return message.content;
   return message.content
@@ -555,19 +565,39 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     replaceMessage(message: UserMessage) {
       const ta = textareaRef.current;
       const current = ta ? ta.value : value;
-      if (!canRestoreUserMessage(current, attachedImagesRef.current.length, pendingImageCountRef.current)) return;
-
       const restoredText = getUserMessageText(message);
       const restoredImages = draftImagesToAttachedImages(getUserMessageDraftImages(message));
-      valueRef.current = restoredText;
-      attachedImagesRef.current = restoredImages;
-      setValue(restoredText);
-      setAtQuery(null);
-      setHistoryMenuOpen(false);
-      setAttachedImages((prev) => {
-        prev.forEach(revokeImagePreview);
-        return restoredImages;
-      });
+      if (canRestoreUserMessage(current, attachedImagesRef.current.length, pendingImageCountRef.current)) {
+        // Empty composer: replace wholesale with the restored message (text + images).
+        valueRef.current = restoredText;
+        attachedImagesRef.current = restoredImages;
+        setValue(restoredText);
+        setAtQuery(null);
+        setHistoryMenuOpen(false);
+        setAttachedImages((prev) => {
+          prev.forEach(revokeImagePreview);
+          return restoredImages;
+        });
+      } else {
+        // Composer already has content: never drop the restored message. Prepend
+        // it — text first (blank line between, mirrors prependText's queue-restore
+        // semantics), images before the user's existing attachments (cap at max).
+        const combined = combineRestoredMessage(restoredText, current);
+        valueRef.current = combined;
+        setValue(combined);
+        setAtQuery(null);
+        setHistoryMenuOpen(false);
+        if (restoredImages.length > 0) {
+          setAttachedImages((prev) => {
+            const available = Math.max(0, MAX_ATTACHED_IMAGES - restoredImages.length);
+            const keptTail = prev.slice(0, available);
+            prev.slice(available).forEach(revokeImagePreview);
+            const next = [...restoredImages, ...keptTail];
+            attachedImagesRef.current = next;
+            return next;
+          });
+        }
+      }
       requestAnimationFrame(() => {
         if (!ta) return;
         ta.focus();
