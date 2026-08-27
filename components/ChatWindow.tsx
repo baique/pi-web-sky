@@ -277,6 +277,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     loading, error, messages, entryIds, parentIds, streamState,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
+    commandBusy,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats, todos,
     slashCommands, slashCommandsLoading, queuedMessages,
     notices, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
@@ -303,10 +304,14 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     ? `${compactResult.reason && compactResult.reason !== "manual" ? `${compactResult.reason[0].toUpperCase()}${compactResult.reason.slice(1)} ` : t("chat.compacted")} ${formatTokenCount(compactResult.tokensBefore)} -> ${formatTokenCount(compactResult.estimatedTokensAfter)} tokens (${t("chat.tokensSaved", { saved: formatTokenCount(compactSavedTokens) })})`
     : null;
   const phaseInfo = useMemo(() => {
+    // 内置命令 busy（reload 等）：借助播报槽左槽展示 loading；compact 已有自身横幅，不重复占位。
+    if (commandBusy && commandBusy.name !== "compact") {
+      return { text: t("chat.commandBusy", { name: `/${commandBusy.name}` }), orb: "working" as const };
+    }
     if (!agentPhase) return null;
     const text = phaseLabel(agentPhase, t);
     return text ? { text, orb: orbModeForPhase(agentPhase) } : null;
-  }, [agentPhase, t]);
+  }, [agentPhase, commandBusy, t]);
   const retryText = useMemo(
     () => retryInfo ? `${t("chat.retrying", { attempt: retryInfo.attempt, max: retryInfo.maxAttempts })}${retryInfo.errorMessage ? ` — ${retryInfo.errorMessage}` : ""}` : null,
     [retryInfo, t],
@@ -662,9 +667,11 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       modelScopeWarnings={modelScopeWarnings}
       onModelChange={handleModelChange}
       modelSwitching={modelSwitching}
+      modelsLoading={modelList.length === 0 && (!modelNames || Object.keys(modelNames).length === 0) && !modelError}
       onCompact={session || isNew ? handleCompact : undefined}
       onAbortCompaction={handleAbortCompaction}
       isCompacting={isCompacting}
+      commandBusy={Boolean(commandBusy)}
       compactError={compactError}
       compactResult={compactResult}
       toolPreset={toolPreset}

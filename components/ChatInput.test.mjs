@@ -70,7 +70,7 @@ test("keeps the model selector visible when a model error leaves no options", ()
   );
 
   assert.match(html, />No models</);
-  assert.match(html, /title="No available models"/);
+  assert.match(html, /title="正在载入模型"/);
 });
 
 test("renders the read-only tool preset as the active selection", () => {
@@ -92,7 +92,7 @@ test("renders the read-only tool preset as the active selection", () => {
   assert.match(html, />read-only<\/span>/);
 });
 
-test("shows and locks the optimistic model while a switch is pending", () => {
+test("shows a switching state and locks the model selector while a switch is pending", () => {
   const html = renderToStaticMarkup(
     React.createElement(
       I18nProvider,
@@ -112,8 +112,7 @@ test("shows and locks the optimistic model while a switch is pending", () => {
   assert.match(html, /title="Switching model"/);
   assert.match(html, /aria-busy="true"/);
   assert.match(html, /disabled=""/);
-  assert.match(html, />DeepSeek V4 Flash</);
-  assert.match(html, /animation:spin 0\.8s linear infinite/);
+  assert.match(html, />切换模型中</);
 });
 
 test("filters model options by name and id", () => {

@@ -305,6 +305,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [pendingModel, setPendingModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [modelSwitching, setModelSwitching] = useState(false);
   const [isCompacting, setIsCompacting] = useState(false);
+  /** 内置斜杠命令执行中（reload/compact 等耗时排他命令）；用于 loading 展示 + 阻塞相斥操作 */
+  const [commandBusy, setCommandBusy] = useState<{ name: string } | null>(null);
   const [compactError, setCompactError] = useState<string | null>(null);
   const [compactResult, setCompactResult] = useState<CompactResultInfo | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>(null);
@@ -319,6 +321,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [extensionWidgets, setExtensionWidgets] = useState<ExtensionWidgetItem[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessages>({ steering: [], followUp: [] });
 
+  const commandBusyRef = useRef<{ name: string } | null>(null);
   const eventConnectionRef = useRef<AgentEventConnection | null>(null);
   const eventStreamGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventStreamGraceGenerationRef = useRef(0);
@@ -1283,7 +1286,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return;
-    if (agentRunningRef.current || bashRunningRef.current) {
+    if (agentRunningRef.current || bashRunningRef.current || commandBusyRef.current) {
       restoreSubmission(message, images, composerDraftKey);
       return;
     }
@@ -1400,7 +1403,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
-    if (agentRunningRef.current || bashRunningRef.current) return;
+    if (agentRunningRef.current || bashRunningRef.current || commandBusyRef.current) return;
     const inputText = `${excludeFromContext ? "!!" : "!"}${command}`;
     bashRunningRef.current = true;
     setPendingBash({ command, excludeFromContext });
@@ -1446,7 +1449,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, []);
 
   const handleFork = useCallback(async (entryId: string) => {
-    if (bashRunningRef.current) return;
+    if (bashRunningRef.current || commandBusyRef.current) return;
     const sid = sessionIdRef.current;
     if (!sid) return;
     setForkingEntryId(entryId);
@@ -1467,7 +1470,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [onSessionForked]);
 
   const handleNavigate = useCallback(async (entryId: string, displayLeafId?: string | null) => {
-    if (bashRunningRef.current) return;
+    if (bashRunningRef.current || commandBusyRef.current) return;
     const sid = sessionIdRef.current;
     if (!sid) return;
     // `displayLeafId` differs from the navigate target when the target is a
@@ -1485,7 +1488,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [loadContext]);
 
   const handleLeafChange = useCallback(async (leafId: string | null) => {
-    if (bashRunningRef.current) return;
+    if (bashRunningRef.current || commandBusyRef.current) return;
     setActiveLeafId(leafId);
     const sid = sessionIdRef.current;
     if (!sid) return;
@@ -1540,23 +1543,42 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [addNotice, currentModelOverride, isNew, loadSession, setNewSessionModel]);
 
+  /**
+   * 内置斜杠命令的 busy 包装：执行期间标记 commandBusy（顶栏 loading + 阻塞相斥操作）。
+   * 已处于 busy 时直接返回 false（拒绝重入），调用方负责提示。
+   */
+  const withCommandBusy = useCallback(async (name: string, fn: () => Promise<void>): Promise<boolean> => {
+    if (commandBusyRef.current) return false;
+    commandBusyRef.current = { name };
+    setCommandBusy({ name });
+    try {
+      await fn();
+      return true;
+    } finally {
+      commandBusyRef.current = null;
+      setCommandBusy(null);
+    }
+  }, []);
+
   const handleCompact = useCallback(async () => {
     const sid = sessionIdRef.current;
     if (!sid || isCompacting) return;
-    setIsCompacting(true);
-    setCompactError(null);
-    setCompactResult(null);
-    try {
-      const result = await sendAgentCommand<CompactCommandResult>(sid, { type: "compact" });
-      setCompactResult(readCompactResult(result, "manual"));
-      await loadSession(sid, true);
-    } catch (e) {
-      setCompactError(e instanceof Error ? e.message : String(e));
+    await withCommandBusy("compact", async () => {
+      setIsCompacting(true);
+      setCompactError(null);
       setCompactResult(null);
-    } finally {
-      setIsCompacting(false);
-    }
-  }, [isCompacting, loadSession]);
+      try {
+        const result = await sendAgentCommand<CompactCommandResult>(sid, { type: "compact" });
+        setCompactResult(readCompactResult(result, "manual"));
+        await loadSession(sid, true);
+      } catch (e) {
+        setCompactError(e instanceof Error ? e.message : String(e));
+        setCompactResult(null);
+      } finally {
+        setIsCompacting(false);
+      }
+    });
+  }, [isCompacting, loadSession, withCommandBusy]);
 
   const loadModels = useCallback(async (signal?: AbortSignal) => {
     const modelCwd = newSessionCwd ?? session?.cwd ?? "";
@@ -1604,31 +1626,43 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       return result;
     };
 
+    // 内置命令执行中（reload/compact）：拒绝其它命令重入，避免与进行中的会话状态重写竞争。
+    if (commandBusyRef.current) {
+      return complete({ handled: true, error: "Another command is still running" });
+    }
+
     try {
       switch (commandName) {
         case "compact": {
-          if (!sid || isCompacting) return complete({ handled: true, error: "No active session to compact" });
-          setIsCompacting(true);
-          setCompactError(null);
-          setCompactResult(null);
-          const result = await sendAgentCommand<CompactCommandResult>(sid, {
-            type: "compact",
-            ...(args ? { customInstructions: args } : {}),
+          if (!sid) return complete({ handled: true, error: "No active session to compact" });
+          if (isCompacting) return complete({ handled: true, error: "Compaction already in progress" });
+          const ok = await withCommandBusy("compact", async () => {
+            setIsCompacting(true);
+            setCompactError(null);
+            setCompactResult(null);
+            const result = await sendAgentCommand<CompactCommandResult>(sid, {
+              type: "compact",
+              ...(args ? { customInstructions: args } : {}),
+            });
+            setCompactResult(readCompactResult(result, "manual"));
+            if (await loadSession(sid, true)) promoteNewSession();
           });
-          setCompactResult(readCompactResult(result, "manual"));
-          if (await loadSession(sid, true)) promoteNewSession();
+          if (!ok) return complete({ handled: true, error: "Another command is still running" });
           return complete({ handled: true, message: "Compacted context" });
         }
 
         case "reload": {
           if (!sid) return complete({ handled: true, error: "No active session to reload" });
-          await sendAgentCommand(sid, { type: "reload" });
-          await Promise.all([
-            loadSession(sid, false, true),
-            loadTools(sid),
-            loadSlashCommands(),
-            loadModels(),
-          ]);
+          const ok = await withCommandBusy("reload", async () => {
+            await sendAgentCommand(sid, { type: "reload" });
+            await Promise.all([
+              loadSession(sid, false, true),
+              loadTools(sid),
+              loadSlashCommands(),
+              loadModels(),
+            ]);
+          });
+          if (!ok) return complete({ handled: true, error: "Another command is still running" });
           return complete({ handled: true, message: "Reloaded session resources" });
         }
 
@@ -1667,7 +1701,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       if (commandName === "compact") setIsCompacting(false);
     }
-  }, [addNotice, ensureNewSession, isCompacting, loadModels, loadSession, loadSlashCommands, loadTools, promoteNewSession, onSessionStatsPanelOpen]);
+  }, [addNotice, ensureNewSession, isCompacting, loadModels, loadSession, loadSlashCommands, loadTools, promoteNewSession, onSessionStatsPanelOpen, withCommandBusy]);
 
   // Let AgentSession.prompt decide atomically whether to queue against the
   // current run or start a new turn if it settled while the request was in
@@ -1970,6 +2004,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentPhase,
     isNew,
     promptAnchorActive,
+    commandBusy,
     // Refs
     sessionIdRef, messagesEndRef, scrollContainerRef,
     lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,

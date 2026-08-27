@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
+import { ThinkingOrb } from "thinking-orbs";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { PhaseBroadcast, QuotaInfo } from "@/hooks/useBroadcast";
 import type { SkillsResponse } from "@/lib/api-types";
@@ -60,9 +61,13 @@ interface Props {
   modelScopeWarnings?: string[];
   onModelChange?: (provider: string, modelId: string) => void;
   modelSwitching?: boolean;
+  /** 模型列表初始加载中（modelList / modelNames 尚未填充） */
+  modelsLoading?: boolean;
   onCompact?: () => void;
   onAbortCompaction?: () => void;
   isCompacting?: boolean;
+  /** reload/compact 等内置命令执行中：禁用发送（loading 由顶栏播报槽承载） */
+  commandBusy?: boolean;
   compactError?: string | null;
   compactResult?: CompactResultInfo | null;
   toolPreset?: ToolPreset;
@@ -466,8 +471,9 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
-  onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
+  onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching, modelsLoading,
   onCompact, onAbortCompaction, isCompacting, compactError, toolPreset, onToolPresetChange,
+  commandBusy = false,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   queuedMessages, inputHistory = [], onRecallQueue,
   phase = null, quota = null,
@@ -863,22 +869,31 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   const runBuiltinCommand = useCallback(async (msg: string): Promise<boolean> => {
     if (attachedImages.length || !msg.startsWith("/") || !onBuiltinCommand) return false;
+    // 扩展/技能等非内置命令不在此处理（由 onSend 走 prompt 流程）。
+    if (!getBuiltinSlashCommand(msg)) return false;
+    // 内置命令一旦受理立即清空输入框（执行期间由顶栏 loading 承接），
+    // 失败时仅当输入框仍为空才把命令文本放回，方便修改或重试。
+    clearInput();
     const result = await onBuiltinCommand(msg);
-    if (!result.handled) return false;
-    if (!result.error) clearInput();
-    return true;
+    if (result.handled && result.error && valueRef.current.trim() === "") {
+      valueRef.current = msg;
+      setValue(msg);
+    }
+    return result.handled;
   }, [attachedImages.length, clearInput, onBuiltinCommand]);
 
   const handleSend = useCallback(async () => {
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
+    // 内置命令执行中（reload/compact）：阻塞发送，保留草稿供稍后重发。
+    if (commandBusy) return;
     onAudioUnlock?.();
     const builtinAllowed = !isStreaming || canRunBuiltinSlashCommandWhileStreaming(msg);
     if (builtinAllowed && await runBuiltinCommand(msg)) return;
     if (isStreaming) return;
     clearInput();
     onSend(msg, attachedImages.length ? attachedImages : undefined);
-  }, [value, attachedImages, isStreaming, runBuiltinCommand, onSend, clearInput, onAudioUnlock]);
+  }, [value, attachedImages, isStreaming, commandBusy, runBuiltinCommand, onSend, clearInput, onAudioUnlock]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -1465,23 +1480,25 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     ? (modelOptions.find((o) => o.modelId === model.modelId && o.provider === model.provider)?.name ?? model.modelId)
     : null;
   const currentName = displayModelName;
+  const isModelsLoading = modelsLoading ?? false;
+  const modelsLoaded = modelOptions.length > 0 || currentName;
 
   const queueCount = (queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0);
 
 
   // 顶栏左槽（空闲态）：模型选择器（自工具栏迁入；流式时该槽让位给运行状态）
-  const modelSlot = (modelOptions.length > 0 || currentName || modelError) && onModelChange ? (
+  const modelSlot = (modelsLoaded || isModelsLoading || modelError) && onModelChange ? (
                   <div ref={dropdownRef} style={{ position: "relative", minWidth: 0 }}>
                     <button
-                      onClick={(e) => {
+                      onClick={modelsLoaded && !modelSwitching ? (e) => {
                         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                         setModelDropdownRect({ top: rect.top, left: rect.left, width: rect.width });
                         setModelDropdownOpen((open) => {
                           if (open) setModelFilter("");
                           return !open;
                         });
-                      }}
-                      disabled={isStreaming || modelSwitching}
+                      } : undefined}
+                      disabled={isStreaming || modelSwitching || isModelsLoading}
                       aria-busy={modelSwitching || undefined}
                       style={{
                         display: "flex", alignItems: "center", gap: 6,
@@ -1508,24 +1525,35 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       onMouseLeave={(e) => {
                         e.currentTarget.style.color = "var(--text-muted)";
                       }}
-                      title={modelSwitching ? "Switching model" : modelOptions.length > 0 ? "Change model" : "No available models"}
+                      title={modelSwitching ? "Switching model" : modelsLoaded ? "Change model" : "正在载入模型"}
                     >
-                      {modelSwitching && (
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }} aria-hidden="true">
-                          <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-                        </svg>
-                      )}
-                      <span style={{ display: "flex", alignItems: "baseline", minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" }}>
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                          {currentName ?? (modelOptions.length > 0 ? "Select model" : "No models")}
+                      {isModelsLoading || modelSwitching ? (
+                        <>
+                          <ThinkingOrb
+                            state={modelSwitching ? "working" : "breathing"}
+                            size={20}
+                            theme={isDark ? "dark" : "light"}
+                            style={isDark ? undefined : { filter: "brightness(0.57) contrast(1.15)" }}
+                          />
+                          <span style={{ display: "flex", alignItems: "baseline", minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" }}>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                              {modelSwitching ? "切换模型中" : "正在载入模型……"}
+                            </span>
+                          </span>
+                        </>
+                      ) : (
+                        <span style={{ display: "flex", alignItems: "baseline", minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" }}>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                            {currentName ?? (modelOptions.length > 0 ? "Select model" : "No models")}
+                          </span>
+                          {model?.provider && (
+                            <>
+                              <span aria-hidden="true" style={{ flexShrink: 0, margin: "0 4px", color: "var(--text-dim)" }}>·</span>
+                              <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 11 }}>{model.provider}</span>
+                            </>
+                          )}
                         </span>
-                        {model?.provider && (
-                          <>
-                            <span aria-hidden="true" style={{ flexShrink: 0, margin: "0 4px", color: "var(--text-dim)" }}>·</span>
-                            <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 11 }}>{model.provider}</span>
-                          </>
-                        )}
-                      </span>
+                      )}
                     </button>
                     {modelDropdownOpen && modelDropdownRect && (() => {
                       const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
@@ -3139,15 +3167,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               ) : (
                 <button
                   onClick={handleSend}
-                  disabled={!value.trim() && !attachedImages.length}
+                  disabled={(!value.trim() && !attachedImages.length) || commandBusy}
                   style={{
                     flexShrink: 0,
                     display: "flex", alignItems: "center", gap: 6,
                     padding: 0,
                     background: "transparent",
                     border: "none",
-                    color: (value.trim() || attachedImages.length) ? "var(--text-muted)" : "var(--text-dim)",
-                    cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
+                    color: (value.trim() || attachedImages.length) && !commandBusy ? "var(--text-muted)" : "var(--text-dim)",
+                    cursor: (value.trim() || attachedImages.length) && !commandBusy ? "pointer" : "not-allowed",
                     fontSize: 13,
                     fontWeight: 600,
                     letterSpacing: "-0.01em",
