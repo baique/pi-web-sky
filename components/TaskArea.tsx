@@ -138,13 +138,13 @@ function TaskCard({
         margin: "2px 8px 6px",
         borderRadius: 8,
         background: dragOver
-          ? "color-mix(in srgb, var(--accent) 12%, transparent)"
-          : "var(--tool-bg-glass)",
-        border: `1px solid ${dragOver ? "var(--accent)" : "var(--border)"}`,
-        borderLeft: dragOver ? "3px solid var(--accent)" : "1px solid var(--border)",
-        boxShadow: "0 1px 2px color-mix(in srgb, var(--text) 7%, transparent)",
-        overflow: "hidden",
-        transition: "border-color 0.12s, background 0.12s, border-left-width 0.12s",
+          ? "color-mix(in srgb, var(--accent) 10%, transparent)"
+          : hovered
+            ? "var(--bg-hover)"
+            : "transparent",
+        border: `1px solid ${dragOver ? "var(--accent)" : "var(--bubble-hairline)"}`,
+        borderLeft: dragOver ? "3px solid var(--accent)" : "1px solid var(--bubble-hairline)",
+        transition: "border-color 0.12s, background 0.12s",
       }}
     >
       {/* Card header */}
@@ -329,6 +329,7 @@ export function TaskArea({
                   if (e.key === "Enter") commitNewTask();
                   if (e.key === "Escape") { setNewTaskOpen(false); setNewTaskName(""); }
                 }}
+                onBlur={() => { setNewTaskOpen(false); setNewTaskName(""); }}
                 placeholder={t("sidebar.taskName")}
                 style={{
                   flex: 1, minWidth: 0,
@@ -350,6 +351,25 @@ export function TaskArea({
                 }}
               >
                 {t("sidebar.create")}
+              </button>
+              <button
+                type="button"
+                title={t("sidebar.cancel")}
+                aria-label={t("sidebar.cancel")}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { setNewTaskOpen(false); setNewTaskName(""); }}
+                style={{
+                  flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 20, height: 20, padding: 0,
+                  background: "none", border: "none", borderRadius: 5,
+                  color: "var(--text-dim)", cursor: "pointer",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "transparent"; }}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                  <line x1="5" y1="5" x2="19" y2="19" /><line x1="19" y1="5" x2="5" y2="19" />
+                </svg>
               </button>
             </div>
           ) : (
