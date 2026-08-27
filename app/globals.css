@@ -738,6 +738,29 @@ pre, code {
   white-space: pre-wrap;
 }
 
+/* 技能展开注记：像 AI 思考展开一样的灰色正文（零卡片、左细线由外层容器提供） */
+.markdown-skill-body {
+  color: var(--text-muted);
+}
+.markdown-skill-body h1,
+.markdown-skill-body h2,
+.markdown-skill-body h3,
+.markdown-skill-body h4,
+.markdown-skill-body h5,
+.markdown-skill-body h6 {
+  color: var(--text-muted);
+}
+.markdown-skill-body a {
+  color: var(--text-muted);
+  text-decoration-color: color-mix(in srgb, var(--text-muted) 40%, transparent);
+}
+.markdown-skill-body a:hover {
+  text-decoration-color: var(--text-muted);
+}
+.markdown-skill-body code {
+  color: var(--text-muted);
+}
+
 .markdown-custom-message {
   line-height: 1.32;
 }

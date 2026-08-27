@@ -12,11 +12,19 @@ const SKILL_EXPANSION_RE = /^<skill name="([^"\n]+)" location="([^"\n]+)">\nRefe
  * suffix. This avoids collapsing ordinary text that merely starts with a
  * skill-looking tag. The greedy body capture makes the final closing tag win
  * when a skill body contains an example `</skill>` tag.
+ *
+ * Returns `{ command, skillBody, userMessage }` — skillBody is the skill
+ * document between the opening tag and `</skill>` (shown when expanded),
+ * userMessage is the text after the closing tag (the user's actual prompt,
+ * kept as-is), or undefined if there is no separate user message.
  */
-export function skillExpansionToCommand(text: string): string | null {
+export function skillExpansionToCommand(
+  text: string,
+): { command: string; skillBody: string; userMessage?: string } | null {
   const match = text.match(SKILL_EXPANSION_RE);
   if (!match) return null;
 
-  const [, name, , , args] = match;
-  return args ? `/skill:${name} ${args}` : `/skill:${name}`;
+  const [, name, , body, args] = match;
+  const command = args ? `/skill:${name} ${args}` : `/skill:${name}`;
+  return { command, skillBody: body, userMessage: match[4] };
 }

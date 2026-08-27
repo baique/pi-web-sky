@@ -2010,7 +2010,8 @@ function SessionItem({
   // A stored first message may be an SDK-expanded <skill> block; collapse it
   // back to the compact /skill:name args command the user typed before using
   // it as the auto-name fallback, mirroring MessageView's rendering.
-  const displayFirstMessage = skillExpansionToCommand(session.firstMessage) ?? session.firstMessage;
+  const parsedSkill = skillExpansionToCommand(session.firstMessage);
+  const displayFirstMessage = parsedSkill?.command ?? session.firstMessage;
   const title = session.name || displayFirstMessage.slice(0, 50) || session.id.slice(0, 12);
 
   const startRename = useCallback((e: React.MouseEvent) => {
