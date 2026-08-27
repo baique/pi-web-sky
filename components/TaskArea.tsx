@@ -135,20 +135,19 @@ function TaskCard({
       onMouseLeave={() => setHovered(false)}
       style={{
         position: "relative",
-        margin: "2px 8px 6px",
-        borderRadius: 8,
+        margin: "0 6px 4px",
+        borderRadius: 6,
         background: dragOver
-          ? "color-mix(in srgb, var(--accent) 10%, transparent)"
-          : hovered
-            ? "var(--bg-hover)"
-            : "transparent",
-        border: `1px solid ${dragOver ? "var(--accent)" : "var(--bubble-hairline)"}`,
-        borderLeft: dragOver ? "3px solid var(--accent)" : "1px solid var(--bubble-hairline)",
-        transition: "border-color 0.12s, background 0.12s",
+          ? "color-mix(in srgb, var(--accent) 8%, transparent)"
+          : "transparent",
+        border: "none",
+        boxShadow: dragOver ? "inset 3px 0 0 var(--accent)" : "none",
+        transition: "background 0.12s, box-shadow 0.12s",
       }}
     >
-      {/* Card header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "7px 8px 7px 5px" }}>
+      {/* Card header — fixed min-height so the hover action buttons never
+          change the row height (no jump while hovering). */}
+      <div style={{ display: "flex", alignItems: "center", gap: 4, minHeight: 26, padding: "2px 8px 2px 5px" }}>
         {confirmDelete ? (
           <>
             <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -309,9 +308,9 @@ export function TaskArea({
             <div
               style={{
                 display: "flex", alignItems: "center", gap: 6,
-                margin: "2px 10px 8px",
+                margin: "0 10px 6px",
                 padding: "0 10px",
-                height: 28,
+                height: 26,
                 background: "var(--glass-bg-input)",
                 border: "1px solid var(--accent)",
                 borderRadius: 7,
@@ -378,7 +377,9 @@ export function TaskArea({
               onClick={() => setNewTaskOpen(true)}
               style={{
                 display: "flex", alignItems: "center", gap: 6,
-                width: "100%", padding: "4px 12px",
+                width: "100%",
+                minHeight: 26,
+                padding: "0 12px",
                 background: "none", border: "none", borderRadius: 5,
                 color: "var(--text-dim)", cursor: "pointer", fontSize: 11, textAlign: "left",
               }}
