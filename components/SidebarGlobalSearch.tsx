@@ -295,32 +295,48 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
   }
 
   return (
-    <div style={{ position: "relative", height: "100%", display: "flex", alignItems: "center", flexShrink: 0 }}>
+    <>
       <div
         ref={inputRef}
-        style={{
-          display: "flex", alignItems: "center", gap: 5,
-          height: 28,
-          padding: "0 8px",
-          width: 190,
-          background: open ? "var(--glass-bg-strong)" : "var(--glass-bg-input)",
-          border: "1px solid var(--border)",
-          borderRadius: 7,
-          color: "var(--text-muted)",
-          transition: "border-color 0.12s, background 0.12s",
-        }}
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
-          <circle cx="11" cy="11" r="7" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
-        <input
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); setResults(null); }}
-          onFocus={() => setOpen(true)}
-          placeholder={t("search.placeholder")}
-          style={{ ...inputStyle, padding: 0, background: "transparent" }}
-        />
+      onMouseEnter={(e) => {
+        if (!open) {
+          e.currentTarget.style.background = "var(--bg-hover)";
+          e.currentTarget.style.color = "var(--text)";
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!open) {
+          e.currentTarget.style.background = "transparent";
+          e.currentTarget.style.color = "var(--text-muted)";
+        }
+      }}
+      style={{
+        position: "relative",
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        flexShrink: 0,
+        width: 190,
+        padding: "0 12px",
+        borderLeft: "1px solid var(--border)",
+        background: open ? "var(--bg-selected)" : "transparent",
+        color: open ? "var(--text)" : "var(--text-muted)",
+        cursor: "text",
+        transition: "background 0.12s, color 0.12s",
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+        <circle cx="11" cy="11" r="7" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+      <input
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); setResults(null); }}
+        onFocus={() => setOpen(true)}
+        placeholder={t("search.placeholder")}
+        style={{ flex: 1, minWidth: 0, height: "100%", padding: 0, border: "none", outline: "none", background: "transparent", color: "inherit", fontSize: 12 }}
+      />
       </div>
       {open && pos && createPortal(
         <div style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 520 }}>
@@ -328,6 +344,6 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
         </div>,
         document.body,
       )}
-    </div>
+    </>
   );
 }

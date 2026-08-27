@@ -2629,7 +2629,7 @@ export function AppShell() {
               {renderSessionStatsButton(true)}
               {renderTodoButton(true)}
               {isMobile && (
-                <div style={{ height: "100%", flexShrink: 0, borderLeft: "1px solid var(--border)" }}>
+                <div style={{ height: "100%", flexShrink: 0 }}>
                   <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} />
                 </div>
               )}
@@ -2668,7 +2668,7 @@ export function AppShell() {
               {renderChatToolbarActions(false)}
               {renderSessionStatsButton(false)}
               {renderTodoButton(false)}
-              <div style={{ height: "100%", flexShrink: 0, borderLeft: "1px solid var(--border)" }}>
+              <div style={{ height: "100%", flexShrink: 0 }}>
                 <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} />
               </div>
             </>
