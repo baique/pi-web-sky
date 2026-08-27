@@ -11,6 +11,13 @@ export const NOTICE_COLOR: Record<string, string> = {
   info: "var(--accent)",
 };
 
+/** 使用率健康色：绿（≤50%）/ 黄（50~80%）/ 红（>80%） */
+function healthColor(pct: number): string {
+  if (pct > 0.8) return NOTICE_COLOR.error;
+  if (pct > 0.5) return NOTICE_COLOR.warning;
+  return NOTICE_COLOR.success;
+}
+
 /**
  * 额度微缩条（纯文本，不新增样式）：
  * - usage：多窗平铺 `5h 24% · 周 84% · 月 95%`，悬停看重置时间明细
@@ -27,7 +34,17 @@ export function QuotaView({ quota }: { quota: QuotaInfo }) {
   return (
     <span title={title} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
       {quota.items.map((item) => (
-        <span key={item.label} style={{ whiteSpace: "nowrap" }}>
+        <span key={item.label} style={{ whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3 }}>
+          <span
+            aria-hidden
+            style={{
+              flexShrink: 0,
+              width: 5,
+              height: 5,
+              borderRadius: "50%",
+              background: healthColor(item.pct),
+            }}
+          />
           {item.label} {item.text}
         </span>
       ))}
