@@ -236,7 +236,7 @@ export async function searchSessions(
         "SELECT session_id, ifnull(snippet(session_search, 2, '[', ']', '…', 12), '') AS snip " +
           "FROM session_search WHERE session_search MATCH ? LIMIT ?",
       )
-      .all(phrase, cap) as SearchRow[];
+      .all(phrase, cap) as unknown as SearchRow[];
     for (const r of db.prepare("SELECT session_id FROM session_search WHERE title MATCH ?").all(phrase) as { session_id: string }[]) {
       titleIds.add(r.session_id);
     }
@@ -247,7 +247,7 @@ export async function searchSessions(
         "SELECT session_id, '' AS snip FROM session_search " +
           "WHERE title LIKE ? OR body LIKE ? LIMIT ?",
       )
-      .all(like, like, cap) as SearchRow[];
+      .all(like, like, cap) as unknown as SearchRow[];
     for (const r of db.prepare("SELECT session_id FROM session_search WHERE title LIKE ?").all(like) as { session_id: string }[]) {
       titleIds.add(r.session_id);
     }

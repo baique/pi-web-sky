@@ -3,12 +3,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useI18n } from "@/hooks/useI18n";
-import type { Task } from "@/lib/task-store";
+
+/** Local mirror of lib/task-store's Task — keeps the client bundle free of
+ *  server-only modules (node:sqlite). */
+export interface TaskGroupUi {
+  id: string;
+  name: string;
+  sessionIds: string[];
+}
 
 const SESSION_MIME = "text/session-id";
 
 interface TaskGroup {
-  task: Task;
+  task: TaskGroupUi;
   content: ReactNode;
 }
 

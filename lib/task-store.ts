@@ -45,7 +45,7 @@ export function listTasks(projectKey: string): Task[] {
     .prepare(
       "SELECT id, project_key AS projectKey, name, created, updated FROM tasks WHERE project_key = ? ORDER BY updated DESC, created DESC",
     )
-    .all(projectKey) as TaskRow[];
+    .all(projectKey) as unknown as TaskRow[];
   return rows.map(rowToTask);
 }
 
