@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>会话行 · 操作按钮布局</title>
+<style>
+  :root { --bg:#eef0f4; --card:rgba(255,255,255,0.7); --line:rgba(0,0,0,0.08);
+          --text:#232328; --muted:#8a8a94; --accent:#4c6ef5; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+         background:var(--bg); color:var(--text); padding:36px 20px;
+         display:flex; flex-direction:column; align-items:center; gap:16px; }
+  h1 { font-size:19px; font-weight:650; }
+  .sub { color:var(--muted); font-size:13px; text-align:center; max-width:680px; line-height:1.6; }
+  .row { display:flex; gap:18px; flex-wrap:wrap; justify-content:center; align-items:stretch; }
+  .opt { background:var(--card); border:1px solid var(--line); border-radius:14px;
+         padding:14px 15px; width:290px; display:flex; flex-direction:column; gap:10px; }
+  .opt h3 { font-size:14.5px; display:flex; align-items:center; gap:7px; }
+  .opt .tag { font-size:10.5px; color:var(--accent); background:rgba(76,110,245,0.10);
+              border-radius:6px; padding:2px 7px; font-weight:600; }
+  .opt .desc { font-size:12px; color:#6a6a74; line-height:1.55; flex:1; }
+
+  .label { font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-top:4px; }
+  .rowbox { background:#fff; border:1px solid var(--line); border-radius:9px; padding:4px 8px; font-size:12px; }
+  .sessline { display:flex; align-items:center; gap:5px; padding:3px 3px; border-radius:6px; }
+  .sessline .title { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ic { width:17px; height:17px; border-radius:5px; display:inline-flex; align-items:center;
+        justify-content:center; font-size:11px; flex-shrink:0; }
+
+  /* hover 浮现态 */
+  .hover .sessline { background:rgba(0,0,0,0.04); }
+  .ghostic { color:#8a8a94; opacity:0.55; }
+
+  /* 方案差异 */
+  .menu-dots { position:relative; }
+  .menu-dots::after { content:"⋯"; }
+  .badge-shrink { background:rgba(0,0,0,0.05); color:#a0a0a8; }
+</style>
+</head>
+<body>
+  <h1>会话行 · 操作按钮布局(含「移动」)</h1>
+  <p class="sub">每个方案展示同一会话行:默认态 + 悬停态。目标:标题空间最大化,同时「编辑 / 展开分支 / 移动 / 删除」都可及。</p>
+
+  <div class="row">
+
+    <!-- 方案1:标题优先 + hover 渐显 + ⋯ 溢出(移动/删除入菜单) -->
+    <div class="opt">
+      <h3>方案 1 <span class="tag">推荐</span></h3>
+      <div class="desc">标题优先。悬停时只浮现<b>高频操作</b>(展开分支 ⑂);「移动 / 编辑 / 删除」收进 <b>⋯ 溢出菜单</b>。标题空间最大,操作不抢眼。</div>
+      <div class="label">默认(静置)</div>
+      <div class="rowbox"><div class="sessline"><span class="ic">💬</span><span class="title">设计接口的交互方案…</span></div></div>
+      <div class="label">悬停</div>
+      <div class="rowbox hover"><div class="sessline"><span class="ic">💬</span><span class="title">设计接口的交互方案…</span><span class="ic">⑂</span><span class="ic menu-dots">⋯</span></div></div>
+    </div>
+
+    <!-- 方案2:全部 inline 常驻,标题截断 -->
+    <div class="opt">
+      <h3>方案 2</h3>
+      <div class="desc">移动 / 编辑 / 展开 / 删除 <b>全部 inline</b>(悬停浮现)。代价:标题被压缩截断,信息损失明显。</div>
+      <div class="label">默认(静置)</div>
+      <div class="rowbox"><div class="sessline"><span class="ic">💬</span><span class="title">设计接口的交互方案…</span></div></div>
+      <div class="label">悬停(4 个图标)</div>
+      <div class="rowbox hover"><div class="sessline"><span class="ic">💬</span><span class="title" style="font-size:11px">设计接口的交互方…</span><span class="ic">✎</span><span class="ic">⑂</span><span class="ic">↗</span><span class="ic">🗑</span></div></div>
+    </div>
+
+    <!-- 方案3:频率分级,高频 inline,低频 ⋯ -->
+    <div class="opt">
+      <h3>方案 3</h3>
+      <div class="desc">按频率分级:<b>展开分支</b>(高频)inline;<b>编辑/移动</b> 悬停第二梯队;<b>删除</b>(低频、危险)只进 ⋯ 菜单 + 二次确认。标题空间居中。</div>
+      <div class="label">默认(静置)</div>
+      <div class="rowbox"><div class="sessline"><span class="ic">💬</span><span class="title">设计接口的交互方案…</span></div></div>
+      <div class="label">悬停</div>
+      <div class="rowbox hover"><div class="sessline"><span class="ic">💬</span><span class="title">设计接口的交互方案…</span><span class="ic">⑂</span><span class="ic">✎</span><span class="ic">↗</span><span class="ic menu-dots">⋯</span></div></div>
+    </div>
+
+  </div>
+
+  <p class="sub" style="margin-top:4px;">↙ 草图上"移动"图标暂用 <b>↗</b> 占位。方案 2 的图标数会随会话树层级继续膨胀。</p>
+</body>
+</html>

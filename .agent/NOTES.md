@@ -10,3 +10,14 @@
 ## 端口约定
 
 - `npm run dev` / `start`：127.0.0.1:30143（见 package.json）；历史上有过 30141/30142 双实例并存时期，遇到旧文档提到这两个端口一律以 package.json 为准。
+
+## 会话 / 目录（pi 硬约束）
+
+1. **pi 新建会话必须选 cwd（目录）**，会话文件按 `sessions/<encoded-cwd>/<ts>_<id>.jsonl` 落盘；cwd 即物理归属。
+2. **pi 没有会话 cwd 迁移/移动命令**：移动 .jsonl 会破坏引用。因此会话的组织归属（项目/任务）一律走旁路元数据，文件原地不动（2026-08-27 项目管理设计的地基）。
+3. `~/pi-cwd-<YYYYMMDD>` 一键默认 scratch 目录机制已存在（`app/api/default-cwd/route.ts`：创建 + allowFileRoot），临时会话的零门槛入口复用它。
+
+## web-search key 配置坑（2026-08-27）
+
+- `web-search.json` 的 `tavilyApiKey` 优先级**低于**环境变量 `TAVILY_API_KEY`（`pi-web-access/credential-source.ts`：`return normalize(environmentValue) ?? source`）。
+- 曾在 `.bashrc` 注入过一个旧 key，拦截所有搜索（Tavily 432 usage limit）；修复 = 从 `.bashrc` 删除该行，让 `web-search.json` 成为唯一真相源。不要在 shell 环境里重复配置搜索 key。

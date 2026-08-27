@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>创建入口 · 任务 &amp; 新会话</title>
+<style>
+  :root { --bg:#eef0f4; --card:rgba(255,255,255,0.7); --line:rgba(0,0,0,0.08);
+          --text:#232328; --muted:#8a8a94; --accent:#4c6ef5; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+         background:var(--bg); color:var(--text); padding:36px 20px;
+         display:flex; flex-direction:column; align-items:center; gap:16px; }
+  h1 { font-size:19px; font-weight:650; }
+  .sub { color:var(--muted); font-size:13px; text-align:center; max-width:680px; line-height:1.6; }
+  .row { display:flex; gap:18px; flex-wrap:wrap; justify-content:center; align-items:stretch; }
+  .opt { background:var(--card); border:1px solid var(--line); border-radius:14px;
+         padding:14px 15px; width:280px; display:flex; flex-direction:column; gap:9px; }
+  .opt h3 { font-size:14.5px; display:flex; align-items:center; gap:7px; }
+  .opt .tag { font-size:10.5px; color:var(--accent); background:rgba(76,110,245,0.10);
+              border-radius:6px; padding:2px 7px; font-weight:600; white-space:nowrap; }
+  .opt .desc { font-size:12px; color:#6a6a74; line-height:1.55; flex:1; }
+
+  .panel { background:#fff; border:1px solid var(--line); border-radius:11px;
+           padding:9px 10px; font-size:12px; display:flex; flex-direction:column; gap:7px; position:relative; }
+  .projline, .taskline { display:flex; align-items:center; gap:6px; border-radius:8px; padding:6px 8px; }
+  .projline { font-weight:600; }
+  .taskline { margin-left:14px; font-weight:500; }
+  .plus { width:18px; height:18px; border-radius:6px; background:rgba(76,110,245,0.12);
+          color:var(--accent); display:inline-flex; align-items:center; justify-content:center;
+          font-size:13px; font-weight:700; flex-shrink:0; box-shadow:0 1px 3px rgba(76,110,245,.2); }
+
+  /* 项目 + 弹出的菜单 */
+  .menu { position:absolute; right:9px; top:34px; background:#fff; border:1px solid var(--line);
+          border-radius:9px; box-shadow:0 10px 24px rgba(0,0,0,0.12); padding:4px; min-width:128px; z-index:2; }
+  .menu .mi { padding:6px 9px; border-radius:6px; font-size:12px; cursor:pointer; }
+  .menu .mi:hover { background:rgba(76,110,245,0.10); color:var(--accent); }
+  .menu .sep { height:1px; background:var(--line); margin:4px 6px; }
+
+  .topbar { display:flex; gap:6px; }
+  .search { flex:1; background:rgba(255,255,255,0.75); border:1px solid rgba(0,0,0,0.06);
+            border-radius:9px; padding:7px 10px; color:var(--muted); }
+  .chat-btn { background:var(--accent); color:#fff; border-radius:9px; padding:7px 12px;
+              font-weight:600; box-shadow:0 2px 6px rgba(76,110,245,0.35); white-space:nowrap; }
+  .arrow-tip { font-size:10px; opacity:.75; }
+</style>
+</head>
+<body>
+  <h1>创建入口 · 任务 &amp; 新会话</h1>
+  <p class="sub">两个入口问题怎么解:<b>① 任务怎么创建</b> 　<b>② 想在「某项目 / 某任务」下定向开会话,入口在哪</b>。核心原则:顶栏「开聊」永远是最快的临时会话,定向创建靠项目/任务节点上的「+」。</p>
+
+  <div class="row">
+
+    <!-- ① 开聊 = 临时会话 -->
+    <div class="opt">
+      <h3>入口 1 <span class="tag">零门槛</span></h3>
+      <div class="desc">顶栏「开聊」点击 = 直接开一个<b>临时会话</b>。没有任何归属选择,秒开。临时会话可随后拖拽归档。</div>
+      <div class="panel">
+        <div class="topbar">
+          <div class="search">🔍 搜索会话…</div>
+          <div class="chat-btn">＋ 开聊</div>
+        </div>
+        <div style="font-size:11px;color:#a0a0a8;text-align:center;">点击即开 · 临时会话(不选项目/任务)</div>
+      </div>
+    </div>
+
+    <!-- ② 项目 hover + 菜单 -->
+    <div class="opt">
+      <h3>入口 2 <span class="tag">项目级</span></h3>
+      <div class="desc">项目节点<b>悬停</b>时右侧出现「+」→ 点开小菜单:<b>新建任务</b> / 新建会话(挂该项目)。项目下所有创建动作都从这里进。</div>
+      <div class="panel" style="min-height:120px;">
+        <div class="projline" style="background:rgba(0,0,0,0.04);">📁 项目 A
+          <span style="flex:1"></span><span class="plus">＋</span>
+        </div>
+        <div class="menu">
+          <div class="mi">＋ 新建任务</div>
+          <div class="mi">＋ 新建会话</div>
+          <div class="sep"></div>
+          <div class="mi" style="color:#8a8a94;">＋ 挂载工作目录…</div>
+        </div>
+        <div style="font-size:11px;color:#a0a0a8;">悬停出现「+」→ 菜单:新建任务 / 新建会话</div>
+      </div>
+    </div>
+
+    <!-- ③ 任务 hover + 菜单 -->
+    <div class="opt">
+      <h3>入口 3 <span class="tag">任务级</span></h3>
+      <div class="desc">任务节点悬停「+」→ 直接<b>新建会话并自动挂到该任务</b>,不再套菜单(意图已明确)。</div>
+      <div class="panel" style="min-height:120px;">
+        <div class="projline">📁 项目 A</div>
+        <div class="taskline" style="background:rgba(0,0,0,0.04);">🗂 任务 · 重构登录
+          <span style="flex:1"></span><span class="plus">＋</span>
+        </div>
+        <div style="font-size:11px;color:#a0a0a8;margin-left:14px;">悬停「+」→ 直接新会话(挂本任务)</div>
+      </div>
+    </div>
+
+  </div>
+
+  <p class="sub" style="margin-top:4px;">例外:拖拽归档时若想「先建任务再挂」,可在落点悬停时按 <b>Shift</b>→ 落点菜单出现「新建任务并挂入」。此为可选增强。</p>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方案 3 · 侧边栏草案 v2</title>
+<style>
+  :root {
+    --bg: #eef0f4; --card: rgba(255,255,255,0.6); --line: rgba(0,0,0,0.08);
+    --text: #232328; --muted: #8a8a94; --accent: #4c6ef5;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    background: var(--bg); color: var(--text); padding: 40px 24px;
+    display: flex; flex-direction: column; align-items: center; gap: 18px;
+  }
+  h1 { font-size: 19px; font-weight: 650; }
+  .sub { color: var(--muted); font-size: 13px; text-align: center; max-width: 620px; line-height: 1.6; }
+  .wrap { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+
+  /* 侧边栏 mockup */
+  .sidebar {
+    width: 300px; min-height: 620px; padding: 14px; border-radius: 16px;
+    background: var(--card); backdrop-filter: blur(12px);
+    border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0,0,0,0.07);
+    display: flex; flex-direction: column; gap: 8px; font-size: 12px;
+  }
+  .topbar { display: flex; gap: 6px; margin-bottom: 4px; }
+  .search { flex: 1; background: rgba(255,255,255,0.75); border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 9px; padding: 7px 10px; color: var(--muted); }
+  .chat-btn { background: var(--accent); color: #fff; border-radius: 9px; padding: 7px 12px;
+    font-weight: 600; box-shadow: 0 2px 6px rgba(76,110,245,0.35); white-space: nowrap; }
+
+  .card { background: rgba(255,255,255,0.72); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+  .card .head { font-weight: 600; }
+  .card .head .meta { color: #9a9aa2; font-weight: 400; }
+  .tree { margin-left: 12px; border-left: 1px solid rgba(0,0,0,0.07); padding-left: 8px; margin-top: 5px; }
+  .task { font-weight: 500; }
+  .sess { margin-left: 9px; color: #5a5a62; margin-top: 2px; }
+
+  .temp { border: 1px dashed rgba(0,0,0,0.16); border-radius: 10px; padding: 7px 10px;
+    color: var(--muted); background: rgba(255,255,255,0.32); }
+  .temp .t { color: #8a8a94; }
+  .temp .s { margin-left: 9px; color: #a5a5ac; }
+
+  .explorer { border-top: 1px solid var(--line); padding-top: 8px; margin-top: auto; }
+  .explorer .hd { display: flex; align-items: center; gap: 6px; color: #55555e; font-weight: 600; }
+  .explorer .hd .badge { margin-left: auto; background: rgba(76,110,245,0.1); color: var(--accent);
+    border-radius: 6px; padding: 1px 6px; font-size: 10px; }
+  .explorer .frow { margin-left: 10px; margin-top: 4px; color: #6a6a74; font-size: 11px; }
+  .explorer .frow span { color: #b0b0b8; margin-left: 4px; }
+
+  /* 说明栏 */
+  .legend { display: flex; flex-direction: column; gap: 10px; max-width: 340px; font-size: 12.5px; }
+  .lg { display: flex; gap: 10px; align-items: flex-start; background: rgba(255,255,255,0.55);
+    border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; line-height: 1.5; }
+  .lg b { display: inline-block; min-width: 18px; height: 18px; line-height: 18px; text-align: center;
+    background: var(--accent); color: #fff; border-radius: 5px; font-size: 11px; flex-shrink: 0; margin-top: 1px; }
+  .lg .t { font-weight: 600; }
+  .lg .d { color: #6a6a74; }
+</style>
+</head>
+<body>
+  <h1>方案 3 · 侧边栏草案 v2(含文件浏览器)</h1>
+  <p class="sub">你已选「临时会话放最下方」。这一版补上了<b>文件浏览器(File Explorer)</b>——它保留侧边栏<b>最底部</b>的可折叠区块,临时会话区插在「项目树」与「文件浏览器」之间。</p>
+
+  <div class="wrap">
+    <div class="sidebar">
+      <!-- ① 顶栏 -->
+      <div class="topbar">
+        <div class="search">🔍 搜索会话…</div>
+        <div class="chat-btn">＋ 开聊</div>
+      </div>
+
+      <!-- ② 项目树 -->
+      <div class="card">
+        <div class="head">📁 项目 A <span class="meta">· 3 工作区</span></div>
+        <div class="tree">
+          <div class="task">🗂 任务 · 重构登录</div>
+          <div class="sess">💬 设计接口</div>
+          <div class="sess">💬 实现</div>
+          <div class="sess" style="margin-top:3px">💬 会话(平铺)</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="head">📁 项目 B</div>
+      </div>
+
+      <!-- ③ 临时会话区(底部折叠) -->
+      <div class="temp">
+        <div class="t">⌄ 临时会话 (3)</div>
+        <div class="s">💬 问天气</div>
+        <div class="s">💬 修个 bug</div>
+      </div>
+
+      <!-- ④ 文件浏览器(最底部) -->
+      <div class="explorer">
+        <div class="hd">▾ 文件浏览器 <span class="badge">2 变更</span></div>
+        <div class="frow">📄 src/ <span>…</span></div>
+        <div class="frow">📄 lib/ <span>…</span></div>
+        <div class="frow">📄 package.json</div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="lg"><b>1</b><div><div class="t">顶栏:搜索 + 开聊</div><div class="d">全局入口。开聊 = 直接临时会话,零门槛,不碰项目。</div></div></div>
+      <div class="lg"><b>2</b><div><div class="t">项目树(主体)</div><div class="d">项目 → 任务 → 会话;会话可不挂任务、平铺在项目下。</div></div></div>
+      <div class="lg"><b>3</b><div><div class="t">临时会话区(底部折叠)</div><div class="d">未归档会话收于此,不干扰主线、不自动删除;随时拖进项目转正。</div></div></div>
+      <div class="lg"><b>4</b><div><div class="t">文件浏览器(最底部)</div><div class="d">沿用现状:底部可折叠区块,展示当前工作目录文件。</div></div></div>
+    </div>
+  </div>
+</body>
+</html>

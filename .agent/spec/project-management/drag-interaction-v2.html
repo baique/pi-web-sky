@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拖拽交互 · 玻璃材质版</title>
+<style>
+  :root { --accent:#4c6ef5; --text:#26262c; --muted:#8a8a94; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    font-family:-apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+    color:var(--text); min-height:100vh; padding:36px 20px;
+    display:flex; flex-direction:column; align-items:center; gap:16px;
+    /* 壁纸:让玻璃有内容可透 */
+    background:
+      radial-gradient(1200px 600px at 15% 10%, #f7d9ff 0%, transparent 55%),
+      radial-gradient(1000px 700px at 85% 20%, #c9e2ff 0%, transparent 55%),
+      radial-gradient(900px 700px at 50% 90%, #ffe3c9 0%, transparent 60%),
+      linear-gradient(160deg,#f2eef8 0%, #e9eefb 100%);
+  }
+  h1 { font-size:19px; font-weight:650; text-shadow:0 1px 0 rgba(255,255,255,0.5); }
+  .sub { color:#5a5a64; font-size:13px; text-align:center; max-width:680px; line-height:1.6; }
+  .row { display:flex; gap:20px; flex-wrap:wrap; justify-content:center; }
+
+  /* 玻璃面板(chrome 层语义:半透明白 + heavy blur) */
+  .glass {
+    background:rgba(255,255,255,0.60);
+    backdrop-filter:blur(14px) saturate(1.4);
+    -webkit-backdrop-filter:blur(14px) saturate(1.4);
+    border:1px solid rgba(255,255,255,0.65);
+    box-shadow:0 8px 28px rgba(50,60,100,0.12), inset 0 1px 0 rgba(255,255,255,0.7);
+    border-radius:16px; padding:16px; width:255px;
+  }
+  .state .cap { font-weight:650; font-size:13px; margin-bottom:11px; }
+  .state .cap .tag { color:var(--muted); font-weight:400; }
+
+  /* 玻璃上的内层节点:更淡一层玻璃 */
+  .node { border-radius:9px; padding:6px 9px; font-size:12px; position:relative;
+          background:rgba(255,255,255,0.38); border:1px solid rgba(255,255,255,0.4); }
+  .node.proj { font-weight:600; }
+  .node.task { margin-left:13px; font-weight:500; }
+  .node.sess { margin-left:13px; color:#4a4a52; background:transparent; border-color:transparent; }
+  .stack { display:flex; flex-direction:column; gap:6px; }
+
+  /* ① 拖起:虚线占位(实心 accent 虚线 + 极轻 accent 底) */
+  .ghost { border:1.5px dashed rgba(76,110,245,0.9); border-radius:9px; padding:6px 9px;
+           background:rgba(76,110,245,0.14); color:#3b5bdb; font-size:12px; }
+  /* 浮块:高 alpha 玻璃,浮起不糊 */
+  .floating { display:inline-block; background:rgba(255,255,255,0.92);
+              backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+              border:1px solid rgba(76,110,245,0.5); border-radius:9px;
+              padding:7px 12px; font-size:12px; box-shadow:0 12px 28px rgba(40,60,140,0.28);
+              transform:rotate(-1.5deg); }
+
+  /* ②③ 悬停高亮:accent 高 alpha 底 + 实心描边 + 实心插入线 */
+  .drop { background:rgba(76,110,245,0.26); border:1.5px solid rgba(76,110,245,0.95); }
+  .drop::before { content:""; position:absolute; left:-13px; top:2px; bottom:2px;
+                  width:2.5px; background:var(--accent); border-radius:2px;
+                  box-shadow:0 0 0 1.5px rgba(255,255,255,0.9); }
+  .hint { font-size:11px; color:#3b5bdb; font-weight:600; margin-top:4px; }
+
+  /* 三点菜单 popover:高 alpha 玻璃 */
+  .popover { background:rgba(255,255,255,0.90); backdrop-filter:blur(16px) saturate(1.4);
+             -webkit-backdrop-filter:blur(16px) saturate(1.4);
+             border:1px solid rgba(255,255,255,0.7); border-radius:12px;
+             box-shadow:0 16px 40px rgba(40,60,120,0.22); padding:6px; width:190px;
+             font-size:12px; }
+  .popover .mi { padding:7px 9px; border-radius:7px; }
+  .popover .mi:hover { background:rgba(76,110,245,0.18); }
+  .popover .mi.sep { border-top:1px solid rgba(0,0,0,0.07); margin-top:4px; padding-top:8px; }
+  .dots { color:#666; margin-left:auto; cursor:pointer; }
+</style>
+</head>
+<body>
+  <h1>拖拽交互 · 玻璃材质版</h1>
+  <p class="sub">背景是壁纸,侧栏是<b>半透明玻璃</b>。这一版反馈元素全部按「玻璃上的高对比」设计:强调色改<b>实心描边 + 高 alpha 底</b>,插入线<b>实心 + 白描边</b>,浮块<b>近实心玻璃</b>——避免半透明叠半透明糊成一片。</p>
+
+  <div class="row">
+    <!-- ① 拖起 -->
+    <div class="glass state">
+      <div class="cap">① 拖起 <span class="tag">· 源留虚线占位</span></div>
+      <div class="stack">
+        <div class="node sess">⌄ 临时会话 (3)</div>
+        <div class="ghost">💬 修个 bug</div>
+        <div class="node sess">💬 问天气</div>
+      </div>
+      <div style="margin-top:12px;text-align:center;">
+        <span class="floating">💬 修个 bug</span>
+        <div style="font-size:11px;color:#5a5a64;margin-top:7px;">近实心玻璃浮块,随指针</div>
+      </div>
+    </div>
+
+    <!-- ② 悬停项目 -->
+    <div class="glass state">
+      <div class="cap">② 悬停「项目」<span class="tag">· 归档</span></div>
+      <div class="stack">
+        <div class="node proj drop">📁 项目 A
+          <div class="hint">释放:归档进项目</div>
+        </div>
+        <div class="node task">🗂 任务 · 重构登录</div>
+        <div class="node sess">💬 设计接口</div>
+      </div>
+    </div>
+
+    <!-- ③ 悬停任务 -->
+    <div class="glass state">
+      <div class="cap">③ 悬停「任务」<span class="tag">· 挂任务</span></div>
+      <div class="stack">
+        <div class="node proj">📁 项目 A</div>
+        <div class="node task drop">🗂 任务 · 重构登录
+          <div class="hint">释放:挂到该任务</div>
+        </div>
+        <div class="node sess">💬 设计接口</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 三点菜单兜底 -->
+  <div class="glass" style="width:auto;display:flex;align-items:center;gap:16px;">
+    <div class="stack" style="flex:1;">
+      <div class="node proj" style="display:flex;align-items:center;">📁 项目 A<span class="dots">⋯</span></div>
+      <div class="node sess">💬 设计接口<span class="dots" style="margin-left:auto;">⋯</span></div>
+    </div>
+    <div class="popover">
+      <div class="mi">📂 移动到项目 ▸</div>
+      <div class="mi">🗂 挂到任务 ▸</div>
+      <div class="mi sep">✏️ 重命名</div>
+      <div class="mi">🗑 删除</div>
+    </div>
+    <div style="font-size:11px;color:#5a5a64;max-width:150px;line-height:1.5;">
+      <b>三点菜单兜底</b><br>每个会话/任务项右侧 ⋯,弹出高 alpha 玻璃 popover(触屏/长列表时替代拖拽)
+    </div>
+  </div>
+</body>
+</html>
