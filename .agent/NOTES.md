@@ -21,3 +21,15 @@
 
 - `web-search.json` 的 `tavilyApiKey` 优先级**低于**环境变量 `TAVILY_API_KEY`（`pi-web-access/credential-source.ts`：`return normalize(environmentValue) ?? source`）。
 - 曾在 `.bashrc` 注入过一个旧 key，拦截所有搜索（Tavily 432 usage limit）；修复 = 从 `.bashrc` 删除该行，让 `web-search.json` 成为唯一真相源。不要在 shell 环境里重复配置搜索 key。
+
+## node:sqlite 全文检索（2026-08-27 侧边栏任务/搜索）
+
+- `node:sqlite` 22.13+ 免 flag（引擎要求 ≥22.19 满足）；本地 v25 验证 FTS5 + trigram 可用。
+- **中文必须 trigram**：`unicode61` 把整段 CJK 当一个 token（"修复登录接口" 成一个词），子串搜不到；trigram 按 3 字符滚动索引，CJK 子串可命中。
+- trigram 查询 **<3 字符不命中**（"登录" 搜不到）→ 用 FTS 表 `LIKE '%q%'` 兜底（trigram 对 LIKE 有索引加速，实测通过）。
+- FTS5 `MATCH` 不能出现在 CASE 等表达式里（"unable to use function MATCH"）——titleMatch 用单独的 `title MATCH` 查询判定。
+- 特殊字符查询需引号转义：`'"' + q.replace(/"/g,'""') + '"'`。
+- **`.mjs` 测试文件不能写 TS 类型注解**：node `--experimental-strip-types` 只处理 `.ts`，`.mjs` 里的 `: Type`/`!` 直接 SyntaxError。
+- 数据层 lib（sqlite-db/task-store/session-search）保持 **SDK-free**（getAgentDir 本地实现 `~/.pi/agent` + `PI_CODING_AGENT_DIR`），纯 node 测试不加载 pi-coding-agent（其 dist 无扩展相对导入在 node ESM 下解析失败）；测试用 jiti 加载 `.ts`（与现有测试一致），或注入 sessionsOverride 避免真实会话扫描。
+- 单库 `~/.pi/agent/pi-web.db`：tasks / session_meta（会话↔任务归属，jsonl 不动）/ search_state / session_search(fts5 trigram)。
+- 会话归属（tasks）按 `project_key`（= workspaceKeyOf），切目录任务即切换；搜索跨项目全局。
