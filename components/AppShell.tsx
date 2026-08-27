@@ -17,7 +17,7 @@ import { McpConfigPanel } from "./McpConfigPanel";
 // ssr:false — xterm.js touches browser globals at import time.
 const TerminalPanel = dynamic(() => import("./TerminalPanel").then((m) => m.TerminalPanel), { ssr: false });
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
-import { BranchNavigator } from "./BranchNavigator";
+import { SidebarGlobalSearch } from "./SidebarGlobalSearch";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -319,6 +319,8 @@ export function AppShell() {
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
   const [branchActiveLeafId, setBranchActiveLeafId] = useState<string | null>(null);
   const branchLeafChangeFnRef = useRef<((leafId: string | null) => void) | null>(null);
+  const pendingNewSessionTaskIdRef = useRef<string | null>(null);
+  const suppressWorkspaceRestoreRef = useRef(false);
 
   const handleBranchDataChange = useCallback((tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => {
     setBranchTree(tree);
@@ -400,12 +402,12 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | "language" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"system" | "session" | "language" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const topPanelRef = useRef<HTMLDivElement | null>(null);
 
   const toggleTopPanel = useCallback((
-    panel: "branches" | "system" | "session" | "language",
+    panel: "system" | "session" | "language",
     keepMobileToolbarOpen = false,
   ) => {
     if (isMobile) setSidebarOpen(false);
@@ -830,8 +832,13 @@ export function AppShell() {
       setActiveFileTabId(null);
       setRightPanelOpen(false);
       // Restore the workspace we switched to: its last open session, or keep
-      // the default welcome page when none is remembered.
-      restoreWorkspaceContext(newProject);
+      // the default welcome page when none is remembered. A global-search jump
+      // carries its own explicit selection — never restore over it.
+      if (suppressWorkspaceRestoreRef.current) {
+        suppressWorkspaceRestoreRef.current = false;
+      } else {
+        restoreWorkspaceContext(newProject);
+      }
     }
     router.replace("/", { scroll: false });
   }, [activeCwd, invalidateWorkspaceRestore, newSessionCwd, router, selectedSession, restoreWorkspaceContext]);
@@ -871,6 +878,14 @@ export function AppShell() {
     }
   }, [invalidateWorkspaceRestore, router, isMobile, selectedSession]);
 
+  /** Global-search jump: explicit session selection across projects. Marks the
+   *  following workspace switch so it never restores the project's last-open
+   *  session over this pick. */
+  const handleSearchSelectSession = useCallback((session: SessionInfo) => {
+    suppressWorkspaceRestoreRef.current = true;
+    handleSelectSession(session);
+  }, [handleSelectSession]);
+
   const handleNewSession = useCallback((sessionId: string, cwd: string) => {
     invalidateWorkspaceRestore();
     const draftKey = `new:${sessionId}:${cwd}`;
@@ -887,6 +902,15 @@ export function AppShell() {
     if (isMobile) setSidebarOpen(false);
     router.replace("/", { scroll: false });
   }, [invalidateWorkspaceRestore, router, isMobile]);
+
+  /** Task row "+": spawn a new session and remember the target task; the
+   *  membership is written once the session gets its real id (disk-persisted). */
+  const handleNewSessionFromTask = useCallback((taskId: string) => {
+    const cwd = selectedSession?.cwd ?? newSessionCwd ?? activeCwd;
+    if (!cwd) return;
+    pendingNewSessionTaskIdRef.current = taskId;
+    handleNewSession(`task-${Date.now()}`, cwd);
+  }, [selectedSession?.cwd, newSessionCwd, activeCwd, handleNewSession]);
 
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
   useGlobalKeyboardShortcuts({
@@ -923,6 +947,24 @@ export function AppShell() {
     setSelectedSession(session);
     hydrateSelectedSession(session.id);
     router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
+    // Task-row "+": once the session is disk-persisted, attach it to the task.
+    const pendingTaskId = pendingNewSessionTaskIdRef.current;
+    if (pendingTaskId) {
+      pendingNewSessionTaskIdRef.current = null;
+      void (async () => {
+        const key = workspaceKeyOf(session);
+        const list = await fetch(`/api/tasks?projectKey=${encodeURIComponent(key)}`, { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null) as { tasks?: { id: string; sessionIds: string[] }[] } | null;
+        const task = list?.tasks?.find((t) => t.id === pendingTaskId);
+        if (!task) return;
+        await fetch(`/api/tasks/${encodeURIComponent(pendingTaskId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionIds: [...task.sessionIds, session.id] }),
+        }).catch(() => {});
+      })();
+    }
   }, [invalidateWorkspaceRestore, router, hydrateSelectedSession]);
 
   const deliverSessionNotification = useCallback(({
@@ -1237,6 +1279,10 @@ export function AppShell() {
         onAtMentions={handleAtMentions}
         onBackgroundTaskDone={handleBackgroundTaskDone}
         onRunningSessionIdsChange={handleRunningSessionIdsChange}
+        branchTree={branchTree}
+        branchActiveLeafId={branchActiveLeafId}
+        onBranchLeafChange={handleBranchLeafChange}
+        onNewSessionFromTask={handleNewSessionFromTask}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
@@ -1634,45 +1680,6 @@ export function AppShell() {
             </button>
           );
         })()}
-        {mobile ? (
-          <button
-            type="button"
-            data-top-panel-trigger
-            onClick={() => toggleTopPanel("branches", true)}
-            title={translate("i18n.branches")}
-            aria-label={translate("i18n.branches")}
-            aria-pressed={activeTopPanel === "branches"}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: TOP_BAR_ICON_BUTTON_SIZE, height: "100%", padding: 0,
-              background: activeTopPanel === "branches" ? "var(--bg-selected)" : "none",
-              border: "none",
-              borderTop: activeTopPanel === "branches" ? "2px solid var(--accent)" : "2px solid transparent",
-              borderRight: "1px solid var(--border)",
-              color: activeTopPanel === "branches" ? "var(--text)" : "var(--text-muted)",
-              cursor: "pointer", flexShrink: 0,
-            }}
-            data-mobile-toolbar-action="branches"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: branchTree.length > 0 ? "var(--accent)" : "var(--text-dim)" }} aria-hidden="true">
-              <line x1="6" y1="3" x2="6" y2="15" />
-              <circle cx="18" cy="6" r="3" />
-              <circle cx="6" cy="18" r="3" />
-              <path d="M18 9a9 9 0 0 1-9 9" />
-            </svg>
-          </button>
-        ) : (
-          <BranchNavigator
-            tree={branchTree}
-            activeLeafId={branchActiveLeafId}
-            onLeafChange={handleBranchLeafChange}
-            inline
-            containerRef={topBarRef}
-            open={activeTopPanel === "branches"}
-            onToggle={() => toggleTopPanel("branches")}
-            hasSession
-          />
-        )}
         <button
           ref={systemBtnRef}
           type="button"
@@ -2584,6 +2591,11 @@ export function AppShell() {
               </button>
               {renderSessionStatsButton(true)}
               {renderTodoButton(true)}
+              {isMobile && (
+                <div style={{ height: "100%", flexShrink: 0, borderLeft: "1px solid var(--border)" }}>
+                  <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} />
+                </div>
+              )}
               {renderMainFileToggle(true)}
               {mobileToolbarMoreOpen && (
                 <div
@@ -2619,23 +2631,12 @@ export function AppShell() {
               {renderChatToolbarActions(false)}
               {renderSessionStatsButton(false)}
               {renderTodoButton(false)}
+              <div style={{ height: "100%", flexShrink: 0, borderLeft: "1px solid var(--border)" }}>
+                <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} />
+              </div>
             </>
           )}
           {!isMobile && renderMainFileToggle(false)}
-          {isMobile && (
-            <BranchNavigator
-              tree={branchTree}
-              activeLeafId={branchActiveLeafId}
-              onLeafChange={handleBranchLeafChange}
-              inline
-              compact
-              containerRef={topBarRef}
-              open={activeTopPanel === "branches"}
-              onToggle={() => toggleTopPanel("branches")}
-              hasSession={showChat}
-              hideInlineButton
-            />
-          )}
           {/* Top panel dropdown — shared, only one active at a time.
               Rendered through a portal to <body>: the topbar's glass
               backdrop-filter makes it the containing block of fixed-position
