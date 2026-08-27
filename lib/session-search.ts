@@ -217,11 +217,11 @@ export async function searchSessions(
   q: string,
   limit = 30,
   sessionsOverride?: SessionInfo[],
-): Promise<SearchResult[]> {
+): Promise<{ indexing: boolean; results: SearchResult[] }> {
   const query = q.trim();
-  if (!query) return [];
+  if (!query) return { indexing: false, results: [] };
   const sessions = sessionsOverride ?? (await loadAllSessions());
-  await ensureSearchIndex(sessions);
+  const indexed = await ensureSearchIndex(sessions);
 
   const cap = Math.min(Math.max(limit, 1), 50);
   const db = getDb();
@@ -269,7 +269,7 @@ export async function searchSessions(
       Number(b.titleMatch) - Number(a.titleMatch)
       || b.session.modified.localeCompare(a.session.modified),
   );
-  return results;
+  return { indexing: indexed.indexing, results };
 }
 
 async function loadAllSessions(): Promise<SessionInfo[]> {
