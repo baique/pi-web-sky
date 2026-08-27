@@ -1819,7 +1819,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   minHeight: 0,
                   display: "flex",
                   flexDirection: "column",
-                  borderTop: "1px solid var(--border)",
                   background: tempDragOver ? "color-mix(in srgb, var(--accent) 8%, transparent)" : "transparent",
                 }}
               >

@@ -9,10 +9,9 @@ import { useI18n } from "@/hooks/useI18n";
 export interface TaskGroupUi {
   id: string;
   name: string;
+  created: number;
   sessionIds: string[];
 }
-
-const SESSION_MIME = "text/session-id";
 
 interface TaskGroup {
   task: TaskGroupUi;
@@ -33,42 +32,19 @@ interface Props {
   onDropSessionToTask: (taskId: string, sessionId: string) => void;
 }
 
-function IconButton({
-  title,
-  onClick,
-  danger,
-  children,
-}: {
-  title: string;
-  onClick: () => void;
-  danger?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-      style={{
-        display: "flex", alignItems: "center", justifyContent: "center",
-        width: 22, height: 22, padding: 0, flexShrink: 0,
-        background: "transparent", border: "1px solid transparent", borderRadius: 5,
-        color: "var(--text-muted)", cursor: "pointer",
-        transition: "background 0.12s, color 0.12s",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = danger ? "rgba(239,68,68,0.12)" : "var(--side-active)";
-        e.currentTarget.style.color = danger ? "#ef4444" : "var(--text)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "transparent";
-        e.currentTarget.style.color = "var(--text-muted)";
-      }}
-    >
-      {children}
-    </button>
-  );
+const SESSION_MIME = "text/session-id";
+
+/** Compact relative time ("3m" / "2h" / "4d") — matches the session list. */
+function formatRelativeTime(ts: number): string {
+  if (!ts) return "";
+  const ms = Date.now() - ts;
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return "now";
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  return d < 7 ? `${d}d` : new Date(ts).toLocaleDateString();
 }
 
 const pencilIcon = (
@@ -90,11 +66,175 @@ const plusIcon = (
     <line x1="1" y1="5" x2="9" y2="5" />
   </svg>
 );
+const folderIcon = (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+  </svg>
+);
+
+function TaskCard({
+  task,
+  content,
+  onDropAssign,
+  onRename,
+  onDelete,
+  onNewSession,
+}: {
+  task: TaskGroupUi;
+  content: ReactNode;
+  onDropAssign: (taskId: string, sessionId: string) => void;
+  onRename: (taskId: string, name: string) => void;
+  onDelete: (taskId: string) => void;
+  onNewSession: (taskId: string) => void;
+}) {
+  const { t } = useI18n();
+  const [collapsed, setCollapsed] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const renameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (renaming) {
+      const id = requestAnimationFrame(() => renameRef.current?.select());
+      return () => cancelAnimationFrame(id);
+    }
+  }, [renaming]);
+
+  const commitRename = useCallback(() => {
+    const name = renameValue.trim();
+    if (name) onRename(task.id, name);
+    setRenaming(false);
+  }, [renameValue, onRename, task.id]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes(SESSION_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOver(true);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const sessionId = e.dataTransfer.getData(SESSION_MIME);
+    if (sessionId) onDropAssign(task.id, sessionId);
+  }, [onDropAssign, task.id]);
+
+  const iconStyle = { flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, background: "transparent", border: "1px solid transparent", borderRadius: 5, color: "var(--text-muted)", cursor: "pointer", transition: "background 0.12s, color 0.12s" };
+
+  return (
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: "relative",
+        margin: "2px 8px 6px",
+        borderRadius: 8,
+        background: dragOver
+          ? "color-mix(in srgb, var(--accent) 12%, transparent)"
+          : "var(--tool-bg-glass)",
+        border: `1px solid ${dragOver ? "var(--accent)" : "var(--border)"}`,
+        borderLeft: dragOver ? "3px solid var(--accent)" : "1px solid var(--border)",
+        boxShadow: "0 1px 2px color-mix(in srgb, var(--text) 7%, transparent)",
+        overflow: "hidden",
+        transition: "border-color 0.12s, background 0.12s, border-left-width 0.12s",
+      }}
+    >
+      {/* Card header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "7px 8px 7px 5px" }}>
+        {confirmDelete ? (
+          <>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {t("sidebar.deleteTaskConfirm", { name: task.name })}
+            </span>
+            <button
+              type="button"
+              onClick={() => { onDelete(task.id); setConfirmDelete(false); }}
+              style={{ height: 22, padding: "0 8px", flexShrink: 0, background: "#ef4444", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+            >
+              {t("sidebar.delete")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(false)}
+              style={{ height: 22, padding: "0 8px", flexShrink: 0, background: "var(--side-input)", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-muted)", fontSize: 11, cursor: "pointer" }}
+            >
+              {t("sidebar.cancel")}
+            </button>
+          </>
+        ) : renaming ? (
+          <input
+            ref={renameRef}
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitRename();
+              if (e.key === "Escape") setRenaming(false);
+            }}
+            onBlur={commitRename}
+            autoFocus
+            style={{ flex: 1, minWidth: 0, fontSize: 11, padding: "3px 6px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--side-input)", color: "var(--text)" }}
+          />
+        ) : (
+          <>
+            {task.sessionIds.length > 0 && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setCollapsed((v) => !v); }}
+                title={collapsed ? t("sidebar.expandForks") : t("sidebar.collapseForks")}
+                aria-expanded={!collapsed}
+                style={{ ...iconStyle, width: 16, height: 16, color: "var(--text-dim)" }}
+              >
+                <svg width="8" height="8" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ transform: collapsed ? "none" : "rotate(90deg)", transition: "transform 0.15s" }}>
+                  <polyline points="3 2 7 5 3 8" />
+                </svg>
+              </button>
+            )}
+            {task.sessionIds.length === 0 && <span style={{ width: 14, flexShrink: 0 }} />}
+            <span style={{ color: "var(--text-dim)", display: "inline-flex", flexShrink: 0 }}>{folderIcon}</span>
+            <span title={task.name} style={{ flex: 1, minWidth: 0, fontSize: 11.5, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {task.name}
+            </span>
+            <span title={new Date(task.created).toLocaleString()} style={{ flexShrink: 0, fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+              {formatRelativeTime(task.created)}
+            </span>
+            <span aria-hidden="true" style={{ flexShrink: 0, fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+              {task.sessionIds.length}
+            </span>
+            {hovered && !renaming && !confirmDelete && (
+              <span style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+                <button type="button" title={t("sidebar.newTaskSession")} onClick={() => onNewSession(task.id)} style={iconStyle}>
+                  {plusIcon}
+                </button>
+                <button type="button" title={t("sidebar.rename")} onClick={() => { setRenameValue(task.name); setRenaming(true); }} style={iconStyle}>
+                  {pencilIcon}
+                </button>
+                <button type="button" title={t("sidebar.deleteTask")} onClick={() => setConfirmDelete(true)} onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.background = "rgba(239,68,68,0.12)"; }} onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "transparent"; }} style={iconStyle}>
+                  {trashIcon}
+                </button>
+              </span>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Task sessions */}
+      {!collapsed && <div style={{ paddingBottom: 3 }}>{content}</div>}
+    </div>
+  );
+}
 
 /**
- * Collapsible task area: task groups (name + member sessions) plus an inline
- * "new task" row. Task rows are HTML5 drag-drop targets for session rows;
- * dropping assigns the dragged session to that task.
+ * Collapsible task area: task cards (name + created + member sessions) with an
+ * inline "new task" row right below the header. Task cards are HTML5 drag-drop
+ * targets; dropping a session row assigns it to that task.
  */
 export function TaskArea({
   collapsed,
@@ -111,22 +251,10 @@ export function TaskArea({
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [newTaskName, setNewTaskName] = useState("");
   const newTaskRef = useRef<HTMLInputElement>(null);
-  const [renameTaskId, setRenameTaskId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const renameRef = useRef<HTMLInputElement>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
 
-  // Select-all once edits mount/expand so retyping the name is instant.
   useEffect(() => {
     if (newTaskOpen) newTaskRef.current?.focus();
   }, [newTaskOpen]);
-  useEffect(() => {
-    if (renameTaskId) {
-      const id = requestAnimationFrame(() => renameRef.current?.select());
-      return () => cancelAnimationFrame(id);
-    }
-  }, [renameTaskId]);
 
   const commitNewTask = useCallback(() => {
     const name = newTaskName.trim();
@@ -136,35 +264,14 @@ export function TaskArea({
     setNewTaskOpen(false);
   }, [newTaskName, onNewTask]);
 
-  const commitRename = useCallback(() => {
-    if (!renameTaskId) return;
-    const name = renameValue.trim();
-    if (name) onRenameTask(renameTaskId, name);
-    setRenameTaskId(null);
-  }, [renameTaskId, renameValue, onRenameTask]);
-
-  const handleDragOver = useCallback((e: React.DragEvent, taskId: string) => {
-    if (!e.dataTransfer.types.includes(SESSION_MIME)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setDragOverTaskId(taskId);
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent, taskId: string) => {
-    e.preventDefault();
-    setDragOverTaskId(null);
-    const sessionId = e.dataTransfer.getData(SESSION_MIME);
-    if (sessionId) onDropSessionToTask(taskId, sessionId);
-  }, [onDropSessionToTask]);
-
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
         flexShrink: 0,
-        borderBottom: "1px solid var(--border)",
         maxHeight: collapsed ? undefined : "min(46vh, 340px)",
+        boxShadow: "0 2px 6px -3px color-mix(in srgb, var(--text) 16%, transparent)",
       }}
     >
       {/* Header toggle */}
@@ -183,20 +290,13 @@ export function TaskArea({
             textTransform: "uppercase", textAlign: "left",
           }}
         >
-          <svg
-            width="9" height="9" viewBox="0 0 10 10" fill="none"
-            stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
-            style={{ transform: collapsed ? "none" : "rotate(90deg)", transition: "transform 0.15s" }}
-          >
+          <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ transform: collapsed ? "none" : "rotate(90deg)", transition: "transform 0.15s" }}>
             <polyline points="3 2 7 5 3 8" />
           </svg>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {t("sidebar.tasks")}
           </span>
-          <span
-            aria-hidden="true"
-            style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10, fontFamily: "var(--font-mono)" }}
-          >
+          <span aria-hidden="true" style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10, fontFamily: "var(--font-mono)" }}>
             {groups.length}
           </span>
         </button>
@@ -204,215 +304,94 @@ export function TaskArea({
 
       {!collapsed && (
         <div style={{ overflowY: "auto", flexShrink: 1, minHeight: 0, paddingBottom: 4 }}>
-          {groups.map(({ task, content }) => (
+          {/* New task row — sits right under the header, above the task cards */}
+          {newTaskOpen ? (
             <div
-              key={task.id}
-              onDragOver={(e) => handleDragOver(e, task.id)}
-              onDragLeave={() => setDragOverTaskId((cur) => (cur === task.id ? null : cur))}
-              onDrop={(e) => handleDrop(e, task.id)}
               style={{
-                position: "relative",
-                margin: "0 6px 2px",
-                borderRadius: 6,
-                border: "1px solid transparent",
-                background: dragOverTaskId === task.id
-                  ? "color-mix(in srgb, var(--accent) 8%, transparent)"
-                  : "transparent",
-                outline: "none",
+                display: "flex", alignItems: "center", gap: 6,
+                margin: "2px 10px 8px",
+                padding: "0 10px",
+                height: 28,
+                background: "var(--glass-bg-input)",
+                border: "1px solid var(--accent)",
+                borderRadius: 7,
               }}
             >
-              {/* Top insertion line on drag-over */}
-              {dragOverTaskId === task.id && (
-                <div
-                  aria-hidden="true"
-                  style={{
-                    position: "absolute", top: -1, left: 4, right: 4, height: 2.5,
-                    background: "var(--accent)", borderRadius: 2, pointerEvents: "none",
-                  }}
-                />
-              )}
-
-              {/* Task header row */}
-              <div
-                style={{
-                  display: "flex", alignItems: "center", gap: 4,
-                  padding: "4px 6px 4px 8px",
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round" style={{ flexShrink: 0 }}>
+                <line x1="5" y1="1" x2="5" y2="9" />
+                <line x1="1" y1="5" x2="9" y2="5" />
+              </svg>
+              <input
+                ref={newTaskRef}
+                value={newTaskName}
+                onChange={(e) => setNewTaskName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitNewTask();
+                  if (e.key === "Escape") { setNewTaskOpen(false); setNewTaskName(""); }
                 }}
-              >
-                {confirmDeleteId === task.id ? (
-                  <>
-                    <span
-                      style={{
-                        flex: 1, minWidth: 0, fontSize: 11, color: "var(--text)",
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}
-                    >
-                      {t("sidebar.deleteTaskConfirm", { name: task.name })}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => { onDeleteTask(task.id); setConfirmDeleteId(null); }}
-                      style={{
-                        height: 22, padding: "0 8px", flexShrink: 0,
-                        background: "#ef4444", border: "none", borderRadius: 5,
-                        color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer",
-                      }}
-                    >
-                      {t("sidebar.delete")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDeleteId(null)}
-                      style={{
-                        height: 22, padding: "0 8px", flexShrink: 0,
-                        background: "var(--side-input)", border: "1px solid var(--border)", borderRadius: 5,
-                        color: "var(--text-muted)", fontSize: 11, cursor: "pointer",
-                      }}
-                    >
-                      {t("sidebar.cancel")}
-                    </button>
-                  </>
-                ) : renameTaskId === task.id ? (
-                  <input
-                    ref={renameRef}
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") commitRename();
-                      if (e.key === "Escape") setRenameTaskId(null);
-                    }}
-                    onBlur={commitRename}
-                    autoFocus
-                    style={{
-                      flex: 1, minWidth: 0,
-                      fontSize: 11, padding: "3px 6px",
-                      border: "1px solid var(--accent)", borderRadius: 5,
-                      outline: "none", background: "var(--side-input)", color: "var(--text)",
-                    }}
-                  />
-                ) : (
-                  <>
-                    <svg
-                      width="11" height="11" viewBox="0 0 24 24" fill="none"
-                      stroke="var(--text-dim)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                      style={{ flexShrink: 0 }}
-                    >
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <polyline points="14 2 14 8 20 8" />
-                    </svg>
-                    <span
-                      title={task.name}
-                      style={{
-                        flex: 1, minWidth: 0, fontSize: 11.5, fontWeight: 500,
-                        color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}
-                    >
-                      {task.name}
-                    </span>
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        flexShrink: 0, fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)",
-                      }}
-                    >
-                      {task.sessionIds.length}
-                    </span>
-                    <IconButton
-                      title={t("sidebar.newTaskSession")}
-                      onClick={() => onNewSessionFromTask(task.id)}
-                    >
-                      {plusIcon}
-                    </IconButton>
-                    <IconButton
-                      title={t("sidebar.rename")}
-                      onClick={() => {
-                        setRenameTaskId(task.id);
-                        setRenameValue(task.name);
-                      }}
-                    >
-                      {pencilIcon}
-                    </IconButton>
-                    <IconButton
-                      title={t("sidebar.deleteTask")}
-                      danger
-                      onClick={() => setConfirmDeleteId(task.id)}
-                    >
-                      {trashIcon}
-                    </IconButton>
-                  </>
-                )}
-              </div>
-
-              {/* Task sessions */}
-              <div style={{ paddingBottom: 2 }}>{content}</div>
-            </div>
-          ))}
-
-          {/* New task row */}
-          <div style={{ padding: "0 10px 6px" }}>
-            {newTaskOpen ? (
-              <div style={{ display: "flex", gap: 5 }}>
-                <input
-                  ref={newTaskRef}
-                  value={newTaskName}
-                  onChange={(e) => setNewTaskName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitNewTask();
-                    if (e.key === "Escape") { setNewTaskOpen(false); setNewTaskName(""); }
-                  }}
-                  onBlur={() => { setNewTaskOpen(false); setNewTaskName(""); }}
-                  placeholder={t("sidebar.taskName")}
-                  style={{
-                    flex: 1, minWidth: 0,
-                    fontSize: 11, padding: "4px 7px",
-                    border: "1px solid var(--accent)", borderRadius: 5,
-                    outline: "none", background: "var(--side-input)", color: "var(--text)",
-                  }}
-                />
-                <button
-                  type="button"
-                  disabled={!newTaskName.trim()}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={commitNewTask}
-                  style={{
-                    padding: "0 10px", flexShrink: 0,
-                    background: "var(--accent)", border: "none", borderRadius: 5,
-                    color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer",
-                    opacity: newTaskName.trim() ? 1 : 0.5,
-                  }}
-                >
-                  {t("sidebar.create")}
-                </button>
-              </div>
-            ) : (
+                placeholder={t("sidebar.taskName")}
+                style={{
+                  flex: 1, minWidth: 0,
+                  height: "100%", padding: 0,
+                  border: "none", outline: "none",
+                  background: "transparent", color: "var(--text)", fontSize: 12,
+                }}
+              />
               <button
                 type="button"
-                onClick={() => setNewTaskOpen(true)}
+                disabled={!newTaskName.trim()}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={commitNewTask}
                 style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  width: "100%", padding: "4px 6px",
-                  background: "none", border: "none", borderRadius: 5,
-                  color: "var(--text-dim)", cursor: "pointer", fontSize: 11, textAlign: "left",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--bg-hover)";
-                  e.currentTarget.style.color = "var(--text-muted)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "none";
-                  e.currentTarget.style.color = "var(--text-dim)";
+                  flexShrink: 0,
+                  background: "none", border: "none", padding: "0 2px",
+                  color: newTaskName.trim() ? "var(--accent)" : "var(--text-dim)",
+                  fontSize: 11, fontWeight: 600, cursor: newTaskName.trim() ? "pointer" : "default",
                 }}
               >
-                {plusIcon}
-                {t("sidebar.newTask")}
-                {sessionCount > 0 && (
-                  <span style={{ fontSize: 10, color: "var(--text-dim)" }}>
-                    · {sessionCount}
-                  </span>
-                )}
+                {t("sidebar.create")}
               </button>
-            )}
-          </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setNewTaskOpen(true)}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                width: "100%", padding: "4px 12px",
+                background: "none", border: "none", borderRadius: 5,
+                color: "var(--text-dim)", cursor: "pointer", fontSize: 11, textAlign: "left",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "var(--bg-hover)";
+                e.currentTarget.style.color = "var(--text-muted)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "none";
+                e.currentTarget.style.color = "var(--text-dim)";
+              }}
+            >
+              {plusIcon}
+              {t("sidebar.newTask")}
+              {sessionCount > 0 && (
+                <span style={{ fontSize: 10, color: "var(--text-dim)" }}>
+                  · {sessionCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {groups.map(({ task, content }) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              content={content}
+              onDropAssign={onDropSessionToTask}
+              onRename={(id, name) => void onRenameTask(id, name)}
+              onDelete={(id) => void onDeleteTask(id)}
+              onNewSession={(id) => onNewSessionFromTask(id)}
+            />
+          ))}
         </div>
       )}
     </div>
