@@ -1,6 +1,6 @@
 # pi-web · 侧边栏任务分组与全局会话搜索设计
 
-> 日期：2026-08-27　范围：pi-web-sky　状态：已确认（用户拍板 3 决策）→ 待实施
+> 日期：2026-08-27　范围：pi-web-sky　状态：已确认（用户拍板 3 决策 + 审核修正 1 轮）→ 待实施
 > 替代：原 `.agent/spec/project-management/`（08-27 项目管理设计，已删除——用户明确"之前的方案删掉"）
 > 样式依据：`../2026-08-24-glass-standard.md` / `../2026-08-24-glass-spec.md`
 
@@ -21,14 +21,15 @@
 
 | # | 决策 | 内容 |
 |---|------|------|
-| 1 | 搜索框位置 | **主顶栏**，居中段：`... todo 按钮 右侧 ... 搜索框 ... 文件面板展开收起按钮 左侧`（desktop/mobile 各自处理，见 §5.1） |
+| 1 | 搜索框位置 | **主顶栏**，居中段：`… todo 按钮 … 搜索框 … 文件面板展开收起按钮`（desktop/mobile 各自处理，见 §5.1） |
 | 2 | 任务范围 | **跟随当前目录/项目**：任务按 `projectKey` 归属，切目录显示该目录的任务（与会话列表一致）。搜索仍全局跨目录 |
 | 3 | 分支导航 | **只保留文件页底部**；桌面顶栏 inline 与移动端快捷入口一并移除 |
-| 4 | 项目层取消 | 旧 spec 的"项目 = 纯逻辑实体"层**不实施**；目录选择器保持现状（路径即组织） |
-| 5 | 数据层 | `node:sqlite`（DatabaseSync，22.13+ 免 flag，引擎要求 ≥22.19 满足）+ **SQLite 单库** `~/.pi/agent/pi-web.db`：任务表 + 会话归属元数据（session_meta）+ FTS5 全文索引三合一；`.jsonl` 文件原地不动（归属只写旁路元数据） |
-| 6 | 中文检索 | FTS5 **trigram** 分词（unicode61 对中文整词切分不可用，实测）；<3 字符短查询用 FTS 表 `LIKE` 兜底；特殊字符查询加引号转义 |
-| 7 | 拖拽 | 原生 HTML5 DnD，不引第三方库；会话行可拖，任务行 + 临时会话区为落点 |
-| 8 | 任务会话新建 | 任务行「+」→ 走现有新建流程，AppShell 记 `pendingNewSessionTaskIdRef`，会话落盘拿到真实 id 后（`handleSessionCreated`）写入归属 |
+| 4 | worktree 选择器 | **自顶部移入文件视图**（与分支选择同侧）；顶部只留路径（CWD/项目）选择器 |
+| 5 | 项目层取消 | 旧 spec 的"项目 = 纯逻辑实体"层**不实施**；目录选择器保持现状（路径即组织） |
+| 6 | 数据层 | `node:sqlite`（DatabaseSync，22.13+ 免 flag，引擎要求 ≥22.19 满足）+ **SQLite 单库** `~/.pi/agent/pi-web.db`：任务表 + 会话归属元数据（session_meta）+ FTS5 全文索引三合一；`.jsonl` 文件原地不动（归属只写旁路元数据） |
+| 7 | 中文检索 | FTS5 **trigram** 分词（unicode61 对中文整词切分不可用，实测）；<3 字符短查询用 FTS 表 `LIKE` 兜底；特殊字符查询加引号转义 |
+| 8 | 拖拽 | 原生 HTML5 DnD，不引第三方库；会话行可拖，任务行 + 临时会话区为落点 |
+| 9 | 任务会话新建 | 任务行「+」→ 走现有新建流程，AppShell 记 `pendingNewSessionTaskIdRef`，会话落盘拿到真实 id 后（`handleSessionCreated`）写入归属 |
 
 ## 2. 布局
 
@@ -36,11 +37,11 @@
 ┌─────────────────────────────────┐
 │ Pi Web        [新建][刷新]        │ ← 不动
 ├─────────────────────────────────┤
-│ [路径选择器 ▾ + worktree]        │ ← 现状不动
+│ [路径选择器 ▾]                   │ ← 只留 CWD/项目选择（worktree 移入文件视图）
 ├─────────────────────────────────┤
 │   会话       文件                │ ← 新增分段 tab（玻璃 token 新设计）
 ├─────────────────────────────────┤
-│ 会话视图：                       │
+│ ── 会话 tab（仅此一侧显示）──    │
 │   ▾ 任务 (2)          [+ 新任务] │ ← 可折叠任务区，max-height≈40vh 滚动
 │     📁 登录重构                  │   任务行：名称+会话数；悬停[+][改名][删除]
 │       💬 设计接口                │   行内 = 拖拽落点
@@ -48,10 +49,11 @@
 │   临时会话 (3)                   │ ← 落点=移出任务；超高超限滚动
 │     💬 修 bug                    │
 ├─────────────────────────────────┤
-│ 文件视图：                       │
-│   FileExplorer（现状）            │
+│ ── 文件 tab（仅此一侧显示）──    │
+│   ▌ worktree 切换器（移入）      │ ← 原顶部 worktree 选择器整体搬入
+│   FileExplorer（现状）           │
 │   ───────────────────────        │
-│   ⑂ 分支选择（底部常驻）          │ ← BranchNavigator 非 inline 形态
+│   ⑂ 分支选择（底部常驻）         │ ← BranchNavigator 非 inline 形态
 └─────────────────────────────────┘
 
 主顶栏（聊天区上方）：
@@ -122,15 +124,15 @@ CREATE VIRTUAL TABLE IF NOT EXISTS session_search USING fts5(
 ### 4.1 SessionSidebar 新结构
 
 ```
-Header（Pi 标题+新建+刷新）→ CWD 选择器 → worktree → [SessionTabs] →
+Header（Pi 标题+新建+刷新）→ CWD 选择器 → [SessionTabs] →
   SessionTab: [TaskArea] + [临时会话区]   （两区各自 max-height + 独立滚动）
-  FilesTab:   [FileExplorer] + 底部 [BranchNavigator]
+  FilesTab:   [worktree 切换器（自顶部移入）] + [FileExplorer] + 底部 [BranchNavigator]
 ```
 
 - `SessionTabs`：分段胶囊（💬 会话 / 📄 文件），等宽两段，选中 accent 底 + 图标；localStorage 记忆 `pi-sidebar-tab`。
 - 会话树构建沿用 `buildSessionTree`（fork 嵌套保留）；任务组显示 = 该任务下**当前项目**的根会话（含其 fork 子树，随根移动）。
-- 临时会话区头部显示未挂任务根会话数，可整体折叠（localStorage）。
-- 文件视图无 cwd 时显示空态引导"先选择项目目录"。
+- 临时会话区头部显示未挂任务根会话数，可整体折叠（localStorage 记忆）。
+- 文件视图无 cwd 时显示空态引导"先选择项目目录"；有 cwd 才渲染 worktree 切换器 + FileExplorer。
 
 ### 4.2 任务区（TaskArea）
 
@@ -155,7 +157,7 @@ onNewSessionFromTask: (taskId: string) => void   // AppShell 处理 pending 归�
 
 - 组件 `SidebarGlobalSearch`，渲染于 AppShell 顶栏 `renderTodoButton(false)` 之后、`renderMainFileToggle(false)` 之前（正是"todo 右侧、文件面板展开收起左侧"）。
 - 桌面：`width: ~200px` 内联输入框（glass 输入样式，`--glass-bg-input` token），聚焦高亮。
-- 移动端：同插槽渲染为图标按钮，点击展开全宽 overlay 输入（手机无空间放常驻框）；函数点后跳转自动收合。
+- 移动端：同插槽渲染为图标按钮，点击展开全宽 overlay 输入（手机无空间放常驻框）；选择跳转后自动收合。
 
 ### 5.2 结果面板
 
@@ -172,9 +174,10 @@ onNewSessionFromTask: (taskId: string) => void   // AppShell 处理 pending 归�
 - `handleSearchSelectSession(session)`：置 `suppressWorkspaceRestoreRef.current = true` → 调现有 `handleSelectSession(session)`（内含 invalidateWorkspaceRestore + router + sessionKey++）→ 侧边栏 `selectedCwdProp` 同步使 cwd 切换 → `handleCwdChange` 中：`if (suppressWorkspaceRestoreRef.current) { 清 ref; } else { restoreWorkspaceContext(newProject); }`；
 - 结果：切到目标目录并选中目标会话、文件 tab 清空、URL 更新，与手动点击行为一致。
 
-## 6. 分支导航迁移
+## 6. 分支与 worktree 选择器迁移
 
-- AppShell：移除桌面 `renderChatToolbarActions(false)` 中的 `<BranchNavigator inline .../>` 和移动端 `hideInlineButton` 实例及 mobile toolbar 的 branches 按钮；清理 `activeTopPanel === "branches"` 与 `toggleTopPanel("branches")`。
+- **worktree 切换器搬迁**：现状 Header 区的 `showWorktreeSwitcher` 下拉与 `inactiveWorktreeSelector` 整体移入**文件视图顶部**；顶部只保留路径（CWD/项目）选择器。
+- **分支导航**：AppShell 移除桌面 `renderChatToolbarActions(false)` 中的 `<BranchNavigator inline .../>` 和移动端 `hideInlineButton` 实例及 mobile toolbar 的 branches 按钮；清理 `activeTopPanel === "branches"` 与 `toggleTopPanel("branches")`。
 - `branchTree/branchActiveLeafId/branchLeafChangeFnRef` 数据链路**保留**，改传 SessionSidebar → 文件页底部 `<BranchNavigator tree activeLeafId onLeafChange />`（现有非 inline 形态自带折叠头）。
 
 ## 7. i18n
@@ -194,7 +197,7 @@ onNewSessionFromTask: (taskId: string) => void   // AppShell 处理 pending 归�
 | `components/SidebarGlobalSearch.tsx` | 新建：顶栏输入 + 结果 popover |
 | `components/SessionTabs.tsx` | 新建：分段 tab |
 | `components/TaskArea.tsx` | 新建：任务区 |
-| `components/SessionSidebar.tsx` | 重构：tabs 化 + 任务区 + 临时区 + 文件页 + 分支底部 + SessionItem 拖拽 |
+| `components/SessionSidebar.tsx` | 重构：tabs 化 + 顶部只留路径选择器 + worktree/分支迁入文件页 + 任务区 + 临时区 + SessionItem 拖拽 |
 | `components/AppShell.tsx` | 顶栏搜索插槽；移除 BranchNavigator；pending 任务归属；suppress restore 守卫 |
 | `lib/i18n/messages/zh-CN.ts` · `en.ts` | 文案 |
 | 测试（必要功能测试，dev skill 原则） | `lib/task-store.test.mjs`（事务回滚）、`lib/session-search.test.mjs`（提取/索引/短查询/转义）、`app/api/tasks/runtime-route.test.mjs` |
@@ -204,11 +207,11 @@ onNewSessionFromTask: (taskId: string) => void   // AppShell 处理 pending 归�
 ## 9. 里程碑
 
 - **M0 数据层**：sqlite-db + task-store + tasks API + session-search + search API（含测试）
-- **M1 侧边栏**：SessionTabs + TaskArea + SessionSidebar 重构 + 拖拽 + 分支底部迁移
+- **M1 侧边栏**：SessionTabs + TaskArea + SessionSidebar 重构 + 拖拽 + worktree/分支迁入文件页
 - **M2 搜索 UI**：SidebarGlobalSearch + AppShell 插槽 + 跨目录跳转守卫 + pending 任务归属
 - **M3 打磨**：i18n 补全、空态、明暗主题目测、lint + typecheck + 全量验证
 
 ## 10. 测试与验收
 
 - `npm test`（数据层单元测试）、`tsc --noEmit`、`npm run lint` 通过；
-- 手动/E2E（playwright）：建任务 → 拖入/拖出 → 任务行 + 新建 → 切目录任务隔离 → 三态搜索（标题/正文/无结果）→ 中文 1/2/3 字符查询 → 跨目录点击跳转不触发"恢复上次会话"覆盖 → 分支导航在文件页底部可用。
+- 手动/E2E（playwright）：建任务 → 拖入/拖出 → 任务行 + 新建 → 切目录任务隔离 → 三态搜索（标题/正文/无结果）→ 中文 1/2/3 字符查询 → 跨目录点击跳转不触发"恢复上次会话"覆盖 → worktree 切换与分支导航在文件页内可用 → 分支导航在文件页底部可用。

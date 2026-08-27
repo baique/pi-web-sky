@@ -119,7 +119,7 @@
 ## Task 7: SessionSidebar 重构（核心）
 
 **Files:**
-- Modify: `components/SessionSidebar.tsx`（大改：Header 区后插 SessionTabs；会话视图 = TaskArea + 临时会话区；文件视图 = 现 FileExplorer 段 + 底部 BranchNavigator；SessionItem 加 draggable）
+- Modify: `components/SessionSidebar.tsx`（大改：Header 区只留路径选择器并后插 SessionTabs；会话视图 = TaskArea + 临时会话区；文件视图 = worktree 切换器（自 Header 区迁入，含 `showWorktreeSwitcher`/`inactiveWorktreeSelector`）+ FileExplorer + 底部 BranchNavigator；SessionItem 加 draggable）
 
 **Interfaces:**
 - Consumes: Task 6 组件、Task 2/3 API、现有 `buildSessionTree`/`SessionItem`/`FileExplorer`、`BranchNavigator`（非 inline 形态）
@@ -134,7 +134,7 @@
 - [ ] **Step 1: 先改数据层对接**（任务 fetch/缓存/变更刷新）+ 手动 dev 验证任务列表出现
 - [ ] **Step 2: tabs 化布局**（SessionTabs 接入，会话/文件视图拆分）
 - [ ] **Step 3: TaskArea 接入 + 临时会话区 + 拖拽移入/移出**
-- [ ] **Step 4: 文件页底部 BranchNavigator + props 接线**（AppShell 数据下传可先置空不崩）
+- [ ] **Step 4: worktree 切换器迁入文件视图顶部 + 分支底部 + props 接线**（`showWorktreeSwitcher`/`inactiveWorktreeSelector` 从 Header 区移入文件视图；BranchNavigator 底部渲染；AppShell 数据下传可先置空不崩）
 - [ ] **Step 5: commit** `feat: 侧边栏 tabs 化 + 任务分组拖拽 + 分支底部`
 
 ## Task 8: AppShell 集成（搜索插槽、分支迁移、pending 归属、跳转守卫）
