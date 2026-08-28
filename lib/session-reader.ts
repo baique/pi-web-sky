@@ -8,12 +8,13 @@ import { closeSync, existsSync, openSync, readSync } from "fs";
 import { readdir } from "fs/promises";
 import { join as joinPath, normalize as normalizePath } from "path";
 import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext, TodoItem } from "./types";
-import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
+import type { SessionEntry as PiSessionEntry } from "@earendil-works/pi-coding-agent";
 import { getDb } from "./sqlite-db";
 import { normalizeToolCalls } from "./normalize";
 import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
+import { scanSessionFiles, sessionScanner } from "./session-scanner";
 
 export { getAgentDir };
 
@@ -60,20 +61,25 @@ export function mergeSessionLists(
 }
 
 async function loadAllSessions(): Promise<SessionInfo[]> {
-  const piSessions: PiSessionInfo[] = await SessionManager.listAll();
+  // 轻量扫描：只读每个会话文件的头部（header + 首条用户消息）与尾部（最新
+  // session_info 自定义名），最后活动时间用文件 mtime——列表只展示标题+时间，
+  // 不读取消息正文（SDK 的 listAll 会全量读每个 jsonl 并拼接全部文本，在大会话
+  // 文件上会把列表刷新拖到秒级甚至十几秒）。
+  const scanned = await sessionScanner.scan();
   const pathToId = new Map<string, string>();
-  for (const s of piSessions) pathToId.set(sessionPathKey(s.path), s.id);
+  for (const s of scanned) pathToId.set(sessionPathKey(s.path), s.id);
 
-  const sessions = piSessions.map((s) => {
+  const sessions = scanned.map((s) => {
     cacheSessionPath(s.id, s.path);
     return {
       path: s.path,
       id: s.id,
       cwd: s.cwd,
       name: s.name,
-      created: s.created instanceof Date ? s.created.toISOString() : String(s.created),
-      modified: s.modified instanceof Date ? s.modified.toISOString() : String(s.modified),
-      messageCount: s.messageCount,
+      created: s.created.toISOString(),
+      modified: s.modified.toISOString(),
+      // 列表不消费消息数（精确值需要全量读，已移除）；保留字段以兼容类型。
+      messageCount: 0,
       firstMessage: s.firstMessage || "(no messages)",
       parentSessionId: s.parentSessionPath ? pathToId.get(sessionPathKey(s.parentSessionPath)) : undefined,
       transient: false,
