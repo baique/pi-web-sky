@@ -154,6 +154,8 @@ export interface UseAgentSessionOptions {
   onSystemPromptLoaderChange?: (loader: (() => Promise<void>) | null) => void;
   onSessionStatsPanelOpen?: () => void;
   setToolPreset?: (preset: ToolPreset) => void;
+  /** 从任务行发起时携带的目标任务 id（创建请求时附带，服务端原子归属）。 */
+  pendingNewSessionTaskRef?: React.MutableRefObject<{ taskId: string; projectKey?: string } | null>;
 }
 
 export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -620,6 +622,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const selectedThinkingLevel = thinkingLevelOverrideRef.current;
       if (selectedModel) setPendingModel(selectedModel);
       const toolNames = getToolNamesForPreset(toolPreset);
+      const pendingTask = opts.pendingNewSessionTaskRef?.current;
       const res = await fetch("/api/agent/new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -627,6 +630,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           cwd: newSessionCwd,
           type: "ensure_session",
           toolNames,
+          ...(pendingTask ? { taskId: pendingTask.taskId } : {}),
           ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
           ...(selectedThinkingLevel
             ? { thinkingLevel: selectedThinkingLevel }
@@ -1172,7 +1176,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           // streaming content; otherwise scrollIntoView may target stale layout.
           liveFollowFrameRef.current = requestAnimationFrame(() => {
             liveFollowFrameRef.current = null;
-            if (isNearBottomRef.current) scrollToBottom("auto");
+            if (isNearBottomRef.current) scrollToBottom("smooth");
           });
         }
         break;

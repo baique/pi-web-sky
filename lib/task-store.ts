@@ -159,6 +159,31 @@ export function taskForSession(sessionId: string): string | null {
   return row?.task_id ?? null;
 }
 
+/**
+ * 把一个会话原子归属到任务（任务不存在返回 false）。会刷新任务的 updated
+ * 使置顶/最近排序生效；会话原本在其他任务下则移动（ON CONFLICT 更新）。
+ * 会话创建完成时由服务端调用，避免前端两跳 PATCH 造成的“先临时区后任务”窗口。
+ */
+export function assignSessionToTask(sessionId: string, taskId: string): boolean {
+  const db = getDb();
+  const task = getTaskRow(taskId);
+  if (!task) return false;
+  const ts = now();
+  db.exec("BEGIN");
+  try {
+    db.prepare(
+      "INSERT INTO session_meta (session_id, task_id, updated) VALUES (?, ?, ?) " +
+        "ON CONFLICT(session_id) DO UPDATE SET task_id = excluded.task_id, updated = excluded.updated",
+    ).run(sessionId, taskId, ts);
+    db.prepare("UPDATE tasks SET updated = ? WHERE id = ?").run(ts, taskId);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return true;
+}
+
 /** Pin / unpin a session (region-relative: inside its task group, or in chat). */
 export function setSessionPinned(sessionId: string, pinned: boolean): void {
   const db = getDb();

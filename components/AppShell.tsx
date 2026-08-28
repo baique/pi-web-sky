@@ -942,29 +942,9 @@ export function AppShell() {
     setSelectedSession(session);
     hydrateSelectedSession(session.id);
     router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
-    // Task-row "+": once the session is disk-persisted, attach it to the task.
-    // The sidebar hands us the resolved projectKey so this never depends on
-    // deriving one from a still-transient session object.
-    const pendingTask = pendingNewSessionTaskRef.current;
-    if (pendingTask) {
-      pendingNewSessionTaskRef.current = null;
-      void (async () => {
-        const key = pendingTask.projectKey ?? workspaceKeyOf(session);
-        const list = await fetch(`/api/tasks?projectKey=${encodeURIComponent(key)}`, { cache: "no-store" })
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null) as { tasks?: { id: string; sessionIds: string[] }[] } | null;
-        const task = list?.tasks?.find((t) => t.id === pendingTask.taskId);
-        if (!task) return;
-        await fetch(`/api/tasks/${encodeURIComponent(pendingTask.taskId)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionIds: [...task.sessionIds, session.id] }),
-        }).catch(() => {});
-        // Refresh the sidebar's task list so the new session shows up in the
-        // group right away (the optimistic path above already selected it).
-        setRefreshKey((k) => k + 1);
-      })();
-    }
+    // 任务归属已由服务端在创建会话时原子写入（/api/agent/new 携带 taskId），
+    // 这里不再需要两跳 PATCH；ref 只负责把 taskId 带给创建请求，消费完清空。
+    pendingNewSessionTaskRef.current = null;
   }, [invalidateWorkspaceRestore, router, hydrateSelectedSession]);
 
   const deliverSessionNotification = useCallback(({
@@ -2528,7 +2508,7 @@ export function AppShell() {
               </button>
               {isMobile && (
                 <div style={{ height: "100%", flexShrink: 0 }}>
-                  <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} leadingBorder={false} />
+                  <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} />
                 </div>
               )}
               {renderSessionStatsButton(true)}
@@ -2562,7 +2542,7 @@ export function AppShell() {
           {!isMobile && (
             <>
               <div style={{ height: "100%", flexShrink: 0 }}>
-                <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} leadingBorder={false} />
+                <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} />
               </div>
               {renderBackgroundButton(false)}
               {renderThemeButton(false)}
@@ -2960,6 +2940,7 @@ export function AppShell() {
               sessionRunning={Boolean(selectedSession && runningSessionIds.has(selectedSession.id))}
               newSessionCwd={effectiveNewSessionCwd}
               newSessionDraftKey={newSessionDraftKey}
+              pendingNewSessionTaskRef={pendingNewSessionTaskRef}
               onAgentEnd={handleAgentEnd}
               onAttentionNeeded={handleAttentionNeeded}
               onSessionCreated={handleSessionCreated}
@@ -3049,8 +3030,13 @@ export function AppShell() {
           "--right-panel-width": `${rightPanelResizer.width}px`,
           display: "flex",
           flexDirection: "column",
-          borderLeft: "1px solid var(--border)",
-          background: "var(--bg)",
+          /* 与左侧栏同一 chrome 标准。面板是整块区域唯一的 backdrop root：
+             滤镜只挂这里，FileViewer / TabBar 内层一律用 --file-panel-* 透明加深色，
+             不得再挂 backdrop-filter（嵌套只会重复模糊、不柔化壁纸）。 */
+          borderLeft: "1px solid color-mix(in srgb, var(--border) 80%, transparent)",
+          background: "var(--file-panel)",
+          backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+          WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
         } as React.CSSProperties}
       >
         {/* Right panel tab bar */}
@@ -3060,7 +3046,7 @@ export function AppShell() {
           flexShrink: 0,
           height: "calc(36px + env(safe-area-inset-top))",
           paddingTop: "env(safe-area-inset-top)",
-          background: "var(--bg-panel)",
+          background: "var(--file-panel-chrome)",
           borderBottom: "1px solid var(--border)",
         }}>
           <div style={{ flex: 1, overflow: "hidden" }}>
@@ -3081,7 +3067,7 @@ export function AppShell() {
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
-              background: "var(--bg-selected)", border: "none", borderLeft: "1px solid var(--border)",
+              background: "var(--side-active)", border: "none", borderLeft: "1px solid var(--border)",
               color: "var(--text)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
             }}
             onMouseEnter={(event) => { event.currentTarget.style.color = "var(--accent)"; }}

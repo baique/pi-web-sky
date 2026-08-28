@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import { allowFileRoot } from "@/lib/file-access";
 import { invalidateSessionListCache } from "@/lib/session-reader";
 import { startRpcSession } from "@/lib/rpc-manager";
+import { assignSessionToTask } from "@/lib/task-store";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
     }
 
     // Use a one-time key so startRpcSession's lock doesn't conflict with real session ids
-    const { provider, modelId, toolNames, thinkingLevel, ...promptCommand } = command as { provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: unknown; [key: string]: unknown };
+    const { provider, modelId, toolNames, thinkingLevel, taskId, ...promptCommand } = command as { provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: unknown; taskId?: unknown; [key: string]: unknown };
     if ((provider && !modelId) || (!provider && modelId)) {
       throw new Error("provider and modelId must be provided together");
     }
@@ -66,6 +67,14 @@ export async function POST(req: Request) {
     // a file request under a brand-new cwd would 403 for up to the cache TTL.
     allowFileRoot(cwd);
     invalidateSessionListCache();
+
+    // 任务归属伴随创建一次完成：会话出生即挂在任务下，任何列表刷新都不会
+    // 先显示“未归属/临时区”（此前是前端拿到 realId 后再两跳 PATCH 补写）。
+    if (typeof taskId === "string" && taskId) {
+      if (!assignSessionToTask(realSessionId, taskId)) {
+        throw new Error(`Task not found: ${taskId}`);
+      }
+    }
 
     const state = await session.send({ type: "get_state" }) as {
       model?: { id: string; provider: string };
