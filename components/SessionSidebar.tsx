@@ -11,7 +11,7 @@ import { AnimatedDropdown } from "./AnimatedDropdown";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { SessionTabs, type SidebarTab } from "./SessionTabs";
-import { TaskArea, type TaskGroupUi } from "./TaskArea";
+import { TaskArea, TASK_SESSION_PREVIEW_LIMIT, type TaskGroupUi } from "./TaskArea";
 
 declare global {
   interface Window {
@@ -1844,46 +1844,54 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 {!tasksCollapsed && (
                   <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
                     <TaskArea
-                      groups={taskGroups.map(({ task, nodes }) => ({
-                        task,
-                        content: (
-                          <div style={{ paddingLeft: 14, paddingBottom: 2 }}>
-                            {(() => {
-                              const pinnedSet = new Set(task.pinnedSessionIds ?? []);
-                              const out: ReactNode[] = [];
-                              nodes.forEach((node, i) => {
-                                const isPin = pinnedSet.has(node.session.id);
-                                if (i > 0) {
-                                  const prev = nodes[i - 1];
-                                  if (prev && pinnedSet.has(prev.session.id) && !isPin) {
-                                    out.push(
-                                      <div key={`pin-line-${i}`} style={{ margin: "2px 6px 4px", height: 1, background: "color-mix(in srgb, var(--border) 45%, transparent)" }} />,
-                                    );
-                                  }
+                      groups={taskGroups.map(({ task, nodes }) => {
+                        const pinnedCount = nodes.filter((n) => n.session.pinned).length;
+                        return {
+                          task,
+                          sessionCount: nodes.length,
+                          pinnedCount,
+                          content: (showAll: boolean) => {
+                            const pinnedSet = new Set(task.pinnedSessionIds ?? []);
+                            // 默认只展示置顶会话 + 最近 5 个非置顶会话（nodes 已按
+                            // 置顶在前、非置顶按 modified 降序排序，前段即最近）。
+                            const visible = showAll
+                              ? nodes
+                              : nodes.slice(0, pinnedCount + TASK_SESSION_PREVIEW_LIMIT);
+                            const out: ReactNode[] = [];
+                            visible.forEach((node, i) => {
+                              const isPin = pinnedSet.has(node.session.id);
+                              if (i > 0) {
+                                const prev = visible[i - 1];
+                                if (prev && pinnedSet.has(prev.session.id) && !isPin) {
+                                  out.push(
+                                    <div key={`pin-line-${i}`} style={{ margin: "2px 6px 4px", height: 1, background: "color-mix(in srgb, var(--border) 45%, transparent)" }} />,
+                                  );
                                 }
-                                out.push(
-                                  <SessionTreeItem
-                                    key={node.session.id}
-                                    node={node}
-                                    selectedSessionId={selectedSessionId}
-                                    runningSessionIds={runningSessionIds}
-                                    unreadSessionIds={unreadSessionIds}
-                                    onSelectSession={handleSelectSessionFromList}
-                                    onRenamed={loadSessions}
-                                    onSessionDeleted={(id) => {
-                                      onSessionDeleted?.(id);
-                                      loadSessions();
-                                    }}
-                                    onTogglePin={handleToggleSessionPin}
-                                    depth={0}
-                                  />,
-                                );
-                              });
-                              return out;
-                            })()}
-                          </div>
-                        ),
-                      }))}
+                              }
+                              out.push(
+                                <SessionTreeItem
+                                  key={node.session.id}
+                                  node={node}
+                                  selectedSessionId={selectedSessionId}
+                                  runningSessionIds={runningSessionIds}
+                                  unreadSessionIds={unreadSessionIds}
+                                  onSelectSession={handleSelectSessionFromList}
+                                  onRenamed={loadSessions}
+                                  onSessionDeleted={(id) => {
+                                    onSessionDeleted?.(id);
+                                    loadSessions();
+                                  }}
+                                  onTogglePin={handleToggleSessionPin}
+                                  depth={0}
+                                />,
+                              );
+                            });
+                            return (
+                              <div style={{ paddingLeft: 14, paddingBottom: 2 }}>{out}</div>
+                            );
+                          },
+                        };
+                      })}
                       newTaskOpen={newTaskOpen}
                       onNewTaskOpenChange={setNewTaskOpen}
                       onNewTask={(name) => void handleCreateTask(name)}
@@ -1992,7 +2000,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             overflow: "hidden",
           }}
         >
-          <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+          {/* FileExplorer owns the scrolling: its search box + action row stay
+              pinned while the changes / tree list scrolls inside. */}
+          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <FileExplorer
               ref={fileExplorerRef}
               cwd={selectedCwd ?? selectedCwdProp!}
@@ -2429,7 +2439,7 @@ function SessionItem({
   }, [onRenamed, session.cwd, session.id, session.name, session.path]);
 
   // Fixed-height outer wrapper — content swaps in place so the list never reflows
-  const ITEM_HEIGHT = 40;
+  const ITEM_HEIGHT = 36;
 
   return (
     <div
@@ -2449,7 +2459,7 @@ function SessionItem({
         alignItems: "center",
         paddingLeft: depth > 0 ? depth * 12 + 14 : 14,
         paddingRight: 8,
-        margin: "0 6px 2px",
+        margin: "0 6px 1px",
         borderRadius: 6,
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete

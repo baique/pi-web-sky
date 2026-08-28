@@ -39,8 +39,8 @@ interface Props {
   onUploadBusyChange?: (busy: boolean) => void;
   changesCollapsed: boolean;
   onChangesCountChange?: (count: number) => void;
-  /** File-tree actions (upload / refresh / changes toggle) rendered at the top
-   *  of the file area, next to the content they operate on. */
+  /** File-tree actions (upload / refresh / changes toggle) rendered in the
+   *  pinned header, on the row below the search box. */
   toolbar?: ReactNode;
 }
 
@@ -805,6 +805,9 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   }, [gitFiles, onChangesCountChange]);
 
   const showUploadFeedback = uploadBusy || pendingConflict !== null || uploadError !== null || uploadSummary !== null;
+  // Expanded git changes replace the tree below them — unless the (always
+  // visible) search box has a query, which then wins.
+  const changesExpanded = !changesCollapsed && gitFiles.length > 0;
 
   const addUploadedFilesToChat = useCallback(() => {
     if (!uploadSummary || uploadSummary.uploaded.length === 0) return;
@@ -814,13 +817,37 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   }, [cwd, onAtMentions, uploadSummary]);
 
   return (
-    <div style={{ minHeight: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       <input ref={uploadInputRef} type="file" multiple hidden onChange={handleUploadInput} />
-      {toolbar && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 2, padding: "2px 8px 0" }}>
-          {toolbar}
-        </div>
-      )}
+      {/* Pinned header — search box with the file actions on the row below it. */}
+      <div style={{ flexShrink: 0, padding: "4px 8px 2px" }}>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") setSearchQuery(""); }}
+          placeholder={t("files.searchPlaceholder")}
+          aria-label={t("files.searchPlaceholder")}
+          style={{
+            width: "100%",
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            padding: "5px 8px",
+            border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
+            borderRadius: 5,
+            outline: "none",
+            background: "var(--side-input)",
+            color: "var(--text)",
+            boxSizing: "border-box",
+          }}
+        />
+        {toolbar && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 2, padding: "4px 0 0" }}>
+            {toolbar}
+          </div>
+        )}
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
       {showUploadFeedback && (
         <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
         {uploadBusy && (
@@ -939,7 +966,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         </div>
       )}
 
-      {!changesCollapsed && gitFiles.length > 0 && (
+      {changesExpanded && (
         <div style={{ padding: "0 4px 2px" }}>
           <div
             aria-label={t("files.changeStats", {
@@ -961,30 +988,8 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         </div>
       )}
 
-      {(changesCollapsed || gitFiles.length === 0) && (
+      {(!changesExpanded || searchResults !== null) && (
         <div style={{ padding: "2px 4px" }}>
-          <div style={{ padding: "0 4px 4px" }}>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Escape") setSearchQuery(""); }}
-              placeholder={t("files.searchPlaceholder")}
-              aria-label={t("files.searchPlaceholder")}
-              style={{
-                width: "100%",
-                fontSize: 11,
-                fontFamily: "var(--font-mono)",
-                padding: "5px 8px",
-                border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
-                borderRadius: 5,
-                outline: "none",
-                background: "var(--side-input)",
-                color: "var(--text)",
-                boxSizing: "border-box",
-              }}
-            />
-          </div>
           {searchResults !== null ? (
             searchResults.length > 0 ? (
               searchResults.map((match) => (
@@ -1025,6 +1030,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
           )}
         </div>
       )}
+      </div>
     </div>
   );
 });

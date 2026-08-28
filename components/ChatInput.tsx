@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
-import { ThinkingOrb } from "thinking-orbs";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { PhaseBroadcast, QuotaInfo } from "@/hooks/useBroadcast";
 import type { SkillsResponse } from "@/lib/api-types";
@@ -1529,12 +1528,20 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     >
                       {isModelsLoading || modelSwitching ? (
                         <>
-                          <ThinkingOrb
-                            state={modelSwitching ? "working" : "breathing"}
-                            size={20}
-                            theme={isDark ? "dark" : "light"}
-                            style={isDark ? undefined : { filter: "brightness(0.57) contrast(1.15)" }}
-                          />
+                          {/* 普通转圈：模型载入/切换不是「模型在思考」，不用 thinking-orb，避免和 agent 运行状态混淆 */}
+                          <svg
+                            width="13"
+                            height="13"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.2"
+                            strokeLinecap="round"
+                            aria-hidden="true"
+                            style={{ flexShrink: 0, animation: "spin 0.9s linear infinite" }}
+                          >
+                            <path d="M21 12a9 9 0 1 1-5.7-8.4" />
+                          </svg>
                           <span style={{ display: "flex", alignItems: "baseline", minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" }}>
                             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
                               {modelSwitching ? "切换模型中" : "正在载入模型……"}

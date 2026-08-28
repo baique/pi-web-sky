@@ -269,6 +269,7 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 Agent 运行状态用 [`thinking-orbs`](https://www.npmjs.com/package/thinking-orbs)（0.3.1，MIT）做加载球：
 - **agent 状态行**：玻璃胶囊 `.chat-status-pill`（近实底 `--bubble-code-bg` + 文字 `--text`），内嵌 `ThinkingOrb size=20`。状态映射：`waiting_model → breathing`、`running_tools / running_command → working`。
 - **思考块**：`isStreaming` 时折叠行 ✧ 换成 `ThinkingOrb state="breathing" size=20`；展开区 `deferred` 内容拉取中（loading）用 `state="searching"`。
+- **模型载入 / 切换中**（`ChatInput` 模型槽）**不用 orb**：用普通转圈（13px 弧线 svg + 全局 `@keyframes spin`）。orb 专供「模型正在跑」，载入态要与之区分。
 - **主题必须显式传** `theme={isDark ? "dark" : "light"}`（来自 `useTheme().isDark`），不要用库默认 `auto`——项目主题由 `localStorage` 强制，`auto` 会误判。
 - **浅色主题对比度**：库 light 主题墨色上限只有 ~158 中灰，浅底上太淡。浅色（`!isDark`）下给 orb 加 `filter: brightness(0.57) contrast(1.15)`（墨色≈90 近黑），深色不加。
 - orb 的 size 只有 tuned 的 `64 | 20` 两种，行内一律用 20。

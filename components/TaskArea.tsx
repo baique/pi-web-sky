@@ -17,9 +17,20 @@ export interface TaskGroupUi {
   pinnedSessionIds?: string[];
 }
 
+/**
+ * 任务卡片默认展开的会话数：全部置顶会话 + 最近 N 个非置顶会话。
+ * 超出的部分折叠，由卡片底部的“加载更多”按钮展开。
+ */
+export const TASK_SESSION_PREVIEW_LIMIT = 5;
+
 interface TaskGroup {
   task: TaskGroupUi;
-  content: ReactNode;
+  /** 会话列表渲染器：showAll=true 时渲染任务下全部会话。 */
+  content: (showAll: boolean) => ReactNode;
+  /** 任务下会话根节点总数（含分叉子树），用于“加载更多”计数。 */
+  sessionCount: number;
+  /** 置顶会话根节点数（默认全部展示）。 */
+  pinnedCount: number;
 }
 
 interface Props {
@@ -80,6 +91,8 @@ const pinIcon = (
 function TaskCard({
   task,
   content,
+  sessionCount,
+  pinnedCount,
   onDropAssign,
   onRename,
   onDelete,
@@ -87,7 +100,9 @@ function TaskCard({
   onTogglePin,
 }: {
   task: TaskGroupUi;
-  content: ReactNode;
+  content: (showAll: boolean) => ReactNode;
+  sessionCount: number;
+  pinnedCount: number;
   onDropAssign: (taskId: string, sessionId: string) => void;
   onRename: (taskId: string, name: string) => void;
   onDelete: (taskId: string) => void;
@@ -96,6 +111,8 @@ function TaskCard({
 }) {
   const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
+  /** 任务会话默认只展示置顶 + 最近 5 个；点击“加载更多”后展示全部。 */
+  const [showAllSessions, setShowAllSessions] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -395,7 +412,29 @@ function TaskCard({
       </div>
 
       {/* Task sessions */}
-      {!collapsed && <div style={{ paddingBottom: 3 }}>{content}</div>}
+      {!collapsed && (
+        <>
+          <div style={{ paddingBottom: 3 }}>{content(showAllSessions)}</div>
+          {!showAllSessions && sessionCount > pinnedCount + TASK_SESSION_PREVIEW_LIMIT && (
+            <button
+              type="button"
+              onClick={() => setShowAllSessions(true)}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: "100%", boxSizing: "border-box",
+                margin: "2px 0", padding: 0,
+                background: "transparent", border: "none",
+                color: "var(--text-dim)", fontSize: 11, cursor: "pointer",
+                transition: "color 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+            >
+              {t("sidebar.loadMoreSessions", { count: sessionCount - pinnedCount - TASK_SESSION_PREVIEW_LIMIT })}
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -515,7 +554,7 @@ export function TaskArea({
         </div>
       )}
 
-      {groups.map(({ task, content }, index) => {
+      {groups.map(({ task, content, sessionCount, pinnedCount }, index) => {
         const prev = index > 0 ? groups[index - 1].task : null;
         const divider = prev?.pinned && !task.pinned;
         return (
@@ -526,6 +565,8 @@ export function TaskArea({
             <TaskCard
               task={task}
               content={content}
+              sessionCount={sessionCount}
+              pinnedCount={pinnedCount}
               onDropAssign={onDropSessionToTask}
               onRename={(id, name) => void onRenameTask(id, name)}
               onDelete={(id) => void onDeleteTask(id)}

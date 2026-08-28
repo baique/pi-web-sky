@@ -14,8 +14,6 @@ interface SearchHit {
 
 interface Props {
   onSelectSession: (session: SessionInfo) => void;
-  /** False when the search sits leftmost in the top bar (no left divider). */
-  leadingBorder?: boolean;
 }
 
 const DEBOUNCE_MS = 350;
@@ -42,11 +40,11 @@ function renderSnippet(snippet: string): React.ReactNode {
 }
 
 /**
- * Global session search in the top bar (todo button's right side, left of the
- * file-panel toggle). Desktop: inline input + popover results. Mobile: icon
- * button that expands a full-width overlay input.
+ * Global session search in the top bar. Desktop: inline input + popover
+ * results. Mobile: icon button that expands a full-width overlay input.
+ * Carries the trailing divider that separates it from the buttons on its right.
  */
-export function SidebarGlobalSearch({ onSelectSession, leadingBorder = true }: Props) {
+export function SidebarGlobalSearch({ onSelectSession }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
@@ -245,7 +243,7 @@ export function SidebarGlobalSearch({ onSelectSession, leadingBorder = true }: P
             display: "flex", alignItems: "center", justifyContent: "center",
             width: 36, height: "100%", padding: 0,
             background: mobileOverlay ? "var(--bg-selected)" : "none",
-            border: "none", borderLeft: leadingBorder ? "1px solid var(--border)" : "none",
+            border: "none", borderRight: "1px solid var(--border)",
             color: mobileOverlay ? "var(--text)" : "var(--text-muted)",
             cursor: "pointer",
           }}
@@ -321,7 +319,7 @@ export function SidebarGlobalSearch({ onSelectSession, leadingBorder = true }: P
         flexShrink: 0,
         width: 190,
         padding: "0 12px",
-        borderLeft: leadingBorder ? "1px solid var(--border)" : "none",
+        borderRight: "1px solid var(--border)",
         background: open ? "var(--bg-selected)" : "transparent",
         color: open ? "var(--text)" : "var(--text-muted)",
         cursor: "text",

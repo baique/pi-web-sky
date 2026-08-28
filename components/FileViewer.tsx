@@ -73,7 +73,8 @@ const FILE_LINE_NUMBER_STYLE: CSSProperties = {
   padding: "0 10px",
   textAlign: "right",
   color: "var(--text-dim)",
-  background: "var(--bg-panel)",
+  /* 行号槽：在面板玻璃上只做最淡的一档加深，不铺实色 */
+  background: "var(--file-panel-gutter)",
   borderRight: "1px solid var(--border)",
   fontFamily: "var(--font-mono)",
   fontSize: 11,
@@ -347,7 +348,7 @@ function DiffView({ patch }: { patch: string }) {
               style={{
                 padding: "2px 16px",
                 color: "var(--text-dim)",
-                background: "var(--bg-panel)",
+                background: "var(--file-panel-gutter)",
                 fontSize: 11,
                 borderTop: "1px solid var(--border)",
                 borderBottom: "1px solid var(--border)",
@@ -518,7 +519,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
           borderBottom: "1px solid var(--border)",
           fontSize: 11,
           color: "var(--text-dim)",
-          background: "var(--bg)",
+          background: "var(--file-panel-chrome)",
           flexShrink: 0,
         }}
       >
@@ -550,6 +551,8 @@ function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
         style={{
           flex: 1,
           overflow: "auto",
+          /* 图片查看器有意保留不透明 mat（方案 B①）：棋盘格要表达图片自身
+             的 alpha 通道，透明 PNG 直接压在玻璃/壁纸上不可读。 */
           background: "var(--bg-panel)",
           display: "flex",
           alignItems: "center",
@@ -688,7 +691,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
           borderBottom: "1px solid var(--border)",
           fontSize: 11,
           color: "var(--text-dim)",
-          background: "var(--bg)",
+          background: "var(--file-panel-chrome)",
           flexShrink: 0,
         }}
       >
@@ -723,7 +726,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
           alignItems: "center",
           justifyContent: "center",
           padding: 24,
-          background: "var(--bg-panel)",
+          background: "transparent",
         }}
       >
         <div style={{ width: "min(680px, 100%)" }}>
@@ -873,7 +876,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }:
           borderBottom: "1px solid var(--border)",
           fontSize: 11,
           color: "var(--text-dim)",
-          background: "var(--bg)",
+          background: "var(--file-panel-chrome)",
           flexShrink: 0,
         }}
       >
@@ -900,7 +903,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }:
           {watching ? "live" : "static"}
         </span>
       </div>
-      <div style={{ flex: 1, minHeight: 0, background: "var(--bg-panel)" }}>
+      <div style={{ flex: 1, minHeight: 0, background: "transparent" }}>
         {error ? (
           <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, color: "#f87171", fontSize: 13, textAlign: "center" }}>
             {error}
@@ -1314,7 +1317,7 @@ function TextFileViewer({
           borderBottom: "1px solid var(--border)",
           fontSize: 11,
           color: "var(--text-dim)",
-          background: "var(--bg)",
+          background: "var(--file-panel-chrome)",
           flexShrink: 0,
         }}
       >
@@ -1349,7 +1352,7 @@ function TextFileViewer({
                     aria-pressed={active}
                     className="file-viewer-mode-button"
                     style={{
-                      background: active ? "var(--bg-selected)" : "transparent",
+                      background: active ? "var(--side-active)" : "transparent",
                       color: active ? "var(--text)" : "var(--text-muted)",
                     }}
                   >
@@ -1397,7 +1400,7 @@ function TextFileViewer({
                   aria-pressed={wrapLines}
                   className="file-viewer-icon-button"
                   style={{
-                    background: wrapLines ? "var(--bg-selected)" : "transparent",
+                    background: wrapLines ? "var(--side-active)" : "transparent",
                     color: wrapLines ? "var(--text)" : "var(--text-muted)",
                   }}
                 >
@@ -1424,7 +1427,7 @@ function TextFileViewer({
           viewerStateRef.current.scrollTop = event.currentTarget.scrollTop;
           viewerStateRef.current.scrollLeft = event.currentTarget.scrollLeft;
         }}
-        style={{ flex: 1, overflow: "auto", background: "var(--bg)" }}
+        style={{ flex: 1, overflow: "auto", background: "transparent" }}
       >
         {effectiveDisplayMode === "diff" && hasGitDiff ? (
           <DiffView patch={gitDiff.patch!} />
@@ -1514,7 +1517,8 @@ function TextFileViewer({
               margin: 0,
               padding: 0,
               border: 0,
-              background: "var(--bg)",
+              /* 代码阅读区透出 chrome 玻璃（方案 A①），与左侧栏文字同一标准 */
+              background: "transparent",
               ...FILE_CODE_STYLE,
               width: wrapLines ? "100%" : "max-content",
               minWidth: "100%",

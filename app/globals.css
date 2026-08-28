@@ -80,6 +80,16 @@
      back into one token. */
   --panel-glass-todo: rgba(250, 250, 251, 0.75);
   --panel-glass-minimap: rgba(250, 250, 251, 0.75);
+  /* 右侧文件面板 —— 材质与左侧栏同一个 chrome 层（--file-panel 即 --side-panel）。
+     整块面板只有**一个 backdrop root**：滤镜只挂在容器上，内层一律不再挂
+     backdrop-filter。嵌套 backdrop-filter 会采样父级已滤过的结果（backdrop
+     root），只会重复模糊、不会更柔化壁纸，纯耗 GPU。所以内层只做深浅叠加：
+     chrome 行加深层 / 行号槽 / 激活 tab 纸面，阅读区直接透出面板玻璃。
+     引用 --text 的加深色自动跟随主题（浅色变暗、深色变亮），.dark 无需重复。 */
+  --file-panel: var(--side-panel);
+  --file-panel-chrome: color-mix(in srgb, var(--text) 5%, transparent);
+  --file-panel-gutter: color-mix(in srgb, var(--text) 3%, transparent);
+  --file-panel-paper: color-mix(in srgb, var(--bg) 60%, transparent);
   /* Terminal body is transparent — the pane uses the message-bubble glass
      (--bubble-alpha / --glass-blur-bubble sliders) as its backdrop. */
   --glass-blur: 8px;
@@ -290,12 +300,14 @@ body {
 /* ── 统一玻璃配方 —— 新的面板/浮层直接套以下 class，勿再写死 px ──
    分层约定（每层 = 背景 token + 模糊 token + 饱和 token，全部受主题与
    reduced-transparency/contrast 统一降级控制）：
-   - chrome  顶栏/侧栏/composer/状态栏     → --frame-glass/--side-panel + --glass-blur-heavy
+   - chrome  顶栏/侧栏/文件面板/composer/状态栏 → --frame-glass/--side-panel + --glass-blur-heavy
    - L-panel 浮动大面板(终端/统计/配置/导航) → --panel-glass + --glass-blur-panel
    - L-popover 下拉小菜单/通知             → --glass-bg-strong(60%) + --glass-blur-popover
    - 气泡    消息/工具调用                 → --*-bg-glass + --glass-blur-bubble
    class 只给玻璃核心（背景+滤镜），边框/圆角/阴影由各组件自行管理，
-   避免与组件内联样式冲突。 */
+   避免与组件内联样式冲突。
+   注意：已经挂了 backdrop-filter 的容器（侧栏、文件面板），内层不得再挂，
+   子面要变深只能用 color-mix 透明加深色——见 --file-panel-chrome 注释。 */
 .glass-panel {
   background: var(--panel-glass);
   backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate));
@@ -1250,7 +1262,8 @@ pre, code {
 }
 
 .file-viewer-icon-button:hover {
-  background: var(--bg-hover) !important;
+  /* chrome 玻璃上的悬浮用侧栏同款 coating，不用实色 --bg-hover */
+  background: var(--side-hover) !important;
   color: var(--text);
 }
 
@@ -1298,8 +1311,9 @@ pre, code {
 .markdown-file-preview h2 { font-size: 1.4em; }
 .markdown-file-preview h3 { font-size: 1.15em; }
 .markdown-file-preview p { margin: 0 0 12px; }
+/* 预览模式内的嵌套块走气泡层级 token，不铺实色：跟聊天里的代码块同一档玻璃。 */
 .markdown-file-preview pre {
-  background: var(--bg-panel);
+  background: var(--bubble-code-bg);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px 16px;
@@ -1311,7 +1325,7 @@ pre, code {
 .markdown-file-preview code {
   font-family: var(--font-mono);
   font-size: 0.9em;
-  background: var(--bg-panel);
+  background: var(--bg-subtle);
   padding: 1px 5px;
   border-radius: 3px;
 }
@@ -1326,7 +1340,8 @@ pre, code {
   padding: 14px 16px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg-panel);
+  /* 阅读区上的嵌套卡片：玻璃加深层，非实色面板 */
+  background: var(--bubble-code-bg);
 }
 .markdown-frontmatter-title {
   font-size: 1.3em;

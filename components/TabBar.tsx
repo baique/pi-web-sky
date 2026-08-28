@@ -31,7 +31,9 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
       style={{
         display: "flex",
         alignItems: "flex-end",
-        background: "var(--bg-panel)",
+        /* 条本身的加深色由 AppShell 的 chrome 行统一给，这里必须透明，
+           否则会把面板玻璃重新盖成实色。 */
+        background: "transparent",
         overflowX: "auto",
         flexShrink: 0,
         height: 36,
@@ -60,7 +62,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               paddingLeft: 12,
               paddingRight: 6,
               borderRight: "1px solid var(--border)",
-              background: isActive ? "var(--bg)" : "var(--bg-panel)",
+              background: isActive ? "var(--file-panel-paper)" : "transparent",
               cursor: "pointer",
               fontSize: 12,
               color: isActive ? "var(--text)" : "var(--text-muted)",
@@ -93,7 +95,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 width: 24, height: 24,
-                background: hoveredClose === tab.id ? "var(--bg-hover)" : "transparent",
+                background: hoveredClose === tab.id ? "var(--side-hover)" : "transparent",
                 border: "none",
                 borderRadius: 4,
                 color: hoveredClose === tab.id ? "var(--text)" : "var(--text-dim)",
