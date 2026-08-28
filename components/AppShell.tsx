@@ -63,11 +63,6 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { FileViewerState } from "@/lib/file-viewer-state";
 
 type SessionCopyField = "file" | "id";
-type AutoNameStatus =
-  | { kind: "idle" }
-  | { kind: "naming" }
-  | { kind: "success" }
-  | { kind: "error"; message: string };
 
 const TOP_BAR_ICON_BUTTON_SIZE = 36;
 const LANGUAGE_MENU_WIDTH = 176;
@@ -320,7 +315,7 @@ export function AppShell() {
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
   const [branchActiveLeafId, setBranchActiveLeafId] = useState<string | null>(null);
   const branchLeafChangeFnRef = useRef<((leafId: string | null) => void) | null>(null);
-  const pendingNewSessionTaskIdRef = useRef<string | null>(null);
+  const pendingNewSessionTaskRef = useRef<{ taskId: string; projectKey?: string } | null>(null);
   const suppressWorkspaceRestoreRef = useRef(false);
 
   const handleBranchDataChange = useCallback((tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => {
@@ -359,10 +354,8 @@ export function AppShell() {
   const [todoPanelPos, setTodoPanelPos] = useState<{ top: number; right: number } | null>(null);
   const todoBtnRef = useRef<HTMLButtonElement | null>(null);
   const todoPanelRef = useRef<HTMLDivElement | null>(null);
-  const [autoNameStatus, setAutoNameStatus] = useState<AutoNameStatus>({ kind: "idle" });
-  const autoNameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const activeSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
-  activeSessionIdRef.current = selectedSession?.id ?? null;
+  // 生成标题（auto-name）：UI 入口已隐藏（操作率低、误触产生额外 API 成本），
+  // 相关 state / handler / effect 一并移除，后续版本若需恢复可回溯 git 记录。
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
   }, []);
@@ -392,7 +385,6 @@ export function AppShell() {
   useEffect(() => {
     return () => {
       if (sessionCopyTimerRef.current) clearTimeout(sessionCopyTimerRef.current);
-      if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
     };
   }, []);
 
@@ -905,11 +897,13 @@ export function AppShell() {
   }, [invalidateWorkspaceRestore, router, isMobile]);
 
   /** Task row "+": spawn a new session and remember the target task; the
-   *  membership is written once the session gets its real id (disk-persisted). */
-  const handleNewSessionFromTask = useCallback((taskId: string) => {
+   *  membership is written once the session gets its real id (disk-persisted).
+   *  projectKey comes from the sidebar's resolved project identity so the write
+   *  targets the right task store even while the session is still transient. */
+  const handleNewSessionFromTask = useCallback((taskId: string, projectKey?: string) => {
     const cwd = selectedSession?.cwd ?? newSessionCwd ?? activeCwd;
     if (!cwd) return;
-    pendingNewSessionTaskIdRef.current = taskId;
+    pendingNewSessionTaskRef.current = { taskId, projectKey };
     handleNewSession(`task-${Date.now()}`, cwd);
   }, [selectedSession?.cwd, newSessionCwd, activeCwd, handleNewSession]);
 
@@ -949,21 +943,26 @@ export function AppShell() {
     hydrateSelectedSession(session.id);
     router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
     // Task-row "+": once the session is disk-persisted, attach it to the task.
-    const pendingTaskId = pendingNewSessionTaskIdRef.current;
-    if (pendingTaskId) {
-      pendingNewSessionTaskIdRef.current = null;
+    // The sidebar hands us the resolved projectKey so this never depends on
+    // deriving one from a still-transient session object.
+    const pendingTask = pendingNewSessionTaskRef.current;
+    if (pendingTask) {
+      pendingNewSessionTaskRef.current = null;
       void (async () => {
-        const key = workspaceKeyOf(session);
+        const key = pendingTask.projectKey ?? workspaceKeyOf(session);
         const list = await fetch(`/api/tasks?projectKey=${encodeURIComponent(key)}`, { cache: "no-store" })
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null) as { tasks?: { id: string; sessionIds: string[] }[] } | null;
-        const task = list?.tasks?.find((t) => t.id === pendingTaskId);
+        const task = list?.tasks?.find((t) => t.id === pendingTask.taskId);
         if (!task) return;
-        await fetch(`/api/tasks/${encodeURIComponent(pendingTaskId)}`, {
+        await fetch(`/api/tasks/${encodeURIComponent(pendingTask.taskId)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionIds: [...task.sessionIds, session.id] }),
         }).catch(() => {});
+        // Refresh the sidebar's task list so the new session shows up in the
+        // group right away (the optimistic path above already selected it).
+        setRefreshKey((k) => k + 1);
       })();
     }
   }, [invalidateWorkspaceRestore, router, hydrateSelectedSession]);
@@ -1030,41 +1029,7 @@ export function AppShell() {
     });
   }, [deliverSessionNotification, selectedSession, translate]);
 
-  const handleAutoName = useCallback(async () => {
-    const sessionId = selectedSession?.id;
-    if (!sessionId || autoNameStatus.kind === "naming") return;
-    if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
-    setActiveTopPanel(null);
-    setAutoNameStatus({ kind: "naming" });
-
-    try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/auto-name`, {
-        method: "POST",
-      });
-      const body = (await response.json().catch(() => ({}))) as { title?: string; error?: string };
-      if (!response.ok || !body.title) {
-        throw new Error(body.error || `HTTP ${response.status}`);
-      }
-
-      const title = body.title.trim();
-      setRefreshKey((key) => key + 1);
-      if (activeSessionIdRef.current !== sessionId) return;
-      setSelectedSession((current) => current?.id === sessionId ? { ...current, name: title } : current);
-      setSessionStats((current) => current?.sessionId === sessionId ? { ...current, sessionName: title } : current);
-      setAutoNameStatus({ kind: "success" });
-      autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 1800);
-    } catch (error) {
-      if (activeSessionIdRef.current !== sessionId) return;
-      const message = error instanceof Error ? error.message : String(error);
-      setAutoNameStatus({ kind: "error", message });
-      autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 5000);
-    }
-  }, [autoNameStatus.kind, selectedSession?.id]);
-
-  useEffect(() => {
-    if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
-    setAutoNameStatus({ kind: "idle" });
-  }, [selectedSession?.id]);
+  // 生成标题（auto-name）逻辑已随按钮一起移除，见上方状态定义处的注释。
 
   // Close the todo popover when switching sessions — the panel is per-session.
   useEffect(() => {
@@ -1600,84 +1565,8 @@ export function AppShell() {
           </svg>
           {!mobile && <span>{translate("history.label")}</span>}
         </button>
-        {(() => {
-          // 上下文压缩后当前消息可能不再包含 user 消息，需同时参考会话文件的消息总数。
-          const hasMessages = Boolean(
-            selectedSession
-            && ((sessionStats?.userMessages ?? 0) > 0 || selectedSession.messageCount > 0),
-          );
-          const disabled = !selectedSession || selectedSession.transient || !hasMessages || autoNameStatus.kind === "naming";
-          const isSuccess = autoNameStatus.kind === "success";
-          const isError = autoNameStatus.kind === "error";
-          const label = autoNameStatus.kind === "naming"
-            ? translate("title.generating")
-            : isSuccess
-              ? translate("title.updated")
-              : isError
-                ? translate("title.failed")
-                : translate("title.generate");
-          const title = !selectedSession || selectedSession.transient
-            ? translate("title.unsaved")
-            : !hasMessages
-              ? translate("title.noMessages")
-              : isError
-                ? autoNameStatus.message
-                : translate("title.generateSession");
-
-          return (
-            <button
-              type="button"
-              onClick={() => {
-                void handleAutoName();
-                if (mobile) setMobileToolbarMoreOpen(true);
-              }}
-              disabled={disabled}
-              title={title}
-              aria-label={label}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
-                height: "100%", padding: mobile ? 0 : "0 12px",
-                background: "none", border: "none",
-                borderTop: "2px solid transparent",
-                borderRight: "1px solid var(--border)",
-                color: isError ? "#dc2626" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)",
-                cursor: disabled ? "not-allowed" : "pointer",
-                opacity: disabled && autoNameStatus.kind !== "naming" ? 0.45 : 1,
-                flexShrink: 0, fontSize: 11, whiteSpace: "nowrap",
-                transition: "color 0.1s, background 0.1s, opacity 0.1s",
-              }}
-              onMouseEnter={(event) => {
-                if (disabled) return;
-                event.currentTarget.style.color = isError ? "#dc2626" : "var(--text)";
-                event.currentTarget.style.background = "var(--bg-hover)";
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.color = isError ? "#dc2626" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)";
-                event.currentTarget.style.background = "none";
-              }}
-              data-mobile-toolbar-action={mobile ? "name" : undefined}
-            >
-              {autoNameStatus.kind === "naming" ? (
-                <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
-                  <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              ) : isSuccess ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              ) : (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="m15 4 5 5L7 22l-5-5Z" />
-                  <path d="m14 5 5 5" />
-                  <path d="M6 4V2M5 3H3M19 19v3M17.5 20.5h3" />
-                </svg>
-              )}
-              {!mobile && <span>{label}</span>}
-            </button>
-          );
-        })()}
+        {/* 生成标题按钮已隐藏：此功能操作率较低，误触将产生额外的 API 成本。
+            相关 auto-name 逻辑已一并移除。 */}
         {mobile ? (
           <button
             type="button"
@@ -2477,6 +2366,17 @@ export function AppShell() {
             const onUp = () => {
               el.removeEventListener("pointermove", onMove);
               el.removeEventListener("pointerup", onUp);
+              // When edge-fill is enabled, re-sample edge colours after the
+              // drag ends so the gradient matches the freshly-picked strips.
+              if (wallSettings.fill && bgUrl) {
+                fetch(bgUrl)
+                  .then(r => r.blob())
+                  .then(async blob => {
+                    const colors = await sampleEdgeColors(blob);
+                    if (colors) updateWallSettings({ fillColorLeft: colors.left, fillColorRight: colors.right });
+                  })
+                  .catch(() => {});
+              }
               // Deliberately stay in adjust mode: re-pick freely, leave via
               // the done action in the hint pill (or Escape).
             };
@@ -2626,13 +2526,13 @@ export function AppShell() {
                   </svg>
                 )}
               </button>
-              {renderSessionStatsButton(true)}
-              {renderTodoButton(true)}
               {isMobile && (
                 <div style={{ height: "100%", flexShrink: 0 }}>
-                  <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} />
+                  <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} leadingBorder={false} />
                 </div>
               )}
+              {renderSessionStatsButton(true)}
+              {renderTodoButton(true)}
               {renderMainFileToggle(true)}
               {mobileToolbarMoreOpen && (
                 <div
@@ -2661,6 +2561,9 @@ export function AppShell() {
           )}
           {!isMobile && (
             <>
+              <div style={{ height: "100%", flexShrink: 0 }}>
+                <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} leadingBorder={false} />
+              </div>
               {renderBackgroundButton(false)}
               {renderThemeButton(false)}
               {renderLanguageButton(false)}
@@ -2668,9 +2571,6 @@ export function AppShell() {
               {renderChatToolbarActions(false)}
               {renderSessionStatsButton(false)}
               {renderTodoButton(false)}
-              <div style={{ height: "100%", flexShrink: 0 }}>
-                <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} />
-              </div>
             </>
           )}
           {!isMobile && renderMainFileToggle(false)}

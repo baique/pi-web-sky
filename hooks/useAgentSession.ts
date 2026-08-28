@@ -1346,12 +1346,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         await ensureEventsConnected(sid);
         promptRequestStarted = true;
+        // Promote (select + task-attribute) BEFORE sending the prompt: the
+        // POST below blocks until the first response finishes, so waiting
+        // would postpone task membership until the whole first reply is done.
+        promoteNewSession(1, message);
         await sendAgentCommand(sid, {
           type: "prompt",
           message,
           ...(piImages?.length ? { images: piImages } : {}),
         });
-        promoteNewSession(1, message);
       } else if (session) {
         sentSessionId = session.id;
         await ensureEventsConnected(session.id);
@@ -1411,13 +1414,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       const sid = sessionIdRef.current ?? session?.id ?? await ensureNewSession();
       if (!sid) throw new Error("Unable to create a session for the shell command");
+      // Promote before the (blocking) bash POST so task membership is
+      // attributed immediately, not after the command finishes.
+      promoteNewSession(1, inputText);
       await sendAgentCommand(sid, {
         type: "bash",
         command,
         excludeFromContext,
       });
       await loadSession(sid);
-      promoteNewSession(1, inputText);
     } catch (e) {
       console.error("Failed to execute shell command:", e);
       addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
