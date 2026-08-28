@@ -7,7 +7,9 @@ export interface Task {
   name: string;
   created: number;
   updated: number;
+  pinned: boolean;
   sessionIds: string[];
+  pinnedSessionIds: string[];
 }
 
 interface TaskRow {
@@ -16,13 +18,17 @@ interface TaskRow {
   name: string;
   created: number;
   updated: number;
+  pinned: number;
 }
 
 const now = () => Date.now();
 
 function listTaskSessionIds(taskId: string): string[] {
+  // Order here is a fallback only: the sidebar re-sorts group contents by
+  // session modified-time (desc) + pinned segment, so this must stay in sync
+  // directionally (pinned first, then descending recency).
   return getDb()
-    .prepare("SELECT session_id FROM session_meta WHERE task_id = ? ORDER BY updated")
+    .prepare("SELECT session_id FROM session_meta WHERE task_id = ? ORDER BY pinned DESC, updated DESC, rowid DESC")
     .all(taskId)
     .map((r) => (r as { session_id: string }).session_id);
 }
@@ -30,20 +36,32 @@ function listTaskSessionIds(taskId: string): string[] {
 function getTaskRow(id: string): TaskRow | undefined {
   return getDb()
     .prepare(
-      "SELECT id, project_key AS projectKey, name, created, updated FROM tasks WHERE id = ?",
+      "SELECT id, project_key AS projectKey, name, created, updated, pinned FROM tasks WHERE id = ?",
     )
     .get(id) as TaskRow | undefined;
 }
 
-function rowToTask(row: TaskRow): Task {
-  return { ...row, sessionIds: listTaskSessionIds(row.id) };
+function listPinnedTaskSessionIds(taskId: string): string[] {
+  return getDb()
+    .prepare("SELECT session_id FROM session_meta WHERE task_id = ? AND pinned = 1")
+    .all(taskId)
+    .map((r) => (r as { session_id: string }).session_id);
 }
 
-/** All tasks of one project, newest-updated first. */
+function rowToTask(row: TaskRow): Task {
+  return {
+    ...row,
+    pinned: row.pinned === 1,
+    sessionIds: listTaskSessionIds(row.id),
+    pinnedSessionIds: listPinnedTaskSessionIds(row.id),
+  };
+}
+
+/** All tasks of one project, pinned first then newest-updated. */
 export function listTasks(projectKey: string): Task[] {
   const rows = getDb()
     .prepare(
-      "SELECT id, project_key AS projectKey, name, created, updated FROM tasks WHERE project_key = ? ORDER BY updated DESC, created DESC",
+      "SELECT id, project_key AS projectKey, name, created, updated, pinned FROM tasks WHERE project_key = ? ORDER BY pinned DESC, updated DESC, created DESC",
     )
     .all(projectKey) as unknown as TaskRow[];
   return rows.map(rowToTask);
@@ -58,7 +76,7 @@ export function createTask(projectKey: string, name: string): Task {
   getDb()
     .prepare("INSERT INTO tasks (id, project_key, name, created, updated) VALUES (?, ?, ?, ?, ?)")
     .run(id, projectKey, trimmed, ts, ts);
-  return { id, projectKey: projectKey, name: trimmed, created: ts, updated: ts, sessionIds: [] };
+  return { id, projectKey: projectKey, name: trimmed, created: ts, updated: ts, pinned: false, sessionIds: [], pinnedSessionIds: [] };
 }
 
 /**
@@ -69,7 +87,7 @@ export function createTask(projectKey: string, name: string): Task {
  */
 export function updateTask(
   id: string,
-  patch: { name?: string; sessionIds?: string[] },
+  patch: { name?: string; sessionIds?: string[]; pinned?: boolean },
 ): Task | null {
   const db = getDb();
   const existing = getTaskRow(id);
@@ -81,6 +99,13 @@ export function updateTask(
       const trimmed = patch.name.trim();
       if (!trimmed) throw new Error("name must not be empty");
       db.prepare("UPDATE tasks SET name = ?, updated = ? WHERE id = ?").run(trimmed, now(), id);
+    }
+    if (patch.pinned !== undefined) {
+      db.prepare("UPDATE tasks SET pinned = ?, updated = ? WHERE id = ?").run(
+        patch.pinned ? 1 : 0,
+        now(),
+        id,
+      );
     }
     if (patch.sessionIds !== undefined) {
       const current = new Set(listTaskSessionIds(id));
@@ -132,4 +157,18 @@ export function taskForSession(sessionId: string): string | null {
     .prepare("SELECT task_id FROM session_meta WHERE session_id = ?")
     .get(sessionId) as { task_id: string | null } | undefined;
   return row?.task_id ?? null;
+}
+
+/** Pin / unpin a session (region-relative: inside its task group, or in chat). */
+export function setSessionPinned(sessionId: string, pinned: boolean): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO session_meta (session_id, task_id, updated, pinned) VALUES (?, NULL, ?, ?) " +
+      "ON CONFLICT(session_id) DO UPDATE SET pinned = excluded.pinned",
+  ).run(sessionId, now(), pinned ? 1 : 0);
+}
+
+/** Drop all task/meta bookkeeping for a session (used on session delete). */
+export function unassignSession(sessionId: string): void {
+  getDb().prepare("DELETE FROM session_meta WHERE session_id = ?").run(sessionId);
 }

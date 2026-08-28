@@ -57,7 +57,8 @@ test("tasks CRUD over the API", async () => {
   assert.equal(patchRes.status, 200);
   const patched = (await patchRes.json()).task;
   assert.equal(patched.name, "改名");
-  assert.deepEqual(patched.sessionIds, ["s1", "s2"]);
+  // listTaskSessionIds 按 pinned DESC, updated DESC, rowid DESC 排序（同批分配后插入在前），顺序无关断言。
+  assert.deepEqual([...patched.sessionIds].sort(), ["s1", "s2"]);
 
   // PATCH unknown id -> 404
   const missing = await patchTask(

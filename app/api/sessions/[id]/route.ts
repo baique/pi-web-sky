@@ -15,6 +15,7 @@ import { sessionPathKey } from "@/lib/session-path";
 import { getRpcSession } from "@/lib/rpc-manager";
 import { projectTreeForResponse } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
+import { setSessionPinned, unassignSession } from "@/lib/task-store";
 
 export async function GET(
   req: Request,
@@ -83,25 +84,36 @@ export async function GET(
   }
 }
 
-// PATCH /api/sessions/[id]  body: { name: string }
+// PATCH /api/sessions/[id]  body: { name: string } | { pinned: boolean }
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   try {
-    const { name } = await req.json() as { name?: string };
-    if (typeof name !== "string") {
-      return NextResponse.json({ error: "name is required" }, { status: 400 });
-    }
+    const body = await req.json().catch(() => ({})) as { name?: string; pinned?: boolean };
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-    const sm = SessionManager.open(filePath);
-    sm.appendSessionInfo(name.trim());
-    invalidateSessionListCache();
-    return NextResponse.json({ ok: true });
+    if (body.name !== undefined) {
+      if (typeof body.name !== "string") {
+        return NextResponse.json({ error: "name must be a string" }, { status: 400 });
+      }
+      const sm = SessionManager.open(filePath);
+      sm.appendSessionInfo(body.name.trim());
+      invalidateSessionListCache();
+      return NextResponse.json({ ok: true });
+    }
+    if (body.pinned !== undefined) {
+      if (typeof body.pinned !== "boolean") {
+        return NextResponse.json({ error: "pinned must be a boolean" }, { status: 400 });
+      }
+      setSessionPinned(id, body.pinned);
+      invalidateSessionListCache();
+      return NextResponse.json({ ok: true });
+    }
+    return NextResponse.json({ error: "name or pinned is required" }, { status: 400 });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
@@ -154,6 +166,7 @@ export async function DELETE(
     unlinkSync(filePath);
     invalidateSessionPathCache(id);
     invalidateSessionListCache();
+    unassignSession(id);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

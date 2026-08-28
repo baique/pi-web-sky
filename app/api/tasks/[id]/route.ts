@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { deleteTask, updateTask } from "@/lib/task-store";
 
-// PATCH /api/tasks/[id]  body: { name?: string, sessionIds?: string[] }
+// PATCH /api/tasks/[id]  body: { name?, sessionIds?, pinned? }
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -11,8 +11,9 @@ export async function PATCH(
     const body = (await req.json().catch(() => ({}))) as {
       name?: unknown;
       sessionIds?: unknown;
+      pinned?: unknown;
     };
-    const patch: { name?: string; sessionIds?: string[] } = {};
+    const patch: { name?: string; sessionIds?: string[]; pinned?: boolean } = {};
     if (body.name !== undefined) {
       if (typeof body.name !== "string") {
         return NextResponse.json({ error: "name must be a string" }, { status: 400 });
@@ -28,7 +29,13 @@ export async function PATCH(
       }
       patch.sessionIds = body.sessionIds;
     }
-    if (patch.name === undefined && patch.sessionIds === undefined) {
+    if (body.pinned !== undefined) {
+      if (typeof body.pinned !== "boolean") {
+        return NextResponse.json({ error: "pinned must be a boolean" }, { status: 400 });
+      }
+      patch.pinned = body.pinned;
+    }
+    if (patch.name === undefined && patch.sessionIds === undefined && patch.pinned === undefined) {
       return NextResponse.json({ error: "nothing to update" }, { status: 400 });
     }
     const task = updateTask(id, patch);

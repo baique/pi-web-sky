@@ -318,6 +318,8 @@ export interface SessionInfo {
   /** True while the runtime session exists only in memory and its JSONL file
    *  has not been created yet. Disk-backed actions must wait until this clears. */
   transient?: boolean;
+  /** Pinned by the user; sorts first inside its own region (task group or chat). */
+  pinned?: boolean;
 }
 
 export interface TodoItem {

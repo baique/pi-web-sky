@@ -9,6 +9,7 @@ import { readdir } from "fs/promises";
 import { join as joinPath, normalize as normalizePath } from "path";
 import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext, TodoItem } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
+import { getDb } from "./sqlite-db";
 import { normalizeToolCalls } from "./normalize";
 import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
@@ -23,6 +24,17 @@ export async function attachSessionProjectInfo(sessions: SessionInfo[]): Promise
     projectByCwd.set(cwd, await resolveProject(cwd));
   }));
 
+  // Pinned set from the task store (region-relative ordering lives client-side).
+  let pinnedIds = new Set<string>();
+  try {
+    const rows = getDb()
+      .prepare("SELECT session_id FROM session_meta WHERE pinned = 1")
+      .all() as { session_id: string }[];
+    pinnedIds = new Set(rows.map((r) => r.session_id));
+  } catch {
+    // db not available — fall back to nothing pinned
+  }
+
   return sessions.map((session) => {
     const project = session.cwd ? projectByCwd.get(session.cwd) : undefined;
     const projectRoot = project?.projectRoot ?? session.cwd;
@@ -31,6 +43,7 @@ export async function attachSessionProjectInfo(sessions: SessionInfo[]): Promise
       projectRoot,
       projectKey: projectIdentityKey(projectRoot),
       ...(project?.isWorktree && project.branch ? { worktreeBranch: project.branch } : {}),
+      ...(pinnedIds.has(session.id) ? { pinned: true } : {}),
     };
   });
 }

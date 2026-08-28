@@ -80,4 +80,16 @@ export function initSchema(db: DatabaseSync): void {
       tokenize = 'trigram'
     );
   `);
+
+  // Idempotent migrations for databases created before pinned columns existed.
+  for (const migration of [
+    "ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;",
+    "ALTER TABLE session_meta ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;",
+  ]) {
+    try {
+      db.exec(migration);
+    } catch {
+      // column already exists — fine
+    }
+  }
 }

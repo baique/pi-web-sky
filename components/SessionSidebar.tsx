@@ -2,7 +2,6 @@
 
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import type { SessionInfo } from "@/lib/types";
-import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
 import { getProjectActivity, getRecentProjects, sessionsForProject } from "@/lib/project-groups";
@@ -104,8 +103,10 @@ interface Props {
    *  Lets the app play a cross-workspace completion tone. */
   onBackgroundTaskDone?: () => void;
   onRunningSessionIdsChange?: (ids: Set<string>) => void;
-  /** A session should be spawned pre-assigned to this task (task row "+"). */
-  onNewSessionFromTask?: (taskId: string) => void;
+  /** A session should be spawned pre-assigned to this task (task row "+").
+   *  projectKey lets the parent attach the new session to the task reliably
+   *  even before the session has a real id / project identity (transient). */
+  onNewSessionFromTask?: (taskId: string, projectKey?: string) => void;
 }
 
 interface WorktreeEntry {
@@ -165,21 +166,6 @@ function saveUnreadSessionIds(ids: Set<string>): void {
     // ignore storage quota / privacy-mode errors
   }
 }
-
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const mins = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString();
-}
-
 /** Substitute the home dir prefix with ~ (no path truncation — see PathLabel) */
 function displayCwd(cwd: string, homeDir?: string): string {
   return (homeDir && cwd.startsWith(homeDir)) ? "~" + cwd.slice(homeDir.length) : cwd;
@@ -214,7 +200,7 @@ function PathLabel({ text, style }: { text: string; style?: CSSProperties }) {
 
 const DROPDOWN_ANIMATION_MS = 140;
 
-function AnimatedDropdown({ open, children, style }: { open: boolean; children: ReactNode; style: CSSProperties }) {
+function AnimatedDropdown({ open, children, style, up = false }: { open: boolean; children: ReactNode; style: CSSProperties; up?: boolean }) {
   const [mounted, setMounted] = useState(open);
   const [visible, setVisible] = useState(open);
 
@@ -246,8 +232,10 @@ function AnimatedDropdown({ open, children, style }: { open: boolean; children: 
       style={{
         ...style,
         opacity: visible ? 1 : 0,
-        transform: visible ? "translateY(0) scale(1)" : "translateY(-8px) scale(0.96)",
-        transformOrigin: "top center",
+        transform: visible
+          ? "translateY(0) scale(1)"
+          : up ? "translateY(8px) scale(0.96)" : "translateY(-8px) scale(0.96)",
+        transformOrigin: up ? "bottom center" : "top center",
         transition: `opacity ${DROPDOWN_ANIMATION_MS}ms ease, transform ${DROPDOWN_ANIMATION_MS}ms ease`,
         pointerEvents: open ? "auto" : "none",
       }}
@@ -404,6 +392,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
   const [homeDir, setHomeDir] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [cwdHovered, setCwdHovered] = useState(false);
   const [projectFilter, setProjectFilter] = useState("");
   const [wtFilter, setWtFilter] = useState("");
   const [customPathOpen, setCustomPathOpen] = useState(false);
@@ -415,6 +404,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Worktree switcher state
   const [worktreeState, setWorktreeState] = useState<WorktreeState | null>(null);
   const [wtDropdownOpen, setWtDropdownOpen] = useState(false);
+  const [wtTriggerHovered, setWtTriggerHovered] = useState(false);
   const [wtNewOpen, setWtNewOpen] = useState(false);
   const [wtNewBranch, setWtNewBranch] = useState("");
   const [wtError, setWtError] = useState<string | null>(null);
@@ -423,11 +413,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [worktreeLoadingCwd, setWorktreeLoadingCwd] = useState<string | null>(null);
   const wtDropdownRef = useRef<HTMLDivElement>(null);
   const wtNewInputRef = useRef<HTMLInputElement>(null);
-  const [explorerOpen, setExplorerOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>(() => loadSidebarTab());
+  const [tasksCollapsed, setTasksCollapsed] = useState(() => loadCollapsedFlag(TASKS_COLLAPSED_KEY));
+  const [chatCollapsed, setChatCollapsed] = useState(() => loadCollapsedFlag(TEMP_COLLAPSED_KEY));
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [tasks, setTasks] = useState<TaskGroupUi[]>([]);
-  const [taskAreaCollapsed, setTaskAreaCollapsed] = useState(() => loadTaskAreaCollapsed());
-  const [tempCollapsed, setTempCollapsed] = useState(() => loadTempCollapsed());
   const [tempDragOver, setTempDragOver] = useState(false);
   const [explorerKey, setExplorerKey] = useState(0);
   const [explorerUploadBusy, setExplorerUploadBusy] = useState(false);
@@ -491,12 +481,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     initialLoadDone.current = true;
     loadSessions(isFirst, refreshKey !== initialRefreshKeyRef.current);
   }, [loadSessions, refreshKey]);
-
-  // Browser storage is unavailable during server rendering. Restore the panel
-  // preference after hydration so a collapsed explorer stays collapsed on reload.
-  useEffect(() => {
-    setExplorerOpen(loadExplorerOpen());
-  }, []);
 
   // Persist unread markers so they survive a browser refresh before the user
   // has actually opened the completed session.
@@ -997,6 +981,50 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setTasks(Array.isArray(d.tasks) ? d.tasks : []);
   }, [selectedProject?.key]);
 
+  // Pin / unpin a session inside its region (task group or chat). Optimistic:
+  // reorder immediately, persist in the background — no full re-scan.
+  const handleToggleSessionPin = useCallback((sessionId: string, nextPinned: boolean) => {
+    setAllSessions((prev) => prev.map((s) => (
+      s.id === sessionId ? { ...s, pinned: nextPinned ? true : undefined } : s
+    )));
+    // If the session belongs to a task, move it to the pinned head of that
+    // task's sessionIds immediately (same order the server would return).
+    setTasks((prev) => prev.map((t) => {
+      if (!t.sessionIds.includes(sessionId)) return t;
+      const pinnedSet = new Set(t.pinnedSessionIds ?? []);
+      if (nextPinned) pinnedSet.add(sessionId); else pinnedSet.delete(sessionId);
+      const pinned = new Set(t.sessionIds.filter((id) => pinnedSet.has(id)));
+      const rest = t.sessionIds.filter((id) => !pinnedSet.has(id));
+      return { ...t, pinnedSessionIds: [...pinnedSet], sessionIds: [...pinned, ...rest] };
+    }));
+    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned: nextPinned }),
+    })
+      .catch(() => {})
+      .then(() => persistTasks());
+  }, [persistTasks]);
+
+  // Pin / unpin a task in the tasks region. Optimistic: flip + reorder
+  // pinned-first immediately, persist in the background.
+  const handleToggleTaskPin = useCallback((taskId: string) => {
+    const task = tasks.find((x) => x.id === taskId);
+    if (!task) return;
+    const nextPinned = !task.pinned;
+    setTasks((prev) => {
+      const next = prev.map((t) => (t.id === taskId ? { ...t, pinned: nextPinned } : t));
+      return [...next.filter((t) => t.pinned), ...next.filter((t) => !t.pinned)];
+    });
+    void fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned: nextPinned }),
+    })
+      .catch(() => {})
+      .then(() => persistTasks());
+  }, [tasks, persistTasks]);
+
   const handleCreateTask = useCallback(async (name: string) => {
     const key = selectedProject?.key;
     if (!key) return;
@@ -1044,26 +1072,68 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     await persistTasks();
   }, [tasks, persistTasks]);
 
-  // Session id -> task id, plus tree roots per task for rendering.
-  const taskIdBySession = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const t of tasks) for (const sid of t.sessionIds) map.set(sid, t.id);
-    return map;
-  }, [tasks]);
+  // Region-internal order: pinned segment first, then the rest — both sorted
+  // by the session's last-modified time (desc). Pinning never changes position
+  // within a segment; it only relocates the entry to the pinned segment
+  // (hairline-divided), exactly like the chat region. Sorting happens here in
+  // the client so the server never double-sorts with a different key.
+  function orderPinnedFirst(nodes: SessionTreeNode[]): SessionTreeNode[] {
+    const byModified = (a: SessionTreeNode, b: SessionTreeNode) =>
+      a.session.modified < b.session.modified
+        ? 1
+        : a.session.modified > b.session.modified
+          ? -1
+          : 0;
+    return [
+      ...nodes.filter((n) => n.session.pinned).sort(byModified),
+      ...nodes.filter((n) => !n.session.pinned).sort(byModified),
+    ];
+  }
 
   const taskGroups = useMemo(() => {
-    const rootsById = new Map(sessionTree.map((n) => [n.session.id, n]));
+    // Full-tree index (roots *and* descendants) so forked child sessions
+    // assigned to a task render inside the group and leave the chat region.
+    const byId = new Map<string, SessionTreeNode>();
+    const walk = (nodes: SessionTreeNode[]) => {
+      for (const n of nodes) {
+        byId.set(n.session.id, n);
+        walk(n.children);
+      }
+    };
+    walk(sessionTree);
     return tasks.map((task) => ({
       task,
-      nodes: task.sessionIds
-        .map((sid) => rootsById.get(sid))
-        .filter((n): n is SessionTreeNode => Boolean(n)),
+      nodes: orderPinnedFirst(
+        task.sessionIds
+          .map((sid) => byId.get(sid))
+          .filter((n): n is SessionTreeNode => Boolean(n)),
+      ),
     }));
   }, [tasks, sessionTree]);
 
-  const tempNodes = useMemo(
-    () => sessionTree.filter((n) => !taskIdBySession.has(n.session.id)),
-    [sessionTree, taskIdBySession],
+  // Everything owned by a task group (including its descendants) leaves the
+  // chat region; remaining roots form the temp/chat list.
+  const tempNodes = useMemo(() => {
+    const owned = new Set<string>();
+    for (const g of taskGroups) {
+      const walk = (nodes: SessionTreeNode[]) => {
+        for (const n of nodes) {
+          owned.add(n.session.id);
+          walk(n.children);
+        }
+      };
+      walk(g.nodes);
+    }
+    return sessionTree.filter((n) => !owned.has(n.session.id));
+  }, [sessionTree, taskGroups]);
+
+  // Chat region: pinned sessions first, then the rest (hairline between).
+  const chatNodes = useMemo(
+    () => [
+      ...tempNodes.filter((n) => n.session.pinned),
+      ...tempNodes.filter((n) => !n.session.pinned),
+    ],
+    [tempNodes],
   );
 
   // Worktree switcher — moved out of the header into the files tab.
@@ -1090,21 +1160,24 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                  title={currentWorktree ? t("sidebar.switchWorktreeTitle", { path: currentWorktree.path }) : t("sidebar.switchWorktree")}
                 style={{
                   width: "100%",
-                  height: 29,
+                  height: 28,
                   boxSizing: "border-box",
                   display: "flex",
                   alignItems: "center",
                   gap: 6,
                   padding: "0 10px",
-                  background: "transparent",
-                  border: "1px solid var(--border)",
-                  borderRadius: 7,
+                  background: wtDropdownOpen ? "var(--side-active)" : wtTriggerHovered ? "var(--side-hover)" : "transparent",
+                  border: "none",
+                  borderRadius: 5,
                   cursor: "pointer",
                   fontSize: 11,
                   lineHeight: 1.35,
                   color: "var(--text-muted)",
                   textAlign: "left",
+                  transition: "background 0.12s",
                 }}
+                onMouseEnter={() => setWtTriggerHovered(true)}
+                onMouseLeave={() => setWtTriggerHovered(false)}
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: currentWorktree && !currentWorktree.isMain ? "var(--accent)" : "var(--text-dim)" }}>
                   <line x1="6" y1="3" x2="6" y2="15" />
@@ -1131,16 +1204,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
               <AnimatedDropdown
                 open={wtDropdownOpen}
+                up
                 style={{
                   position: "absolute",
-                  top: "calc(100% + 4px)",
+                  top: "auto",
+                  bottom: "calc(100% + 4px)",
                   left: 0,
                   right: 0,
                   zIndex: 100,
                   background: "var(--panel-glass)",
                   backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
                   WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-                  border: "1px solid var(--border)",
+                  border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
                   borderRadius: 8,
                   boxShadow: "0 6px 20px rgba(0,0,0,0.10)",
                   overflow: "hidden",
@@ -1164,7 +1239,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                           fontSize: 11,
                           fontFamily: "var(--font-mono)",
                           padding: "5px 8px",
-                          border: "1px solid var(--border)",
+                          border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
                           borderRadius: 5,
                           outline: "none",
                           background: "var(--side-input)",
@@ -1444,7 +1519,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       <div
         style={{
           padding: "12px 10px 10px",
-          borderBottom: "1px solid var(--border)",
           flexShrink: 0,
         }}
       >
@@ -1540,15 +1614,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               display: "flex",
               alignItems: "center",
               padding: "6px 10px",
-              background: selectedCwd ? "transparent" : "color-mix(in srgb, var(--accent) 8%, transparent)",
-              border: selectedCwd ? "1px solid var(--border)" : "1px solid rgba(37,99,235,0.4)",
+              background: dropdownOpen
+                ? "var(--side-active)"
+                : cwdHovered
+                  ? "var(--side-hover)"
+                  : selectedCwd
+                    ? "color-mix(in srgb, var(--glass-bg-strong) 55%, transparent)"
+                    : "color-mix(in srgb, var(--accent) 8%, transparent)",
+              border: selectedCwd
+                ? "1px solid color-mix(in srgb, var(--border) 55%, transparent)"
+                : "1px solid color-mix(in srgb, var(--accent) 40%, transparent)",
               borderRadius: 7,
               cursor: "pointer",
               fontSize: 12,
               color: "var(--text)",
               textAlign: "left",
+              boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent)",
               transition: "border-color 0.15s, background 0.15s",
             }}
+            onMouseEnter={() => setCwdHovered(true)}
+            onMouseLeave={() => setCwdHovered(false)}
           >
             {selectedCwd ? (
               <PathLabel
@@ -1602,7 +1687,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               background: "var(--panel-glass)",
               backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
               WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-              border: "1px solid var(--border)",
+              border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
               borderRadius: 8,
               boxShadow: "0 6px 20px rgba(0,0,0,0.10)",
               overflow: "hidden",
@@ -1626,7 +1711,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       fontSize: 11,
                       fontFamily: "var(--font-mono)",
                       padding: "5px 8px",
-                      border: "1px solid var(--border)",
+                      border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
                       borderRadius: 5,
                       outline: "none",
                       background: "var(--side-input)",
@@ -1750,7 +1835,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       />
 
       {sidebarTab === "sessions" ? (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           {loading ? (
             <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
               {t("sidebar.loading")}
@@ -1761,109 +1846,173 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </div>
           ) : (
             <>
-              <TaskArea
-                collapsed={taskAreaCollapsed}
-                onToggle={() => {
-                  const next = !taskAreaCollapsed;
-                  setTaskAreaCollapsed(next);
-                  saveTaskAreaCollapsed(next);
-                }}
-                groups={taskGroups.map(({ task, nodes }) => ({
-                  task,
-                  content: (
-                    <div style={{ paddingBottom: 2 }}>
-                      {nodes.map((node) => (
-                        <SessionTreeItem
-                          key={node.session.id}
-                          node={node}
-                          selectedSessionId={selectedSessionId}
-                          runningSessionIds={runningSessionIds}
-                          unreadSessionIds={unreadSessionIds}
-                          onSelectSession={handleSelectSessionFromList}
-                          onRenamed={loadSessions}
-                          onSessionDeleted={(id) => {
-                            onSessionDeleted?.(id);
-                            loadSessions();
-                          }}
-                          depth={0}
-                        />
-                      ))}
-                    </div>
-                  ),
-                }))}
-                sessionCount={taskIdBySession.size}
-                onNewTask={(name) => void handleCreateTask(name)}
-                onRenameTask={(id, name) => void handleRenameTask(id, name)}
-                onDeleteTask={(id) => void handleDeleteTask(id)}
-                onNewSessionFromTask={(taskId) => onNewSessionFromTask?.(taskId)}
-                onDropSessionToTask={(taskId, sessionId) => void handleAssignSession(taskId, sessionId)}
-              />
-
-              {/* Temp sessions — also the drop zone that unassigns from a task */}
+              {/* Tasks section — fluid up to a cap (GPT-style), scrolls inside
+                  when it exceeds the cap so the chat section always keeps room;
+                  fills the whole column when the chat section is collapsed. */}
               <div
-                onDragOver={(e) => {
-                  if (!e.dataTransfer.types.includes("text/session-id")) return;
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
-                  setTempDragOver(true);
-                }}
-                onDragLeave={() => setTempDragOver(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setTempDragOver(false);
-                  const sid = e.dataTransfer.getData("text/session-id");
-                  if (sid) void handleUnassignSession(sid);
-                }}
                 style={{
-                  flex: 1,
-                  minHeight: 0,
                   display: "flex",
                   flexDirection: "column",
-                  background: tempDragOver ? "color-mix(in srgb, var(--accent) 8%, transparent)" : "transparent",
+                  minHeight: 0,
+                  maxHeight: chatCollapsed ? "none" : "min(50vh, 520px)",
+                  flex: tasksCollapsed
+                    ? "0 0 auto"
+                    : chatCollapsed ? "1 1 0" : "0 1 auto",
                 }}
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = !tempCollapsed;
-                    setTempCollapsed(next);
-                    saveTempCollapsed(next);
-                  }}
-                  aria-expanded={!tempCollapsed}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    padding: "6px 10px", flexShrink: 0,
-                    background: "none", border: "none",
-                    color: "var(--text-muted)", cursor: "pointer",
-                    fontSize: 11, fontWeight: 600, letterSpacing: "0.05em",
-                    textTransform: "uppercase", textAlign: "left",
-                  }}
-                >
-                  <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ transform: tempCollapsed ? "none" : "rotate(90deg)", transition: "transform 0.15s" }}>
-                    <polyline points="3 2 7 5 3 8" />
-                  </svg>
-                  <span>{t("sidebar.tempSessions")}</span>
-                  <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10, fontFamily: "var(--font-mono)" }}>{tempNodes.length}</span>
-                </button>
-                {!tempCollapsed && (
-                  <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-                    {tempNodes.map((node) => (
-                      <SessionTreeItem
-                        key={node.session.id}
-                        node={node}
-                        selectedSessionId={selectedSessionId}
-                        runningSessionIds={runningSessionIds}
-                        unreadSessionIds={unreadSessionIds}
-                        onSelectSession={handleSelectSessionFromList}
-                        onRenamed={loadSessions}
-                        onSessionDeleted={(id) => {
-                          onSessionDeleted?.(id);
-                          loadSessions();
-                        }}
-                        depth={0}
-                      />
-                    ))}
-                    {tempNodes.length === 0 && taskGroups.length === 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 6px 3px 10px" }}>
+                  <button
+                    type="button"
+                    onClick={() => { const next = !tasksCollapsed; setTasksCollapsed(next); saveCollapsedFlag(TASKS_COLLAPSED_KEY, next); }}
+                    aria-expanded={!tasksCollapsed}
+                    style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", color: "var(--text-muted)" }}
+                  >
+                    <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.02em" }}>{t("sidebar.tasks")}</span>
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: tasksCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s" }} aria-hidden="true">
+                      <polyline points="2 3.5 5 6.5 8 3.5" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewTaskOpen((v) => !v)}
+                    title={t("sidebar.newTask")}
+                    aria-label={t("sidebar.newTask")}
+                    style={{ width: 24, height: 24, padding: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", borderRadius: 5, color: "var(--text-dim)", cursor: "pointer" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--side-hover)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                      <line x1="6" y1="1" x2="6" y2="11" />
+                      <line x1="1" y1="6" x2="11" y2="6" />
+                    </svg>
+                  </button>
+                </div>
+                {!tasksCollapsed && (
+                  <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
+                    <TaskArea
+                      groups={taskGroups.map(({ task, nodes }) => ({
+                        task,
+                        content: (
+                          <div style={{ paddingLeft: 14, paddingBottom: 2 }}>
+                            {(() => {
+                              const pinnedSet = new Set(task.pinnedSessionIds ?? []);
+                              const out: ReactNode[] = [];
+                              nodes.forEach((node, i) => {
+                                const isPin = pinnedSet.has(node.session.id);
+                                if (i > 0) {
+                                  const prev = nodes[i - 1];
+                                  if (prev && pinnedSet.has(prev.session.id) && !isPin) {
+                                    out.push(
+                                      <div key={`pin-line-${i}`} style={{ margin: "2px 6px 4px", height: 1, background: "color-mix(in srgb, var(--border) 45%, transparent)" }} />,
+                                    );
+                                  }
+                                }
+                                out.push(
+                                  <SessionTreeItem
+                                    key={node.session.id}
+                                    node={node}
+                                    selectedSessionId={selectedSessionId}
+                                    runningSessionIds={runningSessionIds}
+                                    unreadSessionIds={unreadSessionIds}
+                                    onSelectSession={handleSelectSessionFromList}
+                                    onRenamed={loadSessions}
+                                    onSessionDeleted={(id) => {
+                                      onSessionDeleted?.(id);
+                                      loadSessions();
+                                    }}
+                                    onTogglePin={handleToggleSessionPin}
+                                    depth={0}
+                                  />,
+                                );
+                              });
+                              return out;
+                            })()}
+                          </div>
+                        ),
+                      }))}
+                      newTaskOpen={newTaskOpen}
+                      onNewTaskOpenChange={setNewTaskOpen}
+                      onNewTask={(name) => void handleCreateTask(name)}
+                      onRenameTask={(id, name) => void handleRenameTask(id, name)}
+                      onDeleteTask={(id) => void handleDeleteTask(id)}
+                      onNewSessionFromTask={(taskId) => onNewSessionFromTask?.(taskId, selectedProject?.key ?? undefined)}
+                      onToggleTaskPin={handleToggleTaskPin}
+                      onDropSessionToTask={(taskId, sessionId) => void handleAssignSession(taskId, sessionId)}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Chat section — takes the remaining space; when collapsed its
+                  header anchors to the bottom so the tasks section fills up. */}
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  minHeight: 0,
+                  flex: chatCollapsed ? "0 0 auto" : "1 1 0",
+                  marginTop: chatCollapsed ? "auto" : 0,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", padding: "5px 10px 3px" }}>
+                  <button
+                    type="button"
+                    onClick={() => { const next = !chatCollapsed; setChatCollapsed(next); saveCollapsedFlag(TEMP_COLLAPSED_KEY, next); }}
+                    aria-expanded={!chatCollapsed}
+                    style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", color: "var(--text-dim)" }}
+                  >
+                    <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.02em" }}>{t("sidebar.tempSessions")}</span>
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: chatCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s" }} aria-hidden="true">
+                      <polyline points="2 3.5 5 6.5 8 3.5" />
+                    </svg>
+                  </button>
+                </div>
+                {!chatCollapsed && (
+                  <div
+                    onDragOver={(e) => {
+                      if (!e.dataTransfer.types.includes("text/session-id")) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      setTempDragOver(true);
+                    }}
+                    onDragLeave={() => setTempDragOver(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setTempDragOver(false);
+                      const sid = e.dataTransfer.getData("text/session-id");
+                      if (sid) void handleUnassignSession(sid);
+                    }}
+                    style={{
+                      flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden",
+                      background: tempDragOver ? "color-mix(in srgb, var(--accent) 8%, transparent)" : "transparent",
+                    }}
+                  >
+                    {chatNodes.map((node, i) => {
+                      const isPin = Boolean(node.session.pinned);
+                      const prevPin = i > 0 && Boolean(chatNodes[i - 1].session.pinned);
+                      return (
+                        <div key={node.session.id}>
+                          {prevPin && !isPin && (
+                            <div style={{ margin: "2px 6px 4px", height: 1, background: "color-mix(in srgb, var(--border) 45%, transparent)" }} />
+                          )}
+                          <SessionTreeItem
+                            node={node}
+                            selectedSessionId={selectedSessionId}
+                            runningSessionIds={runningSessionIds}
+                            unreadSessionIds={unreadSessionIds}
+                            onSelectSession={handleSelectSessionFromList}
+                            onRenamed={loadSessions}
+                            onSessionDeleted={(id) => {
+                              onSessionDeleted?.(id);
+                              loadSessions();
+                            }}
+                            onTogglePin={handleToggleSessionPin}
+                            depth={0}
+                          />
+                        </div>
+                      );
+                    })}
+                    {chatNodes.length === 0 && taskGroups.length === 0 && (
                       <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
                         {t("sidebar.noSessions")}
                       </div>
@@ -1876,121 +2025,88 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
       ) : (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
-      {/* File Explorer section */}
+      {/* File Explorer section — always expanded; the file actions live in a
+          toolbar at the top of the tree (FileExplorer toolbar prop) */}
       {(selectedCwdProp || selectedCwd) && (
         <div
           style={{
             borderTop: "1px solid var(--border)",
             display: "flex",
             flexDirection: "column",
-            flex: explorerOpen ? "1 1 0" : "0 0 auto",
+            flex: "1 1 0",
             minHeight: 0,
             overflow: "hidden",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-            <button
-              onClick={() => setExplorerOpen((open) => {
-                const next = !open;
-                saveExplorerOpen(next);
-                return next;
-              })}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                flex: 1,
-                padding: "6px 10px",
-                background: "none",
-                border: "none",
-                color: "var(--text-muted)",
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: "0.05em",
-                textTransform: "uppercase",
-                textAlign: "left",
-              }}
-            >
-              <svg
-                width="9" height="9" viewBox="0 0 10 10" fill="none"
-                stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
-                style={{ transform: explorerOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}
-              >
-                <polyline points="3 2 7 5 3 8" />
-              </svg>
-              {t("files.explorer")}
-            </button>
-            {explorerOpen && changesCount > 0 && (
-              <ToolbarIconButton
-                onClick={() => setChangesCollapsed((v) => !v)}
-                title={t("sidebar.changedFiles", { count: changesCount })}
-                ariaPressed={!changesCollapsed}
-                color={changesCollapsed ? "var(--text-dim)" : "var(--accent)"}
-                background={changesCollapsed ? "none" : "var(--side-active)"}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M3 12h6" />
-                  <path d="M15 12h6" />
-                </svg>
-              </ToolbarIconButton>
-            )}
-            {explorerOpen && (
-              <ToolbarIconButton
-                onClick={() => fileExplorerRef.current?.openUploadPicker()}
-                disabled={explorerUploadBusy}
-                title={t("sidebar.uploadFilesTitle")}
-                color="var(--text-dim)"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <path d="m17 8-5-5-5 5" />
-                  <path d="M12 3v12" />
-                </svg>
-              </ToolbarIconButton>
-            )}
-            <ToolbarIconButton
-              onClick={() => {
-                if (onExplorerRefresh) onExplorerRefresh();
-                else setExplorerKey((k) => k + 1);
-                setExplorerRefreshDone(true);
-                if (explorerRefreshTimerRef.current) clearTimeout(explorerRefreshTimerRef.current);
-                explorerRefreshTimerRef.current = setTimeout(() => setExplorerRefreshDone(false), 2000);
-              }}
-              title={t("sidebar.refreshExplorer")}
-              skipHover={explorerRefreshDone}
-              color={explorerRefreshDone ? "#4ade80" : "var(--text-dim)"}
-              background={explorerRefreshDone ? "rgba(74,222,128,0.18)" : "none"}
-              marginRight={6}
-            >
-              {explorerRefreshDone ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              ) : (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                  <path d="M3 3v5h5" />
-                </svg>
-              )}
-            </ToolbarIconButton>
+          <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+            <FileExplorer
+              ref={fileExplorerRef}
+              cwd={selectedCwd ?? selectedCwdProp!}
+              onOpenFile={onOpenFile ?? (() => {})}
+              refreshKey={explorerKey}
+              onAtMention={onAtMention}
+              onAtMentions={onAtMentions}
+              onUploadBusyChange={setExplorerUploadBusy}
+              changesCollapsed={changesCollapsed}
+              onChangesCountChange={setChangesCount}
+              toolbar={
+                <>
+                  {changesCount > 0 && (
+                    <ToolbarIconButton
+                      onClick={() => setChangesCollapsed((v) => !v)}
+                      title={t("sidebar.changedFiles", { count: changesCount })}
+                      ariaPressed={!changesCollapsed}
+                      color={changesCollapsed ? "var(--text-dim)" : "var(--accent)"}
+                      background={changesCollapsed ? "none" : "var(--side-active)"}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M3 12h6" />
+                        <path d="M15 12h6" />
+                      </svg>
+                    </ToolbarIconButton>
+                  )}
+                  <ToolbarIconButton
+                    onClick={() => fileExplorerRef.current?.openUploadPicker()}
+                    disabled={explorerUploadBusy}
+                    title={t("sidebar.uploadFilesTitle")}
+                    color="var(--text-dim)"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <path d="m17 8-5-5-5 5" />
+                      <path d="M12 3v12" />
+                    </svg>
+                  </ToolbarIconButton>
+                  <ToolbarIconButton
+                    onClick={() => {
+                      if (onExplorerRefresh) onExplorerRefresh();
+                      else setExplorerKey((k) => k + 1);
+                      setExplorerRefreshDone(true);
+                      if (explorerRefreshTimerRef.current) clearTimeout(explorerRefreshTimerRef.current);
+                      explorerRefreshTimerRef.current = setTimeout(() => setExplorerRefreshDone(false), 2000);
+                    }}
+                    title={t("sidebar.refreshExplorer")}
+                    skipHover={explorerRefreshDone}
+                    color={explorerRefreshDone ? "#4ade80" : "var(--text-dim)"}
+                    background={explorerRefreshDone ? "rgba(74,222,128,0.18)" : "none"}
+                    marginRight={0}
+                  >
+                    {explorerRefreshDone ? (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                        <path d="M3 3v5h5" />
+                      </svg>
+                    )}
+                  </ToolbarIconButton>
+                </>
+              }
+            />
           </div>
-          {explorerOpen && (
-            <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
-              <FileExplorer
-                ref={fileExplorerRef}
-                cwd={selectedCwd ?? selectedCwdProp!}
-                onOpenFile={onOpenFile ?? (() => {})}
-                refreshKey={explorerKey}
-                onAtMention={onAtMention}
-                onAtMentions={onAtMentions}
-                onUploadBusyChange={setExplorerUploadBusy}
-                changesCollapsed={changesCollapsed}
-                onChangesCountChange={setChangesCount}
-              />
-            </div>
-          )}
         </div>
       )}
           {worktreeSection}
@@ -1999,7 +2115,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     </div>
   );
 }
-
 function SessionTreeItem({
   node,
   selectedSessionId,
@@ -2008,6 +2123,7 @@ function SessionTreeItem({
   onSelectSession,
   onRenamed,
   onSessionDeleted,
+  onTogglePin,
   depth,
 }: {
   node: SessionTreeNode;
@@ -2017,6 +2133,7 @@ function SessionTreeItem({
   onSelectSession: (s: SessionInfo) => void;
   onRenamed?: () => void;
   onSessionDeleted?: (id: string) => void;
+  onTogglePin?: (sessionId: string, nextPinned: boolean) => void;
   depth: number;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -2044,6 +2161,7 @@ function SessionTreeItem({
           onClick={() => onSelectSession(node.session)}
           onRenamed={onRenamed}
           onDeleted={(id) => onSessionDeleted?.(id)}
+          onTogglePin={onTogglePin}
           depth={depth}
           hasChildren={hasChildren}
           collapsed={collapsed}
@@ -2062,6 +2180,7 @@ function SessionTreeItem({
               onSelectSession={onSelectSession}
               onRenamed={onRenamed}
               onSessionDeleted={onSessionDeleted}
+              onTogglePin={onTogglePin}
               depth={depth + 1}
             />
           ))}
@@ -2184,6 +2303,7 @@ function SessionItem({
   onClick,
   onRenamed,
   onDeleted,
+  onTogglePin,
   depth = 0,
   hasChildren = false,
   collapsed = false,
@@ -2196,6 +2316,7 @@ function SessionItem({
   onClick: () => void;
   onRenamed?: () => void;
   onDeleted?: (id: string) => void;
+  onTogglePin?: (sessionId: string, nextPinned: boolean) => void;
   depth?: number;
   hasChildren?: boolean;
   collapsed?: boolean;
@@ -2299,7 +2420,7 @@ function SessionItem({
   }, [onRenamed, session.cwd, session.id, session.name, session.path]);
 
   // Fixed-height outer wrapper — content swaps in place so the list never reflows
-  const ITEM_HEIGHT = 54;
+  const ITEM_HEIGHT = 40;
 
   return (
     <div
@@ -2318,13 +2439,13 @@ function SessionItem({
         alignItems: "center",
         paddingLeft: depth > 0 ? depth * 12 + 14 : 14,
         paddingRight: 8,
+        margin: "0 6px 2px",
+        borderRadius: 6,
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete
-          ? "rgba(239,68,68,0.06)"
-          : isSelected ? "var(--side-selected)" : hovered ? "var(--side-hover)" : "transparent",
-        borderLeft: confirmDelete
-          ? "2px solid #ef4444"
-          : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
+          ? "color-mix(in srgb, #ef4444 7%, transparent)"
+          : isSelected ? "color-mix(in srgb, var(--accent) 8%, transparent)" : hovered ? "var(--side-hover)" : "transparent",
+        borderLeft: "2px solid transparent",
         transition: "background 0.1s",
         opacity: deleting ? 0.5 : 1,
         gap: 6,
@@ -2343,8 +2464,9 @@ function SessionItem({
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
                 height: 30, padding: "0 11px",
-                background: "#ef4444", border: "none",
-                borderRadius: 6, color: "#fff",
+                background: "color-mix(in srgb, #ef4444 12%, transparent)",
+                border: "none",
+                borderRadius: 6, color: "#ef4444",
                 cursor: "pointer", fontSize: 12, fontWeight: 600,
                 whiteSpace: "nowrap",
               }}
@@ -2362,7 +2484,7 @@ function SessionItem({
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 height: 30, padding: "0 11px",
-                background: "var(--side-input)", border: "1px solid var(--border)",
+                background: "var(--side-input)", border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
                 borderRadius: 6, color: "var(--text-muted)",
                 cursor: "pointer", fontSize: 12, fontWeight: 500,
                 whiteSpace: "nowrap",
@@ -2408,54 +2530,97 @@ function SessionItem({
               <path d="M18 9a9 9 0 0 1-9 9" />
             </svg>
           )}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
+          <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
+            {session.pinned && (
+              <span title={t("sidebar.pinned")} style={{ display: "inline-flex", flexShrink: 0, color: "var(--accent)" }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 17v5" />
+                  <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+                </svg>
+              </span>
+            )}
+            {isRunning ? (
+              <RunningSessionIndicator />
+            ) : isUnread ? (
+              <UnreadSessionIndicator />
+            ) : null}
+            {session.worktreeBranch && (
+              <span
+                title={`Worktree: ${session.cwd}`}
+                style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--accent)", minWidth: 0, overflow: "hidden", flexShrink: 0 }}
+              >
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <line x1="6" y1="3" x2="6" y2="15" />
+                  <circle cx="18" cy="6" r="3" />
+                  <circle cx="6" cy="18" r="3" />
+                  <path d="M18 9a9 9 0 0 1-9 9" />
+                </svg>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.worktreeBranch}</span>
+              </span>
+            )}
+            <span
+              title={title}
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                minWidth: 0,
+                flex: 1, minWidth: 0,
                 fontSize: 12,
                 fontWeight: isSelected ? 500 : 400,
                 lineHeight: 1.4,
                 color: "var(--text)",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               }}
-              title={title}
             >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                {title}
-              </span>
-            </div>
-            <div style={{ marginTop: 2, display: "flex", alignItems: "center", gap: 8, color: "var(--text-dim)", fontSize: 11, minWidth: 0 }}>
-              {isRunning ? (
-                <RunningSessionIndicator />
-              ) : isUnread ? (
-                <UnreadSessionIndicator />
-              ) : (
-                <span title={session.modified}>{formatRelativeTime(session.modified)}</span>
-              )}
-              <span>{t("sidebar.messagesCount", { count: session.messageCount })}</span>
-              {session.worktreeBranch && (
-                <span
-                  title={`Worktree: ${session.cwd}`}
-                  style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--accent)", minWidth: 0, overflow: "hidden" }}
-                >
-                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                    <line x1="6" y1="3" x2="6" y2="15" />
-                    <circle cx="18" cy="6" r="3" />
-                    <circle cx="6" cy="18" r="3" />
-                    <path d="M18 9a9 9 0 0 1-9 9" />
-                  </svg>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.worktreeBranch}</span>
-                </span>
-              )}
-            </div>
+              {title}
+            </span>
           </div>
 
-          {/* Action buttons — shown on hover. Placed BEFORE the collapse toggle
-              so the toggle keeps a fixed rightmost position while hovering. */}
+          {/* Expand / collapse toggle — shown on hover, placed before the fork
+              indicator so the toggle is the leftmost element. */}
+          {hovered && hasChildren && !session.transient && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleCollapse?.(); }}
+              title={collapsed ? "Expand forks" : "Collapse forks"}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 20, height: 20, padding: 0, flexShrink: 0,
+                background: "none", border: "none",
+                color: "var(--text-dim)", cursor: "pointer",
+                transform: collapsed ? "rotate(-90deg)" : "none",
+                transition: "transform 0.15s",
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="2 3.5 5 6.5 8 3.5" />
+              </svg>
+            </button>
+          )}
+          {/* Action buttons — shown on hover. */}
           {hovered && !session.transient && (
             <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+              <button
+                onClick={() => onTogglePin?.(session.id, !session.pinned)}
+                title={session.pinned ? t("sidebar.unpin") : t("sidebar.pin")}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 32, height: 32, padding: 0,
+                  background: "transparent", border: "1px solid transparent",
+                  borderRadius: 7, color: session.pinned ? "var(--accent)" : "var(--text-muted)",
+                  cursor: "pointer", flexShrink: 0,
+                  transition: "background 0.12s, color 0.12s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "var(--side-active)";
+                  e.currentTarget.style.color = "var(--accent)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.color = session.pinned ? "var(--accent)" : "var(--text-muted)";
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 17v5" />
+                  <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+                </svg>
+              </button>
               <button
                 onClick={startRename}
                 title={t("sidebar.rename")}
@@ -2510,26 +2675,6 @@ function SessionItem({
             </div>
           )}
 
-          {/* Collapse toggle — always visible, stays rightmost so its position
-              does not shift when the hover action buttons appear */}
-          {hasChildren && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onToggleCollapse?.(); }}
-              title={collapsed ? "Expand forks" : "Collapse forks"}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 20, height: 20, padding: 0, flexShrink: 0,
-                background: "none", border: "none",
-                color: "var(--text-dim)", cursor: "pointer",
-                transform: collapsed ? "rotate(-90deg)" : "none",
-                transition: "transform 0.15s",
-              }}
-            >
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="2 3.5 5 6.5 8 3.5" />
-              </svg>
-            </button>
-          )}
         </>
       )}
     </div>
@@ -2542,8 +2687,8 @@ function SessionItem({
 // ============================================================================
 
 const SIDEBAR_TAB_KEY = "pi-sidebar-tab";
-const TASK_AREA_COLLAPSED_KEY = "pi-sidebar-task-area-collapsed";
-const TEMP_COLLAPSED_KEY = "pi-sidebar-temp-collapsed";
+const TASKS_COLLAPSED_KEY = "pi-sidebar-tasks-collapsed";
+const TEMP_COLLAPSED_KEY = "pi-sidebar-chat-collapsed";
 
 function loadSidebarTab(): SidebarTab {
   if (typeof window === "undefined") return "sessions";
@@ -2562,7 +2707,7 @@ function saveSidebarTab(tab: SidebarTab): void {
   }
 }
 
-function loadCollapsed(key: string): boolean {
+function loadCollapsedFlag(key: string): boolean {
   if (typeof window === "undefined") return false;
   try {
     return window.localStorage.getItem(key) === "1";
@@ -2571,24 +2716,11 @@ function loadCollapsed(key: string): boolean {
   }
 }
 
-function saveCollapsed(key: string, collapsed: boolean): void {
+function saveCollapsedFlag(key: string, collapsed: boolean): void {
   try {
     if (collapsed) window.localStorage.setItem(key, "1");
     else window.localStorage.removeItem(key);
   } catch {
     // ignore storage errors
   }
-}
-
-function loadTaskAreaCollapsed(): boolean {
-  return loadCollapsed(TASK_AREA_COLLAPSED_KEY);
-}
-function saveTaskAreaCollapsed(v: boolean): void {
-  saveCollapsed(TASK_AREA_COLLAPSED_KEY, v);
-}
-function loadTempCollapsed(): boolean {
-  return loadCollapsed(TEMP_COLLAPSED_KEY);
-}
-function saveTempCollapsed(v: boolean): void {
-  saveCollapsed(TEMP_COLLAPSED_KEY, v);
 }
