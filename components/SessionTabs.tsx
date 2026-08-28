@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 
 export type SidebarTab = "sessions" | "files";
@@ -10,11 +11,14 @@ interface Props {
 }
 
 /**
- * Segmented pill switch between the sidebar's two views (sessions / files),
- * sitting directly below the path selector.
+ * Underline tabs between the path selector and the sidebar content. No
+ * floating container: one hairline runs across the row and the active tab
+ * paints its own 2px accent line over it. Hover is React-state driven (no
+ * manual style writes — those survive re-renders and leak stale colors).
  */
 export function SessionTabs({ active, onChange }: Props) {
   const { t } = useI18n();
+  const [hoveredTab, setHoveredTab] = useState<SidebarTab | null>(null);
   const tabs: { key: SidebarTab; label: string; icon: React.ReactNode }[] = [
     {
       key: "sessions",
@@ -42,51 +46,39 @@ export function SessionTabs({ active, onChange }: Props) {
       aria-label={t("sidebar.views")}
       style={{
         display: "flex",
-        gap: 2,
-        padding: 2,
-        background: "var(--side-input)",
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        margin: "0 10px 8px",
-        flexShrink: 0,
+        flex: "0 0 auto",
+        minWidth: 0,
+        borderBottom: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
       }}
     >
       {tabs.map(({ key, label, icon }) => {
         const selected = active === key;
+        const hovered = !selected && hoveredTab === key;
         return (
           <button
             key={key}
             role="tab"
             aria-selected={selected}
             onClick={() => onChange(key)}
+            onMouseEnter={() => setHoveredTab(key)}
+            onMouseLeave={() => setHoveredTab(null)}
             style={{
               flex: 1,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               gap: 6,
-              height: 26,
+              height: 32,
               padding: 0,
               border: "none",
-              borderRadius: 6,
+              borderBottom: selected ? "2px solid var(--accent)" : "2px solid transparent",
+              marginBottom: -1,
+              background: hovered ? "var(--side-hover)" : "transparent",
               cursor: "pointer",
               fontSize: 11,
               fontWeight: selected ? 600 : 400,
-              color: selected ? "var(--accent)" : "var(--text-muted)",
-              background: selected ? "var(--side-selected)" : "transparent",
-              transition: "background 0.12s, color 0.12s",
-            }}
-            onMouseEnter={(e) => {
-              if (!selected) {
-                e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = "var(--text)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!selected) {
-                e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "var(--text-muted)";
-              }
+              color: selected ? "var(--accent)" : hovered ? "var(--text)" : "var(--text-muted)",
+              transition: "color 0.12s, background 0.12s",
             }}
           >
             {icon}

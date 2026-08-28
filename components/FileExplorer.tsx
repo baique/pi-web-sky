@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useState, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { forwardRef, useState, useCallback, useEffect, useImperativeHandle, useMemo, useRef, type ReactNode } from "react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
 import {
   encodeFilePathForApi,
@@ -39,6 +39,9 @@ interface Props {
   onUploadBusyChange?: (busy: boolean) => void;
   changesCollapsed: boolean;
   onChangesCountChange?: (count: number) => void;
+  /** File-tree actions (upload / refresh / changes toggle) rendered at the top
+   *  of the file area, next to the content they operate on. */
+  toolbar?: ReactNode;
 }
 
 export interface FileExplorerHandle {
@@ -388,7 +391,7 @@ function TreeNode({
               padding: "0 8px",
               height: 20,
               background: "var(--side-input)",
-              border: "1px solid var(--border)",
+              border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
               borderRadius: 4,
               color: "var(--accent)",
               cursor: "pointer",
@@ -419,7 +422,7 @@ function TreeNode({
               padding: "0 5px",
               height: 20,
               background: "var(--side-input)",
-              border: "1px solid var(--border)",
+              border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
               borderRadius: 4,
               color: "var(--text-muted)",
               cursor: "pointer",
@@ -587,6 +590,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   onUploadBusyChange,
   changesCollapsed,
   onChangesCountChange,
+  toolbar,
 }, ref) {
   const { t } = useI18n();
   const [roots, setRoots] = useState<FileNode[]>([]);
@@ -812,6 +816,11 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   return (
     <div style={{ minHeight: "100%" }}>
       <input ref={uploadInputRef} type="file" multiple hidden onChange={handleUploadInput} />
+      {toolbar && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 2, padding: "2px 8px 0" }}>
+          {toolbar}
+        </div>
+      )}
       {showUploadFeedback && (
         <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
         {uploadBusy && (
@@ -852,7 +861,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
               <button type="button" onClick={() => void performUpload(pendingConflict.files, "overwrite")} style={{ height: 22, padding: "0 7px", border: "1px solid #ef4444", borderRadius: 4, background: "transparent", color: "#ef4444", cursor: "pointer", fontSize: 10 }}>
                 {t("files.replace")}
               </button>
-              <button type="button" onClick={() => void performUpload(pendingConflict.files, "skip")} style={{ height: 22, padding: "0 7px", border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: 10 }}>
+              <button type="button" onClick={() => void performUpload(pendingConflict.files, "skip")} style={{ height: 22, padding: "0 7px", border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: 10 }}>
                 {t("files.skipExisting")}
               </button>
               <button type="button" onClick={() => setPendingConflict(null)} style={{ height: 22, padding: "0 7px", border: "none", borderRadius: 4, background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 10 }}>
@@ -907,7 +916,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                   onClick={addUploadedFilesToChat}
                   title={uploadSummary.uploaded.length === 1 ? t("files.addUploadedFile") : t("files.addAllUploadedFiles")}
                   aria-label={uploadSummary.uploaded.length === 1 ? t("files.addUploadedFile") : t("files.addAllUploadedFiles")}
-                  style={{ height: 22, padding: "0 7px", display: "flex", alignItems: "center", justifyContent: "center", gap: 4, flexShrink: 0, border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
+                  style={{ height: 22, padding: "0 7px", display: "flex", alignItems: "center", justifyContent: "center", gap: 4, flexShrink: 0, border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
                 >
                   <MentionIcon />
                   {t("files.mention")}
@@ -967,7 +976,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 fontSize: 11,
                 fontFamily: "var(--font-mono)",
                 padding: "5px 8px",
-                border: "1px solid var(--border)",
+                border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
                 borderRadius: 5,
                 outline: "none",
                 background: "var(--side-input)",

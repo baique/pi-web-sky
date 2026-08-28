@@ -78,29 +78,34 @@ export function applyWallpaperCss(s: WallpaperSettings, hasImage: boolean): void
   }
 }
 
-/** Average the leftmost/rightmost pixel columns of an image blob into two CSS colours. */
+/**
+ * Sample the leftmost/rightmost pixel column of an image blob into two CSS colours.
+ * Only samples the top 8 rows — a short vertical slice keeps colours true to the
+ * wallpaper edge and avoids the "washed out" result that happens when averaging
+ * highlights, shadows and midtones over a taller strip.
+ */
 export async function sampleEdgeColors(
   blob: Blob,
 ): Promise<{ left: string; right: string } | null> {
   try {
     const bmp = await createImageBitmap(blob);
-    const h = 64;
-    const w = Math.max(2, Math.round((bmp.width * h) / bmp.height));
+    const sampleH = 8;
+    const w = Math.max(1, Math.round((bmp.width * sampleH) / bmp.height));
     const canvas = document.createElement("canvas");
     canvas.width = w;
-    canvas.height = h;
+    canvas.height = sampleH;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return null;
-    ctx.drawImage(bmp, 0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, sampleH);
     const avg = (x: number): string => {
-      const d = ctx.getImageData(x, 0, 1, h).data;
+      const d = ctx.getImageData(x, 0, 1, sampleH).data;
       let r = 0, g = 0, b = 0;
-      for (let i = 0; i < h; i++) {
+      for (let i = 0; i < sampleH; i++) {
         r += d[i * 4];
         g += d[i * 4 + 1];
         b += d[i * 4 + 2];
       }
-      return `rgb(${Math.round(r / h)}, ${Math.round(g / h)}, ${Math.round(b / h)})`;
+      return `rgb(${Math.round(r / sampleH)}, ${Math.round(g / sampleH)}, ${Math.round(b / sampleH)})`;
     };
     const result = { left: avg(0), right: avg(w - 1) };
     bmp.close();

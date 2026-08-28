@@ -1947,7 +1947,10 @@ function BashExecutionView({ message, sessionId }: { message: BashExecutionMessa
 
   // Reuse the existing ToolCallBlock so user-run bash looks identical to an
   // agent-run bash tool call: same header, collapse behavior, result pane.
-  // Synthesize an equivalent ToolCallContent + ToolResultMessage pair.
+  // The wrapper shell uses the AI-message bubble recipe so user-run bash is
+  // always visible as a bubble (collapsed tool rows are intentionally
+  // background-less inline lines, which reads as "no bubble" for a message
+  // the user sent themselves).
   const toolName = message.excludeFromContext ? "bash (local)" : "bash";
   const block: ToolCallContent = {
     type: "toolCall",
@@ -1967,7 +1970,18 @@ function BashExecutionView({ message, sessionId }: { message: BashExecutionMessa
       };
 
   return (
-    <div style={{ margin: "6px 0" }}>
+    <div
+      style={{
+        margin: "6px 0",
+        padding: "4px",
+        borderRadius: "var(--bubble-radius)",
+        background: "var(--assistant-card-glass)",
+        backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+        WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+        border: "1px solid var(--bubble-border)",
+        boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
+      }}
+    >
       <ToolCallBlock block={block} result={result} />
       {message.truncated && fullOutputUrl && (
         <div style={{ padding: "4px 10px", fontSize: 11, marginTop: -1 }}>

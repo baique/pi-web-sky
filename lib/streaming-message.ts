@@ -127,7 +127,14 @@ export function streamReducer(
 ): StreamingState {
   switch (action.type) {
     case "start":
-      return { isStreaming: true, streamingMessage: null };
+      // A late `start` (e.g. the mount-time state restore finishing after the
+      // SSE reconnect already replayed the partial message via `snapshot`)
+      // must not wipe an in-flight streaming message. Clearing it here would
+      // drop every subsequent text delta (applyDelta needs an existing block)
+      // and freeze the typewriter until the whole message lands at message_end.
+      return state.streamingMessage
+        ? { ...state, isStreaming: true }
+        : { isStreaming: true, streamingMessage: null };
     case "snapshot": {
       const message = normalizeStreamingToolCalls(action.message);
       return message.role === "assistant"

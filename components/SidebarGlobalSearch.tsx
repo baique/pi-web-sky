@@ -14,6 +14,8 @@ interface SearchHit {
 
 interface Props {
   onSelectSession: (session: SessionInfo) => void;
+  /** False when the search sits leftmost in the top bar (no left divider). */
+  leadingBorder?: boolean;
 }
 
 const DEBOUNCE_MS = 350;
@@ -44,7 +46,7 @@ function renderSnippet(snippet: string): React.ReactNode {
  * file-panel toggle). Desktop: inline input + popover results. Mobile: icon
  * button that expands a full-width overlay input.
  */
-export function SidebarGlobalSearch({ onSelectSession }: Props) {
+export function SidebarGlobalSearch({ onSelectSession, leadingBorder = true }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
@@ -243,7 +245,7 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
             display: "flex", alignItems: "center", justifyContent: "center",
             width: 36, height: "100%", padding: 0,
             background: mobileOverlay ? "var(--bg-selected)" : "none",
-            border: "none", borderLeft: "1px solid var(--border)",
+            border: "none", borderLeft: leadingBorder ? "1px solid var(--border)" : "none",
             color: mobileOverlay ? "var(--text)" : "var(--text-muted)",
             cursor: "pointer",
           }}
@@ -319,7 +321,7 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
         flexShrink: 0,
         width: 190,
         padding: "0 12px",
-        borderLeft: "1px solid var(--border)",
+        borderLeft: leadingBorder ? "1px solid var(--border)" : "none",
         background: open ? "var(--bg-selected)" : "transparent",
         color: open ? "var(--text)" : "var(--text-muted)",
         cursor: "text",
