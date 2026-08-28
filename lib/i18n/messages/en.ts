@@ -128,6 +128,7 @@ export const enLocale: LocalePlugin = {
     "sidebar.pinTask": "Pin task",
     "sidebar.unpinTask": "Unpin task",
     "sidebar.pinned": "Pinned",
+    "sidebar.moreActions": "More actions",
     "sidebar.delete": "Delete",
     "sidebar.deleteWithShiftClick": "Delete (Shift+click to delete without confirmation)",
     "sidebar.expandForks": "Expand forks",

@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { FolderIcon } from "./FileIcons";
+import { AnimatedDropdown } from "./AnimatedDropdown";
 
 /** Local mirror of lib/task-store's Task — keeps the client bundle free of
  *  server-only modules (node:sqlite). */
@@ -100,7 +101,60 @@ function TaskCard({
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** 更多（⋮）下拉：打开态 + 展开方向（下方空间不足时向上） */
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [moreUp, setMoreUp] = useState(false);
   const renameRef = useRef<HTMLInputElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+
+  // 菜单打开时：点击菜单外任意处 / Escape 关闭（捕获阶段监听，避免被 stopPropagation 拦掉）。
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onPointerDown = (ev: PointerEvent) => {
+      if (actionsRef.current && !actionsRef.current.contains(ev.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setMoreOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [moreOpen]);
+
+  // 打开菜单前测可用空间：按钮下方放不下菜单则向上展开。
+  const handleMoreClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (moreOpen) {
+      setMoreOpen(false);
+      return;
+    }
+    const btn = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    let node = (e.currentTarget as HTMLElement).parentElement;
+    let container: Element | null = null;
+    while (node) {
+      const st = getComputedStyle(node);
+      if (st.overflowY === "auto" || st.overflowY === "scroll" || st.overflowY === "overlay") {
+        container = node;
+        break;
+      }
+      node = node.parentElement;
+    }
+    const cRect = container
+      ? container.getBoundingClientRect()
+      : { top: 0, bottom: window.innerHeight };
+    const MENU_HEIGHT_EST = 3 * 34 + 12; // 菜单三项估算高 + 内边距
+    const spaceBelow = cRect.bottom - btn.bottom;
+    const spaceAbove = btn.top - cRect.top;
+    const fitsBelow = spaceBelow >= MENU_HEIGHT_EST;
+    const fitsAbove = spaceAbove >= MENU_HEIGHT_EST;
+    setMoreUp(!fitsBelow && (fitsAbove || spaceAbove > spaceBelow));
+    setMoreOpen(true);
+  }, [moreOpen]);
 
   useEffect(() => {
     if (renaming) {
@@ -224,25 +278,116 @@ function TaskCard({
             <span title={`${task.name} · ${formatRelativeTime(task.created)}`} style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {task.name}
             </span>
-            {hovered && !renaming && !confirmDelete && (
-              <span style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+            {task.pinned && !renaming && !confirmDelete && (
+              <span title={t("sidebar.pinned")} style={{ display: "inline-flex", flexShrink: 0, color: "var(--accent)" }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 17v5" />
+                  <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+                </svg>
+              </span>
+            )}
+            {(hovered || moreOpen) && !renaming && !confirmDelete && (
+              <span ref={actionsRef} style={{ position: "relative", display: "flex", gap: 3, flexShrink: 0, alignItems: "center" }}>
                 <button
                   type="button"
-                  title={task.pinned ? t("sidebar.unpinTask") : t("sidebar.pinTask")}
-                  onClick={(e) => { e.stopPropagation(); onTogglePin(task.id); }}
-                  style={{ ...iconStyle, color: task.pinned ? "var(--accent)" : "var(--text-muted)" }}
+                  title={t("sidebar.newTaskSession")}
+                  onClick={(e) => { e.stopPropagation(); onNewSession(task.id); }}
+                  style={{ ...iconStyle, width: 28, height: 28 }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-active)"; e.currentTarget.style.color = "var(--accent)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
                 >
-                  {pinIcon}
-                </button>
-                <button type="button" title={t("sidebar.newTaskSession")} onClick={(e) => { e.stopPropagation(); onNewSession(task.id); }} style={iconStyle}>
                   {bubbleIcon}
                 </button>
-                <button type="button" title={t("sidebar.rename")} onClick={(e) => { e.stopPropagation(); setRenameValue(task.name); setRenaming(true); }} style={iconStyle}>
+                <button type="button" title={t("sidebar.rename")} onClick={(e) => { e.stopPropagation(); setRenameValue(task.name); setRenaming(true); setMoreOpen(false); }} style={{ ...iconStyle, width: 28, height: 28 }} onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-active)"; e.currentTarget.style.color = "var(--accent)"; }} onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}>
                   {pencilIcon}
                 </button>
-                <button type="button" title={t("sidebar.deleteTask")} onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }} onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.background = "rgba(239,68,68,0.12)"; }} onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "transparent"; }} style={iconStyle}>
-                  {trashIcon}
+                <button
+                  type="button"
+                  title={t("sidebar.moreActions")}
+                  aria-expanded={moreOpen}
+                  aria-haspopup="menu"
+                  onClick={handleMoreClick}
+                  style={{ ...iconStyle, width: 28, height: 28, background: moreOpen ? "var(--side-active)" : "transparent", color: moreOpen ? "var(--accent)" : "var(--text-muted)" }}
+                  onMouseEnter={(e) => { if (moreOpen) return; e.currentTarget.style.background = "var(--side-active)"; e.currentTarget.style.color = "var(--accent)"; }}
+                  onMouseLeave={(e) => { if (moreOpen) return; e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="5" r="1.4" fill="currentColor" />
+                    <circle cx="12" cy="12" r="1.4" fill="currentColor" />
+                    <circle cx="12" cy="19" r="1.4" fill="currentColor" />
+                  </svg>
                 </button>
+
+                <AnimatedDropdown
+                  open={moreOpen}
+                  up={moreUp}
+                  style={{
+                    position: "absolute",
+                    top: moreUp ? "auto" : "calc(100% + 4px)",
+                    bottom: moreUp ? "calc(100% + 4px)" : "auto",
+                    right: 0,
+                    zIndex: 120,
+                    minWidth: 148,
+                    background: "var(--panel-glass)",
+                    backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+                    WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+                    border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+                    borderRadius: 9,
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                    padding: 4,
+                  }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column", gap: 1 }} role="menu">
+                    <button
+                      role="menuitem"
+                      onClick={(e) => { e.stopPropagation(); setMoreOpen(false); onTogglePin(task.id); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        padding: "7px 10px", border: "none", borderRadius: 6,
+                        background: "transparent", color: task.pinned ? "var(--accent)" : "var(--text)",
+                        cursor: "pointer", fontSize: 12, textAlign: "left",
+                        transition: "background 0.1s",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-hover)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <span style={{ flexShrink: 0, display: "inline-flex" }}>{pinIcon}</span>
+                      {task.pinned ? t("sidebar.unpinTask") : t("sidebar.pinTask")}
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={(e) => { e.stopPropagation(); setMoreOpen(false); setRenameValue(task.name); setRenaming(true); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        padding: "7px 10px", border: "none", borderRadius: 6,
+                        background: "transparent", color: "var(--text)",
+                        cursor: "pointer", fontSize: 12, textAlign: "left",
+                        transition: "background 0.1s",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-hover)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <span style={{ flexShrink: 0, display: "inline-flex" }}>{pencilIcon}</span>
+                      {t("sidebar.rename")}
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={(e) => { e.stopPropagation(); setMoreOpen(false); setConfirmDelete(true); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        padding: "7px 10px", border: "none", borderRadius: 6,
+                        background: "transparent", color: "#ef4444",
+                        cursor: "pointer", fontSize: 12, textAlign: "left",
+                        transition: "background 0.1s",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.10)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <span style={{ flexShrink: 0, display: "inline-flex" }}>{trashIcon}</span>
+                      {t("sidebar.deleteTask")}
+                    </button>
+                  </div>
+                </AnimatedDropdown>
               </span>
             )}
           </>

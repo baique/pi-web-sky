@@ -7,6 +7,7 @@ import { skillExpansionToCommand } from "@/lib/slash-display";
 import { getProjectActivity, getRecentProjects, sessionsForProject } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { useI18n } from "@/hooks/useI18n";
+import { AnimatedDropdown } from "./AnimatedDropdown";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { SessionTabs, type SidebarTab } from "./SessionTabs";
@@ -195,53 +196,6 @@ function PathLabel({ text, style }: { text: string; style?: CSSProperties }) {
     >
       <span style={{ unicodeBidi: "plaintext" }}>{text}</span>
     </span>
-  );
-}
-
-const DROPDOWN_ANIMATION_MS = 140;
-
-function AnimatedDropdown({ open, children, style, up = false }: { open: boolean; children: ReactNode; style: CSSProperties; up?: boolean }) {
-  const [mounted, setMounted] = useState(open);
-  const [visible, setVisible] = useState(open);
-
-  useEffect(() => {
-    let frame: number | undefined;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-
-    if (open) {
-      setMounted(true);
-      setVisible(false);
-      frame = window.requestAnimationFrame(() => {
-        frame = window.requestAnimationFrame(() => setVisible(true));
-      });
-    } else {
-      setVisible(false);
-      timeout = setTimeout(() => setMounted(false), DROPDOWN_ANIMATION_MS);
-    }
-
-    return () => {
-      if (frame !== undefined) window.cancelAnimationFrame(frame);
-      if (timeout) clearTimeout(timeout);
-    };
-  }, [open]);
-
-  if (!mounted) return null;
-
-  return (
-    <div
-      style={{
-        ...style,
-        opacity: visible ? 1 : 0,
-        transform: visible
-          ? "translateY(0) scale(1)"
-          : up ? "translateY(8px) scale(0.96)" : "translateY(-8px) scale(0.96)",
-        transformOrigin: up ? "bottom center" : "top center",
-        transition: `opacity ${DROPDOWN_ANIMATION_MS}ms ease, transform ${DROPDOWN_ANIMATION_MS}ms ease`,
-        pointerEvents: open ? "auto" : "none",
-      }}
-    >
-      {children}
-    </div>
   );
 }
 
@@ -2328,7 +2282,60 @@ function SessionItem({
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  /** 更多（⋮）下拉：打开态 + 展开方向（下方空间不足时向上） */
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [moreUp, setMoreUp] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+
+  // 菜单打开时：点击菜单外任意处 / Escape 关闭（用捕获阶段监听，避免被 stopPropagation 拦掉）。
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onPointerDown = (ev: PointerEvent) => {
+      if (actionsRef.current && !actionsRef.current.contains(ev.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setMoreOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [moreOpen]);
+
+  // 打开菜单前测可用空间：按钮下方放不下菜单则向上展开。
+  const handleMoreClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (moreOpen) {
+      setMoreOpen(false);
+      return;
+    }
+    const btn = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    let node = (e.currentTarget as HTMLElement).parentElement;
+    let container: Element | null = null;
+    while (node) {
+      const st = getComputedStyle(node);
+      if (st.overflowY === "auto" || st.overflowY === "scroll" || st.overflowY === "overlay") {
+        container = node;
+        break;
+      }
+      node = node.parentElement;
+    }
+    const cRect = container
+      ? container.getBoundingClientRect()
+      : { top: 0, bottom: window.innerHeight };
+    const MENU_HEIGHT_EST = 3 * 34 + 12; // 菜单三项估算高 + 内边距
+    const spaceBelow = cRect.bottom - btn.bottom;
+    const spaceAbove = btn.top - cRect.top;
+    const fitsBelow = spaceBelow >= MENU_HEIGHT_EST;
+    const fitsAbove = spaceAbove >= MENU_HEIGHT_EST;
+    setMoreUp(!fitsBelow && (fitsAbove || spaceAbove > spaceBelow));
+    setMoreOpen(true);
+  }, [moreOpen]);
 
   // Select the whole name once the rename input is mounted (startRename's
   // immediate setTimeout can fire before the input exists).
@@ -2349,6 +2356,7 @@ function SessionItem({
   const startRename = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (session.transient) return;
+    setMoreOpen(false);
     setRenameValue(session.name || displayFirstMessage.slice(0, 50) || session.id.slice(0, 12));
     setRenaming(true);
   }, [session.name, session.transient, displayFirstMessage, session.id]);
@@ -2387,6 +2395,7 @@ function SessionItem({
 
   const handleDeleteClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
+    setMoreOpen(false);
     if (e.shiftKey) {
       void performDelete();
     } else {
@@ -2430,6 +2439,7 @@ function SessionItem({
       onMouseLeave={() => { setHovered(false); }}
       draggable={!session.transient && !renaming && !confirmDelete}
       onDragStart={(e) => {
+        setMoreOpen(false);
         e.dataTransfer.setData("text/session-id", session.id);
         e.dataTransfer.effectAllowed = "move";
       }}
@@ -2449,7 +2459,6 @@ function SessionItem({
         transition: "background 0.1s",
         opacity: deleting ? 0.5 : 1,
         gap: 6,
-        overflow: "hidden",
       }}
     >
       {confirmDelete ? (
@@ -2593,40 +2602,15 @@ function SessionItem({
               </svg>
             </button>
           )}
-          {/* Action buttons — shown on hover. */}
-          {hovered && !session.transient && (
-            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-              <button
-                onClick={() => onTogglePin?.(session.id, !session.pinned)}
-                title={session.pinned ? t("sidebar.unpin") : t("sidebar.pin")}
-                style={{
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 32, height: 32, padding: 0,
-                  background: "transparent", border: "1px solid transparent",
-                  borderRadius: 7, color: session.pinned ? "var(--accent)" : "var(--text-muted)",
-                  cursor: "pointer", flexShrink: 0,
-                  transition: "background 0.12s, color 0.12s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--side-active)";
-                  e.currentTarget.style.color = "var(--accent)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                  e.currentTarget.style.color = session.pinned ? "var(--accent)" : "var(--text-muted)";
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 17v5" />
-                  <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
-                </svg>
-              </button>
+          {/* Action buttons — shown on hover: 编辑 + 更多（⋮，下拉 置顶/编辑/删除） */}
+          {(hovered || moreOpen) && !session.transient && (
+            <div ref={actionsRef} style={{ position: "relative", display: "flex", gap: 4, flexShrink: 0, alignItems: "center" }}>
               <button
                 onClick={startRename}
                 title={t("sidebar.rename")}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 32, height: 32, padding: 0,
+                  width: 28, height: 28, padding: 0,
                   background: "transparent", border: "1px solid transparent",
                   borderRadius: 7, color: "var(--text-muted)",
                   cursor: "pointer", flexShrink: 0,
@@ -2646,32 +2630,131 @@ function SessionItem({
                 </svg>
               </button>
               <button
-                onClick={handleDeleteClick}
-                title={t("sidebar.deleteWithShiftClick")}
+                onClick={handleMoreClick}
+                aria-expanded={moreOpen}
+                aria-haspopup="menu"
+                title={t("sidebar.moreActions")}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 32, height: 32, padding: 0,
-                  background: "transparent", border: "1px solid transparent",
-                  borderRadius: 7, color: "var(--text-muted)",
+                  width: 28, height: 28, padding: 0,
+                  background: moreOpen ? "var(--side-active)" : "transparent",
+                  border: "1px solid transparent",
+                  borderRadius: 7,
+                  color: moreOpen ? "var(--accent)" : "var(--text-muted)",
                   cursor: "pointer", flexShrink: 0,
                   transition: "background 0.12s, color 0.12s",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "rgba(239,68,68,0.12)";
-                  e.currentTarget.style.color = "#ef4444";
+                  if (moreOpen) return;
+                  e.currentTarget.style.background = "var(--side-active)";
+                  e.currentTarget.style.color = "var(--accent)";
                 }}
                 onMouseLeave={(e) => {
+                  if (moreOpen) return;
                   e.currentTarget.style.background = "transparent";
                   e.currentTarget.style.color = "var(--text-muted)";
                 }}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                  <path d="M10 11v6M14 11v6" />
-                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="5" r="1.4" fill="currentColor" />
+                  <circle cx="12" cy="12" r="1.4" fill="currentColor" />
+                  <circle cx="12" cy="19" r="1.4" fill="currentColor" />
                 </svg>
               </button>
+
+              <AnimatedDropdown
+                open={moreOpen}
+                up={moreUp}
+                style={{
+                  position: "absolute",
+                  top: moreUp ? "auto" : "calc(100% + 4px)",
+                  bottom: moreUp ? "calc(100% + 4px)" : "auto",
+                  right: 0,
+                  zIndex: 120,
+                  minWidth: 148,
+                  background: "var(--panel-glass)",
+                  backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+                  WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+                  border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+                  borderRadius: 9,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                  padding: 4,
+                }}
+              >
+                <div style={{ display: "flex", flexDirection: "column", gap: 1 }} role="menu">
+                  <button
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMoreOpen(false);
+                      onTogglePin?.(session.id, !session.pinned);
+                    }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8, width: "100%",
+                      padding: "7px 10px", border: "none", borderRadius: 6,
+                      background: "transparent", color: session.pinned ? "var(--accent)" : "var(--text)",
+                      cursor: "pointer", fontSize: 12, textAlign: "left",
+                      transition: "background 0.1s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-hover)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                      <path d="M12 17v5" />
+                      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+                    </svg>
+                    {session.pinned ? t("sidebar.unpin") : t("sidebar.pin")}
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMoreOpen(false);
+                      startRename(e);
+                    }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8, width: "100%",
+                      padding: "7px 10px", border: "none", borderRadius: 6,
+                      background: "transparent", color: "var(--text)",
+                      cursor: "pointer", fontSize: 12, textAlign: "left",
+                      transition: "background 0.1s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-hover)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                    </svg>
+                    {t("sidebar.rename")}
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMoreOpen(false);
+                      handleDeleteClick(e);
+                    }}
+                    title={t("sidebar.deleteWithShiftClick")}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8, width: "100%",
+                      padding: "7px 10px", border: "none", borderRadius: 6,
+                      background: "transparent", color: "#ef4444",
+                      cursor: "pointer", fontSize: 12, textAlign: "left",
+                      transition: "background 0.1s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.10)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                      <path d="M10 11v6M14 11v6" />
+                      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                    </svg>
+                    {t("sidebar.delete")}
+                  </button>
+                </div>
+              </AnimatedDropdown>
             </div>
           )}
 

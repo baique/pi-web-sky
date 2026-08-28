@@ -129,6 +129,7 @@ export const zhCNLocale: LocalePlugin = {
     "sidebar.pinTask": "置顶任务",
     "sidebar.unpinTask": "取消置顶任务",
     "sidebar.pinned": "已置顶",
+    "sidebar.moreActions": "更多操作",
     "sidebar.delete": "删除",
     "sidebar.deleteWithShiftClick": "删除（按住 Shift 点击可跳过确认）",
     "sidebar.expandForks": "展开分叉",
