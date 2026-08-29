@@ -12,8 +12,16 @@
 
 export const SUBAGENT_ASYNC_WIDGET_KEY = "subagent-async";
 export const SUBAGENT_INSPECT_WIDGET_KEY = "subagent-inspect";
+export const SUBAGENT_FLEET_STATUS_WIDGET_KEY = "subagent-fleet-status";
 export const SUBAGENT_ASYNC_JSON_PREFIX = "PI_SUBAGENT_ASYNC_JSON:";
 export const SUBAGENT_INSPECT_JSON_PREFIX = "PI_SUBAGENT_INSPECT_JSON:";
+
+/** pi-subagents 推的、在 pi-web 里不应作为可见 widget 渲染的 key（纯数据传输 / TUI 专属） */
+export const SUBAGENT_HIDDEN_WIDGET_KEYS = new Set([
+  SUBAGENT_ASYNC_WIDGET_KEY,
+  SUBAGENT_INSPECT_WIDGET_KEY,
+  SUBAGENT_FLEET_STATUS_WIDGET_KEY,
+]);
 
 /** pi-subagents AsyncStatusSnapshotV1 的节点结构（对齐插件侧，只取展示所需字段） */
 export interface SubagentSnapshotNode {

@@ -1166,6 +1166,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
             statuses={extensionStatuses}
             widgets={extensionWidgets}
             sessionId={session?.id ?? sessionIdRef.current ?? undefined}
+            tools={isMobile ? undefined : terminalBarToggle}
             notice={
               isMobile ? null : (
                 <div style={{ flex: "0 1 auto", minWidth: 0, overflow: "hidden", display: "flex", alignItems: "center", gap: 8, padding: "0 10px" }}>
@@ -1235,9 +1236,6 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               )
             }
           />
-          {!isMobile && (
-            <div className="extension-actions">{terminalBarToggle}</div>
-          )}
         </div>
       </div>
       </>

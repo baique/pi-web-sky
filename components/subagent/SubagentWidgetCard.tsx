@@ -55,6 +55,25 @@ function StateDot({ state }: { state: string }) {
   );
 }
 
+/**
+ * 过滤冗余层级：pi-subagents 快照里每个 run 通常带一个同名同状态的 step 子节点
+ * （single 模式的 run 只有一个 step，信息完全重复）。渲染时若某节点的唯一子节点
+ * 与它同名且状态一致，就折叠掉子层，避免出现"delegate → delegate"的视觉嵌套。
+ */
+function isRedundantChild(node: SubagentSnapshotNode): boolean {
+  const children = node.children;
+  if (!children || children.length !== 1) return false;
+  const child = children[0];
+  return child.kind === "step"
+    && (child.label === node.label || child.label === node.kind)
+    && child.state === node.state;
+}
+
+function visibleChildren(node: SubagentSnapshotNode): SubagentSnapshotNode[] {
+  if (isRedundantChild(node)) return [];
+  return node.children ?? [];
+}
+
 function NodeRow({
   node,
   depth,
@@ -69,12 +88,27 @@ function NodeRow({
   const { t } = useI18n();
   const label = node.label || node.kind;
   const elapsed = formatElapsed(node.startedAt, node.endedAt);
-  const tool = node.activity?.currentTool;
   const tokens = node.activity?.turnCount !== undefined || node.activity?.toolCount !== undefined;
+  const inspectable = node.state === "running" || node.state === "complete" || node.state === "failed" || node.state === "partial";
 
   return (
     <div style={{ paddingLeft: depth * 14 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, padding: "3px 0" }}>
+      <div
+        onClick={() => inspectable && onInspect(node)}
+        title={inspectable ? t("chat.extensionInspect") : undefined}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          minWidth: 0,
+          padding: "3px 0",
+          borderRadius: 5,
+          cursor: inspectable ? "pointer" : "default",
+          ...(inspectable && !inspecting ? { background: "transparent", transition: "background 0.1s" } : {}),
+        }}
+        onMouseEnter={(e) => { if (inspectable && !inspecting) e.currentTarget.style.background = "var(--bg-hover)"; }}
+        onMouseLeave={(e) => { if (inspectable && !inspecting) e.currentTarget.style.background = "transparent"; }}
+      >
         <StateDot state={node.state} />
         <span
           style={{
@@ -90,22 +124,6 @@ function NodeRow({
         <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 10, flexShrink: 0 }}>
           {STATE_LABELS[node.state] ?? node.state}
         </span>
-        {tool && (
-          <span
-            style={{
-              color: "var(--text-muted)",
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              flex: 1,
-              minWidth: 0,
-            }}
-          >
-            ⎿ {tool}
-          </span>
-        )}
         {elapsed && (
           <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 10, flexShrink: 0 }}>
             {elapsed}
@@ -116,29 +134,8 @@ function NodeRow({
             ⟳ {node.activity?.turnCount ?? 0} {node.activity?.toolCount !== undefined ? `/ ${node.activity.toolCount}t` : ""}
           </span>
         )}
-        {(node.state === "running" || node.state === "complete" || node.state === "failed" || node.state === "partial") && (
-          <button
-            type="button"
-            onClick={() => onInspect(node)}
-            disabled={inspecting}
-            style={{
-              marginLeft: "auto",
-              flexShrink: 0,
-              padding: "1px 7px",
-              borderRadius: 5,
-              border: "1px solid var(--border)",
-              background: "var(--bg-panel)",
-              color: "var(--text-muted)",
-              cursor: inspecting ? "default" : "pointer",
-              fontSize: 10,
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            {inspecting ? "…" : t("chat.extensionInspect")}
-          </button>
-        )}
       </div>
-      {node.children?.map((child) => (
+      {visibleChildren(node).map((child) => (
         <NodeRow key={child.id} node={child} depth={depth + 1} onInspect={onInspect} inspecting={false} />
       ))}
     </div>
@@ -156,11 +153,32 @@ export function SubagentWidgetCard({
   const [inspectingNode, setInspectingNode] = useState<SubagentSnapshotNode | null>(null);
   const [inspectReply, setInspectReply] = useState<SubagentInspectReply | null>(null);
   const pendingRequestRef = useRef<{ requestId: string; nodeId: string } | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   const runs = snapshot.runs;
   const runningCount = runs.filter((r) => r.state === "running" || r.state === "queued").length;
   const doneCount = runs.filter((r) => r.state === "complete").length;
   const failedCount = runs.filter((r) => r.state === "failed" || r.state === "rejected").length;
+
+  // 点击卡片/面板外部或按 Esc 时收起展开层（对齐 pi-todo 的 outside-close）。
+  useEffect(() => {
+    if (!expanded) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      setExpanded(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setExpanded(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [expanded]);
 
   useEffect(() => {
     const unsubscribe = subscribeInspectReplies((reply, requestId) => {
@@ -195,18 +213,25 @@ export function SubagentWidgetCard({
           }}
         />
       )}
+      {/* 嵌入 shelf 的触发块：无边框无背景，与其余 widget 触发块一致；
+          右边界线同标准触发块（widget 之间分隔） */}
       <div
-        className="subagent-widget-card"
+        ref={rootRef}
+        className={`subagent-widget-card${expanded ? " is-expanded" : ""}`}
         style={{
-          border: "1px solid var(--bubble-border)",
-          borderRadius: "var(--bubble-inner-radius)",
-          background: "var(--bubble-tool-bg)",
-          backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-          fontSize: 12,
-          overflow: "hidden",
-          minWidth: 220,
-          maxWidth: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          height: "100%",
+          padding: "0 10px",
+          fontSize: 11,
+          flex: "0 0 180px",
+          width: 180,
+          minWidth: 0,
+          color: "var(--text-muted)",
+          fontFamily: "var(--font-mono)",
+          borderRight: "1px solid color-mix(in srgb, var(--border) 78%, transparent)",
+          transition: "color 0.1s, background 0.1s",
         }}
       >
         <button
@@ -216,28 +241,57 @@ export function SubagentWidgetCard({
             display: "flex",
             alignItems: "center",
             gap: 6,
-            width: "100%",
-            padding: "6px 10px",
             background: "none",
             border: "none",
-            color: "var(--text-meta)",
+            color: "inherit",
             cursor: "pointer",
-            fontSize: 12,
+            fontSize: 11,
             textAlign: "left",
+            padding: 0,
+            minWidth: 0,
           }}
         >
-          <span style={{ color: "var(--text-meta)", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 11, flexShrink: 0 }}>
+          <span className="extension-widget-placement" aria-hidden="true">
+            <svg
+              className="extension-widget-placement-icon"
+              viewBox="0 0 8 6"
+              width="8"
+              height="6"
+              data-direction="up"
+              focusable="false"
+            >
+              <path d="M4 0l4 6H0z" />
+            </svg>
+          </span>
+          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, flexShrink: 0, fontSize: 11 }}>
             subagents
           </span>
-          <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, fontSize: 11 }}>
             {runs.length} runs · {runningCount} running · {doneCount} done{failedCount > 0 ? ` · ${failedCount} failed` : ""}
           </span>
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
-            <polyline points="2 3.5 5 6.5 8 3.5" />
-          </svg>
         </button>
+
         {expanded && (
-          <div style={{ borderTop: "1px solid var(--bubble-hairline)", padding: "6px 10px 8px" }}>
+          <div
+            style={{
+              position: "absolute",
+              bottom: "100%",
+              left: 0,
+              right: 0,
+              width: "100%",
+              zIndex: 60,
+              border: "1px solid var(--bubble-border)",
+              borderRadius: "var(--bubble-inner-radius) var(--bubble-inner-radius) 0 0",
+              background: "var(--frame-glass)",
+              backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+              WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+              boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
+              padding: "6px 10px 8px",
+              maxHeight: "min(40dvh, 320px)",
+              overflowY: "auto",
+              overflowX: "hidden",
+            }}
+          >
             {runs.map((node) => (
               <NodeRow key={node.id} node={node} depth={0} onInspect={handleInspect} inspecting={inspectingNode?.id === node.id} />
             ))}

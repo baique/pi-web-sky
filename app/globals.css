@@ -531,6 +531,26 @@ button.extension-widget-trigger:focus-visible {
   white-space: nowrap;
 }
 
+/* subagent 卡片触发块：嵌入 shelf，悬浮/展开态对齐 pi-todo 按钮 */
+.subagent-widget-card {
+  cursor: pointer;
+}
+
+.subagent-widget-card:hover {
+  color: var(--text);
+}
+
+.subagent-widget-card.is-expanded {
+  color: var(--text);
+  background: var(--bg-selected);
+  border-top: 2px solid var(--accent);
+}
+
+.subagent-widget-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .extension-widget-update-pulse {
     transition: none;
