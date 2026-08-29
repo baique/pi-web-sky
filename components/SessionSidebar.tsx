@@ -367,9 +367,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [worktreeLoadingCwd, setWorktreeLoadingCwd] = useState<string | null>(null);
   const wtDropdownRef = useRef<HTMLDivElement>(null);
   const wtNewInputRef = useRef<HTMLInputElement>(null);
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>(() => loadSidebarTab());
-  const [tasksCollapsed, setTasksCollapsed] = useState(() => loadCollapsedFlag(TASKS_COLLAPSED_KEY));
-  const [chatCollapsed, setChatCollapsed] = useState(() => loadCollapsedFlag(TEMP_COLLAPSED_KEY));
+  // 视图持久化状态：初始值固定为 SSR 默认。localStorage 仅客户端存在——
+  // 若在 useState 初始化时读取，服务端默认值与客户端持久化值不一致会触发
+  // hydration mismatch；用户偏好由下方 mount effect 统一恢复。
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("sessions");
+  const [tasksCollapsed, setTasksCollapsed] = useState(false);
+  const [chatCollapsed, setChatCollapsed] = useState(false);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [tasks, setTasks] = useState<TaskGroupUi[]>([]);
   const [tempDragOver, setTempDragOver] = useState(false);
@@ -380,8 +383,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [sessionRefreshDone, setSessionRefreshDone] = useState(false);
   const [explorerRefreshDone, setExplorerRefreshDone] = useState(false);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
-  const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => loadUnreadSessionIds());
+  const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => new Set());
   const previousRunningSessionIdsRef = useRef<Set<string>>(new Set());
+  // 挂载后恢复上次持久化的侧边栏视图状态（tab/折叠/unread 标记）。
+  // 此时 hydration 已完成，setState 走正常客户端更新，不再产生不匹配。
+  useEffect(() => {
+    setSidebarTab(loadSidebarTab());
+    setTasksCollapsed(loadCollapsedFlag(TASKS_COLLAPSED_KEY));
+    setChatCollapsed(loadCollapsedFlag(TEMP_COLLAPSED_KEY));
+    setUnreadSessionIds(loadUnreadSessionIds());
+    // 仅挂载时恢复一次（setState 为稳定引用，无需依赖）
+  }, []);
   // Once polling has delivered a snapshot it is the source of truth for
   // running state; late /api/sessions responses must not overwrite it.
   const runningPollAuthoritativeRef = useRef(false);
