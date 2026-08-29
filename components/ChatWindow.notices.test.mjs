@@ -11,7 +11,7 @@ test("renders desktop notices in the widget bar through NoticeDrawer (click-to-e
   // 播报槽合成上移至 ChatWindow（quota 由 useProviderQuota 提供额度数据）
   assert.match(source, /useBroadcast\(\{ notices: effectiveNotices, phase: phaseInfo, retryText, quota: quotaInfo\.quota \}\)/);
   // widget 栏内使用 NoticeDrawer（原位 + 闪烁胶囊 + 点击展开）；抽屉数据=持久化历史
-  assert.match(source, /<NoticeDrawer\s+broadcast=\{noticeBroadcast\}\s+history=\{noticeHistory\}\s+onDismissError=\{dismissError\}\s+onRemoveNotice=\{removeNotice\}\s+onClearNotices=\{clearNotices\}\s+onFreezeChange=\{setNoticeHistoryFrozen\}\s+isDark=\{isDark\}\s*\/>/);
+  assert.match(source, /<NoticeDrawer\s+broadcast=\{noticeBroadcast\}\s+history=\{sessionNoticeHistory\}\s+onDismissError=\{dismissError\}\s+onRemoveNotice=\{removeNotice\}\s+onClearNotices=\{clearNotices\}\s+onFreezeChange=\{setNoticeHistoryFrozen\}\s+isDark=\{isDark\}\s*\/>/);
 
   // Mobile: top-centered with `left: "50%", top: 60`
   const mobileMatch = source.match(

@@ -327,6 +327,12 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   }, [notices, compactResultText]);
   const quotaInfo = useProviderQuota(displayModelValue?.provider ?? null);
   const { phase: phaseBroadcast, notice: noticeBroadcast, dismissError } = useBroadcast({ notices: effectiveNotices, phase: phaseInfo, retryText, quota: quotaInfo.quota });
+  // 通知历史按会话隔离：只展示当前会话的通知
+  const currentSessionId = session?.id ?? sessionIdRef.current ?? null;
+  const sessionNoticeHistory = useMemo(
+    () => (currentSessionId ? noticeHistory.filter((n) => !n.sessionId || n.sessionId === currentSessionId) : noticeHistory),
+    [noticeHistory, currentSessionId],
+  );
   const sessionBusy = agentRunning || bashRunning;
 
   useEffect(() => {
@@ -1136,10 +1142,10 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
             widgets={extensionWidgets}
             notice={
               isMobile ? null : (
-                <div style={{ flex: "0 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 8, padding: "0 10px", maxWidth: "min(46vw, 480px)" }}>
+                <div style={{ flex: "0 1 auto", minWidth: 0, overflow: "hidden", display: "flex", alignItems: "center", gap: 8, padding: "0 10px" }}>
                   <NoticeDrawer
                     broadcast={noticeBroadcast}
-                    history={noticeHistory}
+                    history={sessionNoticeHistory}
                     onDismissError={dismissError}
                     onRemoveNotice={removeNotice}
                     onClearNotices={clearNotices}

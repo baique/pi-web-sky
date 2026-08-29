@@ -25,14 +25,14 @@ function healthColor(pct: number): string {
  */
 export function QuotaView({ quota }: { quota: QuotaInfo }) {
   if (quota.kind === "balance") {
-    return <span>{quota.text}</span>;
+    return <span style={{ whiteSpace: "nowrap", flexShrink: 0 }}>{quota.text}</span>;
   }
   if (quota.items.length === 0) return null;
   const title = quota.items
     .map((i) => i.detail ?? `${i.label} ${Math.round(i.pct * 100)}%`)
     .join("\n");
   return (
-    <span title={title} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+    <span title={title} style={{ display: "inline-flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
       {quota.items.map((item) => (
         <span key={item.label} style={{ whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3 }}>
           <span

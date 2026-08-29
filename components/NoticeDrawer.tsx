@@ -119,7 +119,7 @@ export function NoticeDrawer({
       key={flashTick}
       onClick={toggleOpen}
       title={open ? t("notice.collapse") : t("notice.expand")}
-      style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", minWidth: 0, maxWidth: "100%" }}
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", minWidth: 0, maxWidth: "min(46vw, 480px)" }}
     >
       <NoticeInline
         notice={broadcast}

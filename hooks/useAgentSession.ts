@@ -98,6 +98,8 @@ export type NoticeItem = {
   exiting?: boolean;
   /** 产生时间（ms）；用于 10 分钟过期清理 */
   ts?: number;
+  /** 所属会话 id；各会话通知独立 */
+  sessionId?: string;
 };
 
 type NoticeState = {
@@ -113,7 +115,7 @@ type NoticeAction =
 type NoticeHistoryAction =
   | { type: "add"; notice: NoticeItem }
   | { type: "remove"; id: string }
-  | { type: "clear" }
+  | { type: "clear"; sessionId?: string }
   | { type: "prune" };
 
 export type AgentPhase =
@@ -281,7 +283,9 @@ function noticeHistoryReducer(state: NoticeItem[], action: NoticeHistoryAction):
     case "remove":
       return state.filter((n) => n.id !== action.id);
     case "clear":
-      return [];
+      return action.sessionId
+        ? state.filter((n) => n.sessionId !== action.sessionId)
+        : [];
     case "prune": {
       const cutoff = Date.now() - NOTICE_HISTORY_TTL_MS;
       return state.filter((n) => !n.ts || n.ts >= cutoff);
@@ -848,6 +852,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       message,
       type: notice.type ?? "info",
       ts: Date.now(),
+      sessionId: sessionIdRef.current ?? undefined,
     };
     // pill（嵌入消息）：现有可见性机制（最新一条 + 5s 自动隐藏 + error 常驻）
     dispatchNotice({ type: "add", notice: item });
@@ -861,7 +866,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, []);
 
   const clearNotices = useCallback(() => {
-    dispatchNoticeHistory({ type: "clear" });
+    dispatchNoticeHistory({ type: "clear", sessionId: sessionIdRef.current ?? undefined });
   }, []);
 
   const handleExtensionUiRequest = useCallback((request: ExtensionUiRequest) => {
