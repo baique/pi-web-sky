@@ -17,7 +17,7 @@ import { useBroadcast } from "@/hooks/useBroadcast";
 import { useProviderQuota } from "@/hooks/useProviderQuota";
 import { useTheme } from "@/hooks/useTheme";
 import { phaseLabel, orbModeForPhase } from "@/lib/agent-phase";
-import { NoticeInline } from "./ComposerHeader";
+import { NoticeDrawer } from "./NoticeDrawer";
 import { formatTokenCount } from "./ChatInput";
 import { useAgentSession, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
@@ -281,7 +281,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     commandBusy,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats, todos,
     slashCommands, slashCommandsLoading, queuedMessages,
-    notices, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
+    notices, noticeHistory, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
+    removeNotice, clearNotices,
     isAutoModelSelection,
     agentPhase,
     isNew,
@@ -824,13 +825,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               </div>
             </div>
             {chatInputElement}
-            {/* 底部栏：始终存在以保持布局稳定；widget 空状态时内部返回 null */}
-            <div className="bottom-band">
-              <ExtensionStatusBar
-                statuses={extensionStatuses}
-                widgets={extensionWidgets}
-              />
-            </div>
+            {/* 欢迎页不渲染底部状态栏：状态栏属于会话界面，空会话欢迎页保持干净 */}
           </div>
         </div>
       ) : (
@@ -1139,9 +1134,16 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
             statuses={extensionStatuses}
             widgets={extensionWidgets}
             notice={
-              isMobile || !noticeBroadcast ? null : (
+              isMobile ? null : (
                 <div style={{ flex: "0 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 8, padding: "0 10px", maxWidth: "min(46vw, 480px)" }}>
-                  <NoticeInline notice={noticeBroadcast} onDismissError={dismissError} isDark={isDark} />
+                  <NoticeDrawer
+                    broadcast={noticeBroadcast}
+                    history={noticeHistory}
+                    onDismissError={dismissError}
+                    onRemoveNotice={removeNotice}
+                    onClearNotices={clearNotices}
+                    isDark={isDark}
+                  />
                 </div>
               )
             }

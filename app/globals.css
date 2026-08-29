@@ -1472,8 +1472,29 @@ span.token.table {
   }
 }
 
+/* 通知胶囊闪烁：出现时脉冲提醒（边缘光晕 + 轻微缩放），结束后停在常态 */
+@keyframes notice-flash {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  40%  { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent); transform: scale(1.03); }
+  60%  { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); transform: scale(1); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); transform: scale(1); }
+}
+
+/* 抽屉入场：从右下角向上长起（参考终端面板 bottombar 入场） */
+@keyframes notice-drawer-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .notice-shelf-item {
+    animation-duration: 0.001ms !important;
+  }
+  .notice-pill {
+    animation: none !important;
+  }
+  .notice-drawer,
+  .notice-drawer-item {
     animation-duration: 0.001ms !important;
   }
   .compaction-status {

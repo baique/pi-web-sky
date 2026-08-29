@@ -108,6 +108,11 @@ type NoticeAction =
   | { type: "mark_oldest_exiting" }
   | { type: "remove"; id: string };
 
+type NoticeHistoryAction =
+  | { type: "add"; notice: NoticeItem }
+  | { type: "remove"; id: string }
+  | { type: "clear" };
+
 export type AgentPhase =
   | { kind: "waiting_model" }
   | { kind: "running_command" }
@@ -171,6 +176,12 @@ const EVENT_STREAM_RECONNECT_DELAY_MS = 1_000;
 const MAX_NOTICES = 5;
 const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
+/** 通知历史（抽屉）持久化：localStorage 键（跨会话、跨刷新存活） */
+const NOTICE_HISTORY_STORAGE_KEY = "pi-notice-history-v1";
+/** 通知历史最长存活时间：24 小时（到期的在读取时剔除） */
+const NOTICE_HISTORY_TTL_MS = 24 * 60 * 60 * 1000;
+/** 通知历史上限 */
+const MAX_NOTICE_HISTORY = 50;
 function createNoticeId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -223,6 +234,51 @@ function noticeReducer(state: NoticeState, action: NoticeAction): NoticeState {
       const visible = state.visible.filter((notice) => notice.id !== action.id);
       return fillPendingNotices(visible, state.pending);
     }
+    default:
+      return state;
+  }
+}
+
+/** 读取并清理过期的持久化通知历史 */
+function loadNoticeHistory(): NoticeItem[] {
+  try {
+    const raw = window.localStorage.getItem(NOTICE_HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { savedAt: number; notices: NoticeItem[] } | null;
+    if (!parsed || !Array.isArray(parsed.notices)) return [];
+    const cutoff = Date.now() - NOTICE_HISTORY_TTL_MS;
+    return parsed.notices
+      .filter((n) => n && typeof n.message === "string" && (parsed.savedAt ?? 0) >= cutoff)
+      .slice(-MAX_NOTICE_HISTORY);
+  } catch {
+    return [];
+  }
+}
+
+function persistNoticeHistory(notices: NoticeItem[]): void {
+  try {
+    window.localStorage.setItem(
+      NOTICE_HISTORY_STORAGE_KEY,
+      JSON.stringify({ savedAt: Date.now(), notices: notices.slice(-MAX_NOTICE_HISTORY) }),
+    );
+  } catch {
+    // 存储不可用（隐私模式/配额）时静默忽略，仅内存保留。
+  }
+}
+
+function noticeHistoryReducer(state: NoticeItem[], action: NoticeHistoryAction): NoticeItem[] {
+  switch (action.type) {
+    case "add": {
+      const existing = state.findIndex((n) => n.id === action.notice.id);
+      if (existing === -1) return [...state, action.notice].slice(-MAX_NOTICE_HISTORY);
+      const copy = [...state];
+      copy[existing] = action.notice;
+      return copy;
+    }
+    case "remove":
+      return state.filter((n) => n.id !== action.id);
+    case "clear":
+      return [];
     default:
       return state;
   }
@@ -316,6 +372,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [slashCommands, setSlashCommands] = useState<SlashCommandInfo[]>([]);
   const [slashCommandsLoading, setSlashCommandsLoading] = useState(false);
   const [noticeState, dispatchNotice] = useReducer(noticeReducer, { visible: [], pending: [] });
+  // 通知历史（抽屉）：持久化到 localStorage，跨会话存活 24h，不自动消失
+  const [noticeHistory, dispatchNoticeHistory] = useReducer(
+    noticeHistoryReducer,
+    undefined,
+    () => (typeof window !== "undefined" ? loadNoticeHistory() : []),
+  );
   const [sessionStatsOverride, setSessionStatsOverride] = useState<SessionStatsInfo | null>(null);
   const [extensionDialog, setExtensionDialog] = useState<ExtensionUiDialogRequest | null>(null);
   const [extensionCustomUi, setExtensionCustomUi] = useState<ExtensionUiCustomRequest | null>(null);
@@ -774,14 +836,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const addNotice = useCallback((notice: { id?: string; message: string; type?: NoticeType }) => {
     const message = notice.message.trim();
     if (!message) return;
-    dispatchNotice({
-      type: "add",
-      notice: {
-        id: notice.id ?? createNoticeId(),
-        message,
-        type: notice.type ?? "info",
-      },
-    });
+    const item: NoticeItem = {
+      id: notice.id ?? createNoticeId(),
+      message,
+      type: notice.type ?? "info",
+    };
+    // pill（嵌入消息）：现有可见性机制（最新一条 + 5s 自动隐藏 + error 常驻）
+    dispatchNotice({ type: "add", notice: item });
+    // 通知历史（抽屉）：持久化，永不自动消失
+    dispatchNoticeHistory({ type: "add", notice: item });
+  }, []);
+
+  const removeNotice = useCallback((id: string) => {
+    // 历史清理（pill 不受影响，其自动消失由自身机制负责）
+    dispatchNoticeHistory({ type: "remove", id });
+  }, []);
+
+  const clearNotices = useCallback(() => {
+    dispatchNoticeHistory({ type: "clear" });
   }, []);
 
   const handleExtensionUiRequest = useCallback((request: ExtensionUiRequest) => {
@@ -1980,6 +2052,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return () => clearTimeout(t);
   }, [compactResult]);
 
+  // pill（嵌入消息）自动消失：最新一条 5s 后退出，error 常驻
   useEffect(() => {
     if (noticeState.visible.length === 0) return;
     const exiting = noticeState.visible.find((notice) => notice.exiting);
@@ -1997,6 +2070,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return () => clearTimeout(t);
   }, [noticeState.visible]);
 
+  // 通知历史持久化：跨会话存活 24h
+  useEffect(() => {
+    persistNoticeHistory(noticeHistory);
+  }, [noticeHistory]);
+
   useEffect(() => {
     setSessionStatsOverride(null);
   }, [messages.length, contextUsage?.tokens, contextUsage?.percent, contextUsage?.contextWindow]);
@@ -2008,7 +2086,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, modelSwitching, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages,
-    notices: noticeState.visible, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
+    notices: noticeState.visible, noticeHistory, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     isAutoModelSelection: isNew && newSessionModel === null,
     agentPhase,
     isNew,
@@ -2023,6 +2101,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleRecallQueue,
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages, loadContext,
+    removeNotice, clearNotices,
     scrollToBottom, scrollUserMsgToTop, hasOlderChat,
     dispatch, setAgentRunning, setForkingEntryId,
     bashRunning, pendingBash,
