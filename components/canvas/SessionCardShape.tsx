@@ -1,5 +1,5 @@
 import { BaseBoxShapeUtil, HTMLContainer, T } from "tldraw";
-import type { TLBaseShape } from "tldraw";
+import type { TLBaseShape, TLShapePartial } from "tldraw";
 
 /**
  * 会话卡 shape。props 含 w/h 满足 BaseBoxShapeUtil（可拉伸）；
@@ -72,6 +72,27 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
 
   override canResize(): boolean {
     return true;
+  }
+
+  /** 双击展开为工作台（持久化 expanded 标记，刷新后恢复）。
+   *  展开 → expanded=true, w=760, h=600
+   *  收合 → expanded=false, w=原收合宽（优先 props 默认 280）, h=原收合高（默认 120）
+   *  用 defaultProps 常量判断，避免依赖当前 props.w（已是工作台尺寸时无法回退）。 */
+  override onDoubleClick(shape: SessionCardShape): TLShapePartial<SessionCardShape> | void {
+    const COLLAPSED_W = 280;
+    const COLLAPSED_H = 120;
+    const EXPANDED_W = 760;
+    const EXPANDED_H = 600;
+    const willCollapse = shape.props.expanded;
+    return {
+      id: shape.id,
+      type: "session-card",
+      props: {
+        expanded: !shape.props.expanded,
+        w: willCollapse ? COLLAPSED_W : EXPANDED_W,
+        h: willCollapse ? COLLAPSED_H : EXPANDED_H,
+      },
+    };
   }
 }
 

@@ -4,6 +4,7 @@ import "tldraw/tldraw.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tldraw, defaultShapeUtils, type TLComponents } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
+import { WorkbenchOverlay } from "./WorkbenchOverlay";
 import { useI18n } from "@/hooks/useI18n";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
 import type { SessionInfo } from "@/lib/types";
@@ -25,6 +26,7 @@ export function CanvasStage({
   const { t } = useI18n();
   const [dragOver, setDragOver] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
+  const [overlayContainer, setOverlayContainer] = useState<HTMLDivElement | null>(null);
 
   // 会话拖入画布：tldraw 内部会 stopPropagation drop，React 合成 onDrop 收不到。
   // 改用原生事件监听（挂在外层容器，捕获阶段提前拦截）。
@@ -169,6 +171,11 @@ export function CanvasStage({
             {t("boards.dropToAdd")}
           </div>
         )}
+        {/* 展开工作台浮层挂载点（不受画布 transform 影响） */}
+        <div
+          ref={setOverlayContainer}
+          style={{ position: "absolute", inset: 0, zIndex: 25, pointerEvents: "none" }}
+        />
         {board.loading ? (
           <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
             {t("boards.loadingCanvas")}
@@ -184,11 +191,23 @@ export function CanvasStage({
             components={components}
             autoFocus={false}
             colorScheme={isDark ? "dark" : "light"}
-          />
+          >
+            <TldrawInner>
+              <WorkbenchOverlay container={overlayContainer} />
+            </TldrawInner>
+          </Tldraw>
         )}
       </div>
     </div>
   );
+}
+
+/**
+ * 包装 useEditor 的子组件必须挂在 <Tldraw> 内部。
+ * 这里只渲染 children（WorkbenchOverlay 等需要 useEditor 的组件）。
+ */
+function TldrawInner({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
 }
 
 function toolBtnStyle(activeColor?: string, active?: boolean): React.CSSProperties {
