@@ -3,19 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
-import type { NoticeItem, NoticeType } from "@/hooks/useAgentSession";
+import type { NoticeItem } from "@/hooks/useAgentSession";
 import type { NoticeBroadcast } from "@/hooks/useBroadcast";
-import { NoticeInline } from "./ComposerHeader";
+import { NoticeInline, NOTICE_COLOR } from "./ComposerHeader";
 
-export const NOTICE_COLOR: Record<NoticeType, string> = {
-  error: "#ef4444",
-  warning: "#d97706",
-  success: "#10b981",
-  info: "var(--accent)",
-};
-
-/** 展开层的最大高度（视口比例）；内容高度自适应，超出才滚动 */
-export const NOTICE_DRAWER_MAX_HEIGHT_RATIO = 0.6;
+const NOTICE_DRAWER_MAX_HEIGHT_RATIO = 0.6;
 
 /**
  * 右下角通知（桌面端，保留 widget 栏原位与 NoticeInline 样式）：
@@ -31,6 +23,7 @@ export function NoticeDrawer({
   onDismissError,
   onRemoveNotice,
   onClearNotices,
+  onFreezeChange,
   isDark,
 }: {
   /** pill（嵌入消息）数据源：即时公告 */
@@ -39,9 +32,11 @@ export function NoticeDrawer({
   history: NoticeItem[];
   onDismissError: () => void;
   /** 单条清理（持久化） */
-  onRemoveNotice?: (id: string) => void;
+  onRemoveNotice: (id: string) => void;
   /** 全部清理（持久化） */
-  onClearNotices?: () => void;
+  onClearNotices: () => void;
+  /** 抽屉展开/收起时上报，展开期间冻结过期清理 */
+  onFreezeChange: (frozen: boolean) => void;
   isDark: boolean;
 }) {
   const { t } = useI18n();
@@ -49,6 +44,11 @@ export function NoticeDrawer({
   const listRef = useRef<HTMLDivElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
   const pillRef = useRef<HTMLSpanElement>(null);
+
+  // 抽屉展开期间冻结过期清理：展开上报 true，收起上报 false
+  useEffect(() => {
+    onFreezeChange(open);
+  }, [open, onFreezeChange]);
 
   // 新通知到达时闪烁：外层 key 变更 → 重启 notice-flash 动画。
   // 首帧（含 localStorage 恢复的通知）视为已见过，不闪烁。
@@ -98,6 +98,21 @@ export function NoticeDrawer({
   // 折叠态：原 NoticeInline（位置、样式完全不变），外层加点击 + 闪烁动画。
   // 徽标数字：表示通知栏内历史条数，pill 隐藏后仍常驻、可点击打开通知栏。
   const historyCount = history.length;
+  const badgeStyle: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 16,
+    height: 16,
+    padding: "0 4px",
+    borderRadius: 999,
+    background: "var(--accent)",
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: 700,
+    lineHeight: 1,
+    flexShrink: 0,
+  };
   const pill = hasBroadcast ? (
     <span
       ref={pillRef}
@@ -113,24 +128,7 @@ export function NoticeDrawer({
         style={{ animation: "notice-flash 0.9s ease 2" }}
       />
       {historyCount > 0 && (
-        <span
-          aria-label={t("notice.title")}
-          style={{
-            flexShrink: 0,
-            minWidth: 16,
-            height: 16,
-            padding: "0 4px",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: 999,
-            background: "var(--accent)",
-            color: "#fff",
-            fontSize: 10,
-            fontWeight: 700,
-            lineHeight: 1,
-          }}
-        >
+        <span aria-label={t("notice.title")} style={badgeStyle}>
           {historyCount > 99 ? "99+" : historyCount}
         </span>
       )}
@@ -149,21 +147,7 @@ export function NoticeDrawer({
           setOpen(true);
         }
       }}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        minWidth: 16,
-        height: 16,
-        padding: "0 4px",
-        borderRadius: 999,
-        background: "var(--accent)",
-        color: "#fff",
-        cursor: "pointer",
-        fontSize: 10,
-        fontWeight: 700,
-        lineHeight: 1,
-      }}
+      style={{ ...badgeStyle, cursor: "pointer" }}
     >
       {historyCount > 99 ? "99+" : historyCount}
     </span>
@@ -218,7 +202,7 @@ export function NoticeDrawer({
             {t("notice.title")}
             <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>{history.length}</span>
             <span style={{ flex: 1 }} />
-            {onClearNotices && history.length > 0 && (
+            {history.length > 0 && (
               <button
                 type="button"
                 onClick={onClearNotices}
@@ -306,9 +290,7 @@ export function NoticeDrawer({
                       color: "var(--text)",
                       fontSize: 12.5,
                       lineHeight: 1.55,
-                      animation: notice.exiting
-                        ? "notice-shelf-out 0.18s ease-in forwards"
-                        : "notice-drawer-in 0.2s ease-out both",
+                      animation: "notice-drawer-in 0.2s ease-out both",
                     }}
                   >
                     <span
@@ -331,39 +313,37 @@ export function NoticeDrawer({
                       }}
                     >
                       {notice.message}
-                    </span>
-                    {onRemoveNotice && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onRemoveNotice(notice.id);
-                        }}
-                        title={t("notice.remove")}
-                        aria-label={t("notice.remove")}
-                        style={{
-                          flexShrink: 0,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          width: 18,
-                          height: 18,
-                          padding: 0,
-                          background: "none",
-                          border: "none",
-                          borderRadius: 5,
-                          color: "var(--text-muted)",
-                          cursor: "pointer",
-                          fontSize: 11,
-                          lineHeight: 1,
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveNotice(notice.id);
+                    }}
+                    title={t("notice.remove")}
+                    aria-label={t("notice.remove")}
+                    style={{
+                      flexShrink: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 18,
+                      height: 18,
+                      padding: 0,
+                      background: "none",
+                      border: "none",
+                      borderRadius: 5,
+                      color: "var(--text-muted)",
+                      cursor: "pointer",
+                      fontSize: 11,
+                      lineHeight: 1,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
+                  >
+                    ✕
+                  </button>
+                </div>
                 );
               })
             )}

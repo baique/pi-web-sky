@@ -96,6 +96,8 @@ export type NoticeItem = {
   message: string;
   type: NoticeType;
   exiting?: boolean;
+  /** 产生时间（ms）；用于 10 分钟过期清理 */
+  ts?: number;
 };
 
 type NoticeState = {
@@ -111,7 +113,8 @@ type NoticeAction =
 type NoticeHistoryAction =
   | { type: "add"; notice: NoticeItem }
   | { type: "remove"; id: string }
-  | { type: "clear" };
+  | { type: "clear" }
+  | { type: "prune" };
 
 export type AgentPhase =
   | { kind: "waiting_model" }
@@ -178,8 +181,8 @@ const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
 /** 通知历史（抽屉）持久化：localStorage 键（跨会话、跨刷新存活） */
 const NOTICE_HISTORY_STORAGE_KEY = "pi-notice-history-v1";
-/** 通知历史最长存活时间：24 小时（到期的在读取时剔除） */
-const NOTICE_HISTORY_TTL_MS = 24 * 60 * 60 * 1000;
+/** 通知历史最长存活时间：10 分钟（到期的在读取时剔除） */
+const NOTICE_HISTORY_TTL_MS = 10 * 60 * 1000;
 /** 通知历史上限 */
 const MAX_NOTICE_HISTORY = 50;
 function createNoticeId(): string {
@@ -279,6 +282,10 @@ function noticeHistoryReducer(state: NoticeItem[], action: NoticeHistoryAction):
       return state.filter((n) => n.id !== action.id);
     case "clear":
       return [];
+    case "prune": {
+      const cutoff = Date.now() - NOTICE_HISTORY_TTL_MS;
+      return state.filter((n) => !n.ts || n.ts >= cutoff);
+    }
     default:
       return state;
   }
@@ -840,6 +847,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       id: notice.id ?? createNoticeId(),
       message,
       type: notice.type ?? "info",
+      ts: Date.now(),
     };
     // pill（嵌入消息）：现有可见性机制（最新一条 + 5s 自动隐藏 + error 常驻）
     dispatchNotice({ type: "add", notice: item });
@@ -2070,10 +2078,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return () => clearTimeout(t);
   }, [noticeState.visible]);
 
-  // 通知历史持久化：跨会话存活 24h
+  // 通知历史持久化：跨会话存活 10 分钟（到期的在读取时剔除）
   useEffect(() => {
     persistNoticeHistory(noticeHistory);
   }, [noticeHistory]);
+
+  // 通知历史过期清理：每 30s 一次，抽屉展开时冻结（不清理）
+  const noticeHistoryFrozenRef = useRef(false);
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (noticeHistoryFrozenRef.current) return;
+      dispatchNoticeHistory({ type: "prune" });
+    }, 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     setSessionStatsOverride(null);
@@ -2102,6 +2120,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages, loadContext,
     removeNotice, clearNotices,
+    setNoticeHistoryFrozen: (frozen: boolean) => { noticeHistoryFrozenRef.current = frozen; },
     scrollToBottom, scrollUserMsgToTop, hasOlderChat,
     dispatch, setAgentRunning, setForkingEntryId,
     bashRunning, pendingBash,

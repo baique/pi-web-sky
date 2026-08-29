@@ -282,7 +282,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats, todos,
     slashCommands, slashCommandsLoading, queuedMessages,
     notices, noticeHistory, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
-    removeNotice, clearNotices,
+    removeNotice, clearNotices, setNoticeHistoryFrozen,
     isAutoModelSelection,
     agentPhase,
     isNew,
@@ -1142,6 +1142,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     onDismissError={dismissError}
                     onRemoveNotice={removeNotice}
                     onClearNotices={clearNotices}
+                    onFreezeChange={setNoticeHistoryFrozen}
                     isDark={isDark}
                   />
                 </div>
