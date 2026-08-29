@@ -1185,7 +1185,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   left: 0,
                   right: 0,
                   zIndex: 100,
-                  background: "var(--panel-glass)",
+                  background: "var(--popover-glass)",
                   backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
                   WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
                   border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
@@ -1527,11 +1527,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 e.currentTarget.style.textDecoration = "none";
               }}
             >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-                <line x1="6" y1="1" x2="6" y2="11" />
-                <line x1="1" y1="6" x2="11" y2="6" />
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
-              {t("sidebar.new")}
+              {t("sidebar.tempSessions")}
             </button>
             <button
               onClick={() => loadSessions(false, true)}
@@ -1657,7 +1656,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               left: 0,
               right: 0,
               zIndex: 100,
-              background: "var(--panel-glass)",
+              background: "var(--popover-glass)",
               backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
               WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
               border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
@@ -1807,8 +1806,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         }}
       />
 
-      {sidebarTab === "sessions" ? (
-        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      {/* Sessions panel — always mounted; hidden via display when the files
+          panel is active so switching tabs never tears down/rebuilds it. */}
+      <div style={{ flex: 1, minHeight: 0, display: sidebarTab === "sessions" ? "flex" : "none", flexDirection: "column" }}>
           {loading ? (
             <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
               {t("sidebar.loading")}
@@ -1820,17 +1820,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           ) : (
             <>
               {/* Tasks section — fluid up to a cap (GPT-style), scrolls inside
-                  when it exceeds the cap so the chat section always keeps room;
-                  fills the whole column when the chat section is collapsed. */}
+                  when it exceeds the cap so the chat section always keeps room. */}
               <div
                 style={{
                   display: "flex",
                   flexDirection: "column",
                   minHeight: 0,
-                  maxHeight: chatCollapsed ? "none" : "min(50vh, 520px)",
-                  flex: tasksCollapsed
-                    ? "0 0 auto"
-                    : chatCollapsed ? "1 1 0" : "0 1 auto",
+                  maxHeight: "min(50vh, 520px)",
+                  flex: tasksCollapsed ? "0 0 auto" : "0 1 auto",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 6px 3px 10px" }}>
@@ -1838,7 +1835,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     type="button"
                     onClick={() => { const next = !tasksCollapsed; setTasksCollapsed(next); saveCollapsedFlag(TASKS_COLLAPSED_KEY, next); }}
                     aria-expanded={!tasksCollapsed}
-                    style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", color: "var(--text-muted)" }}
+                    style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", color: "var(--text-dim)" }}
                   >
                     <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.02em" }}>{t("sidebar.tasks")}</span>
                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: tasksCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s" }} aria-hidden="true">
@@ -1912,6 +1909,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                           },
                         };
                       })}
+                      selectedSessionId={selectedSessionId}
                       newTaskOpen={newTaskOpen}
                       onNewTaskOpenChange={setNewTaskOpen}
                       onNewTask={(name) => void handleCreateTask(name)}
@@ -1925,15 +1923,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 )}
               </div>
 
-              {/* Chat section — takes the remaining space; when collapsed its
-                  header anchors to the bottom so the tasks section fills up. */}
+              {/* Chat section — takes the remaining space; when collapsed it
+                  sits right under the tasks section (simple flow layout). */}
               <div
                 style={{
                   display: "flex",
                   flexDirection: "column",
                   minHeight: 0,
                   flex: chatCollapsed ? "0 0 auto" : "1 1 0",
-                  marginTop: chatCollapsed ? "auto" : 0,
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", padding: "5px 10px 3px" }}>
@@ -2005,8 +2002,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </>
           )}
         </div>
-      ) : (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+
+      {/* Files panel — always mounted too; hidden via display when the
+          sessions panel is active. */}
+      <div style={{ flex: 1, display: sidebarTab === "files" ? "flex" : "none", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
       {/* File Explorer section — always expanded; the file actions live in a
           toolbar at the top of the tree (FileExplorer toolbar prop) */}
       {(selectedCwdProp || selectedCwd) && (
@@ -2095,7 +2094,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       )}
           {worktreeSection}
         </div>
-      )}
     </div>
   );
 }
@@ -2663,7 +2661,7 @@ function SessionItem({
                   right: 0,
                   zIndex: 120,
                   minWidth: 148,
-                  background: "var(--panel-glass)",
+                  background: "var(--popover-glass)",
                   backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
                   WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
                   border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
@@ -2761,7 +2759,7 @@ function SessionItem({
                     boxSizing: "border-box",
                     padding: 10,
                     display: "flex", flexDirection: "column", gap: 8,
-                    background: "var(--panel-glass)",
+                    background: "var(--popover-glass)",
                     backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
                     WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
                     border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",

@@ -38,6 +38,8 @@ interface TaskGroup {
 
 interface Props {
   groups: TaskGroup[];
+  /** 当前选中的会话 id：选中会话属于某个任务时自动展开该任务卡片。 */
+  selectedSessionId?: string | null;
   newTaskOpen: boolean;
   onNewTaskOpenChange: (open: boolean) => void;
   onNewTask: (name: string) => void;
@@ -97,6 +99,7 @@ function TaskCard({
   sessionCount,
   pinnedCount,
   sessionTotal,
+  activeSessionId,
   onDropAssign,
   onRename,
   onDelete,
@@ -108,6 +111,8 @@ function TaskCard({
   sessionCount: number;
   pinnedCount: number;
   sessionTotal: number;
+  /** 当前选中的会话 id；属于本任务时自动展开卡片。 */
+  activeSessionId?: string | null;
   onDropAssign: (taskId: string, sessionId: string) => void;
   onRename: (taskId: string, name: string) => void;
   onDelete: (taskId: string) => void;
@@ -115,7 +120,14 @@ function TaskCard({
   onTogglePin: (taskId: string) => void;
 }) {
   const { t } = useI18n();
-  const [collapsed, setCollapsed] = useState(false);
+  /** 任务卡片默认收起：用户创建的任务默认折叠，点击展开；
+   *  选中会话属于本任务时自动展开（会话切换后卡片保持展开）。 */
+  const [collapsed, setCollapsed] = useState(true);
+  /** 选中会话属于本任务时自动展开（会话切换后卡片保持展开）。 */
+  const sessionActive = activeSessionId != null && task.sessionIds.includes(activeSessionId);
+  useEffect(() => {
+    if (sessionActive) setCollapsed(false);
+  }, [sessionActive]);
   /** 任务会话默认只展示置顶 + 最近 5 个；点击“加载更多”后展示全部。 */
   const [showAllSessions, setShowAllSessions] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -336,7 +348,7 @@ function TaskCard({
                     right: 0,
                     zIndex: 120,
                     minWidth: 148,
-                    background: "var(--panel-glass)",
+                    background: "var(--popover-glass)",
                     backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
                     WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
                     border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
@@ -418,7 +430,7 @@ function TaskCard({
             boxSizing: "border-box",
             padding: 10,
             display: "flex", flexDirection: "column", gap: 8,
-            background: "var(--panel-glass)",
+            background: "var(--popover-glass)",
             backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
             WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
             border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
@@ -491,6 +503,7 @@ function TaskCard({
  */
 export function TaskArea({
   groups,
+  selectedSessionId,
   newTaskOpen,
   onNewTaskOpenChange,
   onNewTask,
@@ -612,6 +625,7 @@ export function TaskArea({
               sessionCount={sessionCount}
               pinnedCount={pinnedCount}
               sessionTotal={sessionTotal}
+              activeSessionId={selectedSessionId}
               onDropAssign={onDropSessionToTask}
               onRename={(id, name) => void onRenameTask(id, name)}
               onDelete={(id) => void onDeleteTask(id)}
