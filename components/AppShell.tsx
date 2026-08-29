@@ -16,6 +16,8 @@ import { PluginsConfig } from "./PluginsConfig";
 import { McpConfigPanel } from "./McpConfigPanel";
 // ssr:false — xterm.js touches browser globals at import time.
 const TerminalPanel = dynamic(() => import("./TerminalPanel").then((m) => m.TerminalPanel), { ssr: false });
+// ssr:false — tldraw 依赖浏览器环境，仅进入看板模式时下载（~1MB）。
+const SessionCanvas = dynamic(() => import("./canvas/SessionCanvas").then((m) => m.SessionCanvas), { ssr: false });
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { SidebarGlobalSearch } from "./SidebarGlobalSearch";
@@ -169,11 +171,18 @@ export function AppShell() {
   }, [playDoneSound, soundEnabledRef]);
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
+  // 看板模式：activeBoardId 非空时主区域替换为画布（含系统看板 __running__）。
+  const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const handleRunningSessionIdsChange = useCallback((ids: Set<string>) => {
     setRunningSessionIds((previous) => {
       if (previous.size === ids.size && [...ids].every((id) => previous.has(id))) return previous;
       return ids;
     });
+  }, []);
+  // 进入/退出看板模式：打开看板时清掉当前会话选择（主区域被画布替换）。
+  const handleOpenBoard = useCallback((boardId: string) => {
+    setActiveBoardId(boardId);
+    setSelectedSession(null);
   }, []);
   // The temporary id distinguishes consecutive fresh composers in one cwd.
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
@@ -1247,6 +1256,9 @@ export function AppShell() {
         onBackgroundTaskDone={handleBackgroundTaskDone}
         onRunningSessionIdsChange={handleRunningSessionIdsChange}
         onNewSessionFromTask={handleNewSessionFromTask}
+        onOpenBoard={handleOpenBoard}
+        activeBoardId={activeBoardId}
+        runningBoardCount={runningSessionIds.size}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
@@ -2956,7 +2968,16 @@ export function AppShell() {
 
         {/* Chat content */}
         <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-          {showChat ? (
+          {activeBoardId ? (
+            <SessionCanvas
+              key={activeBoardId}
+              boardId={activeBoardId}
+              projectKey={selectedSession ? (selectedSession.projectKey ?? workspaceKeyOf(selectedSession)) : undefined}
+              onExit={() => setActiveBoardId(null)}
+              onOpenSession={handleSelectSession}
+              onRunningSessionIdsChange={handleRunningSessionIdsChange}
+            />
+          ) : showChat ? (
             <ChatWindow
               key={sessionKey}
               session={selectedSession}

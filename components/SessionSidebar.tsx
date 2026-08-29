@@ -12,6 +12,7 @@ import { dropdownDirection } from "@/lib/dropdown-direction";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { SessionTabs, type SidebarTab } from "./SessionTabs";
+import { BoardList } from "./canvas/BoardList";
 import { TaskArea, TASK_SESSION_PREVIEW_LIMIT, type TaskGroupUi } from "./TaskArea";
 
 declare global {
@@ -109,6 +110,12 @@ interface Props {
    *  projectKey lets the parent attach the new session to the task reliably
    *  even before the session has a real id / project identity (transient). */
   onNewSessionFromTask?: (taskId: string, projectKey?: string) => void;
+  /** 进入看板模式（主区域替换为画布） */
+  onOpenBoard?: (boardId: string) => void;
+  /** 当前激活看板 id（看板模式下高亮） */
+  activeBoardId?: string | null;
+  /** 全局运行中会话数（系统看板徽标） */
+  runningBoardCount?: number;
 }
 
 interface WorktreeEntry {
@@ -339,7 +346,7 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, activeBoardId, runningBoardCount = 0 }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2053,6 +2060,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           )}
         </div>
 
+      {/* Boards panel — always mounted too; hidden via display when other tabs active. */}
+      <div style={{ flex: 1, display: sidebarTab === "boards" ? "flex" : "none", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+        <BoardList
+          projectKey={selectedProject?.key ?? null}
+          runningCount={runningBoardCount}
+          activeBoardId={activeBoardId ?? null}
+          onOpenBoard={(id) => onOpenBoard?.(id)}
+        />
+      </div>
+
       {/* Files panel — always mounted too; hidden via display when the
           sessions panel is active. */}
       <div style={{ flex: 1, display: sidebarTab === "files" ? "flex" : "none", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
@@ -2871,7 +2888,9 @@ const TEMP_COLLAPSED_KEY = "pi-sidebar-chat-collapsed";
 function loadSidebarTab(): SidebarTab {
   if (typeof window === "undefined") return "sessions";
   try {
-    return window.localStorage.getItem(SIDEBAR_TAB_KEY) === "files" ? "files" : "sessions";
+    const v = window.localStorage.getItem(SIDEBAR_TAB_KEY);
+    if (v === "files" || v === "boards") return v;
+    return "sessions";
   } catch {
     return "sessions";
   }
