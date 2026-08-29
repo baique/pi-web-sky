@@ -241,7 +241,7 @@ test("delegates event stream readiness and hides an empty agent phase", () => {
   assert.doesNotMatch(chatWindowSource, /chat-status-pill/);
   assert.match(chatWindowSource, /phase=\{isMobile \? null : phaseBroadcast\}/);
   // 播报槽合成上移至 ChatWindow，通知渲染在底部 widget shelf
-  assert.match(chatWindowSource, /useBroadcast\(\{ notices: effectiveNotices, phase: phaseInfo, retryText, quota: quotaInfo \}\)/);
+  assert.match(chatWindowSource, /useBroadcast\(\{ notices: effectiveNotices, phase: phaseInfo, retryText, quota: quotaInfo\.quota \}\)/);
 });
 
 test("uses one absolute agent-readiness deadline instead of a five-second transport deadline", () => {

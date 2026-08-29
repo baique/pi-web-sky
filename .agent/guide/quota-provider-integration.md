@@ -7,8 +7,21 @@
 
 ```
 auth.json(服务端) → GET /api/quota?provider=X → useProviderQuota(60s轮询)
-  → QuotaInfo → ChatWindow 底栏 <QuotaView/> 常驻（排在通知后面）
+  → { quota, error } → ChatWindow 底栏常驻（额度/错误提示排在通知后面）
 ```
+
+## 错误反馈（2026-08-29 加）
+
+额度查询失败不再静默留空，底栏常驻位按分类提示：
+
+| error kind | 触发 | 展示 |
+|---|---|---|
+| `auth` | 上游 401/403（key 被拒/过期） | 红色 ⚠ `额度凭据失效，请重新登录`，清空旧额度 |
+| `no-credential` | auth.json 无该提供商凭据 | 黄色 ● `未登录，额度不可用` |
+| `transient` | 网络失败/5xx/超时 | 低调 `额度查询失败`（若已有旧额度则保留旧值不提示） |
+
+- 后端 `fetchJson` 抛 `QuotaHttpError(status)`，`GET /api/quota` 失败响应带 `status` 字段供前端区分
+- 前端 `useProviderQuota` 返回 `{ quota, error }`（`QuotaErrorKind = auth | no-credential | transient`）
 
 ## 接入一个新提供商的步骤（共 3 处）
 
@@ -55,16 +68,16 @@ const SUPPORTED_PROVIDERS = new Set(["opencode-go", "deepseek", "your-provider"]
   - 凭据是 **OAuth access token**（`auth.json` 里 `{type:"oauth",access}`，非 key）——后端 `readProviderKey` 已兼容
   - 上游：`GET /alpha/whoami`（拿 orgId，个人账号为 null 则不传）→
     `GET /alpha/billing/credits`（`windowLimits.fiveHour/weekly`：used/cap/resetAt，resetAt 为**毫秒**）
-    + `GET /alpha/usage/summary`（totalCost）
-  - 映射：5h 窗（used/cap 百分比）、周窗（used/cap 百分比）、余窗（剩余月度额度 $，percent 字段承载金额数值）
-  - 前端 `toQuotaInfo` 里 `label==="余"` 窗渲染 `$金额` 而非百分比（pct 置 0）
-  - 展示示例：`5h 44% · 周 22% · 余 $8.67`（悬停看重置时刻）
+    + `GET /alpha/usage/summary`（totalCost 本期已用）
+  - 映射与 opencode-go 对齐的三窗：5h 窗（used/cap 百分比）、周窗（used/cap 百分比）、
+    月窗（本期消费占比 `spent/(spent+remaining)`，resetsAt 留空）
+  - 展示示例：`5h 52% · 周 26% · 月 15%`（悬停看重置时刻）
 
 ## 展示位（常驻）
 
 - 额度不再走通知槽 idle（NoticeDrawer 只负责 P0/P1 通知）
-- ChatWindow bottom-band 的 `notice` 容器内：`<NoticeDrawer/>` 后追加 `<QuotaView quota={quotaInfo}/>`，常驻渲染
-- `quotaInfo` 为 null（不支持/无凭据/失败）时区域留空，不弹错
+- ChatWindow bottom-band 的 `notice` 容器内：`<NoticeDrawer/>` 后追加额度展示（`QuotaView` 或错误提示），常驻渲染
+- 无额度且无错误时区域留空
 
 ## 验证清单
 
@@ -77,5 +90,5 @@ const SUPPORTED_PROVIDERS = new Set(["opencode-go", "deepseek", "your-provider"]
 
 - 底栏通知槽 maxWidth `min(46vw, 480px)`（约 66 字符 mono），usage 型窗口数 ≤3 时放得下；
   更多窗口会省略号截断，悬停仍可看全量
-- 失败不缓存：上游持续 5xx 时前端保留上一次成功展示，60s 后重试
-- 无凭据/不支持的提供商返回 `{ok:false}`，前端静默置空，不弹错
+- 失败不缓存：上游持续 5xx 时前端 `transient` 提示（有旧额度则保留展示），60s 后重试
+- 无凭据（`no-credential`）/凭据失效（`auth`）明确提示，不静默

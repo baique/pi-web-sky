@@ -18,7 +18,7 @@ import { useProviderQuota } from "@/hooks/useProviderQuota";
 import { useTheme } from "@/hooks/useTheme";
 import { phaseLabel, orbModeForPhase } from "@/lib/agent-phase";
 import { NoticeDrawer } from "./NoticeDrawer";
-import { QuotaView } from "./ComposerHeader";
+import { QuotaView, NOTICE_COLOR } from "./ComposerHeader";
 import { formatTokenCount } from "./ChatInput";
 import { useAgentSession, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
@@ -326,7 +326,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       : arr;
   }, [notices, compactResultText]);
   const quotaInfo = useProviderQuota(displayModelValue?.provider ?? null);
-  const { phase: phaseBroadcast, notice: noticeBroadcast, dismissError } = useBroadcast({ notices: effectiveNotices, phase: phaseInfo, retryText, quota: quotaInfo });
+  const { phase: phaseBroadcast, notice: noticeBroadcast, dismissError } = useBroadcast({ notices: effectiveNotices, phase: phaseInfo, retryText, quota: quotaInfo.quota });
   const sessionBusy = agentRunning || bashRunning;
 
   useEffect(() => {
@@ -1146,9 +1146,58 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     onFreezeChange={setNoticeHistoryFrozen}
                     isDark={isDark}
                   />
-                  {/* 常驻额度：排在通知后面，不受通知/流式状态影响 */}
-                  {quotaInfo && (
-                    <QuotaView quota={quotaInfo} />
+                  {/* 常驻额度：排在通知后面，不受通知/流式状态影响；查询失败给反馈 */}
+                  {quotaInfo.quota && <QuotaView quota={quotaInfo.quota} />}
+                  {quotaInfo.error === "auth" && (
+                    <span
+                      title="额度凭据已被上游拒绝（401/403），请重新登录该提供商"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                        color: NOTICE_COLOR.error,
+                        fontSize: 12,
+                        fontFamily: "var(--font-mono)",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      <span aria-hidden style={{ width: 5, height: 5, borderRadius: "50%", background: NOTICE_COLOR.error, flexShrink: 0 }} />
+                      ⚠ 额度凭据失效，请重新登录
+                    </span>
+                  )}
+                  {quotaInfo.error === "no-credential" && (
+                    <span
+                      title="该提供商未配置凭据"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                        color: NOTICE_COLOR.warning,
+                        fontSize: 12,
+                        fontFamily: "var(--font-mono)",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      <span aria-hidden style={{ width: 5, height: 5, borderRadius: "50%", background: NOTICE_COLOR.warning, flexShrink: 0 }} />
+                      未登录，额度不可用
+                    </span>
+                  )}
+                  {quotaInfo.error === "transient" && quotaInfo.quota == null && (
+                    <span
+                      title="额度查询失败，稍后自动重试"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                        color: "var(--text-dim)",
+                        fontSize: 12,
+                        fontFamily: "var(--font-mono)",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      <span aria-hidden style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--text-dim)", flexShrink: 0 }} />
+                      额度查询失败
+                    </span>
                   )}
                 </div>
               )

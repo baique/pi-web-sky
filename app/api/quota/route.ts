@@ -55,13 +55,22 @@ function readProviderKey(provider: string): string | null {
   return null;
 }
 
+/** 带 HTTP 状态码的额度查询错误（供前端区分凭据失效 vs 瞬时故障） */
+class QuotaHttpError extends Error {
+  status: number;
+  constructor(status: number) {
+    super(`HTTP ${status}`);
+    this.status = status;
+  }
+}
+
 async function fetchJson(url: string, key: string): Promise<unknown> {
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw new QuotaHttpError(res.status);
   return res.json();
 }
 
@@ -113,24 +122,24 @@ function normalizeTs(value: unknown): string {
 }
 
 /**
- * commandcode：月度额度（剩余 $） + 分时窗口（5h / 周，cap 内用量百分比）。
+ * commandcode：三时间窗（5h / 周 / 月）用量百分比，与 opencode-go 对齐。
  * 实测形状（2026-08-29）：
- * credits: { monthlyCredits, purchasedCredits, freeCredits }
+ * credits: { monthlyCredits(剩余), purchasedCredits, freeCredits }
  * windowLimits: { fiveHour:{used,cap,resetAt(ms)}, weekly:{used,cap,resetAt(ms)} }
- * summary: { totalCost, totalCount }
+ * summary: { totalCost(本期已用), totalCount }
+ * 月窗 = 本期消费占比 spent / (spent + monthlyCredits)；无重置时刻（订阅周期），resetsAt 留空
  */
 function parseCommandCode(data: unknown): QuotaPayload {
   if (!isRecord(data) || !isRecord(data.credits)) throw new Error("cc credits: unexpected shape");
   const credits = data.credits;
-  const monthly =
-    typeof credits.monthlyCredits === "number" ? credits.monthlyCredits : 0;
+  const remaining = typeof credits.monthlyCredits === "number" ? credits.monthlyCredits : 0;
   const summary = isRecord(data.summary)
     ? data.summary
     : isRecord(data.usage) && isRecord(data.usage.summary)
       ? data.usage.summary
       : null;
   const spent = summary && typeof summary.totalCost === "number" ? summary.totalCost : 0;
-  const pool = monthly + spent;
+  const pool = remaining + spent;
 
   const windows: { label: string; percent: number; status: string; resetsAt: string }[] = [];
   const wl = isRecord(data.windowLimits) ? data.windowLimits : null;
@@ -150,18 +159,16 @@ function parseCommandCode(data: unknown): QuotaPayload {
       resetsAt: normalizeTs(w.resetAt),
     });
   }
-  if (windows.length === 0) throw new Error("cc credits: no window limit");
-
-  // 主条把剩余月度额度带上（5h 40% · 周 20% · 余 $7.70）——行内紧凑，放得下
-  // 约定：percent 字段承载金额数值，前端按 label==="余" 渲染为 $ 金额
+  // 月窗 = 本期消费占比（对齐 ocg 三窗结构）
   if (pool > 0) {
     windows.push({
-      label: "余",
-      percent: monthly,
+      label: "月",
+      percent: Math.min(100, Math.max(0, Math.round((spent / pool) * 100))),
       status: "ok",
       resetsAt: "",
     });
   }
+  if (windows.length === 0) throw new Error("cc credits: no window limit");
   return { kind: "usage", windows };
 }
 
@@ -210,7 +217,9 @@ export async function GET(req: Request) {
   } catch (error) {
     // 过期缓存兜底：上游偶发失败时先展示旧数据
     if (hit) return NextResponse.json({ ok: true, quota: hit.data });
+    // 401/403 = 凭据失效（key 被拒/过期），其余 = 瞬时故障；status 供前端区分文案
+    const status = error instanceof QuotaHttpError ? error.status : null;
     const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ ok: false, error: message }, { status: 502 });
+    return NextResponse.json({ ok: false, error: message, status }, { status: 502 });
   }
 }
