@@ -15,7 +15,7 @@ import { sessionPathKey } from "@/lib/session-path";
 import { getRpcSession } from "@/lib/rpc-manager";
 import { projectTreeForResponse } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
-import { setSessionPinned, unassignSession } from "@/lib/task-store";
+import { setSessionPinned, taskNameForSession, unassignSession } from "@/lib/task-store";
 
 export async function GET(
   req: Request,
@@ -67,6 +67,8 @@ export async function GET(
         : "(no messages)",
       parentSessionId,
       transient: !filePath || !existsSync(filePath),
+      // 实时任务归属（sessionInfo 面板打开时读取，避免列表快照过期）
+      taskName: taskNameForSession(id) ?? undefined,
     } : null;
 
     return NextResponse.json({

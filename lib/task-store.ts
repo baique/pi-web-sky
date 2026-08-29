@@ -202,6 +202,16 @@ export function taskForSession(sessionId: string): string | null {
   return row?.task_id ?? null;
 }
 
+/** Session's current task name, or null when it is a temp session. */
+export function taskNameForSession(sessionId: string): string | null {
+  const row = getDb()
+    .prepare(
+      "SELECT t.name FROM session_meta m JOIN tasks t ON t.id = m.task_id WHERE m.session_id = ?",
+    )
+    .get(sessionId) as { name: string } | undefined;
+  return row?.name ?? null;
+}
+
 /**
  * 把一个会话原子归属到任务（任务不存在返回 false）。会刷新任务的 updated
  * 使置顶/最近排序生效；会话原本在其他任务下则移动（ON CONFLICT 更新）。

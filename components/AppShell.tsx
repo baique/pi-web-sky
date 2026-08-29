@@ -347,6 +347,9 @@ export function AppShell() {
 
   // Session stats (tokens + cost) — populated by ChatWindow, displayed in top bar
   const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
+  // 会话归属任务名（实时）：undefined=未拉取（用列表快照兜底），null=确认无任务，
+  // string=任务名。拖拽移入/移出任务后不依赖 selectedSession 的过期快照。
+  const [liveTaskName, setLiveTaskName] = useState<string | null | undefined>(undefined);
   // Session todo list — populated by ChatWindow from pi-todo.state, shown as a
   // narrow panel pinned to the top-right (moved from pi's TUI bottom-left).
   const [sessionTodos, setSessionTodos] = useState<TodoItem[]>([]);
@@ -398,6 +401,26 @@ export function AppShell() {
   const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | "language" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const topPanelRef = useRef<HTMLDivElement | null>(null);
+
+  // sessionInfo 面板打开时实时拉取会话最新归属（拖拽移入/移出任务后，
+  // selectedSession 快照可能过期；面板展示以实时值为准）。
+  useEffect(() => {
+    if (activeTopPanel !== "session" || !selectedSession?.id) {
+      setLiveTaskName(undefined);
+      return;
+    }
+    let cancelled = false;
+    // 拉取期间先用快照（undefined 兜底到 selectedSession?.taskName）
+    setLiveTaskName(undefined);
+    fetch(`/api/sessions/${encodeURIComponent(selectedSession.id)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() as Promise<{ info?: SessionInfo | null }> : null))
+      .then((d) => {
+        // d.info.taskName：undefined=无任务（不序列化），string=有任务
+        if (!cancelled) setLiveTaskName(d?.info?.taskName ?? null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeTopPanel, selectedSession?.id]);
 
   const toggleTopPanel = useCallback((
     panel: "branches" | "system" | "session" | "language",
@@ -2674,10 +2697,14 @@ export function AppShell() {
                       return `${s}s`;
                     };
                     const totalActiveMs = sessionStats.totalActiveMs ?? 0;
+                    // 任务名三态：undefined=未拉取（快照兜底），null=确认无任务，string=任务名。
+                    const taskNameValue = liveTaskName === undefined
+                      ? selectedSession?.taskName ?? null
+                      : liveTaskName;
                     const sessionRows = [
                        ...(sessionStats.sessionName ? [{ label: translate("session.name"), value: sessionStats.sessionName, copyField: null }] : []),
-                       // 会话属于任务时展示任务名（文件行上方）
-                       ...(selectedSession?.taskName ? [{ label: translate("session.task"), value: selectedSession.taskName, copyField: null }] : []),
+                       // 会话属于任务时展示任务名（文件行上方）；实时值优先
+                       ...(taskNameValue ? [{ label: translate("session.task"), value: taskNameValue, copyField: null }] : []),
                        { label: translate("session.file"), value: sessionStats.sessionFile ?? translate("session.inMemory"), copyField: "file" as const },
                        { label: translate("session.id"), value: sessionStats.sessionId, copyField: "id" as const },
                        ...(totalActiveMs > 0 ? [{ label: translate("session.totalActive"), value: formatDuration(totalActiveMs), copyField: null }] : []),
