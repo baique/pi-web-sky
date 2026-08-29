@@ -1,13 +1,13 @@
 # 余额查询功能（按提供商）— 设计
 
-> 2026-08-26 · 提供商：opencode-go、deepseek · 展示位：底栏通知槽（NoticeInline 空闲态 P3；用户确认底部即可，顶栏预留位不用）
+> 2026-08-26 · 提供商：opencode-go、deepseek（2026-08-29 增 commandcode）· 展示位：**底栏常驻**（通知之后；2026-08-29 由空闲态改为常驻）
 
 ## 背景
 
 composer-console 改造时已预留额度展示契约与渲染位，本期补数据链路：
 
 - 契约：`hooks/useBroadcast.ts` 的 `QuotaInfo`（`balance` 文本型 / `usage` 条型）
-- 渲染：`components/ComposerHeader.tsx` 的 `QuotaView`（空闲态显示，流式时让位给运行状态）
+- 渲染：`components/ComposerHeader.tsx` 的 `QuotaView`（常驻显示，不受通知/流式影响）
 
 ## 接口实测（2026-08-26，真实 key 锁定形状）
 

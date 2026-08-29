@@ -7,10 +7,11 @@ import type { QuotaInfo } from "@/hooks/useBroadcast";
  * 当前模型提供商 → 顶栏额度展示（QuotaInfo）。
  * - opencode-go：三时间窗（5h/周/月），主条取最紧窗口，悬停看全部
  * - deepseek：余额 + 服务端算好的峰谷档位与下次切换时间
+ * - commandcode：分时窗口（5h/周）用量百分比 + 主条剩余月度额度（余 $x.xx）
  * - 其他提供商返回 null（区域留空）
  */
 
-const SUPPORTED_PROVIDERS = new Set(["opencode-go", "deepseek"]);
+const SUPPORTED_PROVIDERS = new Set(["opencode-go", "deepseek", "commandcode"]);
 const POLL_MS = 60_000;
 
 interface QuotaResponse {
@@ -54,12 +55,18 @@ function toQuotaInfo(payload: QuotaPayload, now = Date.now()): QuotaInfo | null 
           return Number.isFinite(ts) ? new Date(ts).toLocaleString() : "—";
         })();
         const resetIn = formatResetIn(w.resetsAt, now);
+        // commandcode 的“余”窗（剩余月度额度）行内显示 $ 金额而非百分比
+        const isRemainder = w.label === "余";
+        const amount = isRemainder ? Number(w.percent) : null;
         return {
           label: w.label,
-          pct: Math.max(0, Math.min(1, w.percent / 100)),
-          // 行内仅百分比，倒计时放悬停明细（三窗平铺时行内放不下）
-          text: `${w.percent}%`,
-          detail: [`${w.label}窗 ${w.percent}%`, resetIn && `剩 ${resetIn}`, `重置 ${resetLocal}`].filter(Boolean).join("，"),
+          // 金额窗不参与健康色圆点（pct 无意义），置 0 使圆点呈绿色
+          pct: isRemainder ? 0 : Math.max(0, Math.min(1, w.percent / 100)),
+          // 行内仅百分比/金额，倒计时放悬停明细（多窗平铺时行内放不下）
+          text: isRemainder ? `$${Number.isFinite(amount) ? amount!.toFixed(2) : "0.00"}` : `${w.percent}%`,
+          detail: isRemainder
+            ? `剩余月度额度 $${Number.isFinite(amount) ? amount!.toFixed(2) : "0.00"}`
+            : [`${w.label}窗 ${w.percent}%`, resetIn && `剩 ${resetIn}`, `重置 ${resetLocal}`].filter(Boolean).join("，"),
         };
       });
     if (items.length === 0) return null;

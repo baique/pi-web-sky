@@ -11,6 +11,8 @@ export const dynamic = "force-dynamic";
  * 按提供商查询余额/用量（设计见 .agent/spec/2026-08-26-quota-display-design.md）：
  * - opencode-go：GET /zen/go/v1/usage → 三时间窗（5h滚动/周/月）percent + resetsAt
  * - deepseek：GET /user/balance → 余额；峰谷由服务端按 UTC 计算
+ * - commandcode：GET /alpha/whoami + /alpha/billing/credits → 月度额度 + 分时窗口（5h/周）
+ *   凭据为 OAuth access token（auth.json {type:"oauth",access}），非 api key
  * 密钥只从服务端 auth.json 读取，不落前端。结果内存缓存 30s，失败不缓存。
  */
 
@@ -43,7 +45,10 @@ function readProviderKey(provider: string): string | null {
     const parsed: unknown = JSON.parse(readFileSync(join(getAgentDir(), "auth.json"), "utf-8"));
     if (!isRecord(parsed)) return null;
     const entry = parsed[provider];
-    if (isRecord(entry) && typeof entry.key === "string" && entry.key) return entry.key;
+    if (!isRecord(entry)) return null;
+    // 常规 API key；commandcode 走 OAuth access token（auth.json 存 {type:"oauth",access}）
+    if (typeof entry.key === "string" && entry.key) return entry.key;
+    if (entry.type === "oauth" && typeof entry.access === "string" && entry.access) return entry.access;
   } catch {
     // auth.json 缺失或损坏按无 key 处理
   }
@@ -94,6 +99,72 @@ function parseDeepSeekBalance(data: unknown): QuotaPayload {
   };
 }
 
+/** 毫秒时间戳 → ISO 字符串（credit resetAt 为毫秒，其他上游可能给秒，统一防御） */
+function normalizeTs(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    // ≥1e12 视为毫秒，否则视为秒
+    return new Date(value >= 1e12 ? value : value * 1000).toISOString();
+  }
+  if (typeof value === "string" && value.trim()) {
+    const ts = /^\d+$/.test(value.trim()) ? Number(value.trim()) : Date.parse(value.trim());
+    if (Number.isFinite(ts) && ts > 0) return new Date(ts >= 1e12 ? ts : ts * 1000).toISOString();
+  }
+  return "";
+}
+
+/**
+ * commandcode：月度额度（剩余 $） + 分时窗口（5h / 周，cap 内用量百分比）。
+ * 实测形状（2026-08-29）：
+ * credits: { monthlyCredits, purchasedCredits, freeCredits }
+ * windowLimits: { fiveHour:{used,cap,resetAt(ms)}, weekly:{used,cap,resetAt(ms)} }
+ * summary: { totalCost, totalCount }
+ */
+function parseCommandCode(data: unknown): QuotaPayload {
+  if (!isRecord(data) || !isRecord(data.credits)) throw new Error("cc credits: unexpected shape");
+  const credits = data.credits;
+  const monthly =
+    typeof credits.monthlyCredits === "number" ? credits.monthlyCredits : 0;
+  const summary = isRecord(data.summary)
+    ? data.summary
+    : isRecord(data.usage) && isRecord(data.usage.summary)
+      ? data.usage.summary
+      : null;
+  const spent = summary && typeof summary.totalCost === "number" ? summary.totalCost : 0;
+  const pool = monthly + spent;
+
+  const windows: { label: string; percent: number; status: string; resetsAt: string }[] = [];
+  const wl = isRecord(data.windowLimits) ? data.windowLimits : null;
+  for (const [key, label] of [
+    ["fiveHour", "5h"],
+    ["weekly", "周"],
+  ] as const) {
+    const w = wl && isRecord(wl[key]) ? wl[key] : null;
+    if (!w) continue;
+    const used = typeof w.used === "number" ? w.used : 0;
+    const cap = typeof w.cap === "number" ? w.cap : 0;
+    if (!(cap > 0)) continue;
+    windows.push({
+      label,
+      percent: Math.round((used / cap) * 100),
+      status: "ok",
+      resetsAt: normalizeTs(w.resetAt),
+    });
+  }
+  if (windows.length === 0) throw new Error("cc credits: no window limit");
+
+  // 主条把剩余月度额度带上（5h 40% · 周 20% · 余 $7.70）——行内紧凑，放得下
+  // 约定：percent 字段承载金额数值，前端按 label==="余" 渲染为 $ 金额
+  if (pool > 0) {
+    windows.push({
+      label: "余",
+      percent: monthly,
+      status: "ok",
+      resetsAt: "",
+    });
+  }
+  return { kind: "usage", windows };
+}
+
 async function queryQuota(provider: string): Promise<QuotaPayload> {
   const key = readProviderKey(provider);
   if (!key) throw new Error("no credential for provider");
@@ -103,6 +174,18 @@ async function queryQuota(provider: string): Promise<QuotaPayload> {
   }
   if (provider === "deepseek") {
     return parseDeepSeekBalance(await fetchJson("https://api.deepseek.com/user/balance", key));
+  }
+  if (provider === "commandcode") {
+    const base = "https://api.commandcode.ai";
+    // whoami → orgId（个人账号为 null，此时不传 orgId）
+    const whoami = (await fetchJson(`${base}/alpha/whoami`, key)) as Record<string, unknown>;
+    const orgId = isRecord(whoami.org) && typeof whoami.org.id === "string" ? whoami.org.id : null;
+    const qs = orgId ? `?orgId=${encodeURIComponent(orgId)}` : "";
+    const [creditsRaw, summaryRaw] = await Promise.all([
+      fetchJson(`${base}/alpha/billing/credits${qs}`, key),
+      fetchJson(`${base}/alpha/usage/summary${qs}`, key),
+    ]);
+    return parseCommandCode({ ...(creditsRaw as object), summary: summaryRaw });
   }
   throw new Error(`unsupported provider: ${provider}`);
 }

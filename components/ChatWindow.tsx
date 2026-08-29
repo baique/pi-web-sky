@@ -18,6 +18,7 @@ import { useProviderQuota } from "@/hooks/useProviderQuota";
 import { useTheme } from "@/hooks/useTheme";
 import { phaseLabel, orbModeForPhase } from "@/lib/agent-phase";
 import { NoticeDrawer } from "./NoticeDrawer";
+import { QuotaView } from "./ComposerHeader";
 import { formatTokenCount } from "./ChatInput";
 import { useAgentSession, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
@@ -1145,6 +1146,10 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     onFreezeChange={setNoticeHistoryFrozen}
                     isDark={isDark}
                   />
+                  {/* 常驻额度：排在通知后面，不受通知/流式状态影响 */}
+                  {quotaInfo && (
+                    <QuotaView quota={quotaInfo} />
+                  )}
                 </div>
               )
             }

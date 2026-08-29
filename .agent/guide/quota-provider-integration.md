@@ -1,13 +1,13 @@
 # 额度查询 · 提供商接入说明
 
 > 功能设计：[2026-08-26-quota-display-design.md](./2026-08-26-quota-display-design.md)
-> 展示位：底栏通知槽（NoticeInline 空闲态 P3），流式时自动让位
+> 展示位：**底栏常驻**（通知 NoticeDrawer 之后、Terminal 之前），不受通知/流式状态影响（2026-08-29 改，原设计为通知槽 idle 态，已废弃）
 
 ## 数据流
 
 ```
 auth.json(服务端) → GET /api/quota?provider=X → useProviderQuota(60s轮询)
-  → QuotaInfo → useBroadcast → NoticeInline(底栏空闲态)
+  → QuotaInfo → ChatWindow 底栏 <QuotaView/> 常驻（排在通知后面）
 ```
 
 ## 接入一个新提供商的步骤（共 3 处）
@@ -51,6 +51,20 @@ const SUPPORTED_PROVIDERS = new Set(["opencode-go", "deepseek", "your-provider"]
   每窗的 `detail` 字段写悬停明细，建议格式：`5h窗 24%，剩 1h27m，重置 8/26 18:30`
 - **balance 型**：拼 `text`，参考 deepseek：`¥10.91 · 峰 · 18:00转谷 (1h19m)`；
   币种符号映射加在 `currencySymbol()`
+- **commandcode 分时窗（usage 型，2026-08-29 接入）**：
+  - 凭据是 **OAuth access token**（`auth.json` 里 `{type:"oauth",access}`，非 key）——后端 `readProviderKey` 已兼容
+  - 上游：`GET /alpha/whoami`（拿 orgId，个人账号为 null 则不传）→
+    `GET /alpha/billing/credits`（`windowLimits.fiveHour/weekly`：used/cap/resetAt，resetAt 为**毫秒**）
+    + `GET /alpha/usage/summary`（totalCost）
+  - 映射：5h 窗（used/cap 百分比）、周窗（used/cap 百分比）、余窗（剩余月度额度 $，percent 字段承载金额数值）
+  - 前端 `toQuotaInfo` 里 `label==="余"` 窗渲染 `$金额` 而非百分比（pct 置 0）
+  - 展示示例：`5h 44% · 周 22% · 余 $8.67`（悬停看重置时刻）
+
+## 展示位（常驻）
+
+- 额度不再走通知槽 idle（NoticeDrawer 只负责 P0/P1 通知）
+- ChatWindow bottom-band 的 `notice` 容器内：`<NoticeDrawer/>` 后追加 `<QuotaView quota={quotaInfo}/>`，常驻渲染
+- `quotaInfo` 为 null（不支持/无凭据/失败）时区域留空，不弹错
 
 ## 验证清单
 
