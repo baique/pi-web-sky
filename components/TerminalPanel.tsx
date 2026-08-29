@@ -346,6 +346,9 @@ export function TerminalPanel({
       host.appendChild(a.term.element);
     }
     a.term.element?.classList.add("terminal-attaching");
+    // 立即聚焦（不等 fit 完成）——否则打开面板瞬间按 Ctrl+W 等，焦点还在触发按钮上，
+    // 浏览器级快捷键会直接透传（关标签页）。
+    a.term.focus();
     fitWhenReady(activeId);
     const ro = new ResizeObserver(() => {
       if (!hiddenRef.current && activeIdRef.current === activeId) fitWhenReady(activeId);
@@ -518,7 +521,11 @@ export function TerminalPanel({
       onClose();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key !== "Escape") return;
+      // 终端聚焦时 Esc 属于终端（\x1b），不关闭面板；面板其它区域聚焦时仍可关闭。
+      const active = document.activeElement;
+      if (active?.classList?.contains("xterm-helper-textarea")) return;
+      onClose();
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown, true);
@@ -527,6 +534,48 @@ export function TerminalPanel({
       document.removeEventListener("keydown", onKeyDown, true);
     };
   }, [onClose]);
+
+  // 终端键盘优先：焦点保护 + 浏览器级 Ctrl 快捷键兜底。
+  // 根因：点击面板 tab 条/空白等非 xterm 区域后，焦点会掉到 body（Chrome 对不可聚焦
+  // div 的清焦行为），此时 Ctrl+W 等浏览器级快捷键不再被 xterm 拦截，直接关标签页。
+  // 修复：① 点击面板非交互区把焦点还给 xterm（用 click，pointerdown 聚焦会被默认清焦覆盖）；
+  // ② document 级兜底——面板可见且焦点不在文本输入控件时，纯 Ctrl+A-Z 转发给 pty。
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const focusActiveTerm = () => {
+      if (hiddenRef.current) return;
+      const id = activeIdRef.current;
+      const a = id ? attachedRef.current.get(id) : undefined;
+      a?.term.focus();
+    };
+    const onClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("button, select, input, textarea, a")) return;
+      focusActiveTerm();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (hiddenRef.current || !event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
+      if (event.key.length !== 1) return;
+      const code = event.key.toLowerCase().charCodeAt(0);
+      if (code < 97 || code > 122) return; // 只转发纯 Ctrl+A-Z
+      const active = document.activeElement;
+      if (active?.classList?.contains("xterm-helper-textarea")) return; // xterm 原生处理
+      if (active instanceof HTMLElement && active.closest("input, textarea, [contenteditable='true']")) return; // 文本输入框自己处理
+      const id = activeIdRef.current;
+      const a = id ? attachedRef.current.get(id) : undefined;
+      if (!a) return;
+      event.preventDefault();
+      event.stopPropagation();
+      a.term.input(String.fromCharCode(code - 96));
+    };
+    el.addEventListener("click", onClick, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      el.removeEventListener("click", onClick, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, []);
 
   const panelStyle: React.CSSProperties = isMobile
     ? { position: "fixed", inset: 10, zIndex: 1050 }
