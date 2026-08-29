@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { SubagentInspectReply, SubagentSnapshot, SubagentSnapshotNode } from "@/lib/subagent-widget";
-import { dispatchInspectReply, invokeSubagentInspect, nextInspectRequestId, subscribeInspectReplies } from "@/lib/extension-command";
+import { invokeSubagentInspect, nextInspectRequestId, subscribeInspectReplies } from "@/lib/extension-command";
 import { SubagentInspectPanel } from "./SubagentInspectPanel";
 
 const STATE_COLORS: Record<string, string> = {
@@ -152,7 +152,6 @@ export function SubagentWidgetCard({
   snapshot: SubagentSnapshot;
   sessionId?: string;
 }) {
-  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [inspectingNode, setInspectingNode] = useState<SubagentSnapshotNode | null>(null);
   const [inspectReply, setInspectReply] = useState<SubagentInspectReply | null>(null);

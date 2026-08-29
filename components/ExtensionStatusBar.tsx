@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { parseAnsiLine, stripAnsi } from "@/lib/ansi";
 import type { ExtensionStatusItem, ExtensionWidgetItem } from "@/lib/types";
 import {
@@ -43,15 +43,6 @@ export function ExtensionStatusBar({
   /** 当前会话 id，用于 inspect 命令。 */
   sessionId?: string;
 }) {
-  // The shelf is event-driven: Pi Web tools use its reserved right slot but
-  // must not make the otherwise-empty extension shelf permanently visible.
-  if (statuses.length === 0 && widgets.length === 0 && !tools && !notice) return null;
-
-  const statusLine = formatExtensionStatusLine(statuses);
-  const plainStatusLine = stripAnsi(statusLine);
-
-  // 拦截 subagent-inspect 回包（emit-then-retract 的 emit 帧）分发给订阅者。
-  // retract 帧（widgetLines: undefined）已被 useAgentSession 过滤，不会到这里。
   // 拦截 subagent-inspect 回包（emit-then-retract 的 emit 帧）分发给订阅者。
   // 注：真正的分发在 useAgentSession 的 setWidget case 同步完成（绕过 React 批处理）；
   // 这里作为兜底保留（若未来 useAgentSession 路径变更，此处仍能捕获）。
@@ -65,16 +56,18 @@ export function ExtensionStatusBar({
 
   // 分离 subagent-async 与其余 widget：subagent 快照 → 结构化卡片；其余原样走文本。
   // 解析失败时 subagent 也降级回文本 widget（不放卡片，不丢内容）。
-  const { subagentSnapshot, subagentWidget, otherWidgets } = useMemo(() => {
-    const subagent = widgets.find((w) => w.key === SUBAGENT_ASYNC_WIDGET_KEY);
-    if (!subagent) return { subagentSnapshot: null, subagentWidget: null, otherWidgets: widgets };
-    const snapshot = parseSubagentSnapshot(subagent.lines);
-    return {
-      subagentSnapshot: snapshot,
-      subagentWidget: snapshot ? subagent : null,
-      otherWidgets: snapshot ? widgets.filter((w) => w.key !== SUBAGENT_ASYNC_WIDGET_KEY) : widgets,
-    };
-  }, [widgets]);
+  const subagentWidget = widgets.find((w) => w.key === SUBAGENT_ASYNC_WIDGET_KEY);
+  const subagentSnapshot = subagentWidget ? parseSubagentSnapshot(subagentWidget.lines) : null;
+  const otherWidgets = subagentWidget && subagentSnapshot
+    ? widgets.filter((w) => w.key !== SUBAGENT_ASYNC_WIDGET_KEY)
+    : widgets;
+
+  // The shelf is event-driven: Pi Web tools use its reserved right slot but
+  // must not make the otherwise-empty extension shelf permanently visible.
+  if (statuses.length === 0 && widgets.length === 0 && !tools && !notice) return null;
+
+  const statusLine = formatExtensionStatusLine(statuses);
+  const plainStatusLine = stripAnsi(statusLine);
 
   return (
     <div
