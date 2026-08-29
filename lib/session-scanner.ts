@@ -5,9 +5,8 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 /**
  * 轻量会话列表扫描：只读取每个 jsonl 的「头部」（session header + 首条用户
- * 消息简述）和「尾部」（重命名后的 session_info），中间的消息内容一律不读，
- * 最后活动时间直接用文件 mtime。列表展示只需要标题 + 时间，读全量消息是
- * 纯浪费（大会话文件会把一次列表刷新拖到秒级以上）。
+ * 消息简述）和「尾部」（自定义名 session_info，反向分块读），中间内容一律
+ * 不读，最后活动时间直接用文件 mtime。列表展示只需要标题 + 时间 + 名字。
  */
 
 interface HeaderEntry {
@@ -29,9 +28,10 @@ export interface SessionScanResult {
   parentSessionPath?: string;
 }
 
-// 头部 / 尾部各最多读这么多字节；超出部分（超长正文）不碰。
-const HEAD_READ_BYTES = 48 * 1024;
-const TAIL_READ_BYTES = 48 * 1024;
+// 初始读块：前几条 entry（header + 首条用户消息）通常远小于此；
+// 不足时再按需扩读，直到拿到首条消息或达到上限。
+const HEAD_INITIAL_BYTES = 4 * 1024;
+const HEAD_MAX_BYTES = 48 * 1024;
 // 列表里的首条消息只做简述展示（sidebar 也只截取前 50 字符）。
 const FIRST_MESSAGE_PREVIEW_LENGTH = 300;
 
@@ -54,27 +54,98 @@ function extractTextContent(message: { content?: unknown }): string {
     .join(" ");
 }
 
-/** 读取文件尾部，取最后一个 session_info 的自定义名（显式清空 → undefined）。 */
-function scanNameFromTail(path: string, size: number): string | undefined {
-  if (size <= 0) return undefined;
-  const start = Math.max(0, size - TAIL_READ_BYTES);
-  const buf = Buffer.alloc(size - start);
+/**
+ * 读取文件头部：拿 header + 首条用户消息。
+ * 策略：先读小块（4KB），解析完整行；若首条消息已拿到则停；若块尾行
+ * 不完整（可能被截断），或还没拿到首条消息，则扩大读取继续。
+ * 首行必须是 session 头，否则视为非本应用会话文件。
+ */
+function scanHead(path: string, size: number): { header: HeaderEntry; firstMessage: string } | null {
+  let readLen = Math.min(HEAD_INITIAL_BYTES, size);
+  let text = "";
   const fd = openSync(path, "r");
   try {
-    readSync(fd, buf, 0, buf.length, start);
+    let header: HeaderEntry | null = null;
+    let firstMessage = "";
+
+    while (true) {
+      const buf = Buffer.alloc(readLen);
+      readSync(fd, buf, 0, readLen, 0);
+      const chunk = buf.toString("utf8");
+      // 块尾可能是半行：丢到最后完整换行处，避免解析半行。
+      const lastNl = chunk.lastIndexOf("\n");
+      const end = lastNl === -1 ? chunk.length : lastNl + 1;
+      text += chunk.slice(0, end);
+
+      for (const line of text.split("\n")) {
+        const entry = parseLine(line) as
+          | HeaderEntry
+          | { type?: unknown; message?: { role?: unknown; content?: unknown } }
+          | null;
+        if (!entry) continue;
+        if (!header) {
+          // 首条 entry 必须是 session 头，否则不是本应用的会话文件。
+          if (entry.type !== "session") return null;
+          header = entry as HeaderEntry;
+          continue;
+        }
+        if (entry.type === "message" && entry.message?.role === "user") {
+          const msgText = extractTextContent(entry.message).trim();
+          if (msgText) {
+            firstMessage = msgText.slice(0, FIRST_MESSAGE_PREVIEW_LENGTH);
+            break;
+          }
+        }
+      }
+
+      if (!header) return null;
+      if (firstMessage) break; // 已拿到首条消息，收工。
+
+      // 还没拿到首条消息：已读满上限或已到文件尾则放弃；否则扩读。
+      if (readLen >= HEAD_MAX_BYTES || readLen >= size) break;
+      readLen = Math.min(readLen * 2, HEAD_MAX_BYTES, size);
+      if (readLen <= 0) break;
+    }
+    return { header, firstMessage };
   } finally {
     closeSync(fd);
   }
-  // 第一段可能从一个完整行中间开始（首尾重叠时是完整行，多为空行，均安全跳过）。
-  const lines = buf.toString("utf8").split("\n");
-  let name: string | undefined;
-  for (let i = 1; i < lines.length; i++) {
-    const entry = parseLine(lines[i]) as { type?: string; name?: unknown } | null;
-    if (entry?.type === "session_info" && typeof entry.name === "string") {
-      name = entry.name.trim() || undefined;
+}
+
+// 从文件末尾向前翻的块大小与上限。反向分块：session_info 是 append 写入的，
+// 改名后继续聊会被推到更靠前的位置；从尾部向前找最后一个 session_info
+// 与 SDK getSessionName 语义一致，且大多数会话第一块就命中（改名后没怎么聊）。
+const NAME_BLOCK_BYTES = 64 * 1024;
+const NAME_MAX_BLOCKS = 256; // 约 16MB，超出视为无名字
+
+/** 读取文件尾部，取最后一个 session_info 的自定义名（显式清空 → undefined）。 */
+function scanNameFromTail(path: string, size: number): string | undefined {
+  if (size <= 0) return undefined;
+  const fd = openSync(path, "r");
+  try {
+    let offset = size;
+    for (let block = 0; block < NAME_MAX_BLOCKS && offset > 0; block++) {
+      const start = Math.max(0, offset - NAME_BLOCK_BYTES);
+      const len = offset - start;
+      const buf = Buffer.alloc(len);
+      readSync(fd, buf, 0, len, start);
+      const text = buf.toString("utf8");
+      const lines = text.split("\n");
+      // 块首可能截断一行（前一行的后半），跳过第一行；块尾对齐 offset 完整。
+      // 从后往前找本块内最后一个 session_info。
+      for (let i = lines.length - 1; i >= 1; i--) {
+        const entry = parseLine(lines[i]) as { type?: string; name?: unknown } | null;
+        if (entry?.type === "session_info" && typeof entry.name === "string") {
+          const name = entry.name.trim();
+          return name || undefined; // 显式清空 → undefined
+        }
+      }
+      offset = start;
     }
+    return undefined;
+  } finally {
+    closeSync(fd);
   }
-  return name;
 }
 
 function scanOneSessionFile(path: string): SessionScanResult | null {
@@ -86,40 +157,9 @@ function scanOneSessionFile(path: string): SessionScanResult | null {
   }
   if (!stat.isFile() || stat.size === 0) return null;
 
-  const headLen = Math.min(HEAD_READ_BYTES, stat.size);
-  const headBuf = Buffer.alloc(headLen);
-  const fd = openSync(path, "r");
-  try {
-    readSync(fd, headBuf, 0, headLen, 0);
-  } catch {
-    return null;
-  } finally {
-    closeSync(fd);
-  }
-
-  let header: HeaderEntry | null = null;
-  let firstMessage = "";
-  for (const line of headBuf.toString("utf8").split("\n")) {
-    const entry = parseLine(line) as
-      | HeaderEntry
-      | { type?: unknown; message?: { role?: unknown; content?: unknown } }
-      | null;
-    if (!entry) continue;
-    if (!header) {
-      // 首条 entry 必须是 session 头，否则不是本应用的会话文件。
-      if (entry.type !== "session") return null;
-      header = entry as HeaderEntry;
-      continue;
-    }
-    if (entry.type === "message" && entry.message?.role === "user") {
-      const text = extractTextContent(entry.message).trim();
-      if (text) {
-        firstMessage = text.slice(0, FIRST_MESSAGE_PREVIEW_LENGTH);
-        break;
-      }
-    }
-  }
-  if (!header) return null;
+  const scanned = scanHead(path, stat.size);
+  if (!scanned) return null;
+  const { header, firstMessage } = scanned;
 
   const id = typeof header.id === "string" ? header.id : "";
   if (!id) return null;
@@ -140,9 +180,10 @@ function scanOneSessionFile(path: string): SessionScanResult | null {
 
 /**
  * 扫描 <agentDir>/sessions 下所有 jsonl。同步小 IO 串行即可（单文件只读
- * 首尾几十 KB），`sessionsDir` 仅在测试时注入。
+ * 头部小块 + 尾部反向分块），`sessionsDir` 仅在测试时注入。
  */
-export async function scanSessionFiles(sessionsDir?: string): Promise<SessionScanResult[]> {  const root = sessionsDir ?? joinPath(getAgentDir(), "sessions");
+export async function scanSessionFiles(sessionsDir?: string): Promise<SessionScanResult[]> {
+  const root = sessionsDir ?? joinPath(getAgentDir(), "sessions");
   let projectDirs: string[];
   try {
     const entries = await readdir(root, { withFileTypes: true });

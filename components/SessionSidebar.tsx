@@ -1035,6 +1035,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, [tasks, selectedProject?.key]);
 
+  // 改名成功：乐观更新本地 name，立即生效。不触发 loadSessions——
+  // 服务端列表扫描直接带名字，但刷新有 1-2s 延迟；本地先改，避免等。
+  const handleSessionRenamed = useCallback((sessionId: string, newName: string) => {
+    setAllSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, name: newName } : s)));
+  }, []);
+
   const handleCreateTask = useCallback(async (name: string) => {
     const key = selectedProject?.key;
     if (!key) return;
@@ -1936,7 +1942,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                                   runningSessionIds={runningSessionIds}
                                   unreadSessionIds={unreadSessionIds}
                                   onSelectSession={handleSelectSessionFromList}
-                                  onRenamed={loadSessions}
+                                  onRenamed={(id, name) => handleSessionRenamed(id, name)}
                                   onSessionDeleted={(id) => {
                                     onSessionDeleted?.(id);
                                     loadSessions();
@@ -2024,7 +2030,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             runningSessionIds={runningSessionIds}
                             unreadSessionIds={unreadSessionIds}
                             onSelectSession={handleSelectSessionFromList}
-                            onRenamed={loadSessions}
+                            onRenamed={(id, name) => handleSessionRenamed(id, name)}
                             onSessionDeleted={(id) => {
                               onSessionDeleted?.(id);
                               loadSessions();
@@ -2157,7 +2163,7 @@ function SessionTreeItem({
   runningSessionIds: Set<string>;
   unreadSessionIds: Set<string>;
   onSelectSession: (s: SessionInfo) => void;
-  onRenamed?: () => void;
+  onRenamed?: (sessionId: string, newName: string) => void;
   onSessionDeleted?: (id: string) => void;
   onTogglePin?: (sessionId: string, nextPinned: boolean) => void;
   depth: number;
@@ -2340,7 +2346,7 @@ function SessionItem({
   isRunning?: boolean;
   isUnread?: boolean;
   onClick: () => void;
-  onRenamed?: () => void;
+  onRenamed?: (sessionId: string, newName: string) => void;
   onDeleted?: (id: string) => void;
   onTogglePin?: (sessionId: string, nextPinned: boolean) => void;
   depth?: number;
@@ -2453,7 +2459,7 @@ function SessionItem({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
       });
-      onRenamed?.();
+      onRenamed?.(session.id, name);
     } catch {
       // ignore
     }
@@ -2496,7 +2502,7 @@ function SessionItem({
       name: session.name,
       clientX: e.clientX,
       clientY: e.clientY,
-      refresh: () => { onRenamed?.(); },
+      refresh: () => { onRenamed?.(session.id, session.name ?? ""); },
     });
     if (!handled) return;
     e.preventDefault();
