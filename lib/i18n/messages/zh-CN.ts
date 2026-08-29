@@ -215,6 +215,8 @@ export const zhCNLocale: LocalePlugin = {
     "chat.extensionWidgetLine": "{count} 行",
     "chat.extensionWidgetLines": "{count} 行",
     "chat.close": "关闭",
+    "chat.extensionInspect": "详情",
+    "chat.extensionNoDetail": "暂无详细过程（可尝试刷新后重试）",
     "chat.queued": "已排队 · {count}",
     "chat.recall": "移回输入框",
     "chat.recallTitle": "移除所有排队消息并将其放回输入框编辑",
