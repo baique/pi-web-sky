@@ -106,6 +106,15 @@ export function TerminalPanel({
   // 拖拽位置/尺寸保存在组件内 state：面板常驻挂载（hidden 只是 display:none），
   // 所以关闭再打开仍保持用户调好的位置与大小；页面刷新后回到锚定默认。
   const [dragPos, setDragPos] = useState<{ left: number; top: number } | null>(null);
+  // 游离态判定：被拖离锚定位置后视为“用户特意摆放”，点击别处不再自动收起；
+  // 锚定态（未被拖走）保留原下拉行为：点击面板外自动关闭。
+  const isFloating = dragPos !== null;
+  // 主动关闭：回到锚定状态（重置拖拽位置与缩放尺寸），下次打开在锚定位置。
+  const handleClose = useCallback(() => {
+    setDragPos(null);
+    setPanelSize(null);
+    onClose();
+  }, [onClose]);
   const [panelSize, setPanelSize] = useState<{ width: number; height: number } | null>(null);
   const dragStateRef = useRef<{
     pointerId: number;
@@ -638,6 +647,23 @@ export function TerminalPanel({
     try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
   }, [endResize]);
 
+  // 锚定态下点击面板外自动收起（下拉语义）；游离态（被拖走后）不关——
+  // 用户特意摆放的面板不应被误关，只靠 × 按钮/触发按钮关闭。
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (hiddenRef.current) return;
+      if (isFloating) return; // 游离态：不自动收起
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      // 两个触发按钮本身是 toggle，点击它们不视为 outside-click
+      if (document.getElementById("terminal-topbar-btn")?.contains(target)) return;
+      if (document.getElementById("terminal-bottombar-btn")?.contains(target)) return;
+      handleClose();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [handleClose, isFloating]);
+
   // 终端键盘优先：焦点保护 + 浏览器级 Ctrl 快捷键兜底。
   // 根因：点击面板 tab 条/空白等非 xterm 区域后，焦点会掉到 body（Chrome 对不可聚焦
   // div 的清焦行为），此时 Ctrl+W 等浏览器级快捷键不再被 xterm 拦截，直接关标签页。
@@ -724,7 +750,7 @@ export function TerminalPanel({
   const panel = (
     <div
       ref={rootRef}
-      className={`terminal-panel terminal-panel-${origin}${isMobile ? " terminal-panel-mobile" : ""}${hidden ? " terminal-panel-hidden" : ""}`}
+      className={`terminal-panel terminal-panel-${origin}${isMobile ? " terminal-panel-mobile" : ""}${hidden ? " terminal-panel-hidden" : ""}${dragPos ? " terminal-panel-dragged" : ""}`}
       style={{
         ...panelStyle,
         // L-panel 玻璃：终端面板（见 --panel-glass / --glass-blur-panel）
@@ -794,7 +820,7 @@ export function TerminalPanel({
           <button
             type="button"
             className="terminal-close"
-            onClick={onClose}
+            onClick={handleClose}
             title={t("common.close")}
             aria-label={t("common.close")}
           >

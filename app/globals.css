@@ -1823,6 +1823,8 @@ span.token.table {
 /* Materialize, don't just fade — blur+scale arrive together. */
 .terminal-panel-top { transform-origin: top right; animation: terminal-panel-in-top 0.15s ease-out both; border-radius: 0 0 10px 10px !important; border-top: none !important; }
 .terminal-panel-bottombar { transform-origin: bottom right; animation: terminal-panel-in-bottombar 0.15s ease-out both; border-radius: 10px 10px 0 0 !important; border-bottom: none !important; }
+/* 被拖离锚定位置后：四角全圆（覆盖锚定态的单侧圆角） */
+.terminal-panel-dragged { border-radius: 10px !important; border-top: 1px solid var(--border) !important; border-bottom: 1px solid var(--border) !important; }
 
 /* Panel stays mounted while closed — hide instead of tearing down xterm. */
 .terminal-panel-hidden { display: none; }
@@ -1911,6 +1913,10 @@ html.dark .terminal-tabs { border-bottom-color: color-mix(in srgb, var(--text) 6
 .terminal-chip-close:hover, .terminal-close:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
 .terminal-new, .terminal-close { width: 30px; margin-right: 2px; align-self: center; height: 24px; }
 .terminal-new:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
+/* 关闭按钮（面板右上角 ×）用红色强调，chip 内小 × 同步 */
+.terminal-close { color: color-mix(in srgb, #f87171 80%, transparent); }
+.terminal-close:hover { color: #fff; background: color-mix(in srgb, #ef4444 85%, transparent); }
+.terminal-chip-close:hover { color: #fff; background: color-mix(in srgb, #ef4444 80%, transparent); }
 
 /* 失联芯片（后台重启/断网后 SSE 探活失败）+ 批量清理按钮 */
 .terminal-chip.is-disconnected { opacity: 0.72; }
