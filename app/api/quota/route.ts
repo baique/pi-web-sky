@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isApiRequestAllowed } from "@/lib/request-security";
+import { isDeepSeekPeak, nextDeepSeekSwitch } from "@/lib/deepseek-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -15,12 +16,6 @@ export const dynamic = "force-dynamic";
 
 const CACHE_TTL_MS = 30_000;
 const FETCH_TIMEOUT_MS = 10_000;
-
-/** DeepSeek 峰时窗（UTC 小时区间，左闭右开）：01–04、06–10 */
-const DS_PEAK_WINDOWS: [number, number][] = [
-  [1, 4],
-  [6, 10],
-];
 
 type QuotaPayload =
   | {
@@ -65,27 +60,6 @@ async function fetchJson(url: string, key: string): Promise<unknown> {
   return res.json();
 }
 
-function nextPeakSwitch(now: Date): Date {
-  // 候选切换点：今天与明天的每个峰时起止整点（UTC），取第一个晚于 now 的
-  const candidates: number[] = [];
-  for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
-    for (const [start, end] of DS_PEAK_WINDOWS) {
-      for (const hour of [start, end]) {
-        const d = new Date(now);
-        d.setUTCDate(d.getUTCDate() + dayOffset);
-        d.setUTCHours(hour, 0, 0, 0);
-        if (d.getTime() > now.getTime()) candidates.push(d.getTime());
-      }
-    }
-  }
-  return new Date(Math.min(...candidates));
-}
-
-function isDeepSeekPeak(now: Date): boolean {
-  const h = now.getUTCHours();
-  return DS_PEAK_WINDOWS.some(([start, end]) => h >= start && h < end);
-}
-
 function parseOcgUsage(data: unknown): QuotaPayload {
   if (!isRecord(data) || !isRecord(data.usage)) throw new Error("ocg usage: unexpected shape");
   const usage = data.usage;
@@ -116,7 +90,7 @@ function parseDeepSeekBalance(data: unknown): QuotaPayload {
     currency: typeof info.currency === "string" ? info.currency : "",
     totalBalance: info.total_balance,
     isPeak: isDeepSeekPeak(now),
-    nextSwitchAt: nextPeakSwitch(now).toISOString(),
+    nextSwitchAt: nextDeepSeekSwitch(now).toISOString(),
   };
 }
 

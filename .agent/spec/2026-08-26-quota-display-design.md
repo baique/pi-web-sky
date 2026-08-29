@@ -29,7 +29,10 @@ GET https://api.deepseek.com/user/balance   Authorization: Bearer <auth.json key
    "granted_balance":"0.00","topped_up_balance":"10.91"}]}
 ```
 
-峰谷规则：峰时 01:00–04:00、06:00–10:00 UTC（北京 09–12 / 14–18 点），其余时段 token 半价。
+峰谷规则（官方依据：https://api-docs.deepseek.com/zh-cn/quick_start/pricing/）：
+- 2026-08-17 起引入峰谷计费：工作日（周一~周五）北京时间 09:00–12:00、14:00–18:00 为高峰，其余时段 token 半价
+- **2026-08-23 起周末（周六、周日）全天按低谷价计费，无峰谷切换**（官方更新日志）
+- 实现集中在 `lib/deepseek-pricing.ts`：统一换算北京时间判星期与时刻（不能用 UTC 直判，周末边界会错位），`nextDeepSeekSwitch` 跨周末直接跳到周一 09:00 转峰
 
 ## 设计
 
