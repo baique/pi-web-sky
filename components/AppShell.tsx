@@ -883,6 +883,7 @@ export function AppShell() {
     }
     setNewSessionCwd(null);
     setSelectedSession(session);
+    setActiveBoardId(null); // 会话与看板同级切换：点会话退出看板模式
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
     setSystemPromptLoading(false);

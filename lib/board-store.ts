@@ -21,6 +21,7 @@ interface BoardRow {
   projectKey: string;
   name: string;
   isSystem: number;
+  sortOrder: number;
   created: number;
   updated: number;
 }
@@ -66,6 +67,7 @@ function rowToBoard(row: BoardRow, nodeCount: number): BoardInfo {
     projectKey: row.projectKey,
     name: row.name,
     isSystem: row.isSystem === 1,
+    sortOrder: row.sortOrder,
     created: row.created,
     updated: row.updated,
     nodeCount,
@@ -137,7 +139,7 @@ function countNodes(boardId: string): number {
 
 function getBoardRow(id: string): BoardRow | undefined {
   return getDb()
-    .prepare("SELECT id, project_key AS projectKey, name, is_system AS isSystem, created, updated FROM boards WHERE id = ?")
+    .prepare("SELECT id, project_key AS projectKey, name, is_system AS isSystem, sort_order AS sortOrder, created, updated FROM boards WHERE id = ?")
     .get(id) as BoardRow | undefined;
 }
 
@@ -151,6 +153,7 @@ export function getSystemRunningBoard(): BoardInfo {
     projectKey: "",
     name: "running",
     isSystem: true,
+    sortOrder: 0,
     created: 0,
     updated: 0,
     nodeCount: 0,
@@ -168,10 +171,33 @@ export function getBoard(id: string): BoardInfo | undefined {
 export function listBoards(projectKey: string): BoardInfo[] {
   const rows = getDb()
     .prepare(
-      "SELECT id, project_key AS projectKey, name, is_system AS isSystem, created, updated FROM boards WHERE project_key = ? ORDER BY created, rowid",
+      "SELECT id, project_key AS projectKey, name, is_system AS isSystem, sort_order AS sortOrder, created, updated FROM boards WHERE project_key = ? ORDER BY sort_order, created, rowid",
     )
     .all(projectKey) as unknown as BoardRow[];
   return rows.map((row) => rowToBoard(row, countNodes(row.id)));
+}
+
+/**
+ * 项目内看板批量排序（完整有序 id 列表）。id 必须都属于该项目，否则事务回滚。
+ */
+export function reorderBoards(projectKey: string, orderedIds: string[]): BoardInfo[] {
+  const db = getDb();
+  if (orderedIds.length === 0) return listBoards(projectKey);
+  db.exec("BEGIN");
+  try {
+    const stmt = db.prepare("UPDATE boards SET sort_order = ?, updated = ? WHERE id = ? AND project_key = ?");
+    orderedIds.forEach((id, index) => {
+      const res = stmt.run(index, now(), id, projectKey);
+      if (res.changes === 0) {
+        throw new Error(`board ${id} does not belong to project ${projectKey}`);
+      }
+    });
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return listBoards(projectKey);
 }
 
 /** 创建看板。空 projectKey / 空名抛错。 */
@@ -181,10 +207,15 @@ export function createBoard(projectKey: string, name: string): BoardInfo {
   if (!trimmed) throw new Error("name must not be empty");
   const id = randomUUID();
   const ts = now();
+  // 新看板置顶：sort_order 取当前项目最小值 - 1
+  const minRow = getDb()
+    .prepare("SELECT MIN(sort_order) AS minOrder FROM boards WHERE project_key = ?")
+    .get(projectKey) as { minOrder: number | null };
+  const sortOrder = minRow.minOrder === null ? 0 : minRow.minOrder - 1;
   getDb()
-    .prepare("INSERT INTO boards (id, project_key, name, is_system, created, updated) VALUES (?, ?, ?, 0, ?, ?)")
-    .run(id, projectKey, trimmed, ts, ts);
-  return { id, projectKey, name: trimmed, isSystem: false, created: ts, updated: ts, nodeCount: 0 };
+    .prepare("INSERT INTO boards (id, project_key, name, is_system, sort_order, created, updated) VALUES (?, ?, ?, 0, ?, ?, ?)")
+    .run(id, projectKey, trimmed, sortOrder, ts, ts);
+  return { id, projectKey, name: trimmed, isSystem: false, sortOrder, created: ts, updated: ts, nodeCount: 0 };
 }
 
 /** 改名。系统看板 / 不存在返回 null。 */

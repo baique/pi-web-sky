@@ -12,7 +12,7 @@ import { dropdownDirection } from "@/lib/dropdown-direction";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { SessionTabs, type SidebarTab } from "./SessionTabs";
-import { BoardList } from "./canvas/BoardList";
+import { BoardSection } from "./canvas/BoardSection";
 import { TaskArea, TASK_SESSION_PREVIEW_LIMIT, type TaskGroupUi } from "./TaskArea";
 
 declare global {
@@ -379,6 +379,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // 若在 useState 初始化时读取，服务端默认值与客户端持久化值不一致会触发
   // hydration mismatch；用户偏好由下方 mount effect 统一恢复。
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("sessions");
+  const [boardsCollapsed, setBoardsCollapsed] = useState(false);
   const [tasksCollapsed, setTasksCollapsed] = useState(false);
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
@@ -397,6 +398,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // 此时 hydration 已完成，setState 走正常客户端更新，不再产生不匹配。
   useEffect(() => {
     setSidebarTab(loadSidebarTab());
+    setBoardsCollapsed(loadCollapsedFlag(BOARDS_COLLAPSED_KEY));
     setTasksCollapsed(loadCollapsedFlag(TASKS_COLLAPSED_KEY));
     setChatCollapsed(loadCollapsedFlag(TEMP_COLLAPSED_KEY));
     setUnreadSessionIds(loadUnreadSessionIds());
@@ -1875,6 +1877,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </div>
           ) : (
             <>
+              {/* Boards section — sits above tasks, style matches task rows */}
+              <BoardSection
+                projectKey={selectedProject?.key ?? null}
+                runningCount={runningBoardCount}
+                activeBoardId={activeBoardId ?? null}
+                collapsed={boardsCollapsed}
+                onToggleCollapsed={() => { const next = !boardsCollapsed; setBoardsCollapsed(next); saveCollapsedFlag(BOARDS_COLLAPSED_KEY, next); }}
+                onOpenBoard={(id) => onOpenBoard?.(id)}
+              />
+
               {/* Tasks section — fluid up to a cap (GPT-style), scrolls inside
                   when it exceeds the cap so the chat section always keeps room. */}
               <div
@@ -2059,16 +2071,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </>
           )}
         </div>
-
-      {/* Boards panel — always mounted too; hidden via display when other tabs active. */}
-      <div style={{ flex: 1, display: sidebarTab === "boards" ? "flex" : "none", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
-        <BoardList
-          projectKey={selectedProject?.key ?? null}
-          runningCount={runningBoardCount}
-          activeBoardId={activeBoardId ?? null}
-          onOpenBoard={(id) => onOpenBoard?.(id)}
-        />
-      </div>
 
       {/* Files panel — always mounted too; hidden via display when the
           sessions panel is active. */}
@@ -2882,15 +2884,14 @@ function SessionItem({
 // ============================================================================
 
 const SIDEBAR_TAB_KEY = "pi-sidebar-tab";
+const BOARDS_COLLAPSED_KEY = "pi-sidebar-boards-collapsed";
 const TASKS_COLLAPSED_KEY = "pi-sidebar-tasks-collapsed";
 const TEMP_COLLAPSED_KEY = "pi-sidebar-chat-collapsed";
 
 function loadSidebarTab(): SidebarTab {
   if (typeof window === "undefined") return "sessions";
   try {
-    const v = window.localStorage.getItem(SIDEBAR_TAB_KEY);
-    if (v === "files" || v === "boards") return v;
-    return "sessions";
+    return window.localStorage.getItem(SIDEBAR_TAB_KEY) === "files" ? "files" : "sessions";
   } catch {
     return "sessions";
   }

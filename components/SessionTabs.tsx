@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 
-export type SidebarTab = "sessions" | "boards" | "files";
+export type SidebarTab = "sessions" | "files";
 
 interface Props {
   active: SidebarTab;
@@ -26,17 +26,6 @@ export function SessionTabs({ active, onChange }: Props) {
       icon: (
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
-      ),
-    },
-    {
-      key: "boards",
-      label: t("sidebar.boardsTab"),
-      icon: (
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-          <path d="M3 9h18" />
-          <path d="M9 21V9" />
         </svg>
       ),
     },

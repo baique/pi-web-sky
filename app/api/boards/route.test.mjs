@@ -16,6 +16,7 @@ const { POST: addNode } = await jiti.import("./[id]/nodes/route.ts");
 const { PATCH: patchNode, DELETE: deleteNode } = await jiti.import("./[id]/nodes/[nid]/route.ts");
 const { POST: addEdge } = await jiti.import("./[id]/edges/route.ts");
 const { DELETE: deleteEdge } = await jiti.import("./[id]/edges/[eid]/route.ts");
+const { PUT: reorderBoards } = await jiti.import("./reorder/route.ts");
 
 const PROJECT = "proj-b";
 
@@ -92,6 +93,25 @@ test("boards API: create / rename / delete + project isolation", async () => {
   assert.equal(getDel.status, 404);
   // other project board unaffected
   assert.ok(await getBoard(new Request("http://localhost/api/boards/x"), { params: Promise.resolve({ id: other.id }) }));
+});
+
+test("reorder API: full order replace + foreign id rollback", async () => {
+  freshDb();
+  const a = await createBoard(jsonReq("http://localhost/api/boards", "POST", { projectKey: PROJECT, name: "A" }));
+  const b = await createBoard(jsonReq("http://localhost/api/boards", "POST", { projectKey: PROJECT, name: "B" }));
+  const c = await createBoard(jsonReq("http://localhost/api/boards", "POST", { projectKey: PROJECT, name: "C" }));
+  const [A, B, C] = [(await a.json()).board, (await b.json()).board, (await c.json()).board];
+
+  const res = await reorderBoards(jsonReq("http://localhost/api/boards/reorder", "PUT", { projectKey: PROJECT, orderedIds: [C.id, A.id, B.id] }));
+  assert.equal(res.status, 200);
+  const { boards } = await res.json();
+  assert.deepEqual(boards.map((x) => x.id), [C.id, A.id, B.id]);
+
+  const bad = await reorderBoards(jsonReq("http://localhost/api/boards/reorder", "PUT", { projectKey: PROJECT, orderedIds: [A.id, "foreign"] }));
+  assert.equal(bad.status, 500);
+  const after = await listBoards(new Request("http://localhost/api/boards?projectKey=proj-b"));
+  const afterBoards = (await after.json()).boards.filter((x) => !x.isSystem);
+  assert.deepEqual(afterBoards.map((x) => x.id), [C.id, A.id, B.id]);
 });
 
 test("canvas API: full replace + node/edge sub-resources", async () => {

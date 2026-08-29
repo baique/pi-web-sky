@@ -44,7 +44,6 @@ export function SessionCanvas({
   const board = useBoardCanvas({ boardId, projectKey, onOpenSession: (sid) => onOpenSession({ id: sid } as SessionInfo, false) });
   const [boards, setBoards] = useState<BoardInfo[]>([]);
   const [boardListOpen, setBoardListOpen] = useState(false);
-  const [connectMode, setConnectMode] = useState(false);
 
   const loadBoards = useCallback(async () => {
     try {
@@ -88,8 +87,6 @@ export function SessionCanvas({
       />
       <CanvasStage
         board={board}
-        connectMode={connectMode}
-        onToggleConnectMode={() => setConnectMode((v) => !v)}
         isDark={isDark}
       />
     </div>

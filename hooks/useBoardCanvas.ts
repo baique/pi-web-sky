@@ -71,10 +71,7 @@ export function useBoardCanvas({
   }, [load]);
 
   // 初次物化数据（editor 挂载后再用）
-  const initialCanvasRef = useRef<BoardCanvas | null>(null);
-  const setInitialCanvas = useCallback((c: BoardCanvas) => {
-    initialCanvasRef.current = c;
-  }, []);
+  const [initialCanvas, setInitialCanvas] = useState<BoardCanvas | null>(null);
 
   // ---- 运行中快照轮询 ----
   useEffect(() => {
@@ -138,15 +135,10 @@ export function useBoardCanvas({
   }, [loadSessionSummaries]);
 
   // ---- tldraw 挂载 ----
+  const [editorReady, setEditorReady] = useState(false);
   const onMount = useCallback((editor: Editor) => {
     editorRef.current = editor;
-    const initial = initialCanvasRef.current;
-    if (initial) {
-      hydrateShapes(editor, initial, sessionTitles);
-      if (initial.view && boardIdRef.current !== SYSTEM_RUNNING_BOARD_ID) {
-        editor.setCamera({ x: initial.view.cameraX, y: initial.view.cameraY, z: initial.view.cameraZ });
-      }
-    }
+    setEditorReady(true);
     // 监听 shape 变更 → 防抖保存（仅普通看板）
     if (boardIdRef.current === SYSTEM_RUNNING_BOARD_ID) return;
     const unlisten = editor.store.listen(() => {
@@ -162,8 +154,11 @@ export function useBoardCanvas({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveInFlightRef = useRef(false);
   const pendingSaveRef = useRef(false);
+  /** hydrate 期间为 true：忽略 store 变更，避免把空画布覆盖到已保存数据 */
+  const hydratingRef = useRef(false);
 
   const scheduleSave = useCallback((editor: Editor) => {
+    if (hydratingRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => void flushSave(editor), 500);
   }, []);
@@ -223,15 +218,23 @@ export function useBoardCanvas({
         },
       });
     }
+    // 节点位置索引（arrow 端点用）
+    const nodeById = new Map<string, { x: number; y: number; w: number; h: number }>();
+    for (const node of canvas.nodes) {
+      nodeById.set(node.id, { x: node.x, y: node.y, w: node.w || CARD_W, h: node.h || CARD_H });
+    }
     for (const edge of canvas.edges) {
+      const from = nodeById.get(edge.fromId);
+      const to = nodeById.get(edge.toId);
+      if (!from || !to) continue;
       shapes.push({
         id: createShapeId(edge.id),
         type: "arrow",
         x: 0,
         y: 0,
         props: {
-          start: { x: 0, y: 0 },
-          end: { x: 0, y: 0 },
+          start: { x: from.x + from.w / 2, y: from.y + from.h / 2 },
+          end: { x: to.x + to.w / 2, y: to.y + to.h / 2 },
           color: (edge.color as TLArrowShape["props"]["color"]) ?? "blue",
           dash: edge.dashed ? "dashed" : "solid",
           arrowheadStart: "none",
@@ -253,6 +256,26 @@ export function useBoardCanvas({
       editor.createShapes(shapes);
     }
   }, []);
+
+  // 初始画布就绪 + editor 已挂载 + 会话摘要就绪 → 物化 nodes/edges/view
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !editorReady || !initialCanvas) return;
+    // 摘要未就绪时不物化（标题/失效态依赖它），就绪后由本 effect 重跑
+    if (Object.keys(sessionTitles).length === 0 && initialCanvas.nodes.length > 0) return;
+    const canvas = initialCanvas;
+    console.log("[board] hydrate", canvas.nodes.length, "nodes", canvas.edges.length, "edges, titles", Object.keys(sessionTitles).length);
+    hydratingRef.current = true;
+    hydrateShapes(editor, canvas, sessionTitles);
+    // hydrate 创建 shape 会触发 store 变更 → 防抖保存；标记后跳过，
+    // 等渲染稳定（下一次真实用户交互）再恢复保存。
+    setTimeout(() => { hydratingRef.current = false; }, 800);
+    if (canvas.view && boardIdRef.current !== SYSTEM_RUNNING_BOARD_ID) {
+      editor.setCamera({ x: canvas.view.cameraX, y: canvas.view.cameraY, z: canvas.view.cameraZ });
+    }
+    setInitialCanvas(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCanvas, sessionTitles, hydrateShapes, editorReady]);
 
   // ---- 序列化：tldraw shapes → sqlite canvas ----
   const serializeShapes = useCallback((editor: Editor) => {
@@ -279,12 +302,22 @@ export function useBoardCanvas({
         });
       } else if (shape.type === "arrow") {
         const a = shape as TLArrowShape;
-        const meta = (shape.meta ?? {}) as { fromId?: string; toId?: string };
+        // 箭头端点从 binding 解析：binding.fromId 恒为 arrow shape 自身，
+        // 真正端点由 props.terminal 区分（start/end → 绑定目标）
+        const bindings = editor.getBindingsInvolvingShape(shape.id, "arrow");
+        let fromId = "";
+        let toId = "";
+        for (const b of bindings) {
+          const props = (b as { props?: { terminal?: string } }).props;
+          const terminal = props?.terminal;
+          if (terminal === "start") fromId = b.toId.replace("shape:", "");
+          if (terminal === "end") toId = b.toId.replace("shape:", "");
+        }
         edges.push({
           id: shape.id.replace("shape:", ""),
           boardId: bid,
-          fromId: meta.fromId ?? "",
-          toId: meta.toId ?? "",
+          fromId,
+          toId,
           label: a.props.richText ? richTextToString(a.props.richText) : null,
           color: a.props.color,
           dashed: a.props.dash === "dashed",

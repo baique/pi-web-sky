@@ -2077,3 +2077,13 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
    - stuck 吸附中：上方直角贴合顶边、下边圆角成胶囊，磨砂柔和、更透。
    关键：两态不改变文档流高度（padding/高度恒定）——
    否则头部占位变化会反哺"超长"判定，在高度恰为一屏时形成反馈环闪烁。 */
+
+/* === tldraw 看板画布（SessionCanvas）===
+   tldraw 编辑器免费可用，仅隐藏商业许可水印（不影响任何功能）。 */
+.tl-watermark_SEE-LICENSE { display: none !important; }
+
+/* === tldraw 画布玻璃化（SessionCanvas）===
+   画布背景透明，露出页面背景（壁纸/纯色），与 AI 消息气泡玻璃观感一致。
+   卡片/工具栏各自用 --panel-glass / --frame-glass，不在此重复叠 backdrop-filter。 */
+.tl-canvas { background: transparent !important; }
+.tl-container { background: transparent !important; }

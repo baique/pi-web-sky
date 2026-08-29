@@ -11,6 +11,8 @@ export interface BoardInfo {
   projectKey: string;
   name: string;
   isSystem: boolean;
+  /** 项目内手动排序（系统看板恒置顶） */
+  sortOrder: number;
   created: number;
   updated: number;
   /** 节点数（列表展示用，不落库） */

@@ -88,7 +88,7 @@ export function initSchema(db: DatabaseSync): void {
  * 老库打开时自动按序补齐缺失的迁移（每个迁移一个事务，成功后推进版本号），
  * 新库建表后从 v0 一路迁到 SCHEMA_VERSION。重复打开不再执行已完成的迁移。
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 interface Migration {
   version: number;
@@ -125,6 +125,13 @@ const MIGRATIONS: Migration[] = [
       "CREATE TABLE IF NOT EXISTS board_edges (\n  id       TEXT PRIMARY KEY,\n  board_id TEXT NOT NULL,\n  from_id  TEXT NOT NULL,\n  to_id    TEXT NOT NULL,\n  label    TEXT,\n  color    TEXT,\n  dashed   INTEGER NOT NULL DEFAULT 0,\n  created  INTEGER NOT NULL,\n  updated  INTEGER NOT NULL\n);",
       "CREATE INDEX IF NOT EXISTS idx_board_edges_board ON board_edges(board_id);",
       "CREATE TABLE IF NOT EXISTS board_view (\n  board_id   TEXT PRIMARY KEY,\n  camera_x   REAL NOT NULL DEFAULT 0,\n  camera_y   REAL NOT NULL DEFAULT 0,\n  camera_z   REAL NOT NULL DEFAULT 1,\n  updated    INTEGER NOT NULL\n);",
+    ],
+  },
+  {
+    version: 4,
+    name: "boards.sort_order",
+    statements: [
+      "ALTER TABLE boards ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;",
     ],
   },
 ];

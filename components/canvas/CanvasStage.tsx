@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import "tldraw/tldraw.css";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tldraw, defaultShapeUtils, type TLComponents } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
 import { useI18n } from "@/hooks/useI18n";
@@ -11,38 +12,54 @@ import type { SessionInfo } from "@/lib/types";
 const shapeUtils = [...defaultShapeUtils, SessionCardUtil];
 
 /**
- * tldraw 画布舞台：无限画布 + 工具行 + 连线模式 + 拖放添加会话。
- * 收合卡 shape 用 SessionCardUtil；连线用 tldraw 原生 arrow。
+ * tldraw 画布舞台：无限画布 + 工具行 + 拖放添加会话。
+ * 连线用 tldraw 内置 arrow 工具（工具栏已有），不做自定义连线。
  */
 export function CanvasStage({
   board,
-  connectMode,
-  onToggleConnectMode,
   isDark,
 }: {
   board: UseBoardCanvasReturn;
-  connectMode: boolean;
-  onToggleConnectMode: () => void;
   isDark: boolean;
 }) {
   const { t } = useI18n();
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [pickerLoading, setPickerLoading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
 
-  // 加载会话列表（添加会话用）
-  const loadSessions = useCallback(async () => {
-    setPickerLoading(true);
-    try {
-      const res = await fetch("/api/sessions", { cache: "no-store" });
-      if (res.ok) {
-        const data = (await res.json()) as { sessions: SessionInfo[] };
-        setSessions(data.sessions);
-      }
-    } finally {
-      setPickerLoading(false);
-    }
-  }, []);
+  // 会话拖入画布：tldraw 内部会 stopPropagation drop，React 合成 onDrop 收不到。
+  // 改用原生事件监听（挂在外层容器，捕获阶段提前拦截）。
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onDragOverNative = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("text/session-id")) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      setDragOver(true);
+    };
+    const onDragLeaveNative = () => setDragOver(false);
+    const onDropNative = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("text/session-id")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOver(false);
+      const sid = e.dataTransfer.getData("text/session-id");
+      if (!sid) return;
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      board.addSessionNode(sid, x, y);
+    };
+    // 捕获阶段挂载：确保先于 tldraw 内部处理拿到事件
+    el.addEventListener("dragover", onDragOverNative, true);
+    el.addEventListener("dragleave", onDragLeaveNative, true);
+    el.addEventListener("drop", onDropNative, true);
+    return () => {
+      el.removeEventListener("dragover", onDragOverNative, true);
+      el.removeEventListener("dragleave", onDragLeaveNative, true);
+      el.removeEventListener("drop", onDropNative, true);
+    };
+  }, [board]);
 
   const components = useMemo<TLComponents>(() => ({
     // 保留 tldraw 默认 UI（工具条/缩放/小地图），但去掉我们不需要的
@@ -65,6 +82,8 @@ export function CanvasStage({
       {/* 工具行（chrome 材质，同看板栏第二行） */}
       <div
         style={{
+          position: "relative",
+          zIndex: 20,
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
@@ -76,90 +95,24 @@ export function CanvasStage({
           WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
         }}
       >
-        {/* 添加会话 */}
-        <div style={{ position: "relative" }}>
-          <button
-            type="button"
-            onClick={() => { void loadSessions(); setPickerOpen((v) => !v); }}
-            title={t("boards.addSession")}
-            aria-expanded={pickerOpen}
-            style={toolBtnStyle(undefined, pickerOpen)}
-          >
-            <span style={{ fontSize: 13, lineHeight: 1 }}>＋</span>
-            <span>{t("boards.addSession")}</span>
-          </button>
-          {pickerOpen && (
-            <div
-              className="glass-popover"
-              style={{
-                position: "absolute",
-                top: "calc(100% + 6px)",
-                left: 0,
-                zIndex: 1150,
-                width: 280,
-                maxHeight: 320,
-                overflowY: "auto",
-                padding: 4,
-                borderRadius: 10,
-                border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
-                boxShadow: "0 8px 24px -8px rgba(0,0,0,0.25)",
-              }}
-            >
-              {pickerLoading ? (
-                <div style={{ padding: "10px 8px", color: "var(--text-muted)", fontSize: 12 }}>{t("sidebar.loading")}</div>
-              ) : sessions.length === 0 ? (
-                <div style={{ padding: "10px 8px", color: "var(--text-muted)", fontSize: 12, fontStyle: "italic" }}>
-                  {t("boards.noSessions")}
-                </div>
-              ) : (
-                sessions.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => {
-                      board.addSessionNode(s.id);
-                      setPickerOpen(false);
-                    }}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      padding: "6px 10px",
-                      border: "none",
-                      background: "none",
-                      color: "var(--text)",
-                      cursor: "pointer",
-                      fontSize: 12.5,
-                      textAlign: "left",
-                      borderRadius: 6,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
-                  >
-                    {s.name ?? s.firstMessage ?? s.id}
-                  </button>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* 连线模式 */}
-        <button
-          type="button"
-          onClick={onToggleConnectMode}
-          title={t("boards.connectDesc")}
-          aria-pressed={connectMode}
-          style={toolBtnStyle(connectMode ? "var(--accent)" : undefined, connectMode)}
+        {/* 添加会话（从会话区拖拽放入；提示文案） */}
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            padding: "4px 10px",
+            border: "1px dashed color-mix(in srgb, var(--border) 55%, transparent)",
+            background: "var(--glass-bg-input)",
+            color: "var(--text-muted)",
+            fontSize: 12,
+            borderRadius: 7,
+            whiteSpace: "nowrap",
+          }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <line x1="5" y1="12" x2="19" y2="12" />
-            <polyline points="12 5 19 12 12 19" />
-          </svg>
-          <span>{t("boards.connect")}</span>
-        </button>
+          <span style={{ fontSize: 13, lineHeight: 1 }}>＋</span>
+          <span>{t("boards.dragToAdd")}</span>
+        </span>
 
         {/* 自动布局（本期置灰占位） */}
         <button type="button" disabled title={t("boards.autoLayoutDesc")} style={{ ...toolBtnStyle(undefined, false), opacity: 0.4, cursor: "default" }}>
@@ -190,8 +143,32 @@ export function CanvasStage({
         </button>
       </div>
 
-      {/* tldraw 舞台 */}
-      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+      {/* tldraw 舞台（接收会话拖入） */}
+      <div
+        ref={stageRef}
+        style={{ flex: 1, minHeight: 0, position: "relative" }}
+      >
+        {dragOver && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 30,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "color-mix(in srgb, var(--accent) 10%, transparent)",
+              border: "2px dashed var(--accent)",
+              borderRadius: 10,
+              pointerEvents: "none",
+              color: "var(--accent)",
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            {t("boards.dropToAdd")}
+          </div>
+        )}
         {board.loading ? (
           <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
             {t("boards.loadingCanvas")}
