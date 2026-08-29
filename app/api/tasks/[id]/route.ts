@@ -1,6 +1,24 @@
 import { NextResponse } from "next/server";
-import { deleteTask, listTaskSessionIds, updateTask } from "@/lib/task-store";
+import { deleteTask, getTask, listTaskSessionIds, updateTask } from "@/lib/task-store";
 import { deleteSessionTrees } from "@/lib/session-delete";
+
+// GET /api/tasks/[id] → { task: { id, name, ... } | null }
+// 会话输入框 placeholder / 详情面板用：按任务 id 取单个任务（含名称）。
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  try {
+    const task = getTask(id);
+    if (!task) {
+      return NextResponse.json({ task: null }, { status: 404 });
+    }
+    return NextResponse.json({ task }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
+}
 
 // PATCH /api/tasks/[id]  body: { name?, sessionIds?, pinned?, sortOrder? }
 export async function PATCH(

@@ -60,6 +60,12 @@ function rowToTask(row: TaskRow): Task {
   };
 }
 
+/** A single task by id, or undefined. */
+export function getTask(id: string): Task | undefined {
+  const row = getTaskRow(id);
+  return row ? rowToTask(row) : undefined;
+}
+
 /** All tasks of one project: pinned segment first, then manual order
  *  (sort_order), then creation time as a stable fallback. */
 export function listTasks(projectKey: string): Task[] {

@@ -25,26 +25,40 @@ export async function attachSessionProjectInfo(sessions: SessionInfo[]): Promise
     projectByCwd.set(cwd, await resolveProject(cwd));
   }));
 
-  // Pinned set from the task store (region-relative ordering lives client-side).
+  // Pinned set + task-name lookup from the task store.
   let pinnedIds = new Set<string>();
+  const sessionTaskNames = new Map<string, string>();
   try {
     const rows = getDb()
       .prepare("SELECT session_id FROM session_meta WHERE pinned = 1")
       .all() as { session_id: string }[];
     pinnedIds = new Set(rows.map((r) => r.session_id));
+    const taskRows = getDb()
+      .prepare("SELECT id, name FROM tasks")
+      .all() as { id: string; name: string }[];
+    const taskNames = new Map(taskRows.map((r) => [r.id, r.name] as const));
+    const sessionTaskRows = getDb()
+      .prepare("SELECT session_id, task_id FROM session_meta WHERE task_id IS NOT NULL")
+      .all() as { session_id: string; task_id: string }[];
+    for (const r of sessionTaskRows) {
+      const name = taskNames.get(r.task_id);
+      if (name) sessionTaskNames.set(r.session_id, name);
+    }
   } catch {
-    // db not available — fall back to nothing pinned
+    // db not available — fall back to nothing pinned / no task names
   }
 
   return sessions.map((session) => {
     const project = session.cwd ? projectByCwd.get(session.cwd) : undefined;
     const projectRoot = project?.projectRoot ?? session.cwd;
+    const taskName = sessionTaskNames.get(session.id);
     return {
       ...session,
       projectRoot,
       projectKey: projectIdentityKey(projectRoot),
       ...(project?.isWorktree && project.branch ? { worktreeBranch: project.branch } : {}),
       ...(pinnedIds.has(session.id) ? { pinned: true } : {}),
+      ...(taskName ? { taskName } : {}),
     };
   });
 }

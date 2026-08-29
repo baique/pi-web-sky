@@ -2676,6 +2676,8 @@ export function AppShell() {
                     const totalActiveMs = sessionStats.totalActiveMs ?? 0;
                     const sessionRows = [
                        ...(sessionStats.sessionName ? [{ label: translate("session.name"), value: sessionStats.sessionName, copyField: null }] : []),
+                       // 会话属于任务时展示任务名（文件行上方）
+                       ...(selectedSession?.taskName ? [{ label: translate("session.task"), value: selectedSession.taskName, copyField: null }] : []),
                        { label: translate("session.file"), value: sessionStats.sessionFile ?? translate("session.inMemory"), copyField: "file" as const },
                        { label: translate("session.id"), value: sessionStats.sessionId, copyField: "id" as const },
                        ...(totalActiveMs > 0 ? [{ label: translate("session.totalActive"), value: formatDuration(totalActiveMs), copyField: null }] : []),

@@ -93,6 +93,8 @@ interface Props {
   draftKey?: string;
   /** Session working directory — enables the @ file autocomplete menu */
   cwd?: string | null;
+  /** 会话所属任务名（临时会话无）。用于输入框 placeholder 前置展示。 */
+  taskName?: string | null;
   /** Whether the message list is scrolled near the bottom (drives the back-to-latest button). */
   atBottom?: boolean;
   /** Scroll the message list back to the bottom. */
@@ -485,6 +487,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onPromptWithStreamingBehavior,
   draftKey,
   cwd,
+  taskName,
   atBottom = true,
   onScrollToBottom,
 }: Props, ref) {
@@ -2367,6 +2370,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               isStreaming && (onSteer || onFollowUp)
                 ? t("chat.steerPlaceholder")
                 : isStreaming ? t("chat.agentPlaceholder")
+                : taskName ? t("chat.taskPlaceholder", { task: taskName })
                 : t("chat.messagePlaceholder")
             }
             rows={1}

@@ -299,6 +299,30 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsPanelOpen,
   });
 
+  // 会话所属任务名：仅在新建会话（isNew，主会话尚未落盘）时用于输入框
+  // placeholder 前置展示；主会话出现后不再需要（sessionInfo 面板仍展示）。
+  // 新建瞬态期从 pendingNewSessionTaskRef 的 taskId 拉取一次任务名兜底。
+  const [taskName, setTaskName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isNew) {
+      setTaskName(null);
+      return;
+    }
+    const pendingTaskId = pendingNewSessionTaskRef?.current?.taskId;
+    if (!pendingTaskId) {
+      setTaskName(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/tasks/${encodeURIComponent(pendingTaskId)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() as Promise<{ task?: { name?: string } | null }> : null))
+      .then((d) => {
+        if (!cancelled && d?.task?.name) setTaskName(d.task.name);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isNew, pendingNewSessionTaskRef]);
+
   // 播报槽（桌面）：状态与通知分槽合成，结果下发 ChatInput（左槽）与 widget shelf（通知）
   const compactSavedTokens = compactResult
     ? Math.max(0, compactResult.tokensBefore - compactResult.estimatedTokensAfter)
@@ -702,6 +726,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       onAudioUnlock={unlockAudio}
       draftKey={session?.id ?? newSessionDraftKey ?? undefined}
       cwd={session?.cwd ?? newSessionCwd}
+      taskName={taskName}
       atBottom={atBottom}
       onScrollToBottom={scrollToBottom}
       phase={isMobile ? null : phaseBroadcast}
