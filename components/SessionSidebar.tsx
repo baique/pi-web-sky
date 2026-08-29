@@ -992,6 +992,49 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       .then(() => persistTasks());
   }, [tasks, persistTasks]);
 
+  // Reorder tasks within one pinned region. `orderedIds` is the full new
+  // order of ALL tasks (as reported by TaskArea after a same-region drag);
+  // we split it by the tasks' current pinned state and persist each region
+  // separately — a drag can never move a task across regions.
+  const handleReorderTasks = useCallback((orderedIds: string[]) => {
+    const key = selectedProject?.key;
+    if (!key) return;
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const pinned: string[] = [];
+    const unpinned: string[] = [];
+    for (const id of orderedIds) {
+      const task = byId.get(id);
+      if (!task) continue;
+      (task.pinned ? pinned : unpinned).push(id);
+    }
+    // Optimistic: apply the new order locally immediately.
+    setTasks((prev) => {
+      const order = new Map(orderedIds.map((id, i) => [id, i]));
+      return [...prev].sort((a, b) => {
+        const ia = order.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+        const ib = order.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+        // pinned 段永远在非置顶段前（跨区不可能，但防御性保持）。
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        return ia - ib;
+      });
+    });
+    // Persist each region separately (order within a region is what matters).
+    if (pinned.length > 0) {
+      void fetch("/api/tasks/reorder", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectKey: key, orderedIds: pinned }),
+      }).catch(() => {});
+    }
+    if (unpinned.length > 0) {
+      void fetch("/api/tasks/reorder", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectKey: key, orderedIds: unpinned }),
+      }).catch(() => {});
+    }
+  }, [tasks, selectedProject?.key]);
+
   const handleCreateTask = useCallback(async (name: string) => {
     const key = selectedProject?.key;
     if (!key) return;
@@ -1918,6 +1961,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       onNewSessionFromTask={(taskId) => onNewSessionFromTask?.(taskId, selectedProject?.key ?? undefined)}
                       onToggleTaskPin={handleToggleTaskPin}
                       onDropSessionToTask={(taskId, sessionId) => void handleAssignSession(taskId, sessionId)}
+                      onReorderTasks={handleReorderTasks}
                     />
                   </div>
                 )}

@@ -50,6 +50,8 @@ interface Props {
   onToggleTaskPin: (taskId: string) => void;
   /** Drop target: assign the dragged session to this task. */
   onDropSessionToTask: (taskId: string, sessionId: string) => void;
+  /** 任务卡片拖拽排序：上报一个区内完整的新顺序（置顶/非置顶分别调用）。 */
+  onReorderTasks: (orderedIds: string[]) => void;
 }
 
 const SESSION_MIME = "text/session-id";
@@ -93,6 +95,8 @@ const pinIcon = (
   </svg>
 );
 
+const TASK_MIME = "application/x-task-id";
+
 function TaskCard({
   task,
   content,
@@ -105,6 +109,13 @@ function TaskCard({
   onDelete,
   onNewSession,
   onTogglePin,
+  onDragStartTask,
+  onDragOverTask,
+  onDropTask,
+  onDragEndTask,
+  isDragging,
+  dropBefore,
+  dropAfter,
 }: {
   task: TaskGroupUi;
   content: (showAll: boolean) => ReactNode;
@@ -118,6 +129,16 @@ function TaskCard({
   onDelete: (taskId: string) => void;
   onNewSession: (taskId: string, projectKey?: string) => void;
   onTogglePin: (taskId: string) => void;
+  onDragStartTask: (task: TaskGroupUi) => void;
+  /** 返回是否允许落位（同区）；true 时 TaskArea 记录插入位置。 */
+  onDragOverTask: (targetId: string, before: boolean) => boolean;
+  /** 任务拖拽落位到本卡片（同区，由 TaskArea 计算新顺序并上报）。 */
+  onDropTask: (targetId: string) => void;
+  onDragEndTask: () => void;
+  isDragging: boolean;
+  /** 落点指示：插到本卡片上方/下方（排序语义，用横线表示）。 */
+  dropBefore: boolean;
+  dropAfter: boolean;
 }) {
   const { t } = useI18n();
   /** 任务卡片默认收起：用户创建的任务默认折叠，点击展开；
@@ -212,18 +233,51 @@ function TaskCard({
   }, [renameValue, onRename, task.id]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
+    // 任务拖拽（排序）：同区才允许落位。视觉用上/下边框线（dropBefore/dropAfter），
+    // 不设背景高亮——背景 + 左侧竖线是“会话拖入任务”的分配语义。
+    if (e.dataTransfer.types.includes(TASK_MIME)) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const before = e.clientY < rect.top + rect.height / 2;
+      const allowed = onDragOverTask(task.id, before);
+      setDragOver(false);
+      if (allowed) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      }
+      return;
+    }
+    // 会话拖拽：分配到此任务。
     if (!e.dataTransfer.types.includes(SESSION_MIME)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     setDragOver(true);
-  }, []);
+  }, [onDragOverTask, task.id]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     const sessionId = e.dataTransfer.getData(SESSION_MIME);
-    if (sessionId) onDropAssign(task.id, sessionId);
-  }, [onDropAssign, task.id]);
+    if (sessionId) {
+      onDropAssign(task.id, sessionId);
+      return;
+    }
+    // 任务拖拽落位（同区才走到这；跨区 dragover 已禁止）。
+    if (e.dataTransfer.types.includes(TASK_MIME)) {
+      onDropTask(task.id);
+    }
+  }, [onDropAssign, task.id, onDropTask]);
+
+  const handleDragStartTask = useCallback((e: React.DragEvent) => {
+    // 排除按钮/输入等交互元素：只有卡片空白区域可拖拽排序。
+    const t = e.target as HTMLElement;
+    if (t.closest("button, input, textarea, a, [role=menuitem]")) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.setData(TASK_MIME, task.id);
+    e.dataTransfer.effectAllowed = "move";
+    onDragStartTask(task);
+  }, [task, onDragStartTask]);
 
   const iconStyle = { flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, padding: 0, background: "transparent", border: "1px solid transparent", borderRadius: 7, color: "var(--text-muted)", cursor: "pointer", transition: "background 0.12s, color 0.12s" };
 
@@ -236,17 +290,27 @@ function TaskCard({
         position: "relative",
         margin: "0 4px 2px",
         borderRadius: 6,
+        // 会话拖入任务（分配语义）：左侧竖线亮起。
         background: dragOver
           ? "color-mix(in srgb, var(--accent) 8%, transparent)"
           : "transparent",
         border: "none",
         boxShadow: dragOver ? "inset 2px 0 0 var(--accent)" : "none",
+        // 任务排序（排序语义）：上/下边框横线指示插入位置。
+        borderTop: dropBefore ? "2px solid var(--accent)" : "none",
+        borderBottom: dropAfter ? "2px solid var(--accent)" : "none",
+        opacity: isDragging ? 0.4 : 1,
         transition: "background 0.12s, box-shadow 0.12s",
       }}
     >
       {/* Group header — whole row toggles the task body (only meaningful when
-          the task has members). React-state hover, no manual style writes. */}
+          the task has members). React-state hover, no manual style writes.
+          Draggable: only the header row is the drag source (so the drag ghost
+          carries the task, not its sessions). */}
       <div
+        draggable
+        onDragStart={handleDragStartTask}
+        onDragEnd={onDragEndTask}
         role={task.sessionIds.length > 0 ? "button" : undefined}
         aria-expanded={task.sessionIds.length > 0 ? !collapsed : undefined}
         tabIndex={task.sessionIds.length > 0 ? 0 : undefined}
@@ -512,12 +576,17 @@ export function TaskArea({
   onNewSessionFromTask,
   onToggleTaskPin,
   onDropSessionToTask,
+  onReorderTasks,
 }: Props) {
   const { t } = useI18n();
   const [newTaskName, setNewTaskName] = useState("");
   const [createHovered, setCreateHovered] = useState(false);
   const [cancelHovered, setCancelHovered] = useState(false);
   const newTaskRef = useRef<HTMLInputElement>(null);
+  /** 拖拽中的任务（整卡拖动）。{ id, pinned } 用于同区判断。 */
+  const [dragTask, setDragTask] = useState<{ id: string; pinned: boolean } | null>(null);
+  /** 当前 hover 的落点：{ targetId, before }（插到目标前/后）。state 用于渲染边框指示。 */
+  const [dropIndicator, setDropIndicator] = useState<{ targetId: string; before: boolean } | null>(null);
 
   useEffect(() => {
     if (newTaskOpen) newTaskRef.current?.focus();
@@ -530,6 +599,62 @@ export function TaskArea({
     setNewTaskName("");
     onNewTaskOpenChange(false);
   }, [newTaskName, onNewTask, onNewTaskOpenChange]);
+
+  /** 拖拽开始：记录源任务（用于同区判断）。 */
+  const handleDragStartTask = useCallback((task: TaskGroupUi) => {
+    setDragTask({ id: task.id, pinned: Boolean(task.pinned) });
+    setDropIndicator(null);
+  }, []);
+
+  /** 拖拽结束：清状态。落位已在 drop 时通过 onReorderTasks 上报。 */
+  const handleDragEndTask = useCallback(() => {
+    setDragTask(null);
+    setDropIndicator(null);
+  }, []);
+
+  /**
+   * dragover 到某张卡片：仅同区（pinned 一致）允许落位，记录插入位置。
+   * 跨区返回 false（不 preventDefault → 浏览器显示禁止光标）。
+   */
+  const handleDragOverTask = useCallback(
+    (targetId: string, before: boolean): boolean => {
+      if (!dragTask || dragTask.id === targetId) return false;
+      const target = groups.find((g) => g.task.id === targetId);
+      if (!target) return false;
+      if (Boolean(target.task.pinned) !== dragTask.pinned) return false;
+      setDropIndicator({ targetId, before });
+      return true;
+    },
+    [dragTask, groups],
+  );
+
+  /**
+   * drop 到某张卡片（同区）：把拖拽源从原位置移除，插入到目标前/后，
+   * 组装成完整新顺序上报。跨区 drop 不会走到这（dragover 已禁止）。
+   */
+  const handleDropTask = useCallback(
+    (targetId: string) => {
+      const pos = dropIndicator;
+      if (!dragTask || !pos || pos.targetId !== targetId) {
+        handleDragEndTask();
+        return;
+      }
+      const ids = groups.map((g) => g.task.id);
+      const from = ids.indexOf(dragTask.id);
+      const to = ids.indexOf(targetId);
+      if (from === -1 || to === -1) {
+        handleDragEndTask();
+        return;
+      }
+      const next = [...ids];
+      next.splice(from, 1);
+      const insertAt = next.indexOf(targetId) + (pos.before ? 0 : 1);
+      next.splice(insertAt, 0, dragTask.id);
+      handleDragEndTask();
+      onReorderTasks(next);
+    },
+    [dragTask, groups, handleDragEndTask, onReorderTasks, dropIndicator],
+  );
 
   return (
     <div style={{ paddingBottom: 4 }}>
@@ -631,6 +756,13 @@ export function TaskArea({
               onDelete={(id) => void onDeleteTask(id)}
               onNewSession={(id, projectKey) => onNewSessionFromTask(id, projectKey)}
               onTogglePin={onToggleTaskPin}
+              onDragStartTask={handleDragStartTask}
+              onDragOverTask={handleDragOverTask}
+              onDropTask={handleDropTask}
+              onDragEndTask={handleDragEndTask}
+              isDragging={dragTask?.id === task.id}
+              dropBefore={dropIndicator?.targetId === task.id && dropIndicator.before}
+              dropAfter={dropIndicator?.targetId === task.id && !dropIndicator.before}
             />
           </Fragment>
         );

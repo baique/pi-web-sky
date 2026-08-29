@@ -8,6 +8,7 @@ export interface Task {
   created: number;
   updated: number;
   pinned: boolean;
+  sortOrder: number;
   sessionIds: string[];
   pinnedSessionIds: string[];
 }
@@ -19,6 +20,7 @@ interface TaskRow {
   created: number;
   updated: number;
   pinned: number;
+  sortOrder: number;
 }
 
 const now = () => Date.now();
@@ -37,7 +39,7 @@ export function listTaskSessionIds(taskId: string): string[] {
 function getTaskRow(id: string): TaskRow | undefined {
   return getDb()
     .prepare(
-      "SELECT id, project_key AS projectKey, name, created, updated, pinned FROM tasks WHERE id = ?",
+      "SELECT id, project_key AS projectKey, name, created, updated, pinned, sort_order AS sortOrder FROM tasks WHERE id = ?",
     )
     .get(id) as TaskRow | undefined;
 }
@@ -58,11 +60,12 @@ function rowToTask(row: TaskRow): Task {
   };
 }
 
-/** All tasks of one project, pinned first then newest-updated. */
+/** All tasks of one project: pinned segment first, then manual order
+ *  (sort_order), then creation time as a stable fallback. */
 export function listTasks(projectKey: string): Task[] {
   const rows = getDb()
     .prepare(
-      "SELECT id, project_key AS projectKey, name, created, updated, pinned FROM tasks WHERE project_key = ? ORDER BY pinned DESC, updated DESC, created DESC",
+      "SELECT id, project_key AS projectKey, name, created, updated, pinned, sort_order AS sortOrder FROM tasks WHERE project_key = ? ORDER BY pinned DESC, sort_order, created, rowid",
     )
     .all(projectKey) as unknown as TaskRow[];
   return rows.map(rowToTask);
@@ -75,9 +78,9 @@ export function createTask(projectKey: string, name: string): Task {
   const id = randomUUID();
   const ts = now();
   getDb()
-    .prepare("INSERT INTO tasks (id, project_key, name, created, updated) VALUES (?, ?, ?, ?, ?)")
-    .run(id, projectKey, trimmed, ts, ts);
-  return { id, projectKey: projectKey, name: trimmed, created: ts, updated: ts, pinned: false, sessionIds: [], pinnedSessionIds: [] };
+    .prepare("INSERT INTO tasks (id, project_key, name, created, updated, sort_order) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id, projectKey, trimmed, ts, ts, ts);
+  return { id, projectKey: projectKey, name: trimmed, created: ts, updated: ts, pinned: false, sortOrder: ts, sessionIds: [], pinnedSessionIds: [] };
 }
 
 /**
@@ -88,7 +91,7 @@ export function createTask(projectKey: string, name: string): Task {
  */
 export function updateTask(
   id: string,
-  patch: { name?: string; sessionIds?: string[]; pinned?: boolean },
+  patch: { name?: string; sessionIds?: string[]; pinned?: boolean; sortOrder?: number },
 ): Task | null {
   const db = getDb();
   const existing = getTaskRow(id);
@@ -104,6 +107,13 @@ export function updateTask(
     if (patch.pinned !== undefined) {
       db.prepare("UPDATE tasks SET pinned = ?, updated = ? WHERE id = ?").run(
         patch.pinned ? 1 : 0,
+        now(),
+        id,
+      );
+    }
+    if (patch.sortOrder !== undefined) {
+      db.prepare("UPDATE tasks SET sort_order = ?, updated = ? WHERE id = ?").run(
+        patch.sortOrder,
         now(),
         id,
       );
@@ -133,6 +143,32 @@ export function updateTask(
     throw error;
   }
   return rowToTask(getTaskRow(id)!);
+}
+
+/**
+ * Bulk-reorder tasks within one project. `orderedIds` is the full ordered
+ * list of task ids for one pinned segment (caller splits pinned/unpinned);
+ * each id must belong to the project. sort_order values are written as the
+ * array position (0-based), preserving relative order.
+ */
+export function reorderTasks(projectKey: string, orderedIds: string[]): Task[] {
+  const db = getDb();
+  if (orderedIds.length === 0) return listTasks(projectKey);
+  db.exec("BEGIN");
+  try {
+    const stmt = db.prepare("UPDATE tasks SET sort_order = ?, updated = ? WHERE id = ? AND project_key = ?");
+    orderedIds.forEach((id, index) => {
+      const res = stmt.run(index, now(), id, projectKey);
+      if (res.changes === 0) {
+        throw new Error(`task ${id} does not belong to project ${projectKey}`);
+      }
+    });
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return listTasks(projectKey);
 }
 
 /** Delete the task; all its sessions fall back to temp (task_id = NULL). */

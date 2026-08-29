@@ -80,16 +80,65 @@ export function initSchema(db: DatabaseSync): void {
       tokenize = 'trigram'
     );
   `);
+  migrate(db);
+}
 
-  // Idempotent migrations for databases created before pinned columns existed.
-  for (const migration of [
-    "ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;",
-    "ALTER TABLE session_meta ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;",
-  ]) {
+/**
+ * 版本化迁移：用 PRAGMA user_version 记录当前 schema 版本。
+ * 老库打开时自动按序补齐缺失的迁移（每个迁移一个事务，成功后推进版本号），
+ * 新库建表后从 v0 一路迁到 SCHEMA_VERSION。重复打开不再执行已完成的迁移。
+ */
+export const SCHEMA_VERSION = 2;
+
+interface Migration {
+  version: number;
+  name: string;
+  /** 单条语句串；每条独立执行，包在同一个事务里。 */
+  statements: string[];
+}
+
+/** 迁移历史（按版本升序）。只允许追加，不允许修改/删除历史项。 */
+const MIGRATIONS: Migration[] = [
+  {
+    version: 1,
+    name: "pinned columns",
+    statements: [
+      "ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;",
+      "ALTER TABLE session_meta ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;",
+    ],
+  },
+  {
+    version: 2,
+    name: "tasks.sort_order",
+    statements: [
+      "ALTER TABLE tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;",
+    ],
+  },
+];
+
+function migrate(db: DatabaseSync): void {
+  const row = db.prepare("PRAGMA user_version").get() as { user_version: number };
+  let version = row.user_version;
+  for (const m of MIGRATIONS) {
+    if (m.version <= version) continue;
+    db.exec("BEGIN");
     try {
-      db.exec(migration);
-    } catch {
-      // column already exists — fine
+      for (const stmt of m.statements) {
+        try {
+          db.exec(stmt);
+        } catch (error) {
+          // 老库在无版本管理时代可能已手动加过列（幂等 ADD COLUMN 路径），
+          // 列已存在时跳过该语句，不阻断整批迁移。
+          const msg = error instanceof Error ? error.message : String(error);
+          if (!/duplicate column name/i.test(msg)) throw error;
+        }
+      }
+      db.exec(`PRAGMA user_version = ${m.version}`);
+      db.exec("COMMIT");
+      version = m.version;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
     }
   }
 }

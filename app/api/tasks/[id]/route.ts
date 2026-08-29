@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { deleteTask, listTaskSessionIds, updateTask } from "@/lib/task-store";
 import { deleteSessionTrees } from "@/lib/session-delete";
 
-// PATCH /api/tasks/[id]  body: { name?, sessionIds?, pinned? }
+// PATCH /api/tasks/[id]  body: { name?, sessionIds?, pinned?, sortOrder? }
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -13,8 +13,9 @@ export async function PATCH(
       name?: unknown;
       sessionIds?: unknown;
       pinned?: unknown;
+      sortOrder?: unknown;
     };
-    const patch: { name?: string; sessionIds?: string[]; pinned?: boolean } = {};
+    const patch: { name?: string; sessionIds?: string[]; pinned?: boolean; sortOrder?: number } = {};
     if (body.name !== undefined) {
       if (typeof body.name !== "string") {
         return NextResponse.json({ error: "name must be a string" }, { status: 400 });
@@ -36,7 +37,13 @@ export async function PATCH(
       }
       patch.pinned = body.pinned;
     }
-    if (patch.name === undefined && patch.sessionIds === undefined && patch.pinned === undefined) {
+    if (body.sortOrder !== undefined) {
+      if (typeof body.sortOrder !== "number" || !Number.isFinite(body.sortOrder)) {
+        return NextResponse.json({ error: "sortOrder must be a finite number" }, { status: 400 });
+      }
+      patch.sortOrder = body.sortOrder;
+    }
+    if (patch.name === undefined && patch.sessionIds === undefined && patch.pinned === undefined && patch.sortOrder === undefined) {
       return NextResponse.json({ error: "nothing to update" }, { status: 400 });
     }
     const task = updateTask(id, patch);
