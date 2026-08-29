@@ -119,6 +119,9 @@ const TOOL_PRESET_MAP: Record<ToolPresetLabel, ToolPreset> = {
 };
 const COMPOSITION_END_ENTER_GRACE_MS = 100;
 const MODEL_FILTER_THRESHOLD = 8;
+/* 模型列表每个 provider 分组内部可容纳的最大可见行数；超出后组内滚动。
+   约 5 个模型 + 1 行组头 ≈ 6×34 = 204px，接近旧顶栏面板的高度观感。 */
+const MODEL_GROUP_VISIBLE_ROWS = 5;
 const MODEL_OPTION_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const ANCHORED_MENU_GAP = 8;
 
@@ -531,6 +534,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const modelDropdownPanelRef = useRef<HTMLDivElement>(null);
+  const modelGroupScrollRef = useRef<HTMLDivElement>(null);
   const toolDropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
   const controlsMenuRef = useRef<HTMLDivElement>(null);
@@ -1478,11 +1482,25 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const displayModelName = model
     ? (modelOptions.find((o) => o.modelId === model.modelId && o.provider === model.provider)?.name ?? model.modelId)
     : null;
+  // 当前激活模型所在的 provider 分组下标（用于打开时把组内滚动条定位到它附近）
+  const activeModelGroupIndex = model
+    ? modelsByProvider.findIndex((g) => g.options.some((o) => o.modelId === model.modelId && o.provider === model.provider))
+    : -1;
   const currentName = displayModelName;
   const isModelsLoading = modelsLoading ?? false;
   const modelsLoaded = modelOptions.length > 0 || currentName;
 
   const queueCount = (queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0);
+
+  // 打开模型面板时，若激活模型所在的 provider 组内滚动条折叠了它（超过限高），
+  // 将其滚入可视区，避免用户看不到当前模型。
+  useEffect(() => {
+    if (!modelDropdownOpen) return;
+    const el = modelGroupScrollRef.current;
+    if (!el) return;
+    const active = el.querySelector('[aria-current]') as HTMLElement | null;
+    if (active) active.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [modelDropdownOpen]);
 
 
   // 顶栏左槽（空闲态）：模型选择器（自工具栏迁入；流式时该槽让位给运行状态）
@@ -1588,8 +1606,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                         bottom: "calc(100% + 12px)",
                         ...panelPos,
                         zIndex: 500,
-                        /* 与输入台同标准玻璃（--frame-glass + heavy blur + saturate） */
-                        background: "var(--frame-glass)",
+                        /* 浮层弹窗玻璃：比 chrome 浓（--popover-glass），避免列表浮在消息/壁纸上显得发虚 */
+                        background: "var(--popover-glass)",
                         backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
                         WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
                         border: "1px solid var(--border)",
@@ -1628,23 +1646,36 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                             />
                           </div>
                         )}
+                        {/* 每个 provider 组内部限高滚动（约 5 个模型）；组与组之间不整体滚动，
+                            避免单组模型太多时把其他组挤出可视区 */}
                         <div style={{ minHeight: 0, overflowY: "auto" }}>
                           {modelsByProvider.length === 0 ? (
                             <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
                               {modelFilter.trim() ? t("chat.noMatchingModels") : "No available models"}
                             </div>
                           ) : modelsByProvider.map((group, gi) => (
-                            <div key={group.provider}>
+                            <div key={group.provider} style={{ display: "flex", flexDirection: "column" }}>
                               {(modelsByProvider.length > 1) && (
                                 <div style={{
                                   padding: "6px 12px 4px",
                                   fontSize: 10, fontWeight: 600, color: "var(--text-dim)",
                                   textTransform: "uppercase", letterSpacing: "0.07em",
                                   borderTop: gi > 0 ? "1px solid var(--border)" : "none",
+                                  flexShrink: 0,
                                 }}>
                                   {group.provider}
                                 </div>
                               )}
+                              {/* 组内滚动：限高为可见行数×行高，超出滚动；
+                                  当前激活模型若在折叠区外则 scrollIntoView 使其可见 */}
+                              <div
+                                ref={gi === activeModelGroupIndex ? modelGroupScrollRef : undefined}
+                                style={{
+                                  overflowY: "auto",
+                                  maxHeight: MODEL_GROUP_VISIBLE_ROWS * 34,
+                                  flexShrink: 0,
+                                }}
+                              >
                               {group.options.map((opt) => {
                                 const isActive = opt.modelId === model?.modelId && opt.provider === model?.provider;
                                 return (
@@ -1655,6 +1686,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                                       setModelFilter("");
                                       if (!isActive || isAutoModelSelection) onModelChange(opt.provider, opt.modelId);
                                     }}
+                                    aria-current={isActive ? "true" : undefined}
                                     style={{
                                       display: "flex", alignItems: "center", gap: 8,
                                       width: "100%", padding: "7px 12px",
@@ -1675,6 +1707,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                                   </button>
                                 );
                               })}
+                              </div>
                             </div>
                           ))}
                         </div>

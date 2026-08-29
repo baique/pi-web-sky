@@ -56,6 +56,11 @@
      their tint stays visually consistent over the same wallpaper. */
   --frame-glass: rgba(255, 255, 255, 0.76);
   --side-panel: var(--frame-glass);
+  /* Floating popover glass — denser than chrome on purpose: dropdowns /
+     config panels sit directly over message text + wallpaper, so a thin
+     tint reads as "transparent, no glass". Near-opaque base keeps them
+     looking frosted everywhere without depending on the compositor. */
+  --popover-glass: rgba(255, 255, 255, 0.86);
 
   /* Frosted-glass surfaces — chrome stays *near-solid* so the wallpaper
      shows through around the chrome, not through it. Each chat bubble
@@ -174,6 +179,7 @@ html.dark {
   --side-input: color-mix(in srgb, var(--glass-bg-strong) 60%, transparent);
   --frame-glass: rgba(28, 28, 31, 0.68);
   --side-panel: var(--frame-glass);
+  --popover-glass: rgba(28, 28, 31, 0.80);
   --user-bg: #1e293b;
   --assistant-bg: #1a1a1a;
   --tool-bg: #1f2937;
@@ -1727,6 +1733,7 @@ span.token.table {
     --glass-bg-strong: var(--bg);
     --frame-glass: var(--bg);
     --side-panel: var(--frame-glass);
+    --popover-glass: var(--bg);
     --panel-glass: var(--bg);
     --panel-glass-todo: var(--bg);
     --panel-glass-minimap: var(--bg);
@@ -1747,6 +1754,7 @@ span.token.table {
     --glass-bg-strong: var(--bg);
     --frame-glass: var(--bg);
     --side-panel: var(--frame-glass);
+    --popover-glass: var(--bg);
     --panel-glass: var(--bg);
     --panel-glass-todo: var(--bg);
     --panel-glass-minimap: var(--bg);

@@ -790,8 +790,8 @@ export function McpConfigPanel({
         maxHeight: "min(72vh, 600px)",
         display: "flex",
         flexDirection: "column",
-        // L-panel 玻璃：MCP 配置面板（见 --panel-glass / --glass-blur-panel）
-        background: "var(--panel-glass)",
+        // L-panel 玻璃：MCP 配置面板（见 --popover-glass / --glass-blur-panel）
+        background: "var(--popover-glass)",
         backdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
         WebkitBackdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
         transform: "translateZ(0)",

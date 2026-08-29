@@ -2849,9 +2849,9 @@ export function AppShell() {
                 maxHeight: "min(440px, calc(100dvh - 44px))",
                 overflowY: "auto",
                 zIndex: 500,
-                // L-panel 玻璃：会话统计/Todo 面板（专属 --panel-glass-todo，
+                // L-panel 玻璃：会话统计/Todo 面板（与模型选择器同标准 --popover-glass，
                 // blur 仅收敛到 --glass-blur-panel token，不写死 px）。
-                background: "var(--panel-glass-todo)",
+                background: "var(--popover-glass)",
                 backdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
                 WebkitBackdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
                 transform: "translateZ(0)",
