@@ -245,6 +245,7 @@ export const enLocale: LocalePlugin = {
     "chat.previewImage": "Preview image",
     "chat.filterModels": "Filter models…",
     "chat.noMatchingModels": "No matching models",
+    "chat.showModelId": "Show IDs",
     "chat.moreControls": "More controls",
     "chat.collapseControls": "Collapse controls",
     "chat.shell": "Shell",

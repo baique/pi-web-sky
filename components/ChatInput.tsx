@@ -31,6 +31,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { ComposerHeader } from "./ComposerHeader";
 import type { ToolPreset } from "@/lib/tool-presets";
 import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
+import { getPreferredModelIdDisplay, setPreferredModelIdDisplay } from "@/lib/model-id-preference";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -504,6 +505,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [modelFilter, setModelFilter] = useState("");
+  // 模型选择器显示 id 而非名称（部分提供商的展示名重复，id 才能区分）
+  const [showModelId, setShowModelId] = useState(() => getPreferredModelIdDisplay());
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [controlsMenuOpen, setControlsMenuOpen] = useState(false);
@@ -1489,7 +1492,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const activeModelGroupIndex = model
     ? modelsByProvider.findIndex((g) => g.options.some((o) => o.modelId === model.modelId && o.provider === model.provider))
     : -1;
-  const currentName = displayModelName;
+  const currentName = showModelId ? (model?.modelId ?? null) : displayModelName;
   const isModelsLoading = modelsLoading ?? false;
   const modelsLoaded = modelOptions.length > 0 || currentName;
 
@@ -1649,6 +1652,43 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                             />
                           </div>
                         )}
+                        {/* 显示 id 而非名称：部分提供商的展示名重复，id 才能区分 */}
+                        <div style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+                          padding: "6px 10px", borderBottom: "1px solid var(--border)", flexShrink: 0,
+                        }}>
+                          <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                            {t("chat.showModelId")}
+                          </span>
+                          <button
+                            role="switch"
+                            aria-checked={showModelId}
+                            aria-label={t("chat.showModelId")}
+                            onClick={() => {
+                              setShowModelId((prev) => {
+                                const next = !prev;
+                                setPreferredModelIdDisplay(next);
+                                return next;
+                              });
+                            }}
+                            style={{
+                              flexShrink: 0,
+                              width: 26, height: 15, borderRadius: 999,
+                              padding: 0, border: "none", cursor: "pointer",
+                              background: showModelId ? "var(--accent)" : "color-mix(in srgb, var(--text) 22%, transparent)",
+                              position: "relative", transition: "background 0.15s",
+                            }}
+                          >
+                            <span style={{
+                              position: "absolute", top: 2,
+                              left: showModelId ? 13 : 2,
+                              width: 11, height: 11, borderRadius: 999,
+                              background: "var(--popover-glass)",
+                              border: "1px solid var(--border)",
+                              transition: "left 0.15s",
+                            }} />
+                          </button>
+                        </div>
                         {/* 每个 provider 组内部限高滚动（约 5 个模型）；组与组之间不整体滚动，
                             避免单组模型太多时把其他组挤出可视区 */}
                         <div style={{ minHeight: 0, overflowY: "auto" }}>
@@ -1706,7 +1746,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                                     {isActive
                                       ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
                                       : <span style={{ width: 10, flexShrink: 0 }} />}
-                                    {opt.name}
+                                    {showModelId ? opt.modelId : opt.name}
                                   </button>
                                 );
                               })}
