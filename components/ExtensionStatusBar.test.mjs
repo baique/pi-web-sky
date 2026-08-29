@@ -99,7 +99,7 @@ test("subagent-async 快照渲染为结构化卡片", () => {
   assert.match(html, /1 runs · 1 running · 0 done/);
 });
 
-test("subagent-async 解析失败降级为文本 widget", () => {
+test("subagent-async 解析失败不显示（数据坏则隐藏，不降级为文本）", () => {
   const html = renderStatusBar({
     statuses: [],
     widgets: [{
@@ -110,8 +110,28 @@ test("subagent-async 解析失败降级为文本 widget", () => {
   });
 
   assert.doesNotMatch(html, /subagent-widget-card/);
-  assert.match(html, /extension-widget-triggers/);
-  assert.match(html, /subagent-async/);
+  assert.doesNotMatch(html, /extension-widget-triggers/);
+  assert.doesNotMatch(html, /plain text line/);
+});
+
+test("subagent-inspect 回包帧不渲染为可见 widget", () => {
+  const reply = {
+    kind: "pi-subagents.inspect-reply",
+    version: 1,
+    requestId: "req-1",
+    messages: [{ role: "assistant", kind: "text", text: "hello" }],
+  };
+  const html = renderStatusBar({
+    statuses: [],
+    widgets: [{
+      key: "subagent-inspect",
+      lines: [`PI_SUBAGENT_INSPECT_JSON:${JSON.stringify(reply)}`],
+      placement: "aboveEditor",
+    }],
+  });
+
+  assert.doesNotMatch(html, /subagent-inspect/);
+  assert.doesNotMatch(html, /extension-widget-triggers/);
 });
 
 test("非 subagent widget 保持原样", () => {

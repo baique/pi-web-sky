@@ -56,11 +56,11 @@ export function ExtensionStatusBar({
 
   // 分离 subagent-async 与其余 widget：subagent 快照 → 结构化卡片；其余原样走文本。
   // 解析失败时 subagent 也降级回文本 widget（不放卡片，不丢内容）。
+  // subagent-inspect 只是 inspect 回包的数据传输通道（emit-then-retract），不渲染。
+  const HIDDEN_WIDGET_KEYS = new Set([SUBAGENT_ASYNC_WIDGET_KEY, SUBAGENT_INSPECT_WIDGET_KEY]);
   const subagentWidget = widgets.find((w) => w.key === SUBAGENT_ASYNC_WIDGET_KEY);
   const subagentSnapshot = subagentWidget ? parseSubagentSnapshot(subagentWidget.lines) : null;
-  const otherWidgets = subagentWidget && subagentSnapshot
-    ? widgets.filter((w) => w.key !== SUBAGENT_ASYNC_WIDGET_KEY)
-    : widgets;
+  const otherWidgets = widgets.filter((w) => !HIDDEN_WIDGET_KEYS.has(w.key));
 
   // The shelf is event-driven: Pi Web tools use its reserved right slot but
   // must not make the otherwise-empty extension shelf permanently visible.
