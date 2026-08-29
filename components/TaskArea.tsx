@@ -349,16 +349,12 @@ function TaskCard({
           />
         ) : (
           <>
-            {task.sessionIds.length > 0 ? (
-              <span
-                aria-hidden="true"
-                style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}
-              >
-                <FolderIcon size={13} open={!collapsed} />
-              </span>
-            ) : (
-              <span style={{ width: 20, flexShrink: 0 }} />
-            )}
+            <span
+              aria-hidden="true"
+              style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}
+            >
+              <FolderIcon size={13} open={!collapsed} />
+            </span>
             <span title={`${task.name} · ${formatRelativeTime(task.created)}`} style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {task.name}
             </span>
