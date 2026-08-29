@@ -26,7 +26,6 @@ export function CanvasStage({
   const { t } = useI18n();
   const [dragOver, setDragOver] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
-  const [overlayContainer, setOverlayContainer] = useState<HTMLDivElement | null>(null);
 
   // 会话拖入画布：tldraw 内部会 stopPropagation drop，React 合成 onDrop 收不到。
   // 改用原生事件监听（挂在外层容器，捕获阶段提前拦截）。
@@ -171,11 +170,7 @@ export function CanvasStage({
             {t("boards.dropToAdd")}
           </div>
         )}
-        {/* 展开工作台浮层挂载点（不受画布 transform 影响） */}
-        <div
-          ref={setOverlayContainer}
-          style={{ position: "absolute", inset: 0, zIndex: 25, pointerEvents: "none" }}
-        />
+        {/* 展开工作台浮层由 WorkbenchOverlay portal 到 document.body，无需挂载点 */}
         {board.loading ? (
           <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
             {t("boards.loadingCanvas")}
@@ -193,7 +188,7 @@ export function CanvasStage({
             colorScheme={isDark ? "dark" : "light"}
           >
             <TldrawInner>
-              <WorkbenchOverlay container={overlayContainer} />
+              <WorkbenchOverlay />
             </TldrawInner>
           </Tldraw>
         )}
