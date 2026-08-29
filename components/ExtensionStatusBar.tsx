@@ -52,6 +52,9 @@ export function ExtensionStatusBar({
 
   // 拦截 subagent-inspect 回包（emit-then-retract 的 emit 帧）分发给订阅者。
   // retract 帧（widgetLines: undefined）已被 useAgentSession 过滤，不会到这里。
+  // 拦截 subagent-inspect 回包（emit-then-retract 的 emit 帧）分发给订阅者。
+  // 注：真正的分发在 useAgentSession 的 setWidget case 同步完成（绕过 React 批处理）；
+  // 这里作为兜底保留（若未来 useAgentSession 路径变更，此处仍能捕获）。
   useEffect(() => {
     const inspect = widgets.find((w) => w.key === SUBAGENT_INSPECT_WIDGET_KEY);
     if (!inspect) return;

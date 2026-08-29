@@ -21,6 +21,8 @@ import { getToolNamesForPreset, type ToolEntry, type ToolPreset } from "@/lib/to
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { userMessageKey } from "@/lib/prompt-recovery";
 import { AgentEventConnection } from "@/lib/agent-event-connection";
+import { parseSubagentInspectReply, SUBAGENT_INSPECT_WIDGET_KEY } from "@/lib/subagent-widget";
+import { dispatchInspectReply } from "@/lib/extension-command";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
 import {
   CHAT_SCROLL_REATTACH_TOLERANCE,
@@ -896,6 +898,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         });
         break;
       case "setWidget":
+        // 同步分发 inspect 回包（emit 帧），绕过 React 批处理——emit-then-retract
+        // 两帧若走 state，emit 帧会被 retract 覆盖导致前端永远看不到。
+        if (request.widgetKey === SUBAGENT_INSPECT_WIDGET_KEY && request.widgetLines) {
+          const reply = parseSubagentInspectReply(request.widgetLines);
+          if (reply) dispatchInspectReply(reply, reply.requestId);
+        }
         setExtensionWidgets((prev) => {
           const rest = prev.filter((item) => item.key !== request.widgetKey);
           return request.widgetLines
