@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { deleteTask, updateTask } from "@/lib/task-store";
+import { deleteTask, listTaskSessionIds, updateTask } from "@/lib/task-store";
+import { deleteSessionTrees } from "@/lib/session-delete";
 
 // PATCH /api/tasks/[id]  body: { name?, sessionIds?, pinned? }
 export async function PATCH(
@@ -48,15 +49,16 @@ export async function PATCH(
   }
 }
 
-// DELETE /api/tasks/[id]
+// DELETE /api/tasks/[id] —— 删除任务及其下全部会话（含 fork 子树）。
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
   try {
+    const deletedSessionIds = await deleteSessionTrees(listTaskSessionIds(id));
     deleteTask(id);
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, deletedSessionIds });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }

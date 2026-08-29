@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { FolderIcon } from "./FileIcons";
 import { AnimatedDropdown } from "./AnimatedDropdown";
+import { dropdownDirection } from "@/lib/dropdown-direction";
 
 /** Local mirror of lib/task-store's Task — keeps the client bundle free of
  *  server-only modules (node:sqlite). */
@@ -31,6 +32,8 @@ interface TaskGroup {
   sessionCount: number;
   /** 置顶会话根节点数（默认全部展示）。 */
   pinnedCount: number;
+  /** 任务下全部会话数（含 fork 子树），用于删除确认文案。 */
+  sessionTotal: number;
 }
 
 interface Props {
@@ -93,6 +96,7 @@ function TaskCard({
   content,
   sessionCount,
   pinnedCount,
+  sessionTotal,
   onDropAssign,
   onRename,
   onDelete,
@@ -103,6 +107,7 @@ function TaskCard({
   content: (showAll: boolean) => ReactNode;
   sessionCount: number;
   pinnedCount: number;
+  sessionTotal: number;
   onDropAssign: (taskId: string, sessionId: string) => void;
   onRename: (taskId: string, name: string) => void;
   onDelete: (taskId: string) => void;
@@ -118,22 +123,30 @@ function TaskCard({
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** 删除确认气泡方向：下方空间不足时向上展开（防滚动容器边缘被 overflow 裁剪）。 */
+  const [confirmUp, setConfirmUp] = useState(false);
   /** 更多（⋮）下拉：打开态 + 展开方向（下方空间不足时向上） */
   const [moreOpen, setMoreOpen] = useState(false);
   const [moreUp, setMoreUp] = useState(false);
   const renameRef = useRef<HTMLInputElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
+  /** 删除确认气泡容器（点击气泡内部不关闭）。 */
+  const confirmRef = useRef<HTMLDivElement>(null);
 
-  // 菜单打开时：点击菜单外任意处 / Escape 关闭（捕获阶段监听，避免被 stopPropagation 拦掉）。
+  // 菜单/确认气泡打开时：点击它们外任意处 / Escape 关闭（捕获阶段监听，避免被 stopPropagation 拦掉）。
   useEffect(() => {
-    if (!moreOpen) return;
+    if (!moreOpen && !confirmDelete) return;
     const onPointerDown = (ev: PointerEvent) => {
-      if (actionsRef.current && !actionsRef.current.contains(ev.target as Node)) {
-        setMoreOpen(false);
-      }
+      const t = ev.target as Node;
+      if (actionsRef.current?.contains(t) || confirmRef.current?.contains(t)) return;
+      setMoreOpen(false);
+      setConfirmDelete(false);
     };
     const onKeyDown = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") setMoreOpen(false);
+      if (ev.key === "Escape") {
+        setMoreOpen(false);
+        setConfirmDelete(false);
+      }
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown);
@@ -141,7 +154,7 @@ function TaskCard({
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [moreOpen]);
+  }, [moreOpen, confirmDelete]);
 
   // 打开菜单前测可用空间：按钮下方放不下菜单则向上展开。
   const handleMoreClick = useCallback((e: React.MouseEvent) => {
@@ -244,29 +257,7 @@ function TaskCard({
           transition: "background 0.12s",
         }}
       >
-        {confirmDelete ? (
-          <>
-            <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {t("sidebar.deleteTaskConfirm", { name: task.name })}
-            </span>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onDelete(task.id); setConfirmDelete(false); }}
-              onMouseDown={(e) => e.stopPropagation()}
-              style={{ height: 22, padding: "0 8px", flexShrink: 0, background: "color-mix(in srgb, #ef4444 12%, transparent)", border: "none", borderRadius: 5, color: "#ef4444", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
-            >
-              {t("sidebar.delete")}
-            </button>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
-              onMouseDown={(e) => e.stopPropagation()}
-              style={{ height: 22, padding: "0 8px", flexShrink: 0, background: "var(--side-input)", border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)", borderRadius: 5, color: "var(--text-muted)", fontSize: 11, cursor: "pointer" }}
-            >
-              {t("sidebar.cancel")}
-            </button>
-          </>
-        ) : renaming ? (
+        {renaming ? (
           <input
             ref={renameRef}
             value={renameValue}
@@ -303,7 +294,7 @@ function TaskCard({
                 </svg>
               </span>
             )}
-            {(hovered || moreOpen) && !renaming && !confirmDelete && (
+            {(hovered || moreOpen || confirmDelete) && !renaming && (
               <span ref={actionsRef} style={{ position: "relative", display: "flex", gap: 3, flexShrink: 0, alignItems: "center" }}>
                 <button
                   type="button"
@@ -389,7 +380,12 @@ function TaskCard({
                     </button>
                     <button
                       role="menuitem"
-                      onClick={(e) => { e.stopPropagation(); setMoreOpen(false); setConfirmDelete(true); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMoreOpen(false);
+                        setConfirmUp(actionsRef.current ? dropdownDirection(actionsRef.current, 96) : false);
+                        setConfirmDelete(true);
+                      }}
                       style={{
                         display: "flex", alignItems: "center", gap: 8, width: "100%",
                         padding: "7px 10px", border: "none", borderRadius: 6,
@@ -405,6 +401,53 @@ function TaskCard({
                     </button>
                   </div>
                 </AnimatedDropdown>
+
+      {/* 删除确认气泡 —— 挂在操作区容器内（见 actionsRef），方向自适应防 overflow 裁剪 */}
+      {confirmDelete && (
+        <div
+          ref={confirmRef}
+          role="alertdialog"
+          style={{
+            position: "absolute",
+            ...(confirmUp
+              ? { bottom: "calc(100% + 4px)" }
+              : { top: "calc(100% + 4px)" }),
+            right: 0,
+            zIndex: 121,
+            width: 236,
+            boxSizing: "border-box",
+            padding: 10,
+            display: "flex", flexDirection: "column", gap: 8,
+            background: "var(--panel-glass)",
+            backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+            WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+            border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+            borderRadius: 9,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+          }}
+        >
+          <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text)" }}>
+            {t("sidebar.deleteTaskConfirm", { name: task.name, count: sessionTotal })}
+          </div>
+          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDelete(task.id); setConfirmDelete(false); }}
+              style={{ height: 24, padding: "0 10px", background: "color-mix(in srgb, #ef4444 12%, transparent)", border: "none", borderRadius: 5, color: "#ef4444", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+            >
+              {t("sidebar.delete")}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
+              style={{ height: 24, padding: "0 10px", background: "var(--side-input)", border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)", borderRadius: 5, color: "var(--text-muted)", fontSize: 11, cursor: "pointer" }}
+            >
+              {t("sidebar.cancel")}
+            </button>
+          </div>
+        </div>
+      )}
+
               </span>
             )}
           </>
@@ -435,6 +478,7 @@ function TaskCard({
           )}
         </>
       )}
+
     </div>
   );
 }
@@ -554,7 +598,7 @@ export function TaskArea({
         </div>
       )}
 
-      {groups.map(({ task, content, sessionCount, pinnedCount }, index) => {
+      {groups.map(({ task, content, sessionCount, pinnedCount, sessionTotal }, index) => {
         const prev = index > 0 ? groups[index - 1].task : null;
         const divider = prev?.pinned && !task.pinned;
         return (
@@ -567,6 +611,7 @@ export function TaskArea({
               content={content}
               sessionCount={sessionCount}
               pinnedCount={pinnedCount}
+              sessionTotal={sessionTotal}
               onDropAssign={onDropSessionToTask}
               onRename={(id, name) => void onRenameTask(id, name)}
               onDelete={(id) => void onDeleteTask(id)}

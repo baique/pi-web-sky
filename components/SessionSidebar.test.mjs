@@ -5,11 +5,15 @@ import test from "node:test";
 const source = await readFile(new URL("./SessionSidebar.tsx", import.meta.url), "utf8");
 const sessionItemSource = source.slice(source.indexOf("function SessionItem("));
 
-test("only Shift+click bypasses session deletion confirmation", () => {
+test("session delete opens a confirmation bubble instead of inline confirm", () => {
   assert.match(
     sessionItemSource,
-    /const handleDeleteClick[\s\S]*?if \(e\.shiftKey\) \{\s*void performDelete\(\);\s*\} else \{\s*setConfirmDelete\(true\);/,
+    /const handleDeleteClick[\s\S]*?setMoreOpen\(false\);\s*setConfirmUp\([\s\S]*?\);\s*setConfirmDelete\(true\);/,
   );
+  // Shift 快捷直接删除已被移除：统一走气泡确认
+  assert.doesNotMatch(sessionItemSource, /e\.shiftKey/);
+  // 行内确认渲染已被气泡替代
+  assert.doesNotMatch(sessionItemSource, /Delete confirmation: same height, two flat buttons/);
 });
 
 test("does not register row-level session deletion shortcuts", () => {
@@ -66,5 +70,5 @@ test("manual and lifecycle refreshes bypass the server session-list cache", () =
 
 test("does not expose disk-backed actions for transient sessions", () => {
   assert.match(sessionItemSource, /if \(session\.transient\) return;/);
-  assert.match(sessionItemSource, /\(hovered \|\| moreOpen\) && !session\.transient && \(/);
+  assert.match(sessionItemSource, /\(hovered \|\| moreOpen \|\| confirmDelete\) && !session\.transient && \(/);
 });

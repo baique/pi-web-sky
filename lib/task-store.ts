@@ -23,7 +23,8 @@ interface TaskRow {
 
 const now = () => Date.now();
 
-function listTaskSessionIds(taskId: string): string[] {
+/** 任务下根会话 id（不含 fork 子树，子树由树结构隐含归属）。 */
+export function listTaskSessionIds(taskId: string): string[] {
   // Order here is a fallback only: the sidebar re-sorts group contents by
   // session modified-time (desc) + pinned segment, so this must stay in sync
   // directionally (pinned first, then descending recency).

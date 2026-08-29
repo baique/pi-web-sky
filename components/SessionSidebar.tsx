@@ -8,6 +8,7 @@ import { getProjectActivity, getRecentProjects, sessionsForProject } from "@/lib
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { useI18n } from "@/hooks/useI18n";
 import { AnimatedDropdown } from "./AnimatedDropdown";
+import { dropdownDirection } from "@/lib/dropdown-direction";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { SessionTabs, type SidebarTab } from "./SessionTabs";
@@ -1012,9 +1013,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [persistTasks]);
 
   const handleDeleteTask = useCallback(async (taskId: string) => {
-    await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
+    const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
+    const d = await res.json().catch(() => ({})) as { deletedSessionIds?: string[] };
+    // 任务删除连带删除了会话文件：对每个被删会话同步状态（含当前激活会话的清空）。
+    for (const sid of d.deletedSessionIds ?? []) onSessionDeleted?.(sid);
     await persistTasks();
-  }, [persistTasks]);
+  }, [persistTasks, onSessionDeleted]);
 
   const handleAssignSession = useCallback(async (taskId: string, sessionId: string) => {
     const task = tasks.find((t) => t.id === taskId);
@@ -1067,14 +1071,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       }
     };
     walk(sessionTree);
-    return tasks.map((task) => ({
-      task,
-      nodes: orderPinnedFirst(
+    // 任务下全部会话数（含 fork 子树）——删除确认文案用。
+    const countTree = (nodes: SessionTreeNode[]): number =>
+      nodes.reduce((sum, n) => sum + 1 + countTree(n.children), 0);
+    return tasks.map((task) => {
+      const nodes = orderPinnedFirst(
         task.sessionIds
           .map((sid) => byId.get(sid))
           .filter((n): n is SessionTreeNode => Boolean(n)),
-      ),
-    }));
+      );
+      return { task, nodes, sessionTotal: countTree(nodes) };
+    });
   }, [tasks, sessionTree]);
 
   // Everything owned by a task group (including its descendants) leaves the
@@ -1856,12 +1863,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 {!tasksCollapsed && (
                   <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
                     <TaskArea
-                      groups={taskGroups.map(({ task, nodes }) => {
+                      groups={taskGroups.map(({ task, nodes, sessionTotal }) => {
                         const pinnedCount = nodes.filter((n) => n.session.pinned).length;
                         return {
                           task,
                           sessionCount: nodes.length,
                           pinnedCount,
+                          sessionTotal,
                           content: (showAll: boolean) => {
                             const pinnedSet = new Set(task.pinnedSessionIds ?? []);
                             // 默认只展示置顶会话 + 最近 5 个非置顶会话（nodes 已按
@@ -2303,6 +2311,8 @@ function SessionItem({
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** 删除确认气泡方向：下方空间不足时向上展开（防滚动容器边缘被 overflow 裁剪）。 */
+  const [confirmUp, setConfirmUp] = useState(false);
   const [deleting, setDeleting] = useState(false);
   /** 更多（⋮）下拉：打开态 + 展开方向（下方空间不足时向上） */
   const [moreOpen, setMoreOpen] = useState(false);
@@ -2310,16 +2320,20 @@ function SessionItem({
   const inputRef = useRef<HTMLInputElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
 
-  // 菜单打开时：点击菜单外任意处 / Escape 关闭（用捕获阶段监听，避免被 stopPropagation 拦掉）。
+  // 菜单/删除确认气泡打开时：点击它们外任意处 / Escape 关闭（用捕获阶段监听，避免被 stopPropagation 拦掉）。
   useEffect(() => {
-    if (!moreOpen) return;
+    if (!moreOpen && !confirmDelete) return;
     const onPointerDown = (ev: PointerEvent) => {
       if (actionsRef.current && !actionsRef.current.contains(ev.target as Node)) {
         setMoreOpen(false);
+        setConfirmDelete(false);
       }
     };
     const onKeyDown = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") setMoreOpen(false);
+      if (ev.key === "Escape") {
+        setMoreOpen(false);
+        setConfirmDelete(false);
+      }
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown);
@@ -2327,7 +2341,7 @@ function SessionItem({
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [moreOpen]);
+  }, [moreOpen, confirmDelete]);
 
   // 打开菜单前测可用空间：按钮下方放不下菜单则向上展开。
   const handleMoreClick = useCallback((e: React.MouseEvent) => {
@@ -2418,12 +2432,9 @@ function SessionItem({
   const handleDeleteClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setMoreOpen(false);
-    if (e.shiftKey) {
-      void performDelete();
-    } else {
-      setConfirmDelete(true);
-    }
-  }, [performDelete]);
+    setConfirmUp(actionsRef.current ? dropdownDirection(actionsRef.current, 96) : false);
+    setConfirmDelete(true);
+  }, []);
 
   const handleDeleteConfirm = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -2483,49 +2494,7 @@ function SessionItem({
         gap: 6,
       }}
     >
-      {confirmDelete ? (
-        /* ── Delete confirmation: same height, two flat buttons ── */
-        <>
-          <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {t("sidebar.deleteSession", { title: title.slice(0, 22) + (title.length > 22 ? "…" : "") })}
-          </div>
-          <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-            <button
-              onClick={handleDeleteConfirm}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
-                height: 30, padding: "0 11px",
-                background: "color-mix(in srgb, #ef4444 12%, transparent)",
-                border: "none",
-                borderRadius: 6, color: "#ef4444",
-                cursor: "pointer", fontSize: 12, fontWeight: 600,
-                whiteSpace: "nowrap",
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                <path d="M10 11v6M14 11v6" />
-                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-              </svg>
-              {t("sidebar.delete")}
-            </button>
-            <button
-              onClick={handleDeleteCancel}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                height: 30, padding: "0 11px",
-                background: "var(--side-input)", border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
-                borderRadius: 6, color: "var(--text-muted)",
-                cursor: "pointer", fontSize: 12, fontWeight: 500,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {t("sidebar.cancel")}
-            </button>
-          </div>
-        </>
-      ) : renaming ? (
+      {renaming ? (
         /* ── Rename: input fills the same row ── */
         <input
           ref={inputRef}
@@ -2625,7 +2594,7 @@ function SessionItem({
             </button>
           )}
           {/* Action buttons — shown on hover: 编辑 + 更多（⋮，下拉 置顶/编辑/删除） */}
-          {(hovered || moreOpen) && !session.transient && (
+          {(hovered || moreOpen || confirmDelete) && !session.transient && (
             <div ref={actionsRef} style={{ position: "relative", display: "flex", gap: 4, flexShrink: 0, alignItems: "center" }}>
               <button
                 onClick={startRename}
@@ -2756,7 +2725,6 @@ function SessionItem({
                       setMoreOpen(false);
                       handleDeleteClick(e);
                     }}
-                    title={t("sidebar.deleteWithShiftClick")}
                     style={{
                       display: "flex", alignItems: "center", gap: 8, width: "100%",
                       padding: "7px 10px", border: "none", borderRadius: 6,
@@ -2777,6 +2745,63 @@ function SessionItem({
                   </button>
                 </div>
               </AnimatedDropdown>
+
+              {/* 删除确认气泡 —— 浮在操作区旁，不替换行内容；方向自适应防 overflow 裁剪 */}
+              {confirmDelete && (
+                <div
+                  role="alertdialog"
+                  style={{
+                    position: "absolute",
+                    ...(confirmUp
+                      ? { bottom: "calc(100% + 4px)" }
+                      : { top: "calc(100% + 4px)" }),
+                    right: 0,
+                    zIndex: 121,
+                    width: 224,
+                    boxSizing: "border-box",
+                    padding: 10,
+                    display: "flex", flexDirection: "column", gap: 8,
+                    background: "var(--panel-glass)",
+                    backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+                    WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+                    border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+                    borderRadius: 9,
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                  }}
+                >
+                  <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text)" }}>
+                    {t("sidebar.deleteSession", { title: title.slice(0, 30) + (title.length > 30 ? "…" : "") })}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                    <button
+                      onClick={handleDeleteConfirm}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                        height: 26, padding: "0 10px",
+                        background: "color-mix(in srgb, #ef4444 12%, transparent)",
+                        border: "none", borderRadius: 5, color: "#ef4444",
+                        cursor: "pointer", fontSize: 11, fontWeight: 600,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {t("sidebar.delete")}
+                    </button>
+                    <button
+                      onClick={handleDeleteCancel}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        height: 26, padding: "0 10px",
+                        background: "var(--side-input)", border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
+                        borderRadius: 5, color: "var(--text-muted)",
+                        cursor: "pointer", fontSize: 11, fontWeight: 500,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {t("sidebar.cancel")}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
