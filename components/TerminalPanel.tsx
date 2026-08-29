@@ -101,6 +101,26 @@ export function TerminalPanel({
   // 自动创建护栏：用户手动关闭过某项目的终端（×）→ 该项目不再自动补建；
   // autoCreateRequested 避免同一可见时段内重复发起；切换项目/重新打开面板后重新评估。
   const userClosedLabelsRef = useRef<Set<string>>(new Set());
+
+  // ── 面板自由定位（拖拽）与自由缩放（右下角手柄）──────────────────────
+  // 拖拽位置/尺寸保存在组件内 state：面板常驻挂载（hidden 只是 display:none），
+  // 所以关闭再打开仍保持用户调好的位置与大小；页面刷新后回到锚定默认。
+  const [dragPos, setDragPos] = useState<{ left: number; top: number } | null>(null);
+  const [panelSize, setPanelSize] = useState<{ width: number; height: number } | null>(null);
+  const dragStateRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startLeft: number;
+    startTop: number;
+    capturing: boolean;
+  } | null>(null);
+  const resizeStateRef = useRef<{ pointerId: number; startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const MIN_TERMINAL_W = 320;
+  const MIN_TERMINAL_H = 200;
+  const clampNum = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+  /** 拖拽开始判定阈值：超过它才真正进入拖拽（否则 chip 的 click 仍正常触发）。 */
+  const DRAG_THRESHOLD = 4;
   const autoCreateRequestedRef = useRef<string | null>(null);
   const lastAutoEvaluateLabelRef = useRef<string | null>(null);
 
@@ -505,35 +525,118 @@ export function TerminalPanel({
     void refreshList();
   }, [disconnectedIds, refreshList]);
 
-  // Outside click / Escape close.
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const fabRef = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    fabRef.current = document.getElementById("terminal-bottombar-btn") as HTMLElement | null;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (rootRef.current?.contains(target)) return;
-      if (fabRef.current?.contains(target)) return;
-      // The topbar trigger is the sibling entry button — clicking it must be a
-      // genuine toggle, not an outside-click close, or the two handlers fight
-      // (close + reopen) and the collapsed panel replays its enter animation.
-      if (document.getElementById("terminal-topbar-btn")?.contains(target)) return;
-      onClose();
+
+  // 拖拽：从面板 tab 条空白区（非 chips/按钮/select 处）按下并移动。
+  const endDrag = useCallback((pointerId: number) => {
+    const d = dragStateRef.current;
+    if (!d || d.pointerId !== pointerId) return;
+    dragStateRef.current = null;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }, []);
+  const onPanelPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (isMobile) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    if (!target.closest(".terminal-tabs")) return; // 只从 tab 条区域拖
+    // 明确控件不拖（按钮/下拉/文本区）；chip 是 div，按下后若移动则拖面板，
+    // 不移动则 click 照常切换会话（浏览器会区分 click 与 drag）。
+    if (target.closest("button, select, input, textarea, a")) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const rect = root.getBoundingClientRect();
+    // 先不 capture：超过阈值进入拖拽态后才 capture，避免吞掉 chip 的 click。
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft: rect.left,
+      startTop: rect.top,
+      capturing: false,
     };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      // 终端聚焦时 Esc 属于终端（\x1b），不关闭面板；面板其它区域聚焦时仍可关闭。
-      const active = document.activeElement;
-      if (active?.classList?.contains("xterm-helper-textarea")) return;
-      onClose();
+    event.preventDefault();
+  }, [isMobile]);
+  const onPanelPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragStateRef.current;
+    if (!d || d.pointerId !== event.pointerId) return;
+    if (event.pointerType === "mouse" && event.buttons === 0) { endDrag(event.pointerId); return; }
+    const dx = event.clientX - d.startX;
+    const dy = event.clientY - d.startY;
+    if (!d.capturing) {
+      if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return; // 还没超过阈值，等 click
+      d.capturing = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      document.body.style.cursor = "move";
+      document.body.style.userSelect = "none";
+    }
+    event.preventDefault();
+    const root = rootRef.current;
+    if (!root) return;
+    const rect = root.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    setDragPos({
+      left: clampNum(d.startLeft + dx, 0, Math.max(0, vw - rect.width)),
+      top: clampNum(d.startTop + dy, 0, Math.max(0, vh - rect.height)),
+    });
+  }, [endDrag]);
+  const onPanelPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    endDrag(event.pointerId);
+    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+  }, [endDrag]);
+  const onPanelPointerCancel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    endDrag(event.pointerId);
+    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+  }, [endDrag]);
+
+  // 缩放：右下角手柄（透明，不破坏玻璃）。
+  const endResize = useCallback((pointerId: number) => {
+    const r = resizeStateRef.current;
+    if (!r || r.pointerId !== pointerId) return;
+    resizeStateRef.current = null;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }, []);
+  const onResizePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (isMobile) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const rect = root.getBoundingClientRect();
+    resizeStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startW: rect.width,
+      startH: rect.height,
     };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown, true);
-      document.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [onClose]);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+    document.body.style.cursor = "nwse-resize";
+    document.body.style.userSelect = "none";
+  }, [isMobile]);
+  const onResizePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const r = resizeStateRef.current;
+    if (!r || r.pointerId !== event.pointerId) return;
+    if (event.pointerType === "mouse" && event.buttons === 0) { endResize(event.pointerId); return; }
+    event.preventDefault();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    setPanelSize({
+      width: clampNum(r.startW + (event.clientX - r.startX), MIN_TERMINAL_W, vw - 24),
+      height: clampNum(r.startH + (event.clientY - r.startY), MIN_TERMINAL_H, vh - 24),
+    });
+  }, [endResize]);
+  const onResizePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    endResize(event.pointerId);
+    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+  }, [endResize]);
+  const onResizePointerCancel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    endResize(event.pointerId);
+    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+  }, [endResize]);
 
   // 终端键盘优先：焦点保护 + 浏览器级 Ctrl 快捷键兜底。
   // 根因：点击面板 tab 条/空白等非 xterm 区域后，焦点会掉到 body（Chrome 对不可聚焦
@@ -555,15 +658,24 @@ export function TerminalPanel({
       focusActiveTerm();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (hiddenRef.current || !event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
-      if (event.key.length !== 1) return;
-      const code = event.key.toLowerCase().charCodeAt(0);
-      if (code < 97 || code > 122) return; // 只转发纯 Ctrl+A-Z
+      if (hiddenRef.current) return;
       const active = document.activeElement;
-      if (active?.classList?.contains("xterm-helper-textarea")) return; // xterm 原生处理
       if (active instanceof HTMLElement && active.closest("input, textarea, [contenteditable='true']")) return; // 文本输入框自己处理
       const id = activeIdRef.current;
       const a = id ? attachedRef.current.get(id) : undefined;
+      // Esc：面板可见时一律进终端（\x1b），不再关闭面板。
+      if (event.key === "Escape") {
+        if (!a) return;
+        event.preventDefault();
+        event.stopPropagation();
+        a.term.input("\x1b");
+        return;
+      }
+      if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
+      if (event.key.length !== 1) return;
+      const code = event.key.toLowerCase().charCodeAt(0);
+      if (code < 97 || code > 122) return; // 只转发纯 Ctrl+A-Z
+      if (active?.classList?.contains("xterm-helper-textarea")) return; // xterm 原生处理
       if (!a) return;
       event.preventDefault();
       event.stopPropagation();
@@ -579,34 +691,35 @@ export function TerminalPanel({
 
   const panelStyle: React.CSSProperties = isMobile
     ? { position: "fixed", inset: 10, zIndex: 1050 }
-    : origin === "top"
-      ? (() => {
-          const vw = document.documentElement.clientWidth || window.innerWidth;
-          const width = Math.min(780, vw - 48);
+    : (() => {
+        const vw = document.documentElement.clientWidth || window.innerWidth;
+        const vh = window.innerHeight;
+        // 缩放：用户调过的尺寸优先，否则用锚定默认（拖拽/缩放后仍钳制在视口内）。
+        const width = panelSize
+          ? clampNum(panelSize.width, MIN_TERMINAL_W, vw - 24)
+          : Math.min(780, vw - 48);
+        const height = panelSize
+          ? clampNum(panelSize.height, MIN_TERMINAL_H, vh - 24)
+          : origin === "top" ? 465 : Math.min(465, vh - 120);
+        const base: React.CSSProperties = { position: "fixed", width, height, zIndex: 1040 };
+        if (dragPos) {
+          // 拖拽过：完全脱离锚定，用用户位置（钳制在视口内）。
+          base.left = clampNum(dragPos.left, 0, Math.max(0, vw - width));
+          base.top = clampNum(dragPos.top, 0, Math.max(0, vh - height));
+        } else if (origin === "top") {
           // Left-align with the trigger button (topbar terminal entry).
-          const left = anchorRect
+          base.top = anchorRect?.bottom ?? anchorRect?.top ?? 46;
+          base.left = anchorRect
             ? Math.max(24, Math.min(anchorRect.left, vw - width - 24))
             : vw - width - 24;
-          return {
-            position: "fixed",
-            top: (anchorRect?.bottom ?? anchorRect?.top ?? 46),
-            left,
-            width,
-            height: 465,
-            zIndex: 1040,
-          };
-        })()
-      : {
+        } else {
           // Bottom-bar entry: rise above the trigger, flush with the bottom
-          // bar top (no margin — same flush rule as the top dropdown hugging
-          // the top bar). bottom = 底栏顶到视口底.
-          position: "fixed",
-          right: anchorRect ? Math.max(24, window.innerWidth - anchorRect.right) : 24,
-          bottom: anchorRect ? window.innerHeight - anchorRect.top : 35,
-          width: Math.min(780, window.innerWidth - 48),
-          height: Math.min(465, window.innerHeight - 120),
-          zIndex: 1040,
-        };
+          // bar top. bottom = 底栏顶到视口底.
+          base.right = anchorRect ? Math.max(24, vw - anchorRect.right) : 24;
+          base.bottom = anchorRect ? vh - anchorRect.top : 35;
+        }
+        return base;
+      })();
 
   const panel = (
     <div
@@ -619,6 +732,10 @@ export function TerminalPanel({
         backdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
         WebkitBackdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
       }}
+      onPointerDown={onPanelPointerDown}
+      onPointerMove={onPanelPointerMove}
+      onPointerUp={onPanelPointerUp}
+      onPointerCancel={onPanelPointerCancel}
       role="region"
       aria-label={t("terminal.title")}
     >
@@ -709,6 +826,20 @@ export function TerminalPanel({
       {error && <div className="terminal-error">{error}</div>}
 
       {/* Terminal body — one div per known session, only active visible */}
+      {!isMobile && (
+        <div
+          className="terminal-resize-handle"
+          onPointerDown={onResizePointerDown}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={onResizePointerUp}
+          onPointerCancel={onResizePointerCancel}
+          title={t("terminal.resize")}
+          aria-label={t("terminal.resize")}
+          role="separator"
+          aria-orientation="horizontal"
+          tabIndex={-1}
+        />
+      )}
       <div className="terminal-body" ref={containerRef}>
         {sessions.map((s) => (
           <div

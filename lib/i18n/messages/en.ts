@@ -534,6 +534,8 @@ export const enLocale: LocalePlugin = {
     "terminal.empty": "No terminal sessions",
     "terminal.createFirst": "Create a terminal session",
     "terminal.close": "Kill process and close",
+    "terminal.resize": "Drag to resize terminal",
+    "terminal.drag": "Drag to move terminal",
     "mcp.sectionTitle": "MCP servers",
     "mcp.addButton": "Add MCP",
     "mcp.emptyList": "No MCP servers yet. Click \"Add MCP\" below to create one.",

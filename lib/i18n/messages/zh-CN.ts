@@ -535,6 +535,8 @@ export const zhCNLocale: LocalePlugin = {
     "terminal.empty": "暂无终端会话",
     "terminal.createFirst": "新建终端会话",
     "terminal.close": "结束进程并关闭",
+    "terminal.resize": "拖拽调整终端大小",
+    "terminal.drag": "拖拽移动终端位置",
     "mcp.sectionTitle": "MCP 服务器",
     "mcp.addButton": "添加MCP",
     "mcp.emptyList": "暂无 MCP 服务器，点击下方\"添加MCP\"创建",

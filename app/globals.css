@@ -1952,6 +1952,42 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
 }
 .terminal-placeholder button:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
 
+/* 拖拽手柄：tab 条空白区域（JS 在 .terminal-tabs 上的 pointer 事件处理）
+   不给任何视觉样式——保持玻璃原貌，仅交互区可拖动。 */
+.terminal-tabs { cursor: default; }
+.terminal-tabs:active { cursor: move; }
+
+/* 缩放手柄：右下角，透明交互区，不破坏玻璃。悬浮时给一个极淡的斜角提示，
+   仅在悬浮瞬间可见，平时完全融入玻璃（无边框）。 */
+.terminal-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  z-index: 3;
+  cursor: nwse-resize;
+  touch-action: none;
+  /* 无边框无背景：hover 时仅出现极淡的斜线，离开即消失 */
+}
+.terminal-resize-handle::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid transparent;
+  border-bottom: 1.5px solid transparent;
+  opacity: 0;
+  transition: opacity 0.12s, border-color 0.12s;
+}
+.terminal-resize-handle:hover::after {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--text) 35%, transparent);
+}
+.terminal-panel-hidden .terminal-resize-handle { display: none; }
+
 /* 底部一行：widget（flex:1 占满） + 扩展按钮容器（flex:0 0 auto 自适应宽度）。 */
 .bottom-band {
   display: flex;
