@@ -1,6 +1,6 @@
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { NextResponse } from "next/server";
 import { invalidateModelsCache } from "@/lib/models-cache";
+import { createProviderServices, ProviderServicesError } from "@/lib/provider-services";
 import { removeStoredCredentialIfType, storeProviderCredential } from "@/lib/provider-credential-store";
 
 export const dynamic = "force-dynamic";
@@ -8,24 +8,35 @@ export const dynamic = "force-dynamic";
 type Params = { params: Promise<{ provider: string }> };
 
 // GET /api/auth/api-key/[provider] — returns auth status (never returns the actual key)
-export async function GET(_req: Request, { params }: Params) {
+export async function GET(req: Request, { params }: Params) {
   const { provider } = await params;
-  const modelRuntime = await ModelRuntime.create();
-  const status = modelRuntime.getProviderAuthStatus(provider);
-  const displayName = modelRuntime.getProvider(provider)?.name ?? provider;
-  const models = modelRuntime.getModels(provider).length;
-  return NextResponse.json({ provider, displayName, configured: status.configured, source: status.source, models });
+  const cwd = new URL(req.url).searchParams.get("cwd") || undefined;
+  try {
+    const { services } = await createProviderServices(cwd);
+    const modelRuntime = services.modelRuntime;
+    const status = modelRuntime.getProviderAuthStatus(provider);
+    const displayName = modelRuntime.getProvider(provider)?.name ?? provider;
+    const models = modelRuntime.getModels(provider).length;
+    return NextResponse.json({ provider, displayName, configured: status.configured, source: status.source, models });
+  } catch (error) {
+    if (error instanceof ProviderServicesError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
 }
 
 // POST /api/auth/api-key/[provider]  body: { apiKey: string }
 export async function POST(req: Request, { params }: Params) {
   const { provider } = await params;
+  const cwd = new URL(req.url).searchParams.get("cwd") || undefined;
   try {
     const { apiKey } = await req.json() as { apiKey?: string };
     if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
       return NextResponse.json({ error: "apiKey is required" }, { status: 400 });
     }
-    const modelRuntime = await ModelRuntime.create();
+    const { services } = await createProviderServices(cwd);
+    const modelRuntime = services.modelRuntime;
     const apiKeyAuth = modelRuntime.getProvider(provider)?.auth.apiKey;
     if (!apiKeyAuth?.login) {
       throw new Error(`${provider} does not support API key login`);
@@ -54,6 +65,9 @@ export async function POST(req: Request, { params }: Params) {
     invalidateModelsCache();
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof ProviderServicesError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }

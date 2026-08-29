@@ -1,6 +1,6 @@
 import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { invalidateModelsCache } from "@/lib/models-cache";
+import { createProviderServices } from "@/lib/provider-services";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +47,7 @@ export async function GET(
   { params }: { params: Promise<{ provider: string }> }
 ) {
   const { provider } = await params;
+  const cwd = new URL(req.url).searchParams.get("cwd") || undefined;
 
   const encoder = new TextEncoder();
   const send = (controller: ReadableStreamDefaultController, data: unknown) => {
@@ -59,7 +60,11 @@ export async function GET(
 
   const stream = new ReadableStream({
     async start(controller) {
-      const modelRuntime = await ModelRuntime.create();
+      // 复用 createProviderServices（与列表接口同路径）：裸 ModelRuntime.create()
+      // 跳过资源加载器，扩展注册的 provider（如 pi-commandcode-provider 的
+      // commandcode）在登录时会消失，报 Unknown provider。
+      const { services } = await createProviderServices(cwd);
+      const modelRuntime = services.modelRuntime;
       if (!modelRuntime.getProvider(provider)?.auth.oauth) {
         send(controller, { type: "error", message: `Unknown provider: ${provider}` });
         controller.close();

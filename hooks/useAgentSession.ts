@@ -1530,12 +1530,30 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       return;
     }
+    // Stop = cancel the run AND give queued steering/follow-up messages back
+    // to the composer. Pi's abort() only fires the abort signal — the steering
+    // / followUp queues stay populated, so its runLoop drains them with the
+    // already-cancelled signal and emits a second spurious abort (one Stop →
+    // two aborts). The TUI avoids this by recalling queued messages on stop;
+    // mirror that here (same clear_queue + prependText flow as handleRecallQueue).
+    let recalledTexts: string[] = [];
+    try {
+      const result = await sendAgentCommand<{ steering?: string[]; followUp?: string[] }>(sid, { type: "clear_queue" });
+      setQueuedMessages({ steering: [], followUp: [] });
+      recalledTexts = [...(result?.steering ?? []), ...(result?.followUp ?? [])];
+    } catch (e) {
+      // Queue recall is best-effort: still abort even if it fails.
+      console.error("Failed to recall queued messages on abort:", e);
+    }
+    if (recalledTexts.length > 0) {
+      opts.chatInputRef?.current?.prependText(recalledTexts.join("\n\n"));
+    }
     try {
       await sendAgentCommand(sid, { type: "abort" });
     } catch (e) {
       console.error("Failed to abort:", e);
     }
-  }, []);
+  }, [opts.chatInputRef]);
 
   const handleFork = useCallback(async (entryId: string) => {
     if (bashRunningRef.current || commandBusyRef.current) return;
