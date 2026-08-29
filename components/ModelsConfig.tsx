@@ -1870,7 +1870,7 @@ function AddProviderPicker({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function ModelsConfig({ onClose }: { onClose: () => void }) {
+export function ModelsConfig({ onClose, cwd }: { onClose: () => void; cwd?: string }) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
   const [config, setConfig] = useState<ModelsJson>({ providers: {} });
@@ -1884,22 +1884,24 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const loadOAuthProviders = useCallback(() => {
-    fetch("/api/auth/providers")
+    const url = cwd ? `/api/auth/providers?cwd=${encodeURIComponent(cwd)}` : "/api/auth/providers";
+    fetch(url)
       .then((r) => r.json())
       .then((d: { providers?: OAuthProvider[] }) => {
         if (Array.isArray(d.providers)) setOauthProviders(d.providers);
       })
       .catch(() => {});
-  }, []);
+  }, [cwd]);
 
   const loadApiKeyProviders = useCallback(() => {
-    fetch("/api/auth/all-providers")
+    const url = cwd ? `/api/auth/all-providers?cwd=${encodeURIComponent(cwd)}` : "/api/auth/all-providers";
+    fetch(url)
       .then((r) => r.json())
       .then((d: { providers?: ApiKeyProvider[] }) => {
         if (Array.isArray(d.providers)) setApiKeyProviders(d.providers);
       })
       .catch(() => {});
-  }, []);
+  }, [cwd]);
 
   // A dual-auth provider moves between the two lists when its credential type
   // changes, so any auth change has to reload both — refreshing only one leaves

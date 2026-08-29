@@ -3112,7 +3112,7 @@ export function AppShell() {
         </div>
       </div>
     </div>
-    {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
+    {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} cwd={selectedSession?.cwd ?? newSessionCwd ?? activeCwd ?? undefined} />}
     <TerminalPanel
       origin={terminalOrigin}
       anchorRect={terminalAnchor}
