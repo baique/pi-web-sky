@@ -17,6 +17,7 @@ import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trus
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
+import type { RunningPhase, RunningSessionState } from "./board-types";
 import type {
   ExtensionUiRequest,
   ExtensionUiResponse,
@@ -172,8 +173,20 @@ export class AgentSessionWrapper {
   private onDestroyCallback: (() => void) | null = null;
   private shutdownPromise: Promise<void> | null = null;
   private _alive = true;
+  /** 最近一次 agent_start 的时间（看板“运行时长”用）；0 = 未知 */
+  private lastAgentStart = 0;
 
   constructor(public readonly inner: AgentSessionLike) {}
+
+  /** 是否有等待用户响应的扩展 UI 请求（waiting_input 判定用） */
+  hasPendingUiRequest(): boolean {
+    return this.pendingUiRequests.size > 0;
+  }
+
+  /** 最近一次 agent 运行开始时间（ms epoch），无则 0 */
+  lastAgentStartAt(): number {
+    return this.lastAgentStart;
+  }
 
   get sessionId(): string {
     return this.inner.sessionId;
@@ -205,6 +218,9 @@ export class AgentSessionWrapper {
 
   start(): void {
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
+      if (event.type === "agent_start") {
+        this.lastAgentStart = Date.now();
+      }
       if (event.type === "agent_end") {
         invalidateSessionListCache();
       }
@@ -1493,6 +1509,44 @@ export function getRunningRpcSessionIds(): string[] {
     if (session.isRunning()) ids.add(session.sessionId || sessionId);
   }
   return [...ids];
+}
+
+/**
+ * 运行中会话的细分状态快照（看板状态系统用）。
+ * 状态判定优先级（与 pi 既有语义对齐）：
+ * 1. 等待模型：isStreaming 且无待执行工具调用（thinking / 生成中）
+ * 2. 执行工具：pendingToolCalls 非空（running_tools）
+ * 3. 执行命令：isBashRunning（running_command）
+ * 4. 等待输入：扩展 UI 请求（select/confirm/input/editor）挂起（waiting_input）
+ * startedAt 用最近一次 agent_start 事件时间（wrapper 内订阅缓存），未知为 0。
+ */
+export function getRunningSessionStates(): Record<string, RunningSessionState> {
+  const states: Record<string, RunningSessionState> = {};
+  for (const [sessionId, session] of getRegistry()) {
+    const id = session.sessionId || sessionId;
+    if (!session.isRunning()) continue;
+    const inner = session.inner;
+    const state = inner.agent.state as { pendingToolCalls?: ReadonlySet<string> } | undefined;
+    const pendingToolCalls = state?.pendingToolCalls;
+    let phase: RunningPhase;
+    if (inner.isStreaming && pendingToolCalls && pendingToolCalls.size > 0) {
+      phase = "running_tools";
+    } else if (inner.isBashRunning) {
+      phase = "running_command";
+    } else if (inner.isStreaming) {
+      phase = "waiting_model";
+    } else if (session.hasPendingUiRequest()) {
+      phase = "waiting_input";
+    } else {
+      phase = "waiting_model";
+    }
+    states[id] = {
+      phase,
+      model: inner.model ? `${inner.model.provider}/${inner.model.id}` : null,
+      startedAt: session.lastAgentStartAt(),
+    };
+  }
+  return states;
 }
 
 /**
