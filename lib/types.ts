@@ -320,8 +320,6 @@ export interface SessionInfo {
   transient?: boolean;
   /** Pinned by the user; sorts first inside its own region (task group or chat). */
   pinned?: boolean;
-  /** Task this session belongs to (name for display); absent when temp session. */
-  taskName?: string;
 }
 
 export interface TodoItem {
