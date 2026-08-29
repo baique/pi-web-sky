@@ -315,11 +315,17 @@ export interface SessionInfo {
   projectKey?: string;
   /** Branch name when cwd is a linked git worktree (not the main checkout) */
   worktreeBranch?: string;
+  /** Git branch of the session's project root (any git repo, not only worktrees). */
+  branch?: string;
+  /** True when cwd is a linked git worktree (not the main checkout). */
+  isWorktree?: boolean;
   /** True while the runtime session exists only in memory and its JSONL file
    *  has not been created yet. Disk-backed actions must wait until this clears. */
   transient?: boolean;
   /** Pinned by the user; sorts first inside its own region (task group or chat). */
   pinned?: boolean;
+  /** Live task ownership (sessionInfo panel reads it realtime to avoid stale snapshots). */
+  taskName?: string;
 }
 
 export interface TodoItem {

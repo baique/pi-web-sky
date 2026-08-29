@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileS
 import { dirname, join } from "path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
+  attachSessionProjectInfo,
   resolveSessionPath,
   resolveSessionIdByPath,
   invalidateSessionPathCache,
@@ -50,7 +51,7 @@ export async function GET(
     const parentSessionId = header?.parentSession
       ? await resolveSessionIdByPath(header.parentSession)
       : undefined;
-    const info = header ? {
+    const info = header ? (await attachSessionProjectInfo([{
       path: filePath,
       id: header.id,
       cwd: header.cwd ?? "",
@@ -69,7 +70,7 @@ export async function GET(
       transient: !filePath || !existsSync(filePath),
       // 实时任务归属（sessionInfo 面板打开时读取，避免列表快照过期）
       taskName: taskNameForSession(id) ?? undefined,
-    } : null;
+    }]))[0] : null;
 
     return NextResponse.json({
       sessionId: id,

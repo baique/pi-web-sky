@@ -43,6 +43,8 @@ export async function attachSessionProjectInfo(sessions: SessionInfo[]): Promise
       ...session,
       projectRoot,
       projectKey: projectIdentityKey(projectRoot),
+      ...(project?.branch ? { branch: project.branch } : {}),
+      ...(project?.isWorktree ? { isWorktree: true } : {}),
       ...(project?.isWorktree && project.branch ? { worktreeBranch: project.branch } : {}),
       ...(pinnedIds.has(session.id) ? { pinned: true } : {}),
     };

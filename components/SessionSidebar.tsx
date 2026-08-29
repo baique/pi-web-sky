@@ -1868,15 +1868,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </div>
           ) : (
             <>
-              {/* Tasks section — fluid up to a cap (GPT-style), scrolls inside
-                  when it exceeds the cap so the chat section always keeps room. */}
+              {/* Tasks section — pure flow: height follows content (no cap),
+                  so a tall task list simply squeezes the chat section below. */}
               <div
                 style={{
                   display: "flex",
                   flexDirection: "column",
                   minHeight: 0,
-                  maxHeight: "min(50vh, 520px)",
-                  flex: tasksCollapsed ? "0 0 auto" : "0 1 auto",
+                  flex: tasksCollapsed ? "0 0 auto" : "0 0 auto",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 6px 3px 10px" }}>
@@ -1907,7 +1906,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   </button>
                 </div>
                 {!tasksCollapsed && (
-                  <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
+                  <div style={{ overflowX: "hidden" }}>
                     <TaskArea
                       groups={taskGroups.map(({ task, nodes, sessionTotal }) => {
                         const pinnedCount = nodes.filter((n) => n.session.pinned).length;
@@ -2592,7 +2591,7 @@ function SessionItem({
             ) : isUnread ? (
               <UnreadSessionIndicator />
             ) : null}
-            {session.worktreeBranch && (
+            {session.isWorktree && session.branch && (
               <span
                 title={`Worktree: ${session.cwd}`}
                 style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--accent)", minWidth: 0, overflow: "hidden", flexShrink: 0 }}
@@ -2603,7 +2602,7 @@ function SessionItem({
                   <circle cx="6" cy="18" r="3" />
                   <path d="M18 9a9 9 0 0 1-9 9" />
                 </svg>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.worktreeBranch}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.branch}</span>
               </span>
             )}
             <span
