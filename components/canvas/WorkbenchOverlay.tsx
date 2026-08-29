@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEditor, type Editor } from "tldraw";
 import { SessionWorkbench } from "./SessionWorkbench";
-import type { SessionCardShape } from "./SessionCardShape";
 import { useI18n } from "@/hooks/useI18n";
 
 /**
@@ -31,8 +30,10 @@ export function WorkbenchOverlay() {
       const expanded = editor.getCurrentPageShapes().filter((s) =>
         s.type === "session-card" && (s.props as { expanded?: boolean }).expanded,
       ) as unknown as TLShapeLike[];
-      setExpandedShapes(expanded);
-      setZoom(cam.z);
+      // 相等性判断：shape 引用稳定时跳过 setState，避免画布无关变更（hover/pan/运行看板轮询）
+      // 空转整棵 workbench 子树重渲染。
+      setExpandedShapes((prev) => (prev.length === expanded.length && prev.every((s, i) => s.id === expanded[i].id) ? prev : expanded));
+      setZoom((prev) => (prev === cam.z ? prev : cam.z));
       const next: Record<string, { x: number; y: number; w: number; h: number }> = {};
       for (const shape of expanded) {
         const screen = editor.pageToScreen({ x: shape.x, y: shape.y });
@@ -43,7 +44,11 @@ export function WorkbenchOverlay() {
           h: shape.props.h * cam.z,
         };
       }
-      setPositions(next);
+      setPositions((prev) => {
+        const same = Object.keys(prev).length === Object.keys(next).length
+          && Object.entries(next).every(([id, p]) => { const q = prev[id]; return q && q.x === p.x && q.y === p.y && q.w === p.w && q.h === p.h; });
+        return same ? prev : next;
+      });
     };
     recompute();
     const unlisten = editor.store.listen(recompute);
