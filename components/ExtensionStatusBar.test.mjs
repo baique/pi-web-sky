@@ -78,3 +78,53 @@ test("renders widgets and status text in one footer", () => {
   assert.match(html, /usage/);
   assert.match(html, /connected/);
 });
+
+test("subagent-async 快照渲染为结构化卡片", () => {
+  const snapshot = {
+    kind: "pi-subagents.async-status-snapshot",
+    version: 1,
+    generatedAt: 1787999999000,
+    runs: [{ id: "r1", kind: "subagent", label: "worker", state: "running" }],
+  };
+  const html = renderStatusBar({
+    statuses: [],
+    widgets: [{
+      key: "subagent-async",
+      lines: [`PI_SUBAGENT_ASYNC_JSON:${JSON.stringify(snapshot)}`],
+      placement: "belowEditor",
+    }],
+  });
+
+  assert.match(html, /subagent-widget-card/);
+  assert.match(html, /1 runs · 1 running · 0 done/);
+});
+
+test("subagent-async 解析失败降级为文本 widget", () => {
+  const html = renderStatusBar({
+    statuses: [],
+    widgets: [{
+      key: "subagent-async",
+      lines: ["plain text line"],
+      placement: "belowEditor",
+    }],
+  });
+
+  assert.doesNotMatch(html, /subagent-widget-card/);
+  assert.match(html, /extension-widget-triggers/);
+  assert.match(html, /subagent-async/);
+});
+
+test("非 subagent widget 保持原样", () => {
+  const html = renderStatusBar({
+    statuses: [],
+    widgets: [{
+      key: "web-activity",
+      lines: ["─── Web Search Activity ───", "  No activity yet"],
+      placement: "aboveEditor",
+    }],
+  });
+
+  assert.doesNotMatch(html, /subagent-widget-card/);
+  assert.match(html, /extension-widget-triggers/);
+  assert.match(html, /No activity yet/);
+});
