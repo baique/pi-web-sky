@@ -58,14 +58,43 @@ try {
   const rowBox = await taskRow.boundingBox();
   check("task row visible", !!rowBox, `${task.name}`);
 
-  // 2. 点任务行（标题文本处）→ 应进入看板模式（URL ?board=<taskId>）
+  // 2. 交互：单击展开/收起会话列表；hover 操作行的「看板」按钮进入看板
+  // 2a. 单击 → 展开任务内会话列表（任务内第一个会话标题出现）
+  const sessionsFull = await api("/api/sessions");
+  const firstSession = sessionsFull.body.sessions.find((s) => task.sessionIds.includes(s.id));
+  const firstSessionTitle = (firstSession?.name ?? firstSession?.firstMessage ?? "").trim().slice(0, 15);
+  const sessionNameVisible = () =>
+    firstSessionTitle ? page.locator(`text=${firstSessionTitle}`).first().isVisible().catch(() => false) : Promise.resolve(false);
+  const visibleBefore = await sessionNameVisible();
   await taskRow.click();
+  await page.waitForTimeout(600);
+  const visibleAfter = await sessionNameVisible();
+  // 单击 = 切换展开/收起：可见性必须翻转（任务可能因选中会话自动展开，方向不定）
+  check("single click toggles task sessions", visibleBefore !== visibleAfter, `"${firstSessionTitle}" ${visibleBefore ? "expanded→collapsed" : "collapsed→expanded"}`);
+
+  // 2b. hover 任务行 → 点「看板」按钮 → 进入看板模式（URL ?board=<taskId>）
+  await taskRow.hover();
+  await page.waitForTimeout(300);
+  const boardBtn = page.locator('button[title="打开看板"], button[title="Open board"]').first();
+  const btnCount = await boardBtn.count();
+  check("board button visible on hover", btnCount > 0, `buttons=${btnCount}`);
+  await boardBtn.click();
   await page.waitForTimeout(1800);
   const rawUrl = page.url();
   const boardParam = rawUrl.includes("?board=")
     ? decodeURIComponent(rawUrl.split("?board=")[1].split("&")[0])
     : null;
-  check("click task opens board mode (?board=)", boardParam === taskId, `board=${boardParam}`);
+  check("board button opens board mode (?board=)", boardParam === taskId, `board=${boardParam}`);
+
+  // 2c. 任务行选中态与看板条目一致（--side-active 背景）
+  await page.waitForTimeout(500);
+  const taskRowActive = await taskRow.evaluate((el) => {
+    // 任务行标题的父容器 header 背景
+    const header = el.closest('[style*="min-height: 38px"]') ?? el.parentElement;
+    const bg = header ? getComputedStyle(header).backgroundColor : "";
+    return bg;
+  });
+  check("task row active when board open", taskRowActive && taskRowActive !== "rgba(0, 0, 0, 0)" && taskRowActive !== "transparent", `bg=${taskRowActive}`);
 
   // 3. 看板内自动出现任务会话卡片（session-card）
   await page.waitForTimeout(3000); // 等摘要 + 自动补卡轮询

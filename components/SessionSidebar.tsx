@@ -1985,6 +1985,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                         };
                       })}
                       selectedSessionId={selectedSessionId}
+                      activeBoardId={activeBoardId}
                       runningSessionIds={runningSessionIds}
                       newTaskOpen={newTaskOpen}
                       onNewTaskOpenChange={setNewTaskOpen}

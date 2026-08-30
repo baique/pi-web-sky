@@ -40,6 +40,8 @@ interface Props {
   groups: TaskGroup[];
   /** 当前选中的会话 id：选中会话属于某个任务时自动展开该任务卡片。 */
   selectedSessionId?: string | null;
+  /** 当前激活看板 id：任务看板（id = 任务 id）打开时对应任务行显示选中态。 */
+  activeBoardId?: string | null;
   /** 运行中会话 id 集合：任务行显示蓝色数字徽记（任务内运行中会话数）。 */
   runningSessionIds?: Set<string>;
   newTaskOpen: boolean;
@@ -92,6 +94,13 @@ const bubbleIcon = (
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   </svg>
 );
+const boardIcon = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M3 9h18" />
+    <path d="M9 21V9" />
+  </svg>
+);
 const pinIcon = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M12 17v5" />
@@ -109,6 +118,7 @@ function TaskCard({
   sessionTotal,
   runningCount,
   activeSessionId,
+  isActive,
   onDropAssign,
   onRename,
   onDelete,
@@ -132,6 +142,8 @@ function TaskCard({
   runningCount?: number;
   /** 当前选中的会话 id；属于本任务时自动展开卡片。 */
   activeSessionId?: string | null;
+  /** 任务看板当前打开（activeBoardId === 任务 id）→ 与看板条目一致的选中态 */
+  isActive?: boolean;
   onDropAssign: (taskId: string, sessionId: string) => void;
   onRename: (taskId: string, name: string) => void;
   onDelete: (taskId: string) => void;
@@ -313,22 +325,23 @@ function TaskCard({
         transition: "background 0.12s, box-shadow 0.12s",
       }}
     >
-      {/* Group header — whole row opens the task's board (task-as-board).
-          Session list stays accessible via the chevron on the left.
+      {/* Group header — click toggles the session list; the board is opened
+          via the dedicated button in the hover action row (task-as-board).
           Draggable: only the header row is the drag source (so the drag ghost
-          carries the task, not its sessions). */}
+          carries the task, not its sessions).
+          Active state mirrors board-row selection (--side-active). */}
       <div
         draggable
         onDragStart={handleDragStartTask}
         onDragEnd={onDragEndTask}
-        onClick={() => onOpenBoard(task.id)}
+        onClick={() => { if (task.sessionIds.length > 0) setCollapsed((v) => !v); }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         style={{
           display: "flex", alignItems: "center", gap: 4, minHeight: 38,
           padding: "3px 8px 3px 5px",
           borderRadius: 6,
-          background: hovered ? "var(--side-hover)" : "transparent",
+          background: isActive ? "var(--side-active)" : hovered ? "var(--side-hover)" : "transparent",
           cursor: "pointer",
           transition: "background 0.12s",
         }}
@@ -349,36 +362,6 @@ function TaskCard({
           />
         ) : (
           <>
-            {/* 会话列表展开/收起箭头：点任务行开看板，这里保留会话列表入口 */}
-            <button
-              type="button"
-              title={collapsed ? t("sidebar.expandTaskSessions") : t("sidebar.collapseTaskSessions")}
-              aria-expanded={!collapsed}
-              aria-label={collapsed ? t("sidebar.expandTaskSessions") : t("sidebar.collapseTaskSessions")}
-              disabled={task.sessionIds.length === 0}
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (task.sessionIds.length > 0) setCollapsed((v) => !v);
-              }}
-              onKeyDown={(e) => e.stopPropagation()}
-              style={{
-                flexShrink: 0,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 18, height: 20,
-                padding: 0,
-                background: "none", border: "none", borderRadius: 4,
-                color: task.sessionIds.length > 0 ? "var(--text-dim)" : "color-mix(in srgb, var(--text-dim) 45%, transparent)",
-                cursor: task.sessionIds.length > 0 ? "pointer" : "default",
-                transition: "color 0.12s",
-              }}
-              onMouseEnter={(e) => { if (task.sessionIds.length > 0) e.currentTarget.style.color = "var(--text)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
-            >
-              <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s" }}>
-                <polyline points="2 3.5 5 6.5 8 3.5" />
-              </svg>
-            </button>
             <span
               aria-hidden="true"
               style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}
@@ -429,6 +412,17 @@ function TaskCard({
                   onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
                 >
                   {bubbleIcon}
+                </button>
+                {/* 打开看板（任务即看板）：hover 操作行，位于新建会话之后、编辑之前 */}
+                <button
+                  type="button"
+                  title={t("sidebar.taskOpenBoard")}
+                  onClick={(e) => { e.stopPropagation(); onOpenBoard(task.id); }}
+                  style={{ ...iconStyle, width: 28, height: 28, color: isActive ? "var(--accent)" : undefined }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-active)"; e.currentTarget.style.color = "var(--accent)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = isActive ? "var(--accent)" : "var(--text-muted)"; }}
+                >
+                  {boardIcon}
                 </button>
                 <button type="button" title={t("sidebar.rename")} onClick={(e) => { e.stopPropagation(); setRenameValue(task.name); setRenaming(true); setMoreOpen(false); }} style={{ ...iconStyle, width: 28, height: 28 }} onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-active)"; e.currentTarget.style.color = "var(--accent)"; }} onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}>
                   {pencilIcon}
@@ -616,6 +610,7 @@ function TaskCard({
 export function TaskArea({
   groups,
   selectedSessionId,
+  activeBoardId,
   runningSessionIds,
   newTaskOpen,
   onNewTaskOpenChange,
@@ -806,6 +801,7 @@ export function TaskArea({
               sessionTotal={sessionTotal}
               runningCount={runningCount}
               activeSessionId={selectedSessionId}
+              isActive={activeBoardId === task.id}
               onDropAssign={onDropSessionToTask}
               onRename={(id, name) => void onRenameTask(id, name)}
               onDelete={(id) => void onDeleteTask(id)}

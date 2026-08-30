@@ -144,8 +144,7 @@ export const enLocale: LocalePlugin = {
     
     "sidebar.expandForks": "Expand forks",
     "sidebar.collapseForks": "Collapse forks",
-    "sidebar.expandTaskSessions": "Expand task sessions",
-    "sidebar.collapseTaskSessions": "Collapse task sessions",
+    "sidebar.taskOpenBoard": "Open board",
     "sidebar.messagesCount": "{count} msgs",
     "sidebar.views": "Views",
     "sidebar.sessionTab": "Sessions",

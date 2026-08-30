@@ -145,8 +145,7 @@ export const zhCNLocale: LocalePlugin = {
     
     "sidebar.expandForks": "展开分叉",
     "sidebar.collapseForks": "折叠分叉",
-    "sidebar.expandTaskSessions": "展开任务会话",
-    "sidebar.collapseTaskSessions": "收起任务会话",
+    "sidebar.taskOpenBoard": "打开看板",
     "sidebar.messagesCount": "{count} 条消息",
     "sidebar.views": "视图",
     "sidebar.sessionTab": "会话",
