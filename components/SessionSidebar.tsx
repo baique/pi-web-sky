@@ -112,6 +112,8 @@ interface Props {
   onNewSessionFromTask?: (taskId: string, projectKey?: string) => void;
   /** 进入看板模式（主区域替换为画布） */
   onOpenBoard?: (boardId: string) => void;
+  /** 点任务行 → 打开该任务的看板（任务即看板）。 */
+  onOpenTaskBoard?: (taskId: string) => void;
   /** 当前激活看板 id（看板模式下高亮） */
   activeBoardId?: string | null;
   /** 全局运行中会话数（系统看板徽标） */
@@ -346,7 +348,7 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, activeBoardId, runningBoardCount = 0 }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId, runningBoardCount = 0 }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1991,6 +1993,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       onDeleteTask={(id) => void handleDeleteTask(id)}
                       onNewSessionFromTask={(taskId) => onNewSessionFromTask?.(taskId, selectedProject?.key ?? undefined)}
                       onToggleTaskPin={handleToggleTaskPin}
+                      onOpenTaskBoard={(taskId) => onOpenTaskBoard?.(taskId)}
                       onDropSessionToTask={(taskId, sessionId) => void handleAssignSession(taskId, sessionId)}
                       onReorderTasks={handleReorderTasks}
                     />

@@ -92,6 +92,7 @@ import type { BlockingExtensionUiRequest, SessionInfo, SessionTreeNode, TodoItem
 import type { ProjectTrustStatus } from "@/lib/api-types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import { formatSessionStatsLine } from "@/lib/session-stats";
 import type { FileViewerState } from "@/lib/file-viewer-state";
 
 type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
@@ -620,16 +621,6 @@ export function AppShell() {
     setTerminalOpen((open) => origin === terminalOrigin ? !open : true);
   }, [terminalOrigin]);
 
-  // 看板工作台内终端按钮：嵌卡片内无法直接拿 AppShell 的 toggleTerminal，走全局事件桥接。
-  useEffect(() => {
-    const onBoardTerminalToggle = (e: Event) => {
-      const detail = (e as CustomEvent<{ origin: "top" | "bottombar" }>).detail;
-      toggleTerminal(detail?.origin ?? "bottombar");
-    };
-    window.addEventListener("pi-web:board-terminal-toggle", onBoardTerminalToggle);
-    return () => window.removeEventListener("pi-web:board-terminal-toggle", onBoardTerminalToggle);
-  }, [toggleTerminal]);
-
   // Close active top panel (session stats / language / system / branches)
   // on outside click or Escape.
   useEffect(() => {
@@ -1009,6 +1000,14 @@ export function AppShell() {
     handleNewSession(`task-${Date.now()}`, cwd);
   }, [selectedSession?.cwd, newSessionCwd, activeCwd, handleNewSession]);
 
+  // 点任务行 → 打开该任务的看板：懒创建任务型看板后复用 handleOpenBoard。
+  const handleOpenTaskBoard = useCallback((taskId: string) => {
+    void fetch(`/api/tasks/${encodeURIComponent(taskId)}/board`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() as Promise<{ board: { id: string } }> : null))
+      .then((d) => { if (d?.board?.id) handleOpenBoard(d.board.id); })
+      .catch(() => {});
+  }, [handleOpenBoard]);
+
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
   useGlobalKeyboardShortcuts({
     onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd),
@@ -1382,6 +1381,7 @@ export function AppShell() {
         onRunningSessionIdsChange={handleRunningSessionIdsChange}
         onNewSessionFromTask={handleNewSessionFromTask}
         onOpenBoard={handleOpenBoard}
+        onOpenTaskBoard={handleOpenTaskBoard}
         activeBoardId={activeBoardId}
         runningBoardCount={runningSessionIds.size}
       />
@@ -1827,19 +1827,7 @@ export function AppShell() {
       mobileContextText = percent !== null ? `${percent.toFixed(0)}%` : null;
     }
 
-    const tooltipParts: string[] = [];
-    if (tokens) {
-      tooltipParts.push(`in: ${tokens.input.toLocaleString(locale)}`);
-      tooltipParts.push(`out: ${tokens.output.toLocaleString(locale)}`);
-      tooltipParts.push(`cache read: ${tokens.cacheRead.toLocaleString(locale)}`);
-      tooltipParts.push(`cache write: ${tokens.cacheWrite.toLocaleString(locale)}`);
-      if (cost > 0) tooltipParts.push(`cost: $${cost.toFixed(4)}`);
-    }
-    if (contextUsage?.contextWindow) {
-      const percent = contextUsage.percent;
-      tooltipParts.push(`context: ${percent !== null ? percent.toFixed(1) + "%" : "unknown"} of ${contextUsage.contextWindow.toLocaleString()} tokens`);
-    }
-    const tooltip = tooltipParts.join("  |  ");
+    const tooltip = formatSessionStatsLine(sessionStats, contextUsage, locale);
     const covered = mobile && mobileToolbarMoreOpen;
     const hasMobileValues = Boolean(
       (tokens && (tokens.input > 0 || tokens.output > 0))

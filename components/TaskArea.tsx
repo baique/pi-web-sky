@@ -50,6 +50,8 @@ interface Props {
   onNewSessionFromTask: (taskId: string, projectKey?: string) => void;
   /** Toggle the task-level "pinned to the top of its region" flag. */
   onToggleTaskPin: (taskId: string) => void;
+  /** 点任务行 → 打开该任务的看板（任务即看板）。 */
+  onOpenTaskBoard: (taskId: string) => void;
   /** Drop target: assign the dragged session to this task. */
   onDropSessionToTask: (taskId: string, sessionId: string) => void;
   /** 任务卡片拖拽排序：上报一个区内完整的新顺序（置顶/非置顶分别调用）。 */
@@ -112,6 +114,7 @@ function TaskCard({
   onDelete,
   onNewSession,
   onTogglePin,
+  onOpenBoard,
   onDragStartTask,
   onDragOverTask,
   onDropTask,
@@ -134,6 +137,8 @@ function TaskCard({
   onDelete: (taskId: string) => void;
   onNewSession: (taskId: string, projectKey?: string) => void;
   onTogglePin: (taskId: string) => void;
+  /** 点任务行 header → 打开该任务的看板（任务即看板）。 */
+  onOpenBoard: (taskId: string) => void;
   onDragStartTask: (task: TaskGroupUi) => void;
   /** 返回是否允许落位（同区）；true 时 TaskArea 记录插入位置。 */
   onDragOverTask: (targetId: string, before: boolean) => boolean;
@@ -308,25 +313,15 @@ function TaskCard({
         transition: "background 0.12s, box-shadow 0.12s",
       }}
     >
-      {/* Group header — whole row toggles the task body (only meaningful when
-          the task has members). React-state hover, no manual style writes.
+      {/* Group header — whole row opens the task's board (task-as-board).
+          Session list stays accessible via the chevron on the left.
           Draggable: only the header row is the drag source (so the drag ghost
           carries the task, not its sessions). */}
       <div
         draggable
         onDragStart={handleDragStartTask}
         onDragEnd={onDragEndTask}
-        role={task.sessionIds.length > 0 ? "button" : undefined}
-        aria-expanded={task.sessionIds.length > 0 ? !collapsed : undefined}
-        tabIndex={task.sessionIds.length > 0 ? 0 : undefined}
-        onClick={() => { if (task.sessionIds.length > 0) setCollapsed((v) => !v); }}
-        onKeyDown={(e) => {
-          if (task.sessionIds.length === 0) return;
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setCollapsed((v) => !v);
-          }
-        }}
+        onClick={() => onOpenBoard(task.id)}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         style={{
@@ -334,7 +329,7 @@ function TaskCard({
           padding: "3px 8px 3px 5px",
           borderRadius: 6,
           background: hovered ? "var(--side-hover)" : "transparent",
-          cursor: task.sessionIds.length > 0 ? "pointer" : "default",
+          cursor: "pointer",
           transition: "background 0.12s",
         }}
       >
@@ -354,6 +349,36 @@ function TaskCard({
           />
         ) : (
           <>
+            {/* 会话列表展开/收起箭头：点任务行开看板，这里保留会话列表入口 */}
+            <button
+              type="button"
+              title={collapsed ? t("sidebar.expandTaskSessions") : t("sidebar.collapseTaskSessions")}
+              aria-expanded={!collapsed}
+              aria-label={collapsed ? t("sidebar.expandTaskSessions") : t("sidebar.collapseTaskSessions")}
+              disabled={task.sessionIds.length === 0}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (task.sessionIds.length > 0) setCollapsed((v) => !v);
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+              style={{
+                flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 18, height: 20,
+                padding: 0,
+                background: "none", border: "none", borderRadius: 4,
+                color: task.sessionIds.length > 0 ? "var(--text-dim)" : "color-mix(in srgb, var(--text-dim) 45%, transparent)",
+                cursor: task.sessionIds.length > 0 ? "pointer" : "default",
+                transition: "color 0.12s",
+              }}
+              onMouseEnter={(e) => { if (task.sessionIds.length > 0) e.currentTarget.style.color = "var(--text)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+            >
+              <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s" }}>
+                <polyline points="2 3.5 5 6.5 8 3.5" />
+              </svg>
+            </button>
             <span
               aria-hidden="true"
               style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}
@@ -599,6 +624,7 @@ export function TaskArea({
   onDeleteTask,
   onNewSessionFromTask,
   onToggleTaskPin,
+  onOpenTaskBoard,
   onDropSessionToTask,
   onReorderTasks,
 }: Props) {
@@ -785,6 +811,7 @@ export function TaskArea({
               onDelete={(id) => void onDeleteTask(id)}
               onNewSession={(id, projectKey) => onNewSessionFromTask(id, projectKey)}
               onTogglePin={onToggleTaskPin}
+              onOpenBoard={onOpenTaskBoard}
               onDragStartTask={handleDragStartTask}
               onDragOverTask={handleDragOverTask}
               onDropTask={handleDropTask}
