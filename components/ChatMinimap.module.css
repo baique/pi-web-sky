@@ -2,7 +2,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  right: 100%;
+  right: calc(100% + 8px);
   z-index: 100;
   width: 320px;
   overflow-x: hidden;
@@ -10,16 +10,15 @@
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
-  /* Floating-panel glass, one step lighter than the todo popover
-     (--panel-glass 0.9): the preview sits over message text + wallpaper,
-     so 0.78 keeps a real glass feel without going opaque. Blur + saturate
-     keep frosting it wherever the compositor applies the filter. */
-  background: var(--glass-bg-strong);
+  /* 悬浮卡片玻璃：与 todo/通知浮层面板同源（--panel-glass + blur-panel），
+     全圆角独立悬浮，与时间轴留 8px 缝，避免贴边直角的割裂感。 */
+  background: var(--panel-glass);
   backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate));
   transform: translateZ(0);
-  border-left: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  box-shadow: -10px 0 26px rgba(0, 0, 0, 0.07);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: 12px;
+  box-shadow: -8px 0 24px -12px rgba(15, 23, 42, 0.22), 0 1px 3px rgba(15, 23, 42, 0.06);
   pointer-events: auto;
   cursor: default;
   user-select: text;
