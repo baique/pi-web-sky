@@ -411,16 +411,32 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
         boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
         opacity: stale ? 0.55 : 1,
-        // 非激活整卡让位：事件穿透到 .tl-canvas，画布拖拽/平移/框选路过本卡不被阻断
-        pointerEvents: active ? "all" : "none",
+        // 整卡 pointer-events all：挡下层卡（叠卡时事件不漏给下面展开面板的工作台内容）。
+        // 事件冒泡到 .tl-canvas → tldraw 几何命中最上层本卡 → 选中/拖拽。
+        pointerEvents: "all",
         display: "flex",
         flexDirection: "column",
+        position: "relative",
         padding: "8px 10px 6px",
         color: "var(--text)",
         userSelect: "none",
-        cursor: active ? "default" : "grab",
+        cursor: "grab",
       }}
     >
+      {/* 非激活 overlay：覆盖卡片，挡内部控件（只读，点不到按钮/不误触），
+          但**不阻止事件冒泡**——pointer 事件穿过它继续冒泡到 .tl-canvas，
+          让 tldraw 命中本卡（选中/拖拽/路过不阻断）。激活后 overlay 移除（none）。 */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 10,
+          borderRadius: 14,
+          pointerEvents: active ? "none" : "all",
+          cursor: "grab",
+        }}
+      />
       {/* 状态行：状态圆点 + 状态文字 + 标题（紧跟状态）+ 展开按钮 */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 20, flexShrink: 0 }}>
         <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", background: meta.dot, flexShrink: 0 }} />
