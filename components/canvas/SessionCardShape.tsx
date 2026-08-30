@@ -1,4 +1,4 @@
-import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, useValue, resizeBox } from "tldraw";
+import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, resizeBox } from "tldraw";
 import type { TLBaseShape, TLShapePartial } from "tldraw";
 import { useState, useRef } from "react";
 import { SessionWorkbench } from "./SessionWorkbench";
@@ -161,11 +161,6 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
   const { w, h, title, projectName, messageCount, phase, runningMs, endedAt, lastActivityAt, stale, sessionId, expanded, lastReply, cwd, taskId } = shape.props;
   const editor = useEditor();
 
-  // 激活态 = 展开（工作台）或 tldraw 选中（点击卡片即选中，响应式）。
-  // 非激活时卡片上盖透明 overlay：挡内部控件（只读）+ 事件冒泡到 canvas 让 tldraw 命中本卡。
-  const selected = useValue("selected", () => editor.getSelectedShapeIds().includes(shape.id), [editor, shape.id]);
-  const active = expanded || selected;
-
   // draft 卡（新建会话）：sessionId 为空，尚未绑定真实会话
   const isDraft = !sessionId;
 
@@ -212,6 +207,13 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
   };
   const cancelRename = () => setRenaming(false);
 
+  // 点击卡片置顶：两卡重叠时点哪个哪个到最上层。
+  // 事件来源：收合态卡片整体 / 展开态标题栏（pointerEvents none 透传到 HTMLContainer all）。
+  // 展开态工作台内部 pointerEvents all 且 stopPropagation，不会触发这里（会话内交互不置顶）。
+  const bringToFront = () => {
+    editor?.bringToFront([shape.id]);
+  };
+
   // 独立展开/收起：切换 expanded + 尺寸。收合 → 默认展开宽 840/高 600；展开 → 收合回 340×160。
   // 收合态点展开按钮：pointerEvents all 会拦截 tldraw 拖拽，按钮独立接收点击。
   // draft 卡不可收合：收起按钮改为删除（尚未绑定会话，收合无意义）。
@@ -240,6 +242,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
       <HTMLContainer
         data-testid={`session-card-${sessionId}`}
         data-node-id={shape.id.replace("shape:", "")}
+        onPointerDown={bringToFront}
         style={{
           width: w,
           height: h,
@@ -252,9 +255,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
           boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
           opacity: stale ? 0.55 : 1,
-          // 整卡恒 none：卡片本体完全不拦画布（把手/命中/拖拽/框选穿透正常）。
-          // 交互只由内部控件（标题栏按钮/工作台区）显式 all 接管。
-          pointerEvents: "none",
+          pointerEvents: "all",
           display: "flex",
           flexDirection: "column",
           color: "var(--text)",
@@ -378,21 +379,20 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
   return (
     <HTMLContainer
       data-testid={`session-card-${sessionId}`}
+      onPointerDown={bringToFront}
       style={{
         width: w,
         height: h,
         overflow: "hidden",
         borderRadius: 14,
-        border: `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : active ? "color-mix(in srgb, var(--accent) 55%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
+        border: `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
         // 卡片磨砂玻璃：略低于消息气泡（alpha 0.55 vs 气泡 0.44，blur 12px vs 气泡 18px）
         background: "var(--board-card-glass)",
         backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
         WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
         boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
         opacity: stale ? 0.55 : 1,
-        // 整卡恒 none：卡片本体不拦画布（重叠时也不会盖住其他卡的 resize 把手）。
-        // 非激活由 overlay 挡内部控件；激活由内部按钮显式 all 接管。
-        pointerEvents: "none",
+        pointerEvents: "all",
         display: "flex",
         flexDirection: "column",
         padding: "8px 10px 6px",
@@ -401,21 +401,6 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         cursor: "grab",
       }}
     >
-      {/* 非激活 overlay：覆盖整卡，挡内部控件（只读）+ onPointerDown 置顶，
-          但不阻止事件冒泡 → 事件到 canvas → tldraw 命中最上层本卡 → 选中/拖拽。
-          激活后 overlay 让位（none），卡片穿透给画布，把手/命中/拖拽全正常。 */}
-      <div
-        aria-hidden
-        onPointerDown={() => { if (!active) editor.bringToFront([shape.id]); }}
-        style={{
-          position: "absolute",
-          inset: 0,
-          zIndex: 10,
-          borderRadius: 14,
-          pointerEvents: active ? "none" : "all",
-          cursor: "grab",
-        }}
-      />
       {/* 状态行：状态圆点 + 状态文字 + 标题（紧跟状态）+ 展开按钮 */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 20, flexShrink: 0 }}>
         <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", background: meta.dot, flexShrink: 0 }} />
@@ -465,7 +450,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
             aria-label="Rename"
             style={{
               flexShrink: 0,
-              pointerEvents: active ? "all" : "none",
+              pointerEvents: "all",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -497,7 +482,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           title="Expand"
           style={{
             flexShrink: 0,
-            pointerEvents: active ? "all" : "none",
+            pointerEvents: "all",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
