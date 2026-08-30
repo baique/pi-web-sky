@@ -555,9 +555,15 @@ function formatDuration(ms: number): string {
   return `${h}h${min % 60}m`;
 }
 
-/** 底部最后活动时间：运行中显示时长，结束/空闲显示时:分 */
+/** 底部最后活动时间：运行中显示时长，结束/空闲今天显示时:分，跨天显示 月/日 时:分 */
 function formatTime(runningMs: number, endedAt: number): string {
   if (runningMs > 0) return `${formatDuration(runningMs)} ago`;
   const d = endedAt ? new Date(endedAt) : new Date();
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
