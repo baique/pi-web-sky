@@ -339,14 +339,15 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           </svg>
         </button>
       </div>
-      {/* 中间区：最后回复（3 行截断）；无回复则回退到项目名/消息数 */}
+      {/* 中间区：最后回复 —— 流体高度 + 左上对齐（不截断行数），拉高卡片可看完整内容 */}
       <div
         style={{
           flex: 1,
           minHeight: 0,
           display: "flex",
           flexDirection: "column",
-          justifyContent: "center",
+          alignItems: "flex-start",
+          justifyContent: "flex-start",
           gap: 2,
           overflow: "hidden",
           padding: "2px 0",
@@ -358,11 +359,9 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
               fontSize: 11.5,
               lineHeight: 1.45,
               color: "var(--text-muted)",
-              overflow: "hidden",
-              display: "-webkit-box",
-              WebkitLineClamp: 3,
-              WebkitBoxOrient: "vertical",
               wordBreak: "break-word",
+              whiteSpace: "pre-wrap",
+              maxWidth: "100%",
             }}
           >
             {lastReply}

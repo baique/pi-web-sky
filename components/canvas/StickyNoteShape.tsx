@@ -17,6 +17,10 @@ export interface StickyNoteProps {
   text: string;
   w: number;
   h: number;
+  /** 徽记颜色：blue | green | red | yellow | purple，默认 blue */
+  badge: string;
+  /** 新建时间（ms epoch），新建自动记录 */
+  createdAt: number;
 }
 
 export type StickyNoteShape = TLBaseShape<"sticky-note", StickyNoteProps>;
@@ -27,10 +31,30 @@ declare module "@tldraw/tlschema" {
   }
 }
 
+/** 徽记可选色（固定色，不随主题） */
+export const BADGE_COLORS: Record<string, string> = {
+  blue: "#3184f8",
+  green: "#10b981",
+  red: "#ef4444",
+  yellow: "#f59e0b",
+  purple: "#8b5cf6",
+};
+
+export const BADGE_NAMES: Record<string, string> = {
+  blue: "蓝",
+  green: "绿",
+  red: "红",
+  yellow: "黄",
+  purple: "紫",
+};
+
 export const stickyNoteProps = {
   text: T.string,
   w: T.number,
   h: T.number,
+  // optional：兼容旧便笺（无 badge/createdAt 的存量数据），组件内兜底默认值
+  badge: T.string.optional(),
+  createdAt: T.number.optional(),
 };
 
 export class StickyNoteUtil extends BaseBoxShapeUtil<StickyNoteShape> {
@@ -38,7 +62,8 @@ export class StickyNoteUtil extends BaseBoxShapeUtil<StickyNoteShape> {
   static override props = stickyNoteProps;
 
   override getDefaultProps(): StickyNoteShape["props"] {
-    return { text: "", w: 260, h: 200 };
+    // 新建自动记录时间（badge 默认蓝）
+    return { text: "", w: 260, h: 200, badge: "blue", createdAt: Date.now() };
   }
 
   override canEdit(): boolean {
@@ -105,32 +130,53 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
     [editor, shape.id],
   );
 
+  // 旧便笺无 createdAt 时兜底：用当前时间（仅展示，不写回避免噪声）
+  const createdAt = shape.props.createdAt ?? Date.now();
+  const badge = shape.props.badge ?? "blue";
+
   const [draft, setDraft] = useState(text);
   const draftRef = useRef(text);
+  // 徽记同样进草稿：完成才写回，取消则放弃选择
+  const [draftBadge, setDraftBadge] = useState(badge);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 取消/完成主动退出编辑时跳过 onBlur 自动保存（避免点击取消按钮先触发 blur 保存）
+  const skipBlurSaveRef = useRef(false);
 
   // 进入编辑时同步草稿；非编辑且外部 text 变化时重置
   useEffect(() => {
     if (isEditing) {
       setDraft(text);
       draftRef.current = text;
+      setDraftBadge(badge);
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
-  }, [isEditing, text]);
+  }, [isEditing, text, badge]);
 
   const save = useCallback(() => {
     const value = draftRef.current;
-    if (value !== shape.props.text) {
-      editor.updateShapes([{ id: shape.id, type: "sticky-note", props: { text: value } }]);
+    if (value !== shape.props.text || draftBadge !== badge) {
+      editor.updateShapes([{ id: shape.id, type: "sticky-note", props: { text: value, badge: draftBadge } }]);
     }
-  }, [editor, shape.id, shape.props.text]);
+  }, [editor, shape.id, shape.props.text, badge, draftBadge]);
+
+  // 失焦自动保存（取消/完成路径由 skipBlurSaveRef 跳过）
+  const handleBlur = useCallback(() => {
+    if (skipBlurSaveRef.current) {
+      skipBlurSaveRef.current = false;
+      return;
+    }
+    save();
+  }, [save]);
 
   const finish = useCallback(() => {
     save();
+    skipBlurSaveRef.current = true;
     editor.setEditingShape(null);
   }, [save, editor]);
 
+  // 取消：放弃草稿变更（text + badge），直接退出编辑
   const cancel = useCallback(() => {
+    skipBlurSaveRef.current = true;
     editor.setEditingShape(null);
   }, [editor]);
 
@@ -163,7 +209,7 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
             ref={textareaRef}
             value={draft}
             onChange={(e) => { setDraft(e.target.value); draftRef.current = e.target.value; }}
-            onBlur={save}
+            onBlur={handleBlur}
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(); }
@@ -172,6 +218,7 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
             onPointerDown={(e) => e.stopPropagation()}
             spellCheck={false}
             placeholder="Markdown 便笺…"
+            className="sticky-note-input"
             style={{
               flex: 1,
               minHeight: 0,
@@ -192,12 +239,45 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
               flexShrink: 0,
               display: "flex",
               alignItems: "center",
-              justifyContent: "flex-end",
-              gap: 6,
+              gap: 8,
               padding: "6px 10px",
               borderTop: "1px solid var(--bubble-hairline)",
             }}
           >
+            {/* 徽记选择：5 色，默认蓝 */}
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              {Object.entries(BADGE_COLORS).map(([key, color]) => (
+                <button
+                  key={key}
+                  type="button"
+                  title={`徽记·${BADGE_NAMES[key] ?? key}`}
+                  onClick={(e) => { e.stopPropagation(); setDraftBadge(key); }}
+                  style={{
+                    width: 14,
+                    height: 14,
+                    padding: 0,
+                    border: "none",
+                    borderRadius: "50%",
+                    background: color,
+                    cursor: "pointer",
+                    boxShadow: draftBadge === key
+                      ? `0 0 0 2px var(--bg-panel), 0 0 0 3.5px ${color}`
+                      : `0 0 0 1px color-mix(in srgb, ${color} 45%, transparent)`,
+                    opacity: draftBadge === key ? 1 : 0.72,
+                  }}
+                />
+              ))}
+            </div>
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); cancel(); }}
+              style={footerBtnStyle}
+              title="放弃变更 (Esc)"
+            >
+              取消
+            </button>
             <button
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
@@ -221,12 +301,32 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
       style={{ width: w, height: h, pointerEvents: "none" }}
     >
       <div style={bubbleStyle}>
+        {/* 顶部：徽记 + 时间（新建自动记录），保持左上对齐 */}
+        <div
+          onPointerDown={isolateContent}
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px var(--bubble-pad-x, 12px) 0",
+            fontSize: 10,
+            color: "var(--text-muted)",
+          }}
+        >
+          <span
+            aria-hidden
+            title={`徽记·${BADGE_NAMES[badge] ?? badge}`}
+            style={{ width: 8, height: 8, borderRadius: "50%", background: BADGE_COLORS[badge] ?? BADGE_COLORS.blue, flexShrink: 0 }}
+          />
+          <span style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{formatNoteTime(createdAt)}</span>
+        </div>
         <div
           style={{
             flex: 1,
             minHeight: 0,
             overflowY: "auto",
-            padding: "var(--bubble-pad-y, 8px) var(--bubble-pad-x, 12px)",
+            padding: "4px var(--bubble-pad-x, 12px) var(--bubble-pad-y, 8px)",
             textAlign: "left",
           }}
         >
@@ -267,3 +367,12 @@ const footerBtnStyle: React.CSSProperties = {
   fontSize: 11,
   cursor: "pointer",
 };
+
+/** 便笺时间：今天显示时:分，否则 月/日（新建自动记录） */
+function formatNoteTime(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}

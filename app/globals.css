@@ -2221,3 +2221,13 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
   }
 }
 /* 网格保持淡显（可选），但背景绝不能有实色 */
+
+/* === 便笺占位提示（StickyNoteShape）===
+   占位文字遵循主题：浅色偏白（接近浅底）、深色偏深灰（接近深底）——
+   "深白浅黑"，比 --text-dim 更淡，明显区分于正文与占位。 */
+.sticky-note-input::placeholder {
+  color: color-mix(in srgb, var(--text) 18%, transparent);
+}
+html.dark .sticky-note-input::placeholder {
+  color: color-mix(in srgb, var(--text) 28%, transparent);
+}
