@@ -2,7 +2,7 @@
 
 import "tldraw/tldraw.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Tldraw, DefaultToolbar, TldrawUiMenuToolItem, useTools, useIsToolSelected, defaultShapeUtils, type TLComponents } from "tldraw";
+import { Tldraw, DefaultToolbar, DefaultToolbarContent, createShapeId, defaultShapeUtils, type TLComponents, type TLUiOverrides } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
 import { StickyNoteUtil } from "./StickyNoteShape";
 import { StickyNoteTool } from "./StickyNoteTool";
@@ -13,31 +13,44 @@ import type { SessionInfo } from "@/lib/types";
 // 自定义 shape util：会话卡 + 自研 markdown 便笺（sticky-note）。
 const shapeUtils = [...defaultShapeUtils, SessionCardUtil, StickyNoteUtil];
 
-// 底部工具条工具列表 = tldraw 默认内容，仅把内置「便笺」(note) 换成我们的 markdown 便笺 (sticky-note)，
-// 避免与内置 note 工具共存时拖拽冲突。
-const BOARD_TOOL_IDS = [
-  "select", "hand", "draw", "eraser", "arrow", "text", "sticky-note", "asset",
-  "rectangle", "ellipse", "triangle", "diamond", "hexagon", "oval", "rhombus",
-  "star", "cloud", "heart", "x-box", "check-box", "arrow-left", "arrow-up",
-  "arrow-down", "arrow-right", "line", "highlight", "laser", "frame",
-] as const;
-
-function BoardToolbarItem({ toolId }: { toolId: string }) {
-  const tools = useTools();
-  const tool = tools[toolId];
-  const isSelected = useIsToolSelected(tool);
-  return <TldrawUiMenuToolItem toolId={toolId} isSelected={isSelected} />;
-}
-
-function BoardToolbarContent() {
-  return (
-    <>
-      {BOARD_TOOL_IDS.map((tid) => (
-        <BoardToolbarItem key={tid} toolId={tid} />
-      ))}
-    </>
-  );
-}
+// useTools() 是硬编码列表（不含自定义工具），内置 note 工具的 onDragStart 会直接创建 type:"note"。
+// 这里用 UI overrides 把 note 工具换成我们的：
+// - onSelect → setCurrentTool("note")（编辑器里的 note 已被 StickyNoteTool 替换为 sticky-note）
+// - onDragStart → 直接创建 sticky-note（避免拖拽出内置便笺）
+const uiOverrides: TLUiOverrides[] = [{
+  tools(editor, tools) {
+    const note = tools["note"];
+    if (!note) return tools;
+    return {
+      ...tools,
+      note: {
+        ...note,
+        onSelect(source) {
+          editor.setCurrentTool("note");
+          (note as { onSelect?: (s: unknown) => void }).onSelect?.(source);
+        },
+        onDragStart(source, info) {
+          // 拖拽从工具栏创建我们的 sticky-note；不要调原始 onDragStart（它会再建一个内置 note，导致两个控件）
+          const { x, y } = editor.inputs.getCurrentPagePoint();
+          const id = createShapeId();
+          const mark = editor.markHistoryStoppingPoint("drag sticky-note");
+          editor.createShape({ id, type: "sticky-note", x, y });
+          const shape = editor.getShape(id);
+          if (!shape) { editor.setCurrentTool("select.idle"); return; }
+          const bounds = editor.getShapePageBounds(id);
+          const w = bounds?.w ?? 260;
+          const h = bounds?.h ?? 200;
+          editor.updateShape({ id, type: "sticky-note", x: x - w / 2, y: y - h / 2 });
+          editor.select(id);
+          editor.setCurrentTool("select.translating", {
+            ...info, target: "shape", shape, isCreating: true, creatingMarkId: mark,
+            onCreate() { editor.setCurrentTool("select.idle"); editor.select(id); },
+          });
+        },
+      },
+    };
+  },
+}];
 
 /**
  * tldraw 画布舞台：无限画布 + 工具行 + 拖放添加会话。
@@ -102,10 +115,10 @@ export function CanvasStage({
     KeyboardShortcutsDialog: null,
     DebugPanel: null,
     DebugMenu: null,
-    // 底部工具条：保留 tldraw 默认工具，但把内置便笺换成我们的 markdown 便笺
+    // 底部工具条：保留 tldraw 默认工具（note 按钮经 uiOverrides 换成我们的 sticky-note）
     Toolbar: () => (
       <DefaultToolbar>
-        <BoardToolbarContent />
+        <DefaultToolbarContent />
       </DefaultToolbar>
     ),
   }), []);
@@ -168,6 +181,7 @@ export function CanvasStage({
           <Tldraw
             shapeUtils={shapeUtils}
             tools={[StickyNoteTool]}
+            overrides={uiOverrides}
             onMount={(editor) => {
               // 开启内置拖放吸附对齐（对齐线/中点/边缘），不影响展示效果
               editor.user.updateUserPreferences({ isSnapMode: true });
