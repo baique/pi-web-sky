@@ -543,6 +543,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const modelGroupScrollRef = useRef<HTMLDivElement>(null);
   const toolDropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
+  // 桌面版工具栏与移动版 controls 菜单各持一套 ref：同一 ref 挂两处时 React 会让
+  // current 指向最后挂载的（移动版 display:none 容器），全局 mousedown 关闭逻辑
+  // 会误判“点击在下拉外”，导致选项 onClick 永远收不到点击、切换失效。
+  const toolDropdownMobileRef = useRef<HTMLDivElement>(null);
+  const thinkingDropdownMobileRef = useRef<HTMLDivElement>(null);
   const controlsMenuRef = useRef<HTMLDivElement>(null);
   const historyMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1776,10 +1781,16 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         setModelDropdownOpen(false);
         setModelFilter("");
       }
-      if (toolDropdownRef.current && !toolDropdownRef.current.contains(e.target as Node)) {
+      if (
+        toolDropdownRef.current && !toolDropdownRef.current.contains(e.target as Node) &&
+        toolDropdownMobileRef.current && !toolDropdownMobileRef.current.contains(e.target as Node)
+      ) {
         setToolDropdownOpen(false);
       }
-      if (thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node)) {
+      if (
+        thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node) &&
+        thinkingDropdownMobileRef.current && !thinkingDropdownMobileRef.current.contains(e.target as Node)
+      ) {
         setThinkingDropdownOpen(false);
       }
       if (controlsMenuRef.current && !controlsMenuRef.current.contains(e.target as Node)) {
@@ -2828,7 +2839,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               } : null),
             }}>
             {!isStreaming && onThinkingLevelChange && (
-              <div ref={thinkingDropdownRef} style={{ position: "relative" }}>
+              <div ref={thinkingDropdownMobileRef} style={{ position: "relative" }}>
                 <button
                   onClick={() => !isStreaming && setThinkingDropdownOpen((v) => !v)}
                   disabled={isStreaming}
@@ -2916,7 +2927,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             )}
             {!isStreaming && onToolPresetChange && (
-              <div ref={toolDropdownRef} style={{ position: "relative" }}>
+              <div ref={toolDropdownMobileRef} style={{ position: "relative" }}>
                 <button
                   onClick={() => !isStreaming && setToolDropdownOpen((v) => !v)}
                   disabled={isStreaming}
