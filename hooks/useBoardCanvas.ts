@@ -256,10 +256,10 @@ export function useBoardCanvas({
       const b = (await boardRes.json()) as { board: BoardInfo };
       const c = (await canvasRes.json()) as BoardCanvas;
       baseUpdatedRef.current = b.board.updated;
-      // 清空现有 shapes：此间 store 变更必须禁止保存（hydratingRef 标记）
+      // 清空现有 shapes：此间 store 变更必须禁止保存。hydratingRef 保持 true，
+      // 由下方物化 effect 在 hydrate 完成后 800ms 统一复位（不中途复位，避免空画布窗口）。
       hydratingRef.current = true;
       editor.deleteShapes(editor.getCurrentPageShapes().map((s) => s.id));
-      hydratingRef.current = false;
       setInitialCanvas(c); // 复用物化 effect 重新 hydrate
     } catch (e) {
       console.error("[board] reload failed", e);

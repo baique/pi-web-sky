@@ -181,7 +181,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           width: w,
           height: h,
           overflow: "hidden",
-          borderRadius: 14,
+          borderRadius: 18,
           border: `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
           // 卡片磨砂玻璃：略低于消息气泡（alpha 0.55 vs 气泡 0.44，blur 12px vs 气泡 18px）
           background: "var(--board-card-glass)",
@@ -194,21 +194,28 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           flexDirection: "column",
           color: "var(--text)",
           userSelect: "none",
+          // 胶囊化：内部统一留白，标题栏/底栏都被向内挤压，四边圆角衔接
+          padding: 8,
         }}
       >
         {/* 标题栏 = 拖拽区：pointerEvents none 让 tldraw 接管（拖动/选中/缩放），
-            仅显示标题 + 状态圆点 + 收起按钮（按钮 pointerEvents all 独立点击） */}
+            仅显示标题 + 状态圆点 + 展开按钮（按钮 pointerEvents all 独立点击）。
+            无玻璃背景（还原原状态），仅保留底部 border 分隔工作台。
+            导航条（SessionNavBar）经 portal 渲染到 data-session-titlebar 内、展开按钮前。 */}
         <div
+          data-session-titlebar
           style={{
             flexShrink: 0,
             display: "flex",
             alignItems: "center",
             gap: 6,
-            padding: "8px 12px",
-            borderBottom: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+            padding: "0 10px",
+            height: "calc(36px + env(safe-area-inset-top))",
+            borderTopLeftRadius: 12,
+            borderTopRightRadius: 12,
             pointerEvents: "none",
             cursor: "grab",
-            minHeight: 36,
+            position: "relative",
           }}
         >
           <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", background: phaseMeta[phase]?.dot ?? "var(--text-dim)", flexShrink: 0 }} />
@@ -216,6 +223,8 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
             {title || "Untitled"}
           </span>
           <div style={{ flex: 1 }} />
+          {/* 导航条 portal 挂载点：SessionWorkbench 将 SessionNavBar 渲染到这里（展开按钮之前） */}
+          <div data-session-navbar-slot style={{ display: "flex", alignItems: "center", pointerEvents: "all" }} />
           <button
             type="button"
             onClick={toggleExpand}
@@ -242,8 +251,9 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
             </svg>
           </button>
         </div>
-        {/* 工作台：嵌卡片内，随卡片 resize 自然跟随；四周留 padding 保证拖拽/调整手柄可触 */}
-        <div style={{ flex: 1, minHeight: 0, padding: "2px 3px 6px", pointerEvents: "all" }}>
+        {/* 工作台：嵌卡片内，随卡片 resize 自然跟随；四周留 padding 保证拖拽/调整手柄可触
+           垂直对齐：卡片 padding 8 上下一致，底栏内容区底部从 6 减到 0，底距卡底与顶距卡顶同 8 */}
+        <div style={{ flex: 1, minHeight: 0, padding: "0 4px 0", pointerEvents: "all" }}>
           <SessionWorkbench sessionId={sessionId} />
         </div>
       </HTMLContainer>
