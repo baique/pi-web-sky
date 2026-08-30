@@ -227,9 +227,11 @@ export function useBoardCanvas({
   const pendingSaveRef = useRef(false);
   /** hydrate 期间为 true：忽略 store 变更，避免把空画布覆盖到已保存数据 */
   const hydratingRef = useRef(false);
+  /** 初始物化是否已完成：未完成前禁止自动保存（防止未加载/物化失败的空客户端覆盖看板） */
+  const hydratedRef = useRef(false);
 
   const scheduleSave = useCallback((editor: Editor) => {
-    if (hydratingRef.current) return;
+    if (hydratingRef.current || !hydratedRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => void flushSave(editor), 500);
   }, []);
@@ -237,6 +239,7 @@ export function useBoardCanvas({
   const flushSave = useCallback(async (editor: Editor) => {
     const bid = boardIdRef.current;
     if (bid === SYSTEM_RUNNING_BOARD_ID) return;
+    if (!hydratedRef.current) return;
     if (saveInFlightRef.current) {
       pendingSaveRef.current = true;
       return;
@@ -244,6 +247,8 @@ export function useBoardCanvas({
     saveInFlightRef.current = true;
     try {
       const { nodes, edges } = serializeShapes(editor);
+      // 空画布不提交（服务器另有 409 拒绝覆盖非空看板兜底）
+      if (nodes.length === 0 && edges.length === 0) return;
       const camera = editor.getCamera();
       const res = await fetch(`/api/boards/${encodeURIComponent(bid)}/canvas`, {
         method: "PUT",
@@ -362,6 +367,8 @@ export function useBoardCanvas({
       editor.setCamera({ x: canvas.view.cameraX, y: canvas.view.cameraY, z: canvas.view.cameraZ });
     }
     setInitialCanvas(null);
+    // 物化完成才放行自动保存：未完成前的空/部分画布绝不允许覆盖看板
+    hydratedRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCanvas, sessionTitles, hydrateShapes, editorReady]);
 
