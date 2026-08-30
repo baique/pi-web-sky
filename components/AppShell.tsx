@@ -224,6 +224,8 @@ export function AppShell() {
   // 看板模式：activeBoardId 非空时主区域替换为画布（含系统看板 __running__）。
   // 初始值从 URL ?board= 恢复，刷新后保持看板选中。
   const [activeBoardId, setActiveBoardId] = useState<string | null>(() => initialNavigation.boardId);
+  // 当前激活看板是否为任务型：任务看板时非空（= 任务 id），手动/系统看板为 null。
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const handleRunningSessionIdsChange = useCallback((ids: Set<string>) => {
     setRunningSessionIds((previous) => {
       if (previous.size === ids.size && [...ids].every((id) => previous.has(id))) return previous;
@@ -234,6 +236,7 @@ export function AppShell() {
   // 并把看板 id 写入 URL（?board=），刷新后恢复看板选中。
   const handleOpenBoard = useCallback((boardId: string) => {
     setActiveBoardId(boardId);
+    setActiveTaskId(null); // 手动/系统看板非任务型
     setSelectedSession(null);
     // 看板模式下顶栏会话按钮（统计/TODO）无当前会话，清掉残留数据避免误显
     setSessionStats(null);
@@ -1004,7 +1007,12 @@ export function AppShell() {
   const handleOpenTaskBoard = useCallback((taskId: string) => {
     void fetch(`/api/tasks/${encodeURIComponent(taskId)}/board`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() as Promise<{ board: { id: string } }> : null))
-      .then((d) => { if (d?.board?.id) handleOpenBoard(d.board.id); })
+      .then((d) => {
+        if (d?.board?.id) {
+          handleOpenBoard(d.board.id);
+          setActiveTaskId(taskId); // handleOpenBoard 内部会清 taskId，这里再设回
+        }
+      })
       .catch(() => {});
   }, [handleOpenBoard]);
 
@@ -3133,6 +3141,7 @@ export function AppShell() {
             <SessionCanvas
               key={activeBoardId}
               boardId={activeBoardId}
+              taskId={activeTaskId ?? undefined}
               projectKey={selectedSession ? (selectedSession.projectKey ?? workspaceKeyOf(selectedSession)) : undefined}
               onExit={() => setActiveBoardId(null)}
               onOpenSession={handleSelectSession}

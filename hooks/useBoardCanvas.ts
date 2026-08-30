@@ -44,10 +44,13 @@ export type CanvasPhase = "waiting_model" | "running_tools" | "running_command" 
 export function useBoardCanvas({
   boardId,
   projectKey,
+  taskId,
   onOpenSession,
 }: {
   boardId: string;
   projectKey?: string;
+  /** 任务看板模式：非空时按任务内会话自动补卡（任务即看板） */
+  taskId?: string;
   onOpenSession?: (sessionId: string) => void;
 }) {
   const [board, setBoard] = useState<BoardInfo | null>(null);
@@ -649,6 +652,96 @@ export function useBoardCanvas({
     }]);
   }, [sessionTitles]);
 
+  // ---- 自动摆放：画布内找第一个不遮挡的空位 ----
+  // 从 (60, 60) 起逐行扫描（y 递增、x 递增），候选矩形与所有现有
+  // session-card 不重叠且间隙 ≥ 24 即返回。画布无限，最坏也很快。
+  const findFreeSpot = useCallback((editor: Editor): { x: number; y: number } => {
+    const STEP = 24;
+    const occupied = editor.getCurrentPageShapes()
+      .filter((s) => s.type === "session-card")
+      .map((s) => ({ x: s.x, y: s.y, w: (s.props as SessionCardShapeProps).w || CARD_W, h: (s.props as SessionCardShapeProps).h || CARD_H }));
+    const overlaps = (x: number, y: number) => occupied.some(
+      (o) => x < o.x + o.w + STEP && x + CARD_W + STEP > o.x && y < o.y + o.h + STEP && y + CARD_H + STEP > o.y,
+    );
+    let y = 60;
+    let guard = 0;
+    while (guard < 2000) {
+      for (let x = 60; x < 20000; x += CARD_W + STEP) {
+        if (!overlaps(x, y)) return { x, y };
+      }
+      y += CARD_H + STEP;
+      guard += 1;
+    }
+    // 兜底：几乎不可能走到，给个偏移位置避免与 (60,60) 重叠
+    return { x: 60 + Math.random() * 120, y: 60 + Math.random() * 120 };
+  }, []);
+
+  // ---- 任务看板自动补卡（任务即看板）----
+  // 拉取任务内会话 id（根会话集合）→ 与画布现有 session-card 差集 → 自动创建卡片。
+  // 旧会话坐标已由 hydrate 从 board_nodes 恢复，这里只补“任务里有、画布上没有”的新会话。
+  const reconcileTaskSessions = useCallback(async () => {
+    const editor = editorRef.current;
+    const tid = effectiveTaskIdRef.current;
+    if (!editor || !tid) return;
+    try {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(tid)}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as { task?: { sessionIds?: string[] } | null };
+      const sessionIds = data.task?.sessionIds ?? [];
+      const existing = new Set<string>();
+      for (const shape of editor.getCurrentPageShapes()) {
+        if (shape.type === "session-card") {
+          const sid = (shape.props as SessionCardShapeProps).sessionId;
+          if (sid) existing.add(sid);
+        }
+      }
+      const missing = sessionIds.filter((sid) => !existing.has(sid));
+      if (missing.length === 0) return;
+      for (const sid of missing) {
+        const spot = findFreeSpot(editor);
+        addSessionNode(sid, spot.x, spot.y);
+      }
+    } catch {
+      // 网络/解析失败静默，下轮重试
+    }
+  }, [addSessionNode, findFreeSpot]);
+  const taskIdRef = useRef(taskId);
+  taskIdRef.current = taskId;
+
+  // 刷新场景兜底：URL ?board= 恢复任务看板时 props 没有 taskId，但看板本身
+  // 是任务型（board.taskId 非空）——自动补卡同样生效。
+  const boardTaskId = board?.taskId ?? null;
+  const effectiveTaskId = taskId ?? boardTaskId;
+  const effectiveTaskIdRef = useRef(effectiveTaskId);
+  effectiveTaskIdRef.current = effectiveTaskId;
+
+  // 任务看板自动补卡轮询：打开后先补一次（避开 hydrate 窗口），之后 10s 一次。
+  // 与摘要轮询同频；打开期间任务新增会话自动出现在画布上。
+  useEffect(() => {
+    if (!effectiveTaskId) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const run = async () => {
+      if (stopped) return;
+      await reconcileTaskSessions();
+      if (!stopped) timer = setTimeout(run, SUMMARY_POLL_MS);
+    };
+    const first = setTimeout(() => { void run(); }, 1000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        if (timer) clearTimeout(timer);
+        void run();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      clearTimeout(first);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [effectiveTaskId, reconcileTaskSessions]);
+
   // ---- 连线 ----
   const connectNodes = useCallback((fromNodeId: string, toNodeId: string, label?: string, color?: string, dashed?: boolean) => {
     const editor = editorRef.current;
@@ -732,7 +825,8 @@ export function useBoardCanvas({
     sessionTitles,
     loadSessionSummaries,
     hydrateShapes,
-  }), [board, loading, error, running, onMount, addSessionNode, connectNodes, cleanupInvalid, getNodeIdForSession, reloadCanvasWrap, conflictCount, sessionTitles, loadSessionSummaries, hydrateShapes]);
+    reconcileTaskSessions,
+  }), [board, loading, error, running, onMount, addSessionNode, connectNodes, cleanupInvalid, getNodeIdForSession, reloadCanvasWrap, conflictCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
 }
 
 export type UseBoardCanvasReturn = ReturnType<typeof useBoardCanvas>;

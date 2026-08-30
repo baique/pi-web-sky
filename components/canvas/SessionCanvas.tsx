@@ -49,6 +49,7 @@ const CanvasStage = dynamic(() => import("./CanvasStage").then((m) => m.CanvasSt
 export function SessionCanvas({
   boardId,
   projectKey,
+  taskId,
   onOpenSession,
   onRunningSessionIdsChange,
   wallSettings,
@@ -56,6 +57,8 @@ export function SessionCanvas({
 }: {
   boardId: string;
   projectKey?: string;
+  /** 任务看板模式：非空时按任务内会话自动补卡（任务即看板） */
+  taskId?: string;
   onExit: () => void;
   onOpenSession: (session: SessionInfo, isRestore?: boolean) => void;
   onRunningSessionIdsChange?: (ids: Set<string>) => void;
@@ -66,7 +69,7 @@ export function SessionCanvas({
 }) {
   const { t } = useI18n();
   const { isDark } = useTheme();
-  const board = useBoardCanvas({ boardId, projectKey, onOpenSession: (sid) => onOpenSession({ id: sid } as SessionInfo, false) });
+  const board = useBoardCanvas({ boardId, projectKey, taskId, onOpenSession: (sid) => onOpenSession({ id: sid } as SessionInfo, false) });
   const [scrimOpen, setScrimOpen] = useState(false);
   // 乐观锁冲突提示：409 自动重载后短暂显示，说明改动被丢弃（防数据丢失的可见反馈）
   const [conflictNotice, setConflictNotice] = useState(false);
