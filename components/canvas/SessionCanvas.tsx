@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
@@ -68,6 +68,17 @@ export function SessionCanvas({
   const { isDark } = useTheme();
   const board = useBoardCanvas({ boardId, projectKey, onOpenSession: (sid) => onOpenSession({ id: sid } as SessionInfo, false) });
   const [scrimOpen, setScrimOpen] = useState(false);
+  // 乐观锁冲突提示：409 自动重载后短暂显示，说明改动被丢弃（防数据丢失的可见反馈）
+  const [conflictNotice, setConflictNotice] = useState(false);
+  const prevConflictCount = useRef(0);
+  useEffect(() => {
+    if (board.conflictCount > prevConflictCount.current) {
+      prevConflictCount.current = board.conflictCount;
+      setConflictNotice(true);
+      const timer = setTimeout(() => setConflictNotice(false), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [board.conflictCount]);
 
   // 运行中集合上报给 AppShell（顶部会话运行状态保持一致）
   useEffect(() => {
@@ -86,6 +97,43 @@ export function SessionCanvas({
         position: "relative",
       }}
     >
+      {/* 乐观锁冲突提示 toast：数据未丢失但本地未保存改动被丢弃（服务器权威） */}
+      {conflictNotice && (
+        <div
+          role="status"
+          style={{
+            position: "absolute",
+            top: 12,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 80,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 14px",
+            borderRadius: 999,
+            background: "var(--board-card-glass)",
+            backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+            WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+            border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+            boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
+            color: "var(--text)",
+            fontSize: 12.5,
+            whiteSpace: "nowrap",
+            animation: "toast-in 0.2s ease-out",
+          }}
+        >
+          <span aria-hidden style={{ color: "#f59e0b", display: "inline-flex" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 9v4" />
+              <path d="M12 17h.01" />
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            </svg>
+          </span>
+          {t("boards.conflictReload")}
+        </div>
+      )}
+
       {/* 顶部悬浮按钮组：清理失效 + 磨砂调节 */}
       <div
         style={{

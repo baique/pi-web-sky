@@ -79,7 +79,7 @@
      tint reads as "transparent, no glass" on real GPUs. Near-opaque base +
      blur keeps them looking frosted everywhere without depending on the
      compositor actually applying backdrop-filter. */
-  --panel-glass: rgba(250, 250, 251, 0.75);
+  --panel-glass: rgba(250, 250, 251, 0.88);
   /* Per-surface splits of --panel-glass: todo task board and the chat
      timeline rail are tuned independently on purpose — do NOT merge them
      back into one token. */
@@ -216,7 +216,7 @@ html.dark {
   --glass-bg-strong: rgba(34, 34, 37, 0.78);
   --glass-saturate: 140%;
   --glass-bg-input: rgba(34, 34, 37, 0.52);
-  --panel-glass: rgba(34, 34, 37, 0.75);
+  --panel-glass: rgba(34, 34, 37, 0.88);
   --panel-glass-todo: rgba(34, 34, 37, 0.75);
   --panel-glass-minimap: rgba(34, 34, 37, 0.75);
   /* Terminal body is transparent — the pane uses the message-bubble glass
@@ -1487,6 +1487,11 @@ span.token.table {
   to { transform: rotate(360deg); }
 }
 
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
@@ -2099,29 +2104,42 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
 }
 
 /* ── 看板工作台（卡片展开态）底部 widget 条 ──
-   卡片内嵌的 ChatWindow 底栏：底部下边缘 +2px 留白 + 底部圆角，贴合卡片圆角 (14px)
+   卡片内嵌的 ChatWindow 底栏：底部下边缘 +2px 留白 + 底部圆角，贴合卡片圆角 (18px)
    视觉连续；widget 区强制不换行，超宽省略（tui 渲染区可被遮挡），右区（终端/额度/通知）
    尽力保留。选择器限定在 .board-workbench 内，不影响普通聊天底栏。 */
 .board-workbench .bottom-band {
   height: 36px;
-  border-radius: 0 0 12px 12px;
-  overflow: hidden;
+  /* 卡片外壳（.tl-html-container）已有 overflow:hidden + border-radius 18，会兜底裁剪底栏圆角。
+     这里不能自己 overflow:hidden / clip-path：两者都会裁剪向上弹出的 widget 面板（pi-todo）。
+     overflow: visible 让面板穿透，圆角交给卡片外壳处理。 */
+  overflow: visible;
 }
 /* widget 左区：不换行，超宽截断省略（tui 渲染区） */
 .board-workbench .extension-status-left {
   flex-wrap: nowrap;
-  overflow: hidden;
+  /* 不能 overflow:hidden：会裁剪向上弹出的 widget 面板；省略号由内层元素负责 */
+  overflow: visible;
   min-width: 0;
 }
 /* widget 右区：终端/额度/通知尽力保留，优先不换行、不压缩到消失 */
 .board-workbench .extension-status-right {
   flex-shrink: 0;
 }
+/* 底栏 notice 内距：普通会话默认 0 10px，工作台压窄，与顶栏水平内缩对齐
+   （顶栏 = 卡片8 + 标题栏10 = 18px；底栏 = 卡片8 + 内容区4 + notice 6 = 18px）。 */
+.board-workbench .extension-status-right > div {
+  padding: 0 6px;
+}
 /* 左区内容各自省略号，不挤压右区 */
 .board-workbench .extension-status-line,
 .board-workbench .extension-widget-triggers {
   min-width: 0;
   overflow: hidden;
+}
+/* 卡片会话（工作台）不提供终端功能：底栏终端按钮直接隐藏，
+   同时避免走全局事件桥绕回 AppShell（卡片会话无终端的语义）。 */
+.board-workbench .terminal-bar-toggle {
+  display: none;
 }
 
 /* 终端按钮：还原原始形态（shelf 左端项的扁平样式） */

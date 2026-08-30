@@ -165,6 +165,10 @@ export function CanvasStage({
     SharePanel: null,
     MenuPanel: null,
     TopPanel: null,
+    // 白屏 loading 根因：tldraw store.status=loading 时默认渲染 DefaultLoadingScreen
+    // （.tl-loading 铺满 --tl-color-background，浅色下接近纯白，与本项目玻璃设计冲突）。
+    // 置 null 直接不渲染，露出下层 scrim 玻璃背景；真正加载期由 board.loading 提示接管。
+    LoadingScreen: null,
     // 样式面板：选中图形时右侧出现，去掉「透明度选择器」，保留颜色/填充/虚线/字号等
     StylePanel: (props) => <BoardStylePanel {...props} />,
     KeyboardShortcutsDialog: null,

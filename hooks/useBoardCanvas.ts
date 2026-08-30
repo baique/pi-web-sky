@@ -65,6 +65,9 @@ export function useBoardCanvas({
   const editorRef = useRef<Editor | null>(null);
   const boardIdRef = useRef(boardId);
   boardIdRef.current = boardId;
+  /** 乐观锁基线：本客户端读取画布时的 boards.updated。每次成功保存后更新；
+   *  保存时若服务器 updated 已变化（他人改过）→ 409，不覆盖，拉最新重载。 */
+  const baseUpdatedRef = useRef<number | null>(null);
 
   // ---- 加载看板 ----
   const load = useCallback(async () => {
@@ -81,6 +84,8 @@ export function useBoardCanvas({
       const b = (await boardRes.json()) as { board: BoardInfo };
       const c = (await canvasRes.json()) as BoardCanvas;
       setBoard(b.board);
+      // 乐观锁基线：以本次读取的 boards.updated 为准
+      baseUpdatedRef.current = b.board.updated;
       setInitialCanvas(c);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -236,10 +241,43 @@ export function useBoardCanvas({
     saveTimerRef.current = setTimeout(() => void flushSave(editor), 500);
   }, []);
 
+  // 冲突/需重载时：拉最新画布，清空现有 shapes，复用物化 effect 重新 hydrate，
+  // 并刷新乐观锁基线。不保留本地过期操作——以服务器为权威，绝不覆盖。
+  const reloadCanvas = useCallback(async () => {
+    const editor = editorRef.current;
+    const bid = boardIdRef.current;
+    if (!editor) return;
+    try {
+      const [boardRes, canvasRes] = await Promise.all([
+        fetch(`/api/boards/${encodeURIComponent(bid)}`, { cache: "no-store" }),
+        fetch(`/api/boards/${encodeURIComponent(bid)}/canvas`, { cache: "no-store" }),
+      ]);
+      if (!boardRes.ok || !canvasRes.ok) return;
+      const b = (await boardRes.json()) as { board: BoardInfo };
+      const c = (await canvasRes.json()) as BoardCanvas;
+      baseUpdatedRef.current = b.board.updated;
+      // 清空现有 shapes：此间 store 变更必须禁止保存（hydratingRef 标记）
+      hydratingRef.current = true;
+      editor.deleteShapes(editor.getCurrentPageShapes().map((s) => s.id));
+      hydratingRef.current = false;
+      setInitialCanvas(c); // 复用物化 effect 重新 hydrate
+    } catch (e) {
+      console.error("[board] reload failed", e);
+    }
+  }, []);
+
+  // 冲突计数 +1（供 UI 提示「已加载最新版本」）；409 自动重载与手动重载共用
+  const [conflictCount, setConflictCount] = useState(0);
+  const reloadCanvasWrap = useCallback(async () => {
+    await reloadCanvas();
+    setConflictCount((c) => c + 1);
+  }, [reloadCanvas]);
+
   const flushSave = useCallback(async (editor: Editor) => {
     const bid = boardIdRef.current;
     if (bid === SYSTEM_RUNNING_BOARD_ID) return;
-    if (!hydratedRef.current) return;
+    // 双保险：无论谁调用，loading/hydrate 期间一律不写（防未加载完成的空/部分画布覆盖看板）
+    if (!hydratedRef.current || hydratingRef.current) return;
     if (saveInFlightRef.current) {
       pendingSaveRef.current = true;
       return;
@@ -253,11 +291,27 @@ export function useBoardCanvas({
       const res = await fetch(`/api/boards/${encodeURIComponent(bid)}/canvas`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nodes, edges, view: { boardId: bid, cameraX: camera.x, cameraY: camera.y, cameraZ: camera.z, updated: Date.now() } }),
+        body: JSON.stringify({
+          nodes, edges,
+          view: { boardId: bid, cameraX: camera.x, cameraY: camera.y, cameraZ: camera.z, updated: Date.now() },
+          // 乐观锁：提交时带上本客户端读取快照的 boards.updated。服务器发现已
+          // 被他人改过（updated 变化）→ 409，绝不后写覆盖先写。
+          baseUpdated: baseUpdatedRef.current ?? undefined,
+        }),
       });
+      if (res.status === 409) {
+        // 冲突：他人已保存过，本地快照过期。不覆盖，拉最新重载（服务器为权威）。
+        console.warn("[board] canvas save conflict (409) — reloading latest, local stale changes dropped");
+        await reloadCanvasWrap();
+        return;
+      }
       if (!res.ok) {
         console.error("[board] canvas save failed", res.status);
+        return;
       }
+      // 成功：以服务器返回的 updated 刷新乐观锁基线
+      const data = (await res.json().catch(() => null)) as { updated?: number } | null;
+      if (data?.updated) baseUpdatedRef.current = data.updated;
     } catch (e) {
       console.error("[board] canvas save error", e);
     } finally {
@@ -267,7 +321,7 @@ export function useBoardCanvas({
         void flushSave(editor);
       }
     }
-  }, []);
+  }, [reloadCanvasWrap]);
 
   // ---- 物化：sqlite canvas → tldraw shapes ----
   const hydrateShapes = useCallback((editor: Editor, canvas: BoardCanvas, titles: Record<string, SessionSummary>) => {
@@ -673,10 +727,12 @@ export function useBoardCanvas({
     connectNodes,
     cleanupInvalid,
     getNodeIdForSession,
+    reloadCanvas: reloadCanvasWrap,
+    conflictCount,
     sessionTitles,
     loadSessionSummaries,
     hydrateShapes,
-  }), [board, loading, error, running, onMount, addSessionNode, connectNodes, cleanupInvalid, getNodeIdForSession, sessionTitles, loadSessionSummaries, hydrateShapes]);
+  }), [board, loading, error, running, onMount, addSessionNode, connectNodes, cleanupInvalid, getNodeIdForSession, reloadCanvasWrap, conflictCount, sessionTitles, loadSessionSummaries, hydrateShapes]);
 }
 
 export type UseBoardCanvasReturn = ReturnType<typeof useBoardCanvas>;

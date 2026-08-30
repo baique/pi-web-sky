@@ -276,10 +276,17 @@ export function getBoardCanvas(boardId: string): BoardCanvas | null {
 export function putBoardCanvas(
   boardId: string,
   payload: { nodes?: BoardNode[]; edges?: BoardEdge[]; view?: BoardView | null },
-): boolean | "empty-overwrite" {
+  opts?: { baseUpdated?: number },
+): boolean | "empty-overwrite" | "conflict" {
   if (boardId === SYSTEM_RUNNING_BOARD_ID) return false;
-  if (!getBoardRow(boardId)) return false;
   const db = getDb();
+  const row = getBoardRow(boardId);
+  if (!row) return false;
+  // 乐观锁：客户端基于 baseUpdated 快照全量替换。若期间有其他客户端/标签页保存过
+  // （boards.updated 已变化），说明本地快照过期，直接拒绝 —— 由客户端拉取远端合并后重试。
+  if (opts?.baseUpdated !== undefined && opts.baseUpdated !== row.updated) {
+    return "conflict";
+  }
   // 防数据丢失（多次真实发生）：客户端物化失败/未加载时，会带着空/部分节点集自动保存，
   // 全量替换会直接把看板删空。硬性兜底：看板已有节点而本次 payload 节点为空 → 拒绝写入。
   if (payload.nodes !== undefined && payload.nodes.length === 0) {
