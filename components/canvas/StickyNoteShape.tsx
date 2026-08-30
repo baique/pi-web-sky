@@ -1,0 +1,226 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BaseBoxShapeUtil, HTMLContainer, T, resizeBox, useEditor, useValue } from "tldraw";
+import type { TLBaseShape, TLShapePartial } from "tldraw";
+import ReactMarkdown from "react-markdown";
+
+/**
+ * 自研 markdown 便笺（sticky-note）。
+ * 观感 = AI 消息气泡同款毛玻璃（复用 --bubble-* / --assistant-card-glass token，黑白主题自适应）。
+ * - 双击进入编辑：textarea 写 markdown 源码
+ * - 非编辑态：react-markdown 渲染，左上角对齐
+ * - w/h 自由缩放（BaseBoxShapeUtil + resizeBox）
+ */
+
+export interface StickyNoteProps {
+  text: string;
+  w: number;
+  h: number;
+}
+
+export type StickyNoteShape = TLBaseShape<"sticky-note", StickyNoteProps>;
+
+declare module "@tldraw/tlschema" {
+  interface TLGlobalShapePropsMap {
+    "sticky-note": StickyNoteProps;
+  }
+}
+
+export const stickyNoteProps = {
+  text: T.string,
+  w: T.number,
+  h: T.number,
+};
+
+export class StickyNoteUtil extends BaseBoxShapeUtil<StickyNoteShape> {
+  static override type = "sticky-note" as const;
+  static override props = stickyNoteProps;
+
+  override getDefaultProps(): StickyNoteShape["props"] {
+    return { text: "", w: 260, h: 200 };
+  }
+
+  override canEdit(): boolean {
+    return true;
+  }
+
+  override canResize(): boolean {
+    return true;
+  }
+
+  override hideRotateHandle(): boolean {
+    return true;
+  }
+
+  override onResize(
+    shape: StickyNoteShape,
+    info: import("tldraw").TLResizeInfo<StickyNoteShape>,
+  ): Omit<TLShapePartial<StickyNoteShape>, "id" | "type"> | undefined {
+    return resizeBox(shape, info, { minWidth: 140, minHeight: 100 });
+  }
+
+  override getIndicatorPath(shape: StickyNoteShape) {
+    const { w, h } = shape.props;
+    const path = new Path2D();
+    path.roundRect(0, 0, w, h, 12);
+    return path;
+  }
+
+  override component(shape: StickyNoteShape) {
+    return <StickyNoteView shape={shape} />;
+  }
+}
+
+function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
+  const { w, h, text } = shape.props;
+  const editor = useEditor();
+  const isEditing = useValue("editing", () => editor.getEditingShapeId() === shape.id, [editor, shape.id]);
+
+  const [draft, setDraft] = useState(text);
+  const draftRef = useRef(text);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // 进入编辑时同步草稿；非编辑且外部 text 变化时重置
+  useEffect(() => {
+    if (isEditing) {
+      setDraft(text);
+      draftRef.current = text;
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+  }, [isEditing, text]);
+
+  const save = useCallback(() => {
+    const value = draftRef.current;
+    if (value !== shape.props.text) {
+      editor.updateShapes([{ id: shape.id, type: "sticky-note", props: { text: value } }]);
+    }
+  }, [editor, shape.id, shape.props.text]);
+
+  const finish = useCallback(() => {
+    save();
+    editor.setEditingShape(null);
+  }, [save, editor]);
+
+  const cancel = useCallback(() => {
+    editor.setEditingShape(null);
+  }, [editor]);
+
+  // 消息气泡同款毛玻璃
+  const bubbleStyle: React.CSSProperties = {
+    width: w,
+    height: h,
+    borderRadius: "var(--bubble-radius, 12px)",
+    border: "1px solid var(--bubble-border)",
+    background: "var(--assistant-card-glass)",
+    backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+    WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+    boxShadow: "0 2px 10px -6px rgba(0,0,0,0.2)",
+    color: "var(--text)",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+    fontSize: 13,
+    lineHeight: 1.5,
+    pointerEvents: "all",
+    userSelect: "none",
+  };
+
+  // —— 编辑态：textarea 写 markdown 源码 ——
+  if (isEditing) {
+    return (
+      <HTMLContainer style={{ width: w, height: h, pointerEvents: "none" }}>
+        <div style={bubbleStyle}>
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={(e) => { setDraft(e.target.value); draftRef.current = e.target.value; }}
+            onBlur={save}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(); }
+              else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            spellCheck={false}
+            placeholder="Markdown 便笺…"
+            style={{
+              flex: 1,
+              minHeight: 0,
+              resize: "none",
+              border: "none",
+              outline: "none",
+              background: "transparent",
+              color: "var(--text)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 12.5,
+              lineHeight: 1.5,
+              padding: "var(--bubble-pad-y, 8px) var(--bubble-pad-x, 12px)",
+            }}
+          />
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              gap: 6,
+              padding: "6px 10px",
+              borderTop: "1px solid var(--bubble-hairline)",
+            }}
+          >
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); finish(); }}
+              style={footerBtnStyle}
+              title="完成 (Ctrl+Enter)"
+            >
+              完成
+            </button>
+          </div>
+        </div>
+      </HTMLContainer>
+    );
+  }
+
+  // —— 非编辑态：markdown 渲染（左上角对齐）——
+  return (
+    <HTMLContainer
+      data-testid={`sticky-note-${shape.id}`}
+      onPointerDown={() => editor.bringToFront([shape.id])}
+      style={{ width: w, height: h, pointerEvents: "none" }}
+    >
+      <div style={bubbleStyle}>
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            padding: "var(--bubble-pad-y, 8px) var(--bubble-pad-x, 12px)",
+            textAlign: "left",
+          }}
+        >
+          {text.trim() ? (
+            <div className="markdown-body" style={{ wordBreak: "break-word" }}>
+              <ReactMarkdown>{text}</ReactMarkdown>
+            </div>
+          ) : (
+            <div style={{ color: "var(--text-dim)", fontSize: 12 }}>双击编辑 markdown</div>
+          )}
+        </div>
+      </div>
+    </HTMLContainer>
+  );
+}
+
+const footerBtnStyle: React.CSSProperties = {
+  border: "none",
+  background: "color-mix(in srgb, var(--border) 30%, transparent)",
+  color: "var(--text-muted)",
+  borderRadius: 5,
+  padding: "2px 10px",
+  fontSize: 11,
+  cursor: "pointer",
+};

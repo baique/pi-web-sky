@@ -2,25 +2,42 @@
 
 import "tldraw/tldraw.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Tldraw, DefaultToolbar, DefaultToolbarContent, getTipTapDefaultExtensions, type TLComponents } from "tldraw";
+import { Tldraw, DefaultToolbar, TldrawUiMenuToolItem, useTools, useIsToolSelected, defaultShapeUtils, type TLComponents } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
-import { StickyNoteUtil } from "./StickyNoteUtil";
+import { StickyNoteUtil } from "./StickyNoteShape";
+import { StickyNoteTool } from "./StickyNoteTool";
 import { useI18n } from "@/hooks/useI18n";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
 import type { SessionInfo } from "@/lib/types";
 
-// 自定义 shape util。StickyNoteUtil 以 type="note" 覆盖 tldraw 默认便笺：渲染/编辑全继承，仅开放自由缩放。
-// 注意：不能 spread defaultShapeUtils —— tldraw 会用 merge 按 type 把默认 note 替换成我们的，
-// 若先展开默认再追加会得到两个 "note"（schema 报 defined more than once）。
-const shapeUtils = [SessionCardUtil, StickyNoteUtil];
+// 自定义 shape util：会话卡 + 自研 markdown 便笺（sticky-note）。
+const shapeUtils = [...defaultShapeUtils, SessionCardUtil, StickyNoteUtil];
 
-// 开启便笺内 tiptap 代码块（默认关闭）。必须保持引用恒定（模块级 const 或 useMemo）：
-// `<Tldraw>` 对 options 身份敏感，若每次渲染内联新建，会反复重建编辑器 → 画布疯狂重挂载。
-const tiptapOptions = {
-  text: {
-    tipTapConfig: { extensions: getTipTapDefaultExtensions({ codeBlock: {} }) },
-  },
-};
+// 底部工具条工具列表 = tldraw 默认内容，仅把内置「便笺」(note) 换成我们的 markdown 便笺 (sticky-note)，
+// 避免与内置 note 工具共存时拖拽冲突。
+const BOARD_TOOL_IDS = [
+  "select", "hand", "draw", "eraser", "arrow", "text", "sticky-note", "asset",
+  "rectangle", "ellipse", "triangle", "diamond", "hexagon", "oval", "rhombus",
+  "star", "cloud", "heart", "x-box", "check-box", "arrow-left", "arrow-up",
+  "arrow-down", "arrow-right", "line", "highlight", "laser", "frame",
+] as const;
+
+function BoardToolbarItem({ toolId }: { toolId: string }) {
+  const tools = useTools();
+  const tool = tools[toolId];
+  const isSelected = useIsToolSelected(tool);
+  return <TldrawUiMenuToolItem toolId={toolId} isSelected={isSelected} />;
+}
+
+function BoardToolbarContent() {
+  return (
+    <>
+      {BOARD_TOOL_IDS.map((tid) => (
+        <BoardToolbarItem key={tid} toolId={tid} />
+      ))}
+    </>
+  );
+}
 
 /**
  * tldraw 画布舞台：无限画布 + 工具行 + 拖放添加会话。
@@ -85,10 +102,10 @@ export function CanvasStage({
     KeyboardShortcutsDialog: null,
     DebugPanel: null,
     DebugMenu: null,
-    // 底部工具条：保留 tldraw 默认工具（清理失效已移入顶部悬浮按钮组）
+    // 底部工具条：保留 tldraw 默认工具，但把内置便笺换成我们的 markdown 便笺
     Toolbar: () => (
       <DefaultToolbar>
-        <DefaultToolbarContent />
+        <BoardToolbarContent />
       </DefaultToolbar>
     ),
   }), []);
@@ -150,7 +167,7 @@ export function CanvasStage({
         ) : (
           <Tldraw
             shapeUtils={shapeUtils}
-            options={tiptapOptions}
+            tools={[StickyNoteTool]}
             onMount={(editor) => {
               // 开启内置拖放吸附对齐（对齐线/中点/边缘），不影响展示效果
               editor.user.updateUserPreferences({ isSnapMode: true });

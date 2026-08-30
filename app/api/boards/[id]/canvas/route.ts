@@ -31,6 +31,9 @@ export async function PUT(request: Request, { params }: Params) {
     edges: Array.isArray(body.edges) ? (body.edges as never[]) : undefined,
     view: body.view !== undefined && body.view !== null ? (body.view as never) : (body.view === null ? null : undefined),
   });
+  if (ok === "empty-overwrite") {
+    return NextResponse.json({ error: "refusing to overwrite a populated board with an empty canvas (client state incomplete)" }, { status: 409 });
+  }
   if (!ok) return NextResponse.json({ error: "board not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }

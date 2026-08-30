@@ -276,10 +276,16 @@ export function getBoardCanvas(boardId: string): BoardCanvas | null {
 export function putBoardCanvas(
   boardId: string,
   payload: { nodes?: BoardNode[]; edges?: BoardEdge[]; view?: BoardView | null },
-): boolean {
+): boolean | "empty-overwrite" {
   if (boardId === SYSTEM_RUNNING_BOARD_ID) return false;
   if (!getBoardRow(boardId)) return false;
   const db = getDb();
+  // 防数据丢失（多次真实发生）：客户端物化失败/未加载时，会带着空/部分节点集自动保存，
+  // 全量替换会直接把看板删空。硬性兜底：看板已有节点而本次 payload 节点为空 → 拒绝写入。
+  if (payload.nodes !== undefined && payload.nodes.length === 0) {
+    const existing = db.prepare("SELECT COUNT(*) c FROM board_nodes WHERE board_id = ?").get(boardId) as { c: number };
+    if (existing.c > 0) return "empty-overwrite";
+  }
   const ts = now();
   db.exec("BEGIN");
   try {
