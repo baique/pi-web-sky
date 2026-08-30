@@ -2168,6 +2168,26 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
 /* 最内层画布背景：tldraw 默认涂 --tl-color-background（不透明白），必须清掉才能透出壁纸 */
 .tl-background { background: transparent !important; }
 
+/* === tldraw 文本选中修复（SessionCanvas / StickyNote / 工作台）===
+   tldraw 自带 `.tl-container, .tl-container * { user-select: none }`，画布内所有
+   自定义 shape 的 HTML 内容（工作台消息区 / 便笺 markdown / 卡片摘要）都被禁选。
+   只放行 input/textarea/contenteditable。这里精确恢复可读内容区的文本选中：
+   - 会话卡展开工作台内全部内容（消息/工具/代码块）
+   - 便笺非编辑态 markdown 内容
+   不恢复的部分（保持 none，拖拽/缩放不误触）：
+   - 卡片外壳/标题栏/收合卡摘要（这些是画布拖拽区，选中文本会挡拖拽）
+   - 便笺外壳与编辑态 textarea（textarea 自带 user-select:text，无需重复） */
+.tl-container .board-workbench,
+.tl-container .board-workbench * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.tl-container [data-testid^="sticky-note"] .markdown-body,
+.tl-container [data-testid^="sticky-note"] .markdown-body * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* === 看板玻璃 token（SessionCanvas）===
    卡片磨砂玻璃略低于消息气泡：--board-card-glass（alpha 0.55 vs 气泡 0.44）+
    --board-blur（12px vs 气泡 18px）。看板底完全透明（透出壁纸），玻璃只挂卡片。
