@@ -91,9 +91,8 @@ export function CanvasStage({
           gap: 8,
           padding: "6px 12px",
           borderBottom: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
-          background: "var(--frame-glass)",
-          backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+          // 工具行在父层玻璃之上，自身透明（玻璃已由 SessionCanvas 父层提供）
+          background: "transparent",
         }}
       >
         {/* 添加会话（从会话区拖拽放入；提示文案） */}
@@ -144,7 +143,7 @@ export function CanvasStage({
         </button>
       </div>
 
-      {/* tldraw 舞台（接收会话拖入） */}
+      {/* tldraw 舞台（接收会话拖入）。子层：背景透明，玻璃由父层 SessionCanvas 统一提供。 */}
       <div
         ref={stageRef}
         style={{ flex: 1, minHeight: 0, position: "relative" }}

@@ -74,7 +74,19 @@ export function SessionCanvas({
   }, [boardId, onExit]);
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg)" }}>
+    // 看板模式容器：父层做与 AI 消息气泡完全相同的玻璃（--assistant-card-glass + 气泡 blur），
+    // 子层（CanvasStage/工具行/画布）全部透明，玻璃只挂这一层，避免嵌套 backdrop-filter 重复模糊。
+    <div
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        background: "var(--assistant-card-glass)",
+        backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+        WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+      }}
+    >
       <BoardToolbar
         board={board.board}
         boards={boards}

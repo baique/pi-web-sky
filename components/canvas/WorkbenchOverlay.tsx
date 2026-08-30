@@ -116,13 +116,14 @@ function toggleExpand(editor: Editor, shapeId: string) {
   const shape = editor.getShape(shapeId as never);
   if (!shape || shape.type !== "session-card") return;
   const willCollapse = (shape.props as { expanded?: boolean }).expanded;
+  const props = shape.props as { w?: number; h?: number };
   editor.updateShapes([{
     id: shape.id,
     type: "session-card",
     props: {
       expanded: !willCollapse,
-      // 收合时尺寸回到默认收合卡，与 SessionCardUtil.onDoubleClick 保持一致
-      w: willCollapse ? 280 : 760,
+      // 收合回到收合卡尺寸；展开保留用户已 resize 的宽（至少 280），高度 600
+      w: willCollapse ? 280 : Math.max(280, props.w ?? 280),
       h: willCollapse ? 120 : 600,
     },
   }]);

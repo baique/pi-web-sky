@@ -29,9 +29,8 @@ export function BoardToolbar({
   const { t } = useI18n();
 
   const chromeStyle: React.CSSProperties = {
-    background: "var(--frame-glass)",
-    backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-    WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+    // 看板栏在父层玻璃之上，自身透明（玻璃由 SessionCanvas 提供）
+    background: "transparent",
     borderBottom: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
   };
 

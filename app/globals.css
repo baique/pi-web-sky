@@ -2087,3 +2087,28 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
    卡片/工具栏各自用 --panel-glass / --frame-glass，不在此重复叠 backdrop-filter。 */
 .tl-canvas { background: transparent !important; }
 .tl-container { background: transparent !important; }
+/* 最内层画布背景：tldraw 默认涂 --tl-color-background（不透明白），必须清掉才能透出壁纸 */
+.tl-background { background: transparent !important; }
+
+/* === 看板玻璃 token（SessionCanvas）===
+   看板是内容密集区（spec §1.5「内容密集处用高 alpha」）：默认复用 --panel-glass；
+   用户开「减弱透明」时全局玻璃降级成纯白 var(--bg) + blur 0，看板作为承载画布的
+   内容区不平铺纯白（否则画布透明化失去意义），而是降级为高 alpha 半透明 + 保留 blur，
+   既尊重无障碍（近实心可读）又保留磨砂观感。 */
+:root {
+  --board-glass: var(--panel-glass);
+  --board-glass-toolbar: var(--frame-glass);
+  --board-blur: var(--glass-blur-panel);
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root, html.dark {
+    --board-glass: rgba(250, 250, 251, 0.9);
+    --board-glass-toolbar: rgba(250, 250, 251, 0.88);
+    --board-blur: 10px;
+  }
+  html.dark {
+    --board-glass: rgba(34, 34, 37, 0.9);
+    --board-glass-toolbar: rgba(34, 34, 37, 0.88);
+  }
+}
+/* 网格保持淡显（可选），但背景绝不能有实色 */

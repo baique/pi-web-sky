@@ -78,14 +78,18 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
     return true;
   }
 
+  /** 会话卡不支持旋转：对话卡片旋转无意义，且工作台浮层无法跟随旋转。 */
+  override hideRotateHandle(): boolean {
+    return true;
+  }
+
   /** 双击展开为工作台（持久化 expanded 标记，刷新后恢复）。
-   *  展开 → expanded=true, w=760, h=600
-   *  收合 → expanded=false, w=原收合宽（优先 props 默认 280）, h=原收合高（默认 120）
-   *  用 defaultProps 常量判断，避免依赖当前 props.w（已是工作台尺寸时无法回退）。 */
+   *  展开 → expanded=true，宽度保留用户已 resize 的当前宽（至少 280），高度 600
+   *  收合 → expanded=false，回到收合卡默认 280×120
+   *  宽度不强制 760：用户调过的宽度在展开/收合间保留，避免宽度跳变。 */
   override onDoubleClick(shape: SessionCardShape): TLShapePartial<SessionCardShape> | void {
     const COLLAPSED_W = 280;
     const COLLAPSED_H = 120;
-    const EXPANDED_W = 760;
     const EXPANDED_H = 600;
     const willCollapse = shape.props.expanded;
     return {
@@ -93,7 +97,8 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
       type: "session-card",
       props: {
         expanded: !shape.props.expanded,
-        w: willCollapse ? COLLAPSED_W : EXPANDED_W,
+        // 展开：宽度保留当前值（用户 resize 过则保留；未 resize 过用默认 280 → 至少 280）
+        w: willCollapse ? COLLAPSED_W : Math.max(COLLAPSED_W, shape.props.w),
         h: willCollapse ? COLLAPSED_H : EXPANDED_H,
       },
     };
@@ -123,9 +128,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         overflow: "hidden",
         borderRadius: 14,
         border: `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
-        background: "var(--panel-glass)",
-        backdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
-        WebkitBackdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
+        background: "transparent",
         boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
         opacity: stale ? 0.55 : 1,
         pointerEvents: "all",
