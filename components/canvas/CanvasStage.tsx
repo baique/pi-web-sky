@@ -90,6 +90,22 @@ export function CanvasStage({
         ref={stageRef}
         style={{ flex: 1, minHeight: 0, position: "relative" }}
       >
+        {/* 画布 scrim：内容层之下、壁纸之上的一层“暗色承托 + 磨砂”底。
+            - absolute inset 0 铺满舞台，pointerEvents none 不拦截拖拽/选择
+            - 背景用 --board-scrim-bg（暗色 token，明暗主题都保持暗色）
+            - 磨砂用 --board-scrim-blur（右上角调节滑块驱动）
+            玻璃只挂这一层，卡片/工具条各自玻璃不在此重复叠 backdrop-filter。 */}
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 0,
+            pointerEvents: "none",
+            background: "var(--board-scrim-bg)",
+            backdropFilter: "blur(var(--board-scrim-blur)) saturate(var(--glass-saturate))",
+            WebkitBackdropFilter: "blur(var(--board-scrim-blur)) saturate(var(--glass-saturate))",
+          }}
+        />
         {dragOver && (
           <div
             style={{
