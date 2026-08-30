@@ -36,7 +36,9 @@ test("NoticeDrawer: pill reuses NoticeInline styling, flashes on new notices, ex
   // 展开弹层：贴底向上、宽度对齐、高度自适应 + 最大高限制 + 纵向滚动
   assert.match(drawerSource, /createPortal/);
   assert.match(drawerSource, /position: "fixed"/);
-  assert.match(drawerSource, /bottom: 40/);
+  // 弹层底部锚定 widget 栏顶部（pill 位置），不再硬编码视口右下
+  assert.match(drawerSource, /pillRect/);
+  assert.match(drawerSource, /bottom = pillRect/);
   assert.match(drawerSource, /NOTICE_DRAWER_MAX_HEIGHT_RATIO/);
   assert.match(drawerSource, /maxHeight:/);
   assert.match(drawerSource, /overflowY: "auto"/);

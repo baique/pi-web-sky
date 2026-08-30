@@ -86,6 +86,11 @@ export function NoticeDrawer({
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [open]);
 
+  // 通知清空后自动收起弹层（没有可看的内容了）
+  useEffect(() => {
+    if (history.length === 0 && open) setOpen(false);
+  }, [history.length, open]);
+
   const hasBroadcast = broadcast !== null && broadcast.level !== "idle";
 
   const toggleOpen = (e: React.MouseEvent) => {
@@ -153,35 +158,47 @@ export function NoticeDrawer({
     </span>
   ) : null;
 
-  // 展开弹层：贴底向上，高度自适应 + 最大高限制，超出滚动
-  const drawer = open
+  // 展开弹层：锚定 pill（通知徽标）右上角，贴 pill 向上展开——pill 在所属 ChatWindow 的
+  // widget 栏内，弹层跟随其位置（正常会话在视口底部 → 贴底；看板工作台嵌卡片内 → 贴卡片）。
+  // 若 pill 不可见（无广播时 badge 常驻，仍可定位），fallback 视口右下。
+  // 通知清空后 history.length === 0，不渲染弹层（effect 也会把 open 复位）
+  const drawer = open && history.length > 0
     ? createPortal(
         <div
           ref={drawerRef}
           className="notice-drawer"
           role="region"
           aria-label={t("notice.title")}
-          style={{
-            position: "fixed",
-            right: 12,
-            bottom: 40,
-            zIndex: 1030,
-            width: "min(46vw, 480px)",
-            maxWidth: "calc(100vw - 24px)",
-            maxHeight: `${NOTICE_DRAWER_MAX_HEIGHT_RATIO * 100}vh`,
-            display: "flex",
-            flexDirection: "column",
-            background: "var(--panel-glass)",
-            backdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
-            WebkitBackdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
-            border: "1px solid var(--border)",
-            borderRadius: "10px 10px 0 0",
-            borderBottom: "none",
-            boxShadow: "0 -8px 30px rgba(0,0,0,0.35)",
-            overflow: "hidden",
-            animation: "notice-drawer-in 0.15s ease-out both",
-            transformOrigin: "bottom right",
-          }}
+          style={(() => {
+            const pillRect = pillRef.current?.getBoundingClientRect();
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const right = pillRect ? Math.max(8, vw - pillRect.right) : 12;
+            // 弹层底部对齐 widget 栏顶部（pill 所在行上方）：pill 顶再上移一点（widget 栏 padding），
+            // 弹层从 widget 栏上方展开，不遮住 widget。
+            const bottom = pillRect ? Math.max(8, vh - pillRect.top + 8) : 40;
+            return {
+              position: "fixed" as const,
+              right,
+              bottom,
+              zIndex: 1030,
+              width: `min(46vw, 480px)`,
+              maxWidth: "calc(100vw - 24px)",
+              maxHeight: `${NOTICE_DRAWER_MAX_HEIGHT_RATIO * 100}vh`,
+              display: "flex" as const,
+              flexDirection: "column" as const,
+              background: "var(--panel-glass)",
+              backdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
+              WebkitBackdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
+              border: "1px solid var(--border)",
+              borderRadius: "10px 10px 0 0",
+              borderBottom: "none",
+              boxShadow: "0 -8px 30px rgba(0,0,0,0.35)",
+              overflow: "hidden",
+              animation: "notice-drawer-in 0.15s ease-out both",
+              transformOrigin: "bottom right",
+            };
+          })()}
         >
           {/* 弹层头：标题 + 收起 */}
           <div

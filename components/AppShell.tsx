@@ -16,6 +16,8 @@ import { PluginsConfig } from "./PluginsConfig";
 import { McpConfigPanel } from "./McpConfigPanel";
 // ssr:false — xterm.js touches browser globals at import time.
 const TerminalPanel = dynamic(() => import("./TerminalPanel").then((m) => m.TerminalPanel), { ssr: false });
+// ssr:false — tldraw 依赖浏览器环境，仅进入看板模式时下载（~1MB）。
+const SessionCanvas = dynamic(() => import("./canvas/SessionCanvas").then((m) => m.SessionCanvas), { ssr: false });
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { SidebarGlobalSearch } from "./SidebarGlobalSearch";
@@ -169,12 +171,22 @@ export function AppShell() {
   }, [playDoneSound, soundEnabledRef]);
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
+  // 看板模式：activeBoardId 非空时主区域替换为画布（含系统看板 __running__）。
+  // 初始值从 URL ?board= 恢复，刷新后保持看板选中。
+  const [activeBoardId, setActiveBoardId] = useState<string | null>(() => initialNavigation.boardId);
   const handleRunningSessionIdsChange = useCallback((ids: Set<string>) => {
     setRunningSessionIds((previous) => {
       if (previous.size === ids.size && [...ids].every((id) => previous.has(id))) return previous;
       return ids;
     });
   }, []);
+  // 进入/退出看板模式：打开看板时清掉当前会话选择（主区域被画布替换），
+  // 并把看板 id 写入 URL（?board=），刷新后恢复看板选中。
+  const handleOpenBoard = useCallback((boardId: string) => {
+    setActiveBoardId(boardId);
+    setSelectedSession(null);
+    router.replace(`?board=${encodeURIComponent(boardId)}`, { scroll: false });
+  }, [router]);
   // The temporary id distinguishes consecutive fresh composers in one cwd.
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
   const [newSessionDraftId, setNewSessionDraftId] = useState("initial");
@@ -554,6 +566,16 @@ export function AppShell() {
     setTerminalOpen((open) => origin === terminalOrigin ? !open : true);
   }, [terminalOrigin]);
 
+  // 看板工作台内终端按钮：嵌卡片内无法直接拿 AppShell 的 toggleTerminal，走全局事件桥接。
+  useEffect(() => {
+    const onBoardTerminalToggle = (e: Event) => {
+      const detail = (e as CustomEvent<{ origin: "top" | "bottombar" }>).detail;
+      toggleTerminal(detail?.origin ?? "bottombar");
+    };
+    window.addEventListener("pi-web:board-terminal-toggle", onBoardTerminalToggle);
+    return () => window.removeEventListener("pi-web:board-terminal-toggle", onBoardTerminalToggle);
+  }, [toggleTerminal]);
+
   // Close active top panel (session stats / language / system / branches)
   // on outside click or Escape.
   useEffect(() => {
@@ -874,6 +896,7 @@ export function AppShell() {
     }
     setNewSessionCwd(null);
     setSelectedSession(session);
+    setActiveBoardId(null); // 会话与看板同级切换：点会话退出看板模式
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
     setSystemPromptLoading(false);
@@ -913,6 +936,7 @@ export function AppShell() {
     setSystemPrompt(null);
     setSystemPromptLoading(false);
     setActiveTopPanel(null);
+    setActiveBoardId(null); // 新建会话与看板同级切换：点新建退出看板模式进入新建聊天
     if (isMobile) setSidebarOpen(false);
     router.replace("/", { scroll: false });
   }, [invalidateWorkspaceRestore, router, isMobile]);
@@ -1247,6 +1271,9 @@ export function AppShell() {
         onBackgroundTaskDone={handleBackgroundTaskDone}
         onRunningSessionIdsChange={handleRunningSessionIdsChange}
         onNewSessionFromTask={handleNewSessionFromTask}
+        onOpenBoard={handleOpenBoard}
+        activeBoardId={activeBoardId}
+        runningBoardCount={runningSessionIds.size}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
@@ -2994,7 +3021,16 @@ export function AppShell() {
 
         {/* Chat content */}
         <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-          {showChat ? (
+          {activeBoardId ? (
+            <SessionCanvas
+              key={activeBoardId}
+              boardId={activeBoardId}
+              projectKey={selectedSession ? (selectedSession.projectKey ?? workspaceKeyOf(selectedSession)) : undefined}
+              onExit={() => setActiveBoardId(null)}
+              onOpenSession={handleSelectSession}
+              onRunningSessionIdsChange={handleRunningSessionIdsChange}
+            />
+          ) : showChat ? (
             <ChatWindow
               key={sessionKey}
               session={selectedSession}

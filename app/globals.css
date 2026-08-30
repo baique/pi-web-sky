@@ -104,6 +104,12 @@
   --file-panel-chrome: color-mix(in srgb, var(--text) 5%, transparent);
   --file-panel-gutter: color-mix(in srgb, var(--text) 3%, transparent);
   --file-panel-paper: color-mix(in srgb, var(--bg) 60%, transparent);
+  /* 看板玻璃（SessionCanvas）：
+     --board-card-glass  看板会话卡磨砂玻璃（略低于消息气泡的磨砂程度：alpha 比气泡 0.44 略实，
+                          blur 比气泡 18px 略低）
+     --board-blur        卡片共用模糊半径 */
+  --board-card-glass: rgba(250, 250, 251, 0.55);
+  --board-blur: 12px;
   /* Terminal body is transparent — the pane uses the message-bubble glass
      (--bubble-alpha / --glass-blur-bubble sliders) as its backdrop. */
   --glass-blur: 8px;
@@ -195,6 +201,7 @@ html.dark {
   --bg-subtle: rgba(255,255,255,0.05);
 
   --app-bg-scrim: rgba(0, 0, 0, 0.06);
+  --board-card-glass: rgba(34, 34, 37, 0.55);
   --glass-bg: rgba(30, 30, 33, 0.65);
   --glass-bg-strong: rgba(34, 34, 37, 0.78);
   --glass-saturate: 140%;
@@ -2112,3 +2119,31 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
    - stuck 吸附中：上方直角贴合顶边、下边圆角成胶囊，磨砂柔和、更透。
    关键：两态不改变文档流高度（padding/高度恒定）——
    否则头部占位变化会反哺"超长"判定，在高度恰为一屏时形成反馈环闪烁。 */
+
+/* === tldraw 看板画布（SessionCanvas）===
+   tldraw 编辑器免费可用，仅隐藏商业许可水印（不影响任何功能）。 */
+.tl-watermark_SEE-LICENSE { display: none !important; }
+
+/* === tldraw 画布玻璃化（SessionCanvas）===
+   画布背景透明，露出页面背景（壁纸/纯色），与 AI 消息气泡玻璃观感一致。
+   卡片/工具栏各自用 --panel-glass / --frame-glass，不在此重复叠 backdrop-filter。 */
+.tl-canvas { background: transparent !important; }
+.tl-container { background: transparent !important; }
+/* 最内层画布背景：tldraw 默认涂 --tl-color-background（不透明白），必须清掉才能透出壁纸 */
+.tl-background { background: transparent !important; }
+
+/* === 看板玻璃 token（SessionCanvas）===
+   卡片磨砂玻璃略低于消息气泡：--board-card-glass（alpha 0.55 vs 气泡 0.44）+
+   --board-blur（12px vs 气泡 18px）。看板底完全透明（透出壁纸），玻璃只挂卡片。
+   用户开「减弱透明」时卡片仍保持磨砂玻璃（不降级）——看板是内容区，用户明确要
+   玻璃观感；与消息气泡同策略，不随系统 reduce 归零。 */
+@media (prefers-reduced-transparency: reduce) {
+  :root, html.dark {
+    --board-card-glass: rgba(250, 250, 251, 0.55);
+    --board-blur: 12px;
+  }
+  html.dark {
+    --board-card-glass: rgba(34, 34, 37, 0.55);
+  }
+}
+/* 网格保持淡显（可选），但背景绝不能有实色 */

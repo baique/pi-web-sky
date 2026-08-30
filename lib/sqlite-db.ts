@@ -88,7 +88,7 @@ export function initSchema(db: DatabaseSync): void {
  * 老库打开时自动按序补齐缺失的迁移（每个迁移一个事务，成功后推进版本号），
  * 新库建表后从 v0 一路迁到 SCHEMA_VERSION。重复打开不再执行已完成的迁移。
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 4;
 
 interface Migration {
   version: number;
@@ -112,6 +112,26 @@ const MIGRATIONS: Migration[] = [
     name: "tasks.sort_order",
     statements: [
       "ALTER TABLE tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;",
+    ],
+  },
+  {
+    version: 3,
+    name: "session boards",
+    statements: [
+      "CREATE TABLE IF NOT EXISTS boards (\n  id          TEXT PRIMARY KEY,\n  project_key TEXT NOT NULL,\n  name        TEXT NOT NULL,\n  is_system   INTEGER NOT NULL DEFAULT 0,\n  created     INTEGER NOT NULL,\n  updated     INTEGER NOT NULL\n);",
+      "CREATE INDEX IF NOT EXISTS idx_boards_project ON boards(project_key);",
+      "CREATE TABLE IF NOT EXISTS board_nodes (\n  id         TEXT PRIMARY KEY,\n  board_id   TEXT NOT NULL,\n  kind       TEXT NOT NULL,\n  ref_id     TEXT,\n  x          REAL NOT NULL,\n  y          REAL NOT NULL,\n  w          REAL NOT NULL DEFAULT 0,\n  h          REAL NOT NULL DEFAULT 0,\n  expanded   INTEGER NOT NULL DEFAULT 0,\n  props      TEXT NOT NULL DEFAULT '{}',\n  created    INTEGER NOT NULL,\n  updated    INTEGER NOT NULL\n);",
+      "CREATE INDEX IF NOT EXISTS idx_board_nodes_board ON board_nodes(board_id);",
+      "CREATE TABLE IF NOT EXISTS board_edges (\n  id       TEXT PRIMARY KEY,\n  board_id TEXT NOT NULL,\n  from_id  TEXT NOT NULL,\n  to_id    TEXT NOT NULL,\n  label    TEXT,\n  color    TEXT,\n  dashed   INTEGER NOT NULL DEFAULT 0,\n  created  INTEGER NOT NULL,\n  updated  INTEGER NOT NULL\n);",
+      "CREATE INDEX IF NOT EXISTS idx_board_edges_board ON board_edges(board_id);",
+      "CREATE TABLE IF NOT EXISTS board_view (\n  board_id   TEXT PRIMARY KEY,\n  camera_x   REAL NOT NULL DEFAULT 0,\n  camera_y   REAL NOT NULL DEFAULT 0,\n  camera_z   REAL NOT NULL DEFAULT 1,\n  updated    INTEGER NOT NULL\n);",
+    ],
+  },
+  {
+    version: 4,
+    name: "boards.sort_order",
+    statements: [
+      "ALTER TABLE boards ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;",
     ],
   },
 ];

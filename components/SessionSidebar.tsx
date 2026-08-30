@@ -12,6 +12,7 @@ import { dropdownDirection } from "@/lib/dropdown-direction";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { SessionTabs, type SidebarTab } from "./SessionTabs";
+import { BoardSection } from "./canvas/BoardSection";
 import { TaskArea, TASK_SESSION_PREVIEW_LIMIT, type TaskGroupUi } from "./TaskArea";
 
 declare global {
@@ -109,6 +110,12 @@ interface Props {
    *  projectKey lets the parent attach the new session to the task reliably
    *  even before the session has a real id / project identity (transient). */
   onNewSessionFromTask?: (taskId: string, projectKey?: string) => void;
+  /** 进入看板模式（主区域替换为画布） */
+  onOpenBoard?: (boardId: string) => void;
+  /** 当前激活看板 id（看板模式下高亮） */
+  activeBoardId?: string | null;
+  /** 全局运行中会话数（系统看板徽标） */
+  runningBoardCount?: number;
 }
 
 interface WorktreeEntry {
@@ -339,7 +346,7 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, activeBoardId, runningBoardCount = 0 }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -372,6 +379,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // 若在 useState 初始化时读取，服务端默认值与客户端持久化值不一致会触发
   // hydration mismatch；用户偏好由下方 mount effect 统一恢复。
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("sessions");
+  const [boardsCollapsed, setBoardsCollapsed] = useState(false);
   const [tasksCollapsed, setTasksCollapsed] = useState(false);
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
@@ -390,6 +398,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // 此时 hydration 已完成，setState 走正常客户端更新，不再产生不匹配。
   useEffect(() => {
     setSidebarTab(loadSidebarTab());
+    setBoardsCollapsed(loadCollapsedFlag(BOARDS_COLLAPSED_KEY));
     setTasksCollapsed(loadCollapsedFlag(TASKS_COLLAPSED_KEY));
     setChatCollapsed(loadCollapsedFlag(TEMP_COLLAPSED_KEY));
     setUnreadSessionIds(loadUnreadSessionIds());
@@ -485,7 +494,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         const data = await res.json() as { runningSessionIds?: string[] };
         if (stopped || controller !== current) return;
         runningPollAuthoritativeRef.current = true;
-        setRunningSessionIds(new Set(data.runningSessionIds ?? []));
+        // 相等性判断：内容没变化就不 setState（否则每 2.5s 轮询都新建 Set 触发重渲染，
+        // 运行中会话条目在拖拽中被重挂 → 浏览器取消 drag）。
+        setRunningSessionIds((prev) => {
+          const next = new Set(data.runningSessionIds ?? []);
+          if (prev.size === next.size && [...prev].every((id) => next.has(id))) return prev;
+          return next;
+        });
       } catch {
         // Keep the last known state; the next visible-tab poll retries.
       } finally {
@@ -1868,8 +1883,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </div>
           ) : (
             <>
-              {/* Tasks section — pure flow: height follows content (no cap),
-                  so a tall task list simply squeezes the chat section below. */}
+              {/* Boards section — sits above tasks, style matches task rows */}
+              <BoardSection
+                projectKey={selectedProject?.key ?? null}
+                runningCount={runningBoardCount}
+                activeBoardId={activeBoardId ?? null}
+                collapsed={boardsCollapsed}
+                onToggleCollapsed={() => { const next = !boardsCollapsed; setBoardsCollapsed(next); saveCollapsedFlag(BOARDS_COLLAPSED_KEY, next); }}
+                onOpenBoard={(id) => onOpenBoard?.(id)}
+              />
+
+              {/* Tasks section — fluid up to a cap (GPT-style), scrolls inside
+                  when it exceeds the cap so the chat section always keeps room. */}
               <div
                 style={{
                   display: "flex",
@@ -2517,7 +2542,7 @@ function SessionItem({
       onContextMenu={confirmDelete || renaming ? undefined : handleContextMenu}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
-      draggable={!session.transient && !renaming && !confirmDelete}
+      draggable={!renaming && !confirmDelete}
       onDragStart={(e) => {
         setMoreOpen(false);
         e.dataTransfer.setData("text/session-id", session.id);
@@ -2864,6 +2889,7 @@ function SessionItem({
 // ============================================================================
 
 const SIDEBAR_TAB_KEY = "pi-sidebar-tab";
+const BOARDS_COLLAPSED_KEY = "pi-sidebar-boards-collapsed";
 const TASKS_COLLAPSED_KEY = "pi-sidebar-tasks-collapsed";
 const TEMP_COLLAPSED_KEY = "pi-sidebar-chat-collapsed";
 
