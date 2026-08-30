@@ -156,7 +156,7 @@ export function BoardSection({
       setDropIndicator(null);
       return;
     }
-    const ids = boards.filter((b) => !b.isSystem).map((b) => b.id);
+    const ids = boards.filter((b) => !b.isSystem && b.taskId == null).map((b) => b.id);
     const from = ids.indexOf(fromId);
     const to = ids.indexOf(targetId);
     setDragBoard(null);
@@ -178,12 +178,14 @@ export function BoardSection({
     projectKey: "",
     name: "running",
     isSystem: true,
+    taskId: null,
     sortOrder: 0,
     created: 0,
     updated: 0,
     nodeCount: 0,
   };
-  const projectBoards = boards.filter((b) => !b.isSystem);
+  // 任务型看板不混进手动看板列表（任务行本身即入口）；仅展示手动看板。
+  const projectBoards = boards.filter((b) => !b.isSystem && b.taskId == null);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
