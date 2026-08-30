@@ -81,16 +81,15 @@ export function applyWallpaperCss(s: WallpaperSettings, hasImage: boolean): void
   el.setProperty("--glass-blur-bubble", `${Math.round(s.bubbleBlur)}px`);
   // scrim 透明度固定保持 0（透明度滑块暂注释，微调即对背景影响过大），
   // 只写磨砂强度。
-  // 关键：磨砂强度为 0 时把整个 backdrop-filter 置为 none——否则
-  // blur(0px) saturate(0.8) 中的 saturate 残留仍会对背景去饱和，
-  // 用户把磨砂调 0 时背景还“被影响”。
+  // scrim 磨砂只用 blur、不动饱和度——磨砂本质就是模糊，去饱和/增饱和
+  // 都会让壁纸颜色失真，且会受 --glass-saturate（浅 80% / 深 140%）的
+  // 主题差异影响。只 blur 则深浅色效果完全一致。
+  // 关键：磨砂强度为 0 时把整个 backdrop-filter 置为 none，背景原样。
   el.setProperty("--board-scrim-alpha", String(s.scrimAlpha / 100));
   el.setProperty("--board-scrim-blur", `${Math.round(s.scrimBlur)}px`);
   el.setProperty(
     "--board-scrim-filter",
-    s.scrimBlur > 0
-      ? `blur(${Math.round(s.scrimBlur)}px) saturate(var(--glass-saturate))`
-      : "none",
+    s.scrimBlur > 0 ? `blur(${Math.round(s.scrimBlur)}px)` : "none",
   );
   if (s.fill && !s.repeat && hasImage) {
     el.setProperty(

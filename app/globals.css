@@ -111,9 +111,9 @@
   --board-card-glass: rgba(250, 250, 251, 0.55);
   --board-blur: 12px;
   /* 看板画布 scrim（SessionCanvas）：画布内容层之下、壁纸之上的一层
-     “暗色承托 + 磨砂”底。完全照气泡定制模式：--board-scrim-alpha 透明度
-     （0–1，由右上角调节面板的「透明度」滑块驱动）+ --board-scrim-blur 磨砂
-     强度（px）。默认最透明（alpha 0）+ blur 2px，由用户自行加浓。 */
+     “暗色承托 + 磨砂”底。透明度固定 0（滑块暂注释），磨砂强度由
+     右上角调节面板的滑块驱动（--board-scrim-blur）。磨砂只用 blur、
+     不带 saturate——深浅色效果完全一致，默认 blur 2px，由用户自行加浓。 */
   --board-scrim-alpha: 0;
   --board-scrim-bg: rgba(0, 0, 0, var(--board-scrim-alpha));
   --board-scrim-blur: 2px;
