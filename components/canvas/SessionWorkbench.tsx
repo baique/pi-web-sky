@@ -88,6 +88,7 @@ export function SessionWorkbench({
   return (
     <div
       ref={rootRef}
+      className="board-workbench"
       style={containerStyle}
       // 工作台嵌在 tldraw 卡片内：阻止事件冒泡到画布。tldraw 画布在 pointerDown 上
       // preventDefault（会吞掉后续 click），导致终端/模型选择器/session/通知等无法弹出。

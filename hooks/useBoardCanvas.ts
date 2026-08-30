@@ -53,7 +53,15 @@ export function useBoardCanvas({
   const [board, setBoard] = useState<BoardInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [running, setRunning] = useState<RunningSnapshot | null>(null);
+  // 运行中快照：初值取模块级缓存（切换看板重挂时立即有上次数据，避免闪烁），
+  // 轮询更新后写回缓存。
+  const [running, setRunning] = useState<RunningSnapshot | null>(
+    () => (globalThis as { __piRunningSnapshot?: RunningSnapshot }).__piRunningSnapshot ?? null,
+  );
+  const setRunningCached = useCallback((data: RunningSnapshot) => {
+    (globalThis as { __piRunningSnapshot?: RunningSnapshot }).__piRunningSnapshot = data;
+    setRunning(data);
+  }, []);
   const editorRef = useRef<Editor | null>(null);
   const boardIdRef = useRef(boardId);
   boardIdRef.current = boardId;
@@ -99,7 +107,7 @@ export function useBoardCanvas({
         if (!res.ok) return;
         const data = (await res.json()) as RunningSnapshot;
         if (stopped) return;
-        setRunning(data);
+        setRunningCached(data);
       } catch {
         // keep last
       }

@@ -2098,6 +2098,32 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
   -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
 }
 
+/* ── 看板工作台（卡片展开态）底部 widget 条 ──
+   卡片内嵌的 ChatWindow 底栏：底部下边缘 +2px 留白 + 底部圆角，贴合卡片圆角 (14px)
+   视觉连续；widget 区强制不换行，超宽省略（tui 渲染区可被遮挡），右区（终端/额度/通知）
+   尽力保留。选择器限定在 .board-workbench 内，不影响普通聊天底栏。 */
+.board-workbench .bottom-band {
+  height: 36px;
+  border-radius: 0 0 12px 12px;
+  overflow: hidden;
+}
+/* widget 左区：不换行，超宽截断省略（tui 渲染区） */
+.board-workbench .extension-status-left {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+/* widget 右区：终端/额度/通知尽力保留，优先不换行、不压缩到消失 */
+.board-workbench .extension-status-right {
+  flex-shrink: 0;
+}
+/* 左区内容各自省略号，不挤压右区 */
+.board-workbench .extension-status-line,
+.board-workbench .extension-widget-triggers {
+  min-width: 0;
+  overflow: hidden;
+}
+
 /* 终端按钮：还原原始形态（shelf 左端项的扁平样式） */
 .terminal-bar-toggle {
   display: flex;

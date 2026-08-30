@@ -101,8 +101,8 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
     info: import("tldraw").TLResizeInfo<SessionCardShape>,
   ): Omit<TLShapePartial<SessionCardShape>, "id" | "type"> | undefined {
     const expanded = shape.props.expanded;
-    // 展开态最小宽 400（用户要求），高 500；收合态回到卡片默认下限
-    const minW = expanded ? 400 : CARD_W;
+    // 展开态最小宽 600（用户要求），高 500；收合态回到卡片默认下限
+    const minW = expanded ? 600 : CARD_W;
     const minH = expanded ? 500 : CARD_H;
     // resizeBox 处理左上角固定锚点（返回 x/y）+ 最小尺寸钳制，
     // 不手写 w/h（手写会丢锚点，拖拽时卡片会跑位）。
@@ -243,7 +243,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           </button>
         </div>
         {/* 工作台：嵌卡片内，随卡片 resize 自然跟随；四周留 padding 保证拖拽/调整手柄可触 */}
-        <div style={{ flex: 1, minHeight: 0, padding: "2px 3px 4px", pointerEvents: "all" }}>
+        <div style={{ flex: 1, minHeight: 0, padding: "2px 3px 6px", pointerEvents: "all" }}>
           <SessionWorkbench sessionId={sessionId} />
         </div>
       </HTMLContainer>
