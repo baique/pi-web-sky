@@ -1,4 +1,4 @@
-import { BaseBoxShapeUtil, HTMLContainer, T, useEditor } from "tldraw";
+import { BaseBoxShapeUtil, HTMLContainer, T } from "tldraw";
 import type { TLBaseShape, TLShapePartial } from "tldraw";
 import { SessionWorkbench } from "./SessionWorkbench";
 
@@ -133,7 +133,10 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           overflow: "hidden",
           borderRadius: 14,
           border: `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
-          background: "transparent",
+          // 卡片磨砂玻璃：略低于消息气泡（alpha 0.55 vs 气泡 0.44，blur 12px vs 气泡 18px）
+          background: "var(--board-card-glass)",
+          backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+          WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
           boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
           opacity: stale ? 0.55 : 1,
           pointerEvents: "all",
@@ -186,7 +189,10 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         overflow: "hidden",
         borderRadius: 14,
         border: `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
-        background: "transparent",
+        // 卡片磨砂玻璃：略低于消息气泡（alpha 0.55 vs 气泡 0.44，blur 12px vs 气泡 18px）
+        background: "var(--board-card-glass)",
+        backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+        WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
         boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
         opacity: stale ? 0.55 : 1,
         pointerEvents: "all",

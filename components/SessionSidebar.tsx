@@ -494,7 +494,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         const data = await res.json() as { runningSessionIds?: string[] };
         if (stopped || controller !== current) return;
         runningPollAuthoritativeRef.current = true;
-        setRunningSessionIds(new Set(data.runningSessionIds ?? []));
+        // 相等性判断：内容没变化就不 setState（否则每 2.5s 轮询都新建 Set 触发重渲染，
+        // 运行中会话条目在拖拽中被重挂 → 浏览器取消 drag）。
+        setRunningSessionIds((prev) => {
+          const next = new Set(data.runningSessionIds ?? []);
+          if (prev.size === next.size && [...prev].every((id) => next.has(id))) return prev;
+          return next;
+        });
       } catch {
         // Keep the last known state; the next visible-tab poll retries.
       } finally {
@@ -2537,7 +2543,7 @@ function SessionItem({
       onContextMenu={confirmDelete || renaming ? undefined : handleContextMenu}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
-      draggable={!session.transient && !renaming && !confirmDelete}
+      draggable={!renaming && !confirmDelete}
       onDragStart={(e) => {
         setMoreOpen(false);
         e.dataTransfer.setData("text/session-id", session.id);

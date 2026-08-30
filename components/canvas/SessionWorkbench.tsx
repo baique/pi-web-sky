@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChatWindow } from "@/components/ChatWindow";
 import { useI18n } from "@/hooks/useI18n";
 import { useAudio } from "@/hooks/useAudio";
+import { dispatchBoardTerminalToggle } from "@/lib/board-events";
 import type { SessionInfo } from "@/lib/types";
 
 /**
@@ -21,6 +22,19 @@ export function SessionWorkbench({
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatKey, setChatKey] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // 原生 wheel 捕获拦截：tldraw 的 usePassThroughWheelEvents 用原生 addEventListener 挂在
+  // container 上，React onWheel stopPropagation 拦不住它。这里捕获阶段 stopPropagation，
+  // 保证工作台内的滚动不传到 tldraw container（否则消息区未可滚动时被劫持成画布缩放/平移）。
+  // 不 preventDefault —— 让目标元素正常滚动。pointer 事件由下方 React 冒泡拦截覆盖，无需重复。
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const onWheelCapture = (e: WheelEvent) => e.stopPropagation();
+    el.addEventListener("wheel", onWheelCapture, { capture: true });
+    return () => el.removeEventListener("wheel", onWheelCapture, { capture: true });
+  }, []);
 
   // 拉取会话数据（cwd/projectKey 等 ChatWindow 需要）
   useEffect(() => {
@@ -68,7 +82,18 @@ export function SessionWorkbench({
   }
 
   return (
-    <div style={containerStyle}>
+    <div
+      ref={rootRef}
+      style={containerStyle}
+      // 工作台嵌在 tldraw 卡片内：阻止事件冒泡到画布。tldraw 画布在 pointerDown 上
+      // preventDefault（会吞掉后续 click），导致终端/模型选择器/session/通知等无法弹出。
+      // 冒泡阶段拦截：事件先正常到达目标（内部按钮可点击），再阻止冒泡到画布。
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerUp={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
+    >
       <ChatWindow
         key={chatKey}
         session={session}
@@ -78,6 +103,8 @@ export function SessionWorkbench({
         onSoundToggle={onSoundToggle}
         playDoneSound={playDoneSound}
         unlockAudio={unlockAudio}
+        // 工作台内终端按钮：触发全局事件 → AppShell 打开底部终端面板
+        onToggleTerminal={() => dispatchBoardTerminalToggle("bottombar")}
       />
     </div>
   );

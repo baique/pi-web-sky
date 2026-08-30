@@ -1,35 +1,53 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect } from "react";
 import dynamic from "next/dynamic";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
-import { useBoardCanvas, CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
-import type { BoardInfo } from "@/lib/board-types";
-import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
-import { BoardToolbar } from "./BoardToolbar";
+import { useBoardCanvas } from "@/hooks/useBoardCanvas";
 import type { SessionInfo } from "@/lib/types";
 
 // ssr:false — tldraw 依赖浏览器环境，仅进入看板模式时下载（~1MB）。
 const CanvasStage = dynamic(() => import("./CanvasStage").then((m) => m.CanvasStage), {
   ssr: false,
   loading: () => (
-    <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
-      Loading canvas…
+    <div
+      style={{
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "var(--text-muted)",
+        fontSize: 13,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span
+          aria-hidden
+          style={{
+            width: 14,
+            height: 14,
+            borderRadius: "50%",
+            border: "2px solid color-mix(in srgb, var(--text) 15%, transparent)",
+            borderTopColor: "var(--accent)",
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
+        Loading canvas…
+      </div>
     </div>
   ),
 });
 
 /**
  * 看板模式容器：主区域整体替换为画布（侧栏保留）。
- * - 看板栏（返回 / 看板名下拉 / 运行徽标）+ 工具行（添加会话 / 连线 / 清理失效）
- * - 画布（tldraw）：无限画布 / 缩放 / 平移 / 拖拽 / 框选
- * - 展开工作台浮层（portal，M3）
+ * - 无顶部栏：切换看板走侧栏 BoardList；拖入会话、连线走画布自身交互
+ * - 画布（tldraw）：无限画布 / 缩放 / 平移 / 拖拽 / 框选；底部工具条含清理失效按钮
+ * - 会话卡：双击展开工作台（复用 ChatWindow，嵌卡片内）
  */
 export function SessionCanvas({
   boardId,
   projectKey,
-  onExit,
   onOpenSession,
   onRunningSessionIdsChange,
 }: {
@@ -42,61 +60,56 @@ export function SessionCanvas({
   const { t } = useI18n();
   const { isDark } = useTheme();
   const board = useBoardCanvas({ boardId, projectKey, onOpenSession: (sid) => onOpenSession({ id: sid } as SessionInfo, false) });
-  const [boards, setBoards] = useState<BoardInfo[]>([]);
-  const [boardListOpen, setBoardListOpen] = useState(false);
-
-  const loadBoards = useCallback(async () => {
-    try {
-      const params = new URLSearchParams();
-      if (projectKey) params.set("projectKey", projectKey);
-      const res = await fetch(`/api/boards?${params.toString()}`, { cache: "no-store" });
-      if (res.ok) {
-        const data = (await res.json()) as { boards: BoardInfo[] };
-        setBoards(data.boards);
-      }
-    } catch {
-      // ignore
-    }
-  }, [projectKey]);
-
-  useEffect(() => {
-    void loadBoards();
-  }, [loadBoards]);
 
   // 运行中集合上报给 AppShell（顶部会话运行状态保持一致）
   useEffect(() => {
     onRunningSessionIdsChange?.(new Set(board.running?.runningSessionIds ?? []));
   }, [board.running, onRunningSessionIdsChange]);
 
-  const handleSelectBoard = useCallback((id: string) => {
-    setBoardListOpen(false);
-    if (id !== boardId) onExit();
-  }, [boardId, onExit]);
-
   return (
-    // 看板模式容器：父层做与 AI 消息气泡完全相同的玻璃（--assistant-card-glass + 气泡 blur），
-    // 子层（CanvasStage/工具行/画布）全部透明，玻璃只挂这一层，避免嵌套 backdrop-filter 重复模糊。
+    // 看板模式容器：完全透明，壁纸/页面背景直接透出。玻璃只挂在卡片上（--board-card-glass），
+    // 不整块涂气泡白玻璃——看板底与壁纸不冲突。
     <div
       style={{
         height: "100%",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        background: "var(--assistant-card-glass)",
-        backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-        WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+        position: "relative",
       }}
     >
-      <BoardToolbar
-        board={board.board}
-        boards={boards}
-        runningCount={board.runningCount}
-        boardListOpen={boardListOpen}
-        onToggleBoardList={() => setBoardListOpen((v) => !v)}
-        onSelectBoard={handleSelectBoard}
-        onExit={onExit}
-        projectKey={projectKey ?? null}
-      />
+      {/* 顶部悬浮按钮组：清理失效 */}
+      <div
+        style={{
+          position: "absolute",
+          top: 10,
+          right: 10,
+          zIndex: 30,
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          padding: 4,
+          borderRadius: 10,
+          background: "var(--board-card-glass)",
+          backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+          WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+          border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+          boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => void board.cleanupInvalid()}
+          title={t("boards.cleanupDesc")}
+          style={floatingIconBtn}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 6h18" />
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          </svg>
+        </button>
+      </div>
       <CanvasStage
         board={board}
         isDark={isDark}
@@ -104,3 +117,18 @@ export function SessionCanvas({
     </div>
   );
 }
+
+const floatingIconBtn: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: 32,
+  height: 32,
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  color: "var(--text-muted)",
+  cursor: "pointer",
+  borderRadius: 7,
+  transition: "background 0.12s, color 0.12s",
+};

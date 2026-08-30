@@ -2,7 +2,7 @@
 
 import "tldraw/tldraw.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Tldraw, defaultShapeUtils, type TLComponents } from "tldraw";
+import { Tldraw, DefaultToolbar, DefaultToolbarContent, defaultShapeUtils, type TLComponents } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
 import { useI18n } from "@/hooks/useI18n";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
@@ -75,73 +75,16 @@ export function CanvasStage({
     KeyboardShortcutsDialog: null,
     DebugPanel: null,
     DebugMenu: null,
+    // 底部工具条：保留 tldraw 默认工具（清理失效已移入顶部悬浮按钮组）
+    Toolbar: () => (
+      <DefaultToolbar>
+        <DefaultToolbarContent />
+      </DefaultToolbar>
+    ),
   }), []);
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
-      {/* 工具行（chrome 材质，同看板栏第二行） */}
-      <div
-        style={{
-          position: "relative",
-          zIndex: 20,
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "6px 12px",
-          borderBottom: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
-          // 工具行在父层玻璃之上，自身透明（玻璃已由 SessionCanvas 父层提供）
-          background: "transparent",
-        }}
-      >
-        {/* 添加会话（从会话区拖拽放入；提示文案） */}
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 5,
-            padding: "4px 10px",
-            border: "1px dashed color-mix(in srgb, var(--border) 55%, transparent)",
-            background: "var(--glass-bg-input)",
-            color: "var(--text-muted)",
-            fontSize: 12,
-            borderRadius: 7,
-            whiteSpace: "nowrap",
-          }}
-        >
-          <span style={{ fontSize: 13, lineHeight: 1 }}>＋</span>
-          <span>{t("boards.dragToAdd")}</span>
-        </span>
-
-        {/* 自动布局（本期置灰占位） */}
-        <button type="button" disabled title={t("boards.autoLayoutDesc")} style={{ ...toolBtnStyle(undefined, false), opacity: 0.4, cursor: "default" }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="3" y="3" width="7" height="7" rx="1" />
-            <rect x="14" y="3" width="7" height="7" rx="1" />
-            <rect x="3" y="14" width="7" height="7" rx="1" />
-            <rect x="14" y="14" width="7" height="7" rx="1" />
-          </svg>
-          <span>{t("boards.autoLayout")}</span>
-        </button>
-
-        <div style={{ flex: 1 }} />
-
-        {/* 清理失效节点 */}
-        <button
-          type="button"
-          onClick={() => void board.cleanupInvalid()}
-          title={t("boards.cleanupDesc")}
-          style={toolBtnStyle(undefined, false)}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 6h18" />
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-          </svg>
-          <span>{t("boards.cleanup")}</span>
-        </button>
-      </div>
-
       {/* tldraw 舞台（接收会话拖入）。子层：背景透明，玻璃由父层 SessionCanvas 统一提供。 */}
       <div
         ref={stageRef}
@@ -191,19 +134,3 @@ export function CanvasStage({
   );
 }
 
-
-function toolBtnStyle(activeColor?: string, active?: boolean): React.CSSProperties {
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 5,
-    padding: "4px 10px",
-    border: "1px solid color-mix(in srgb, var(--border) 50%, transparent)",
-    background: active ? "var(--side-active)" : "var(--glass-bg-input)",
-    color: activeColor ?? "var(--text)",
-    cursor: "pointer",
-    fontSize: 12,
-    borderRadius: 7,
-    whiteSpace: "nowrap",
-  };
-}

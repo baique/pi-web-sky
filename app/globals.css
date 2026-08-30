@@ -95,6 +95,12 @@
   --file-panel-chrome: color-mix(in srgb, var(--text) 5%, transparent);
   --file-panel-gutter: color-mix(in srgb, var(--text) 3%, transparent);
   --file-panel-paper: color-mix(in srgb, var(--bg) 60%, transparent);
+  /* 看板玻璃（SessionCanvas）：
+     --board-card-glass  看板会话卡磨砂玻璃（略低于消息气泡的磨砂程度：alpha 比气泡 0.44 略实，
+                          blur 比气泡 18px 略低）
+     --board-blur        卡片共用模糊半径 */
+  --board-card-glass: rgba(250, 250, 251, 0.55);
+  --board-blur: 12px;
   /* Terminal body is transparent — the pane uses the message-bubble glass
      (--bubble-alpha / --glass-blur-bubble sliders) as its backdrop. */
   --glass-blur: 8px;
@@ -186,6 +192,7 @@ html.dark {
   --bg-subtle: rgba(255,255,255,0.05);
 
   --app-bg-scrim: rgba(0, 0, 0, 0.06);
+  --board-card-glass: rgba(34, 34, 37, 0.55);
   --glass-bg: rgba(30, 30, 33, 0.65);
   --glass-bg-strong: rgba(34, 34, 37, 0.78);
   --glass-saturate: 140%;
@@ -2091,24 +2098,17 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
 .tl-background { background: transparent !important; }
 
 /* === 看板玻璃 token（SessionCanvas）===
-   看板是内容密集区（spec §1.5「内容密集处用高 alpha」）：默认复用 --panel-glass；
-   用户开「减弱透明」时全局玻璃降级成纯白 var(--bg) + blur 0，看板作为承载画布的
-   内容区不平铺纯白（否则画布透明化失去意义），而是降级为高 alpha 半透明 + 保留 blur，
-   既尊重无障碍（近实心可读）又保留磨砂观感。 */
-:root {
-  --board-glass: var(--panel-glass);
-  --board-glass-toolbar: var(--frame-glass);
-  --board-blur: var(--glass-blur-panel);
-}
+   卡片磨砂玻璃略低于消息气泡：--board-card-glass（alpha 0.55 vs 气泡 0.44）+
+   --board-blur（12px vs 气泡 18px）。看板底完全透明（透出壁纸），玻璃只挂卡片。
+   用户开「减弱透明」时卡片仍保持磨砂玻璃（不降级）——看板是内容区，用户明确要
+   玻璃观感；与消息气泡同策略，不随系统 reduce 归零。 */
 @media (prefers-reduced-transparency: reduce) {
   :root, html.dark {
-    --board-glass: rgba(250, 250, 251, 0.9);
-    --board-glass-toolbar: rgba(250, 250, 251, 0.88);
-    --board-blur: 10px;
+    --board-card-glass: rgba(250, 250, 251, 0.55);
+    --board-blur: 12px;
   }
   html.dark {
-    --board-glass: rgba(34, 34, 37, 0.9);
-    --board-glass-toolbar: rgba(34, 34, 37, 0.88);
+    --board-card-glass: rgba(34, 34, 37, 0.55);
   }
 }
 /* 网格保持淡显（可选），但背景绝不能有实色 */
