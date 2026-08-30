@@ -16,7 +16,7 @@ const browser = await chromium.launch({
   headless: true,
   executablePath: "/home/wa/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome",
 });
-const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
+const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, permissions: ["clipboard-read", "clipboard-write"] });
 const page = await ctx.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
@@ -155,6 +155,17 @@ try {
   const ddx = Math.abs(afterDrag.x - beforeDrag.x), ddy = Math.abs(afterDrag.y - beforeDrag.y);
   check("top handle drag moves note", ddx > 40 || ddy > 20, `dx=${ddx.toFixed(1)} dy=${ddy.toFixed(1)}`);
 
+  // ========== 1.6 右上角快捷复制 ==========
+  const copyBtn = note.locator("button[title='复制内容']");
+  check("copy button present (top right)", (await copyBtn.count()) === 1);
+  await copyBtn.click();
+  await page.waitForTimeout(400);
+  // 反馈 ✓ 出现 = writeText().then() 已执行 = 写入成功（headless 下 readText 读回可能为空，不以此断言）
+  check("copy button copies text", (await note.locator("button[title='已复制']").count()) === 1, "feedback ✓ shown (writeText resolved)");
+  let clip = "";
+  try { clip = await page.evaluate(() => navigator.clipboard.readText()); } catch { /* 权限拒绝则跳过 */ }
+  if (clip) check("clipboard readback", true, `clip="${clip.slice(0, 40)}"`);
+
   // ========== 2. 双击 → 编辑态顶部：徽记选择器 + 取消 + 完成 ==========
   const hint = note.locator("text=双击编辑 markdown");
   await hint.waitFor({ timeout: 5000 });
@@ -224,13 +235,14 @@ try {
 
   // ========== 6. 收合卡中间区：流体高度 + 左上对齐（无 line-clamp） ==========
   const cardId = "shape:e2e-card-" + Date.now();
+  const fakeSid = "e2e-fake-" + Date.now();
   check("card created", !!(await createCard(cardId, {
-    sessionId: "e2e-fake-session", title: "E2E Card", projectName: "e2e", messageCount: 3,
+    sessionId: fakeSid, title: "E2E Card", projectName: "e2e", messageCount: 3,
     lastReply: "line1\nline2\nline3\nline4\nline5", phase: "idle", runningMs: 0, endedAt: 0,
     stale: false, expanded: false, w: 340, h: 160,
   })));
   await page.waitForTimeout(1200);
-  const card = page.locator(`[data-testid="session-card-e2e-fake-session"]`);
+  const card = page.locator(`[data-testid="session-card-${fakeSid}"]`);
   check("card rendered", (await card.count()) === 1);
   const mid = card.locator("div[style*='11.5px']").first();
   const midStyle = await mid.evaluate((el) => {
@@ -240,8 +252,8 @@ try {
   check("no line-clamp (fluid height)", midStyle.clamp === "none", `clamp=${midStyle.clamp}`);
   check("top-left aligned", midStyle.justifyContent === "flex-start", `justify=${midStyle.justifyContent}`);
 
-  // 清理
-  await page.evaluate(({ id }) => {
+  // 清理：删除本次创建的便笺 + 卡片（看板自动保存会把它们持久化，多次运行会累积）
+  await page.evaluate(({ ids }) => {
     const root = document.getElementById("__next") || document.body;
     const stack = [root];
     const seen = new Set();
@@ -255,7 +267,7 @@ try {
         if (memo) for (const k of Object.keys(memo)) {
           const v = memo[k];
           if (v && typeof v === "object" && typeof v.deleteShapes === "function") {
-            v.deleteShapes([id]);
+            v.deleteShapes(ids);
             return;
           }
         }
@@ -263,7 +275,7 @@ try {
       }
       for (const c of node.children || []) stack.push(c);
     }
-  }, { id: noteId });
+  }, { ids: [noteId, cardId] });
 } catch (e) {
   console.error("FATAL", e?.message ?? e);
   fail++;

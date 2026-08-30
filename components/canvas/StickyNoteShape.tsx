@@ -142,6 +142,40 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
   // 取消时置 true：退出编辑的保存钩子跳过（放弃草稿）；finish 不置 → 正常保存
   const cancelRef = useRef(false);
   const wasEditingRef = useRef(false);
+  // 复制反馈：复制成功后短暂显示 ✓
+  const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 复制便笺内容（markdown 源码）到剪贴板
+  const copyContent = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      void navigator.clipboard.writeText(shape.props.text).then(() => {
+        setCopied(true);
+        if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+        copiedTimerRef.current = setTimeout(() => setCopied(false), 1200);
+      }).catch(() => {
+        // 剪贴板不可用（无焦点/权限）：回退到临时 textarea
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = shape.props.text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+          setCopied(true);
+          if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+          copiedTimerRef.current = setTimeout(() => setCopied(false), 1200);
+        } catch {
+          // ignore
+        }
+      });
+    },
+    [shape.props.text],
+  );
+
+  // 卸载时清理定时器
+  useEffect(() => () => { if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current); }, []);
 
   // 进入编辑时同步草稿；非编辑且外部 text 变化时重置
   useEffect(() => {
@@ -321,6 +355,40 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
             style={{ width: 8, height: 8, borderRadius: "50%", background: BADGE_COLORS[badge] ?? BADGE_COLORS.blue, flexShrink: 0 }}
           />
           <span style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{formatNoteTime(createdAt)}</span>
+          {/* 右上角快捷复制：独立接收点击（不参与拖拽把手） */}
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            title={copied ? "已复制" : "复制内容"}
+            onClick={copyContent}
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 22,
+              height: 20,
+              padding: 0,
+              border: "none",
+              borderRadius: 5,
+              background: "transparent",
+              color: copied ? "var(--accent)" : "var(--text-dim)",
+              cursor: "pointer",
+              pointerEvents: "all",
+            }}
+          >
+            {copied ? (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+            ) : (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            )}
+          </button>
         </div>
         <div
           style={{
