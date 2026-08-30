@@ -365,15 +365,15 @@ function TaskCard({
                 title={t("sidebar.taskRunning", { count: runningCount })}
                 style={{
                   flexShrink: 0,
-                  minWidth: 16,
-                  height: 16,
-                  padding: "0 5px",
+                  minWidth: 14,
+                  height: 14,
+                  padding: "0 4px",
                   borderRadius: 999,
                   background: "var(--accent)",
                   color: "#fff",
-                  fontSize: 10,
+                  fontSize: 9,
                   fontWeight: 700,
-                  lineHeight: "16px",
+                  lineHeight: "14px",
                   textAlign: "center",
                   boxSizing: "border-box",
                 }}
