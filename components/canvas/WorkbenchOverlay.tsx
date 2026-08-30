@@ -117,13 +117,14 @@ function toggleExpand(editor: Editor, shapeId: string) {
   if (!shape || shape.type !== "session-card") return;
   const willCollapse = (shape.props as { expanded?: boolean }).expanded;
   const props = shape.props as { w?: number; h?: number };
+  // 展开默认宽 840（容纳消息+底栏）；用户已 resize（≠收合宽 280）则保留用户宽度
+  const EXPANDED_DEFAULT_W = 840;
   editor.updateShapes([{
     id: shape.id,
     type: "session-card",
     props: {
       expanded: !willCollapse,
-      // 收合回到收合卡尺寸；展开保留用户已 resize 的宽（至少 280），高度 600
-      w: willCollapse ? 280 : Math.max(280, props.w ?? 280),
+      w: willCollapse ? 280 : ((props.w ?? 280) === 280 ? EXPANDED_DEFAULT_W : Math.max(280, props.w ?? 280)),
       h: willCollapse ? 120 : 600,
     },
   }]);

@@ -91,14 +91,15 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
     const COLLAPSED_W = 280;
     const COLLAPSED_H = 120;
     const EXPANDED_H = 600;
+    // 展开默认宽：能容纳消息 + 底栏（spec：800px 以上）。用户已 resize 过（宽 ≠ 收合宽）则保留用户宽度。
+    const EXPANDED_DEFAULT_W = 840;
     const willCollapse = shape.props.expanded;
     return {
       id: shape.id,
       type: "session-card",
       props: {
         expanded: !shape.props.expanded,
-        // 展开：宽度保留当前值（用户 resize 过则保留；未 resize 过用默认 280 → 至少 280）
-        w: willCollapse ? COLLAPSED_W : Math.max(COLLAPSED_W, shape.props.w),
+        w: willCollapse ? COLLAPSED_W : (shape.props.w === COLLAPSED_W ? EXPANDED_DEFAULT_W : Math.max(COLLAPSED_W, shape.props.w)),
         h: willCollapse ? COLLAPSED_H : EXPANDED_H,
       },
     };
