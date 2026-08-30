@@ -1872,7 +1872,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
       {/* Sessions panel — always mounted; hidden via display when the files
           panel is active so switching tabs never tears down/rebuilds it. */}
-      <div style={{ flex: 1, minHeight: 0, display: sidebarTab === "sessions" ? "flex" : "none", flexDirection: "column" }}>
+      <div style={{ flex: 1, minHeight: 0, display: sidebarTab === "sessions" ? "flex" : "none", flexDirection: "column", overflowY: "auto", overflowX: "hidden" }}>
           {loading ? (
             <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
               {t("sidebar.loading")}
@@ -1983,6 +1983,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                         };
                       })}
                       selectedSessionId={selectedSessionId}
+                      runningSessionIds={runningSessionIds}
                       newTaskOpen={newTaskOpen}
                       onNewTaskOpenChange={setNewTaskOpen}
                       onNewTask={(name) => void handleCreateTask(name)}
@@ -1997,14 +1998,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 )}
               </div>
 
-              {/* Chat section — takes the remaining space; when collapsed it
-                  sits right under the tasks section (simple flow layout). */}
+              {/* Chat section — takes remaining space when expanded, but never
+                  shrinks below its content (flex-shrink 0): a tall task list
+                  grows the whole panel and scrolls instead of crushing chat. */}
               <div
                 style={{
                   display: "flex",
                   flexDirection: "column",
                   minHeight: 0,
-                  flex: chatCollapsed ? "0 0 auto" : "1 1 0",
+                  flex: chatCollapsed ? "0 0 auto" : "1 0 auto",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", padding: "5px 10px 3px" }}>

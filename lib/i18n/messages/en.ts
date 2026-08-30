@@ -136,6 +136,7 @@ export const enLocale: LocalePlugin = {
     "sidebar.pinTask": "Pin task",
     "sidebar.unpinTask": "Unpin task",
     "sidebar.pinned": "Pinned",
+    "sidebar.taskRunning": "{count} session(s) running",
     "sidebar.moreActions": "More actions",
     "sidebar.delete": "Delete",
     

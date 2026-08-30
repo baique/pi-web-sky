@@ -40,6 +40,8 @@ interface Props {
   groups: TaskGroup[];
   /** 当前选中的会话 id：选中会话属于某个任务时自动展开该任务卡片。 */
   selectedSessionId?: string | null;
+  /** 运行中会话 id 集合：任务行显示蓝色数字徽记（任务内运行中会话数）。 */
+  runningSessionIds?: Set<string>;
   newTaskOpen: boolean;
   onNewTaskOpenChange: (open: boolean) => void;
   onNewTask: (name: string) => void;
@@ -103,6 +105,7 @@ function TaskCard({
   sessionCount,
   pinnedCount,
   sessionTotal,
+  runningCount,
   activeSessionId,
   onDropAssign,
   onRename,
@@ -122,6 +125,8 @@ function TaskCard({
   sessionCount: number;
   pinnedCount: number;
   sessionTotal: number;
+  /** 任务内运行中会话数（>0 时行前显示蓝色数字徽记）。 */
+  runningCount?: number;
   /** 当前选中的会话 id；属于本任务时自动展开卡片。 */
   activeSessionId?: string | null;
   onDropAssign: (taskId: string, sessionId: string) => void;
@@ -358,6 +363,27 @@ function TaskCard({
             <span title={`${task.name} · ${formatRelativeTime(task.created)}`} style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {task.name}
             </span>
+            {runningCount != null && runningCount > 0 && (
+              <span
+                title={t("sidebar.taskRunning", { count: runningCount })}
+                style={{
+                  flexShrink: 0,
+                  minWidth: 16,
+                  height: 16,
+                  padding: "0 5px",
+                  borderRadius: 999,
+                  background: "var(--accent)",
+                  color: "#fff",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  lineHeight: "16px",
+                  textAlign: "center",
+                  boxSizing: "border-box",
+                }}
+              >
+                {runningCount}
+              </span>
+            )}
             {task.pinned && !renaming && !confirmDelete && (
               <span title={t("sidebar.pinned")} style={{ display: "inline-flex", flexShrink: 0, color: "var(--accent)" }}>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -564,6 +590,7 @@ function TaskCard({
 export function TaskArea({
   groups,
   selectedSessionId,
+  runningSessionIds,
   newTaskOpen,
   onNewTaskOpenChange,
   onNewTask,
@@ -735,6 +762,10 @@ export function TaskArea({
       {groups.map(({ task, content, sessionCount, pinnedCount, sessionTotal }, index) => {
         const prev = index > 0 ? groups[index - 1].task : null;
         const divider = prev?.pinned && !task.pinned;
+        // 任务内运行中会话数（徽记）：任一关联会话在运行中即显示蓝色数字
+        const runningCount = runningSessionIds
+          ? task.sessionIds.filter((sid) => runningSessionIds.has(sid)).length
+          : 0;
         return (
           <Fragment key={task.id}>
             {divider && (
@@ -746,6 +777,7 @@ export function TaskArea({
               sessionCount={sessionCount}
               pinnedCount={pinnedCount}
               sessionTotal={sessionTotal}
+              runningCount={runningCount}
               activeSessionId={selectedSessionId}
               onDropAssign={onDropSessionToTask}
               onRename={(id, name) => void onRenameTask(id, name)}

@@ -137,6 +137,7 @@ export const zhCNLocale: LocalePlugin = {
     "sidebar.pinTask": "置顶任务",
     "sidebar.unpinTask": "取消置顶任务",
     "sidebar.pinned": "已置顶",
+    "sidebar.taskRunning": "{count} 个会话运行中",
     "sidebar.moreActions": "更多操作",
     "sidebar.delete": "删除",
     

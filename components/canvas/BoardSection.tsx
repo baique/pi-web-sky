@@ -288,7 +288,9 @@ export function BoardSection({
             </div>
           )}
 
-          {/* 系统「运行中」看板 —— 与项目看板同高同行样式，仅图标不同 */}
+          {/* 系统「运行中」看板 —— 已隐藏（用户决定：仅隐藏，代码保留）。
+              与项目看板同高同行样式，仅图标不同。如需恢复，把 false 改回 true。 */}
+          {false && (
           <div
             key={system.id}
             style={{ margin: "0 4px 2px", borderRadius: 6, opacity: 1 }}
@@ -339,6 +341,7 @@ export function BoardSection({
               )}
             </div>
           </div>
+          )}
 
           {/* 项目看板 */}
           {projectBoards.length === 0 && (
