@@ -13,6 +13,8 @@ export interface SessionCardProps {
   messageCount: number;
   phase: "waiting_model" | "running_tools" | "running_command" | "waiting_input" | "idle" | "just-ended";
   runningMs: number;
+  /** 会话结束时刻（ms epoch），仅 phase=just-ended 时有效；用于 30s 后移除 */
+  endedAt: number;
   stale: boolean;
   expanded: boolean;
   w: number;
@@ -34,6 +36,7 @@ export const sessionCardProps = {
   messageCount: T.number,
   phase: T.string,
   runningMs: T.number,
+  endedAt: T.number,
   stale: T.boolean,
   expanded: T.boolean,
   w: T.number,
@@ -52,6 +55,7 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
       messageCount: 0,
       phase: "idle",
       runningMs: 0,
+      endedAt: 0,
       stale: false,
       expanded: false,
       w: 280,

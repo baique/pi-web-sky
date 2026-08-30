@@ -5,6 +5,7 @@ import type { Editor, TLArrowShape, TLShape, TLShapePartial } from "tldraw";
 import { createShapeId } from "tldraw";
 import type { BoardCanvas, BoardInfo, BoardNode, BoardEdge, RunningSnapshot, RunningSessionState } from "@/lib/board-types";
 import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
+import { shouldRemoveEndedCard } from "@/lib/board-utils";
 
 /** 收合卡默认尺寸（与 spec §3.1 一致） */
 export const CARD_W = 280;
@@ -211,6 +212,7 @@ export function useBoardCanvas({
           messageCount: summary?.messageCount ?? 0,
           phase: "idle",
           runningMs: 0,
+          endedAt: 0,
           stale: node.refId ? !titles[node.refId] : false,
           expanded: node.expanded,
           w: node.w || CARD_W,
@@ -330,11 +332,15 @@ export function useBoardCanvas({
   }, []);
 
   // ---- 运行中看板聚合：running snapshot → 自动物化/更新卡片 ----
+  // 运行中看板：物化运行中会话 + 更新 phase + 结束后 30s 移除
+  // 普通看板：仅更新已有卡片的运行状态（不创建/不删除）
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor) return;
-    if (boardId === SYSTEM_RUNNING_BOARD_ID && running) {
+    if (!editor || !running) return;
+    if (boardId === SYSTEM_RUNNING_BOARD_ID) {
       reconcileRunningBoard(editor, running, sessionTitles);
+    } else {
+      updateCardRunningState(editor, running);
     }
   }, [running, boardId, sessionTitles]);
 
@@ -370,6 +376,7 @@ export function useBoardCanvas({
             messageCount: summary?.messageCount ?? 0,
             phase,
             runningMs,
+            endedAt: 0,
             stale: false,
             expanded: false,
             w: CARD_W,
@@ -394,18 +401,43 @@ export function useBoardCanvas({
     for (const [sid, shape] of existing) {
       if (runningIds.has(sid)) continue;
       const p = shape.props as SessionCardShapeProps;
-      if (p.phase === "just-ended" && p.runningMs > 0 && nowTs - p.runningMs > 30_000) {
-        toUpdate.push({ id: shape.id, type: "session-card", props: { stale: true } });
-        editor.deleteShapes([shape.id]);
-      } else if (!runningIds.has(sid)) {
-        // 首次变为结束：标记 just-ended（脉冲）。30s 后由下一轮移除。
-        if (p.phase !== "just-ended") {
-          toUpdate.push({ id: shape.id, type: "session-card", props: { phase: "just-ended", runningMs: nowTs } });
+      if (p.phase === "just-ended") {
+        // 用独立 endedAt 判定 30s（runningMs 每轮被覆盖，不能当结束时间戳）
+        if (shouldRemoveEndedCard(p.phase, p.endedAt, nowTs)) {
+          editor.deleteShapes([shape.id]);
         }
+      } else {
+        // 首次变为结束：标记 just-ended + 记录结束时刻
+        toUpdate.push({ id: shape.id, type: "session-card", props: { phase: "just-ended", endedAt: nowTs } });
       }
     }
     if (toCreate.length > 0) editor.createShapes(toCreate);
     if (toUpdate.length > 0) editor.updateShapes(toUpdate);
+  }, []);
+
+  // 普通看板：按 running snapshot 更新已有卡片的 phase/runningMs（只更新，不建不删）
+  const updateCardRunningState = useCallback((editor: Editor, snapshot: RunningSnapshot) => {
+    const updates: TLShapePartial[] = [];
+    const now = Date.now();
+    for (const shape of editor.getCurrentPageShapes()) {
+      if (shape.type !== "session-card") continue;
+      const p = shape.props as SessionCardShapeProps;
+      if (!p.sessionId) continue;
+      const state = snapshot.states[p.sessionId] as RunningSessionState | undefined;
+      const runningNow = snapshot.runningSessionIds.includes(p.sessionId);
+      if (runningNow && state) {
+        const phase = state.phase as CanvasPhase;
+        const runningMs = state.startedAt ? now - state.startedAt : 0;
+        // 从结束态回到运行中：清 endedAt
+        if (p.phase !== phase || p.runningMs !== runningMs || p.endedAt !== 0) {
+          updates.push({ id: shape.id, type: "session-card", props: { phase, runningMs, endedAt: 0 } });
+        }
+      } else if (!runningNow && p.phase !== "idle") {
+        // 不在运行列表 → idle（普通看板不保留 just-ended 卡片，不自动删）
+        updates.push({ id: shape.id, type: "session-card", props: { phase: "idle", runningMs: 0, endedAt: 0 } });
+      }
+    }
+    if (updates.length > 0) editor.updateShapes(updates);
   }, []);
 
   // ---- 添加会话节点 ----
@@ -440,6 +472,7 @@ export function useBoardCanvas({
         messageCount: summary?.messageCount ?? 0,
         phase: "idle",
         runningMs: 0,
+        endedAt: 0,
         stale: false,
         expanded: false,
         w: CARD_W,
@@ -543,6 +576,7 @@ type SessionCardShapeProps = {
   messageCount: number;
   phase: CanvasPhase;
   runningMs: number;
+  endedAt: number;
   stale: boolean;
   expanded: boolean;
   w: number;
