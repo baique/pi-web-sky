@@ -19,9 +19,13 @@ interface Props {
   onRevealHistory: () => void;
 }
 
-const MINIMAP_WIDTH = 36;
+const MINIMAP_WIDTH = 26;
 const MAX_NODE_GAP = 50;
-const MINIMAP_PADDING = 12;
+const MINIMAP_PADDING = 22;
+/** 时间轴顶部留白：让柱体上沿离开消息区顶部一段距离。 */
+const TIMELINE_TOP_OFFSET = 14;
+/** 单节点（或极少节点）时柱体的保底高度。 */
+const MIN_SINGLE_NODE_HEIGHT = 48;
 const PREVIEW_HIDE_DELAY = 250;
 const NAVIGATION_ACTIVE_LOCK_MS = 1600;
 
@@ -236,7 +240,7 @@ export function ChatMinimap({
   const [visible, setVisible] = useState(false);
   const [allNodes, setAllNodes] = useState<NodeInfo[]>([]);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const [minimapHeight, setMinimapHeight] = useState(600);
+  const [minimapHeight, setMinimapHeight] = useState(MIN_SINGLE_NODE_HEIGHT);
   const [minimapHovered, setMinimapHovered] = useState(false);
   const [mouseYRatio, setMouseYRatio] = useState<number | null>(null);
   const draggingRef = useRef(false);
@@ -357,7 +361,20 @@ export function ChatMinimap({
       }
 
       const nextNodes = createTurnNodes(turns);
-      setMinimapHeight(minimapEl.clientHeight);
+      // 高度自适应：点少时按舒适间距（MAX_NODE_GAP）算自然高度，柱子变矮；
+      // 点多时封顶在消息区可用高度，间距在 layoutNodes 里自动压缩（不出现滚动条）。
+      const nodeCount = nextNodes.length;
+      const availableHeight = Math.max(
+        MIN_SINGLE_NODE_HEIGHT,
+        scrollEl.clientHeight - TIMELINE_TOP_OFFSET - 8,
+      );
+      const targetHeight = nodeCount <= 1
+        ? MIN_SINGLE_NODE_HEIGHT
+        : Math.min(
+            availableHeight,
+            MINIMAP_PADDING * 2 + (nodeCount - 1) * MAX_NODE_GAP,
+          );
+      setMinimapHeight(targetHeight);
       allNodesRef.current = nextNodes;
       setAllNodes(nextNodes);
       setVisible(scrollEl.scrollHeight - scrollEl.clientHeight > 20);
@@ -610,8 +627,10 @@ export function ChatMinimap({
       }}
       style={{
         width: MINIMAP_WIDTH,
+        height: minimapHeight,
         flexShrink: 0,
         position: "relative",
+        marginTop: TIMELINE_TOP_OFFSET,
         cursor: "pointer",
         userSelect: "none",
         // Independent glass token (see --panel-glass-minimap in globals.css):
@@ -635,7 +654,7 @@ export function ChatMinimap({
             top: MINIMAP_PADDING,
             height: railHeight,
             width: 1,
-            background: "var(--border)",
+            background: "var(--timeline-rail)",
             transform: "translateX(-50%)",
             zIndex: 0,
           }}
@@ -645,6 +664,8 @@ export function ChatMinimap({
       {showRail && positionedNodes.map((node) => {
         const isNearest = minimapHovered && nearestNode?.index === node.index;
         const isActive = activeIndex === node.index;
+        // 节点尺寸随间距自适应：间距充裕时 9px，密集时缩小防重叠。
+        const nodeSize = Math.max(5, Math.min(9, nodeGap * 0.75));
 
         return (
           <div
@@ -667,14 +688,14 @@ export function ChatMinimap({
           >
             <div
               style={{
-                width: 8,
-                height: 8,
-                borderRadius: 2,
-                background: isActive ? "rgba(128,128,128,0.42)" : "rgba(128,128,128,0.16)",
-                border: `1.5px solid ${isActive ? "rgba(128,128,128,0.95)" : "rgba(128,128,128,0.58)"}`,
-                boxShadow: isActive ? "0 0 0 2px var(--bg-panel)" : "none",
-                transition: "transform 0.1s, background 0.1s",
-                transform: isNearest ? "scale(1.25)" : "scale(1)",
+                width: nodeSize,
+                height: nodeSize,
+                borderRadius: "50%",
+                background: isActive ? "var(--timeline-dot-active-bg)" : "var(--timeline-dot-bg)",
+                border: `1.5px solid ${isActive ? "var(--timeline-dot-active-border)" : "var(--timeline-dot-border)"}`,
+                boxShadow: isActive ? "var(--timeline-dot-active-glow)" : "none",
+                transition: "transform 0.12s ease-out, background 0.12s ease-out, box-shadow 0.12s ease-out",
+                transform: isNearest ? "scale(1.3)" : "scale(1)",
               }}
             />
           </div>

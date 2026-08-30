@@ -85,6 +85,15 @@
      back into one token. */
   --panel-glass-todo: rgba(250, 250, 251, 0.75);
   --panel-glass-minimap: rgba(250, 250, 251, 0.75);
+  /* 时间轴（ChatMinimap）胶囊刻度/圆点 token —— 玻璃微珠体系，跟随主题。
+     节点默认是 text 色磨砂半透，激活走 accent 半透填充 + 外光晕，
+     与消息气泡的玻璃语言同源；竖线两端渐隐像玻璃折射的光线。 */
+  --timeline-rail: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--text) 22%, transparent) 8%, color-mix(in srgb, var(--text) 22%, transparent) 92%, transparent);
+  --timeline-dot-bg: color-mix(in srgb, var(--text) 16%, transparent);
+  --timeline-dot-border: color-mix(in srgb, var(--text) 30%, transparent);
+  --timeline-dot-active-bg: color-mix(in srgb, var(--accent) 55%, transparent);
+  --timeline-dot-active-border: color-mix(in srgb, var(--accent) 85%, transparent);
+  --timeline-dot-active-glow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
   /* 右侧文件面板 —— 材质与左侧栏同一个 chrome 层（--file-panel 即 --side-panel）。
      整块面板只有**一个 backdrop root**：滤镜只挂在容器上，内层一律不再挂
      backdrop-filter。嵌套 backdrop-filter 会采样父级已滤过的结果（backdrop
