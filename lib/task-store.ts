@@ -83,10 +83,16 @@ export function createTask(projectKey: string, name: string): Task {
   if (!trimmed) throw new Error("name must not be empty");
   const id = randomUUID();
   const ts = now();
+  // 新任务置顶：sort_order 取当前项目最小值 - 1（与看板 createBoard 一致），
+  // 保证新建任务出现在任务区最上方。
+  const minRow = getDb()
+    .prepare("SELECT MIN(sort_order) AS minOrder FROM tasks WHERE project_key = ?")
+    .get(projectKey) as { minOrder: number | null };
+  const sortOrder = minRow.minOrder === null ? 0 : minRow.minOrder - 1;
   getDb()
     .prepare("INSERT INTO tasks (id, project_key, name, created, updated, sort_order) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(id, projectKey, trimmed, ts, ts, ts);
-  return { id, projectKey: projectKey, name: trimmed, created: ts, updated: ts, pinned: false, sortOrder: ts, sessionIds: [], pinnedSessionIds: [] };
+    .run(id, projectKey, trimmed, ts, ts, sortOrder);
+  return { id, projectKey: projectKey, name: trimmed, created: ts, updated: ts, pinned: false, sortOrder, sessionIds: [], pinnedSessionIds: [] };
 }
 
 /**
