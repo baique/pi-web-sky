@@ -4,7 +4,6 @@ import "tldraw/tldraw.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tldraw, defaultShapeUtils, type TLComponents } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
-import { WorkbenchOverlay } from "./WorkbenchOverlay";
 import { useI18n } from "@/hooks/useI18n";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
 import type { SessionInfo } from "@/lib/types";
@@ -185,24 +184,13 @@ export function CanvasStage({
             components={components}
             autoFocus={false}
             colorScheme={isDark ? "dark" : "light"}
-          >
-            <TldrawInner>
-              <WorkbenchOverlay />
-            </TldrawInner>
-          </Tldraw>
+          />
         )}
       </div>
     </div>
   );
 }
 
-/**
- * 包装 useEditor 的子组件必须挂在 <Tldraw> 内部。
- * 这里只渲染 children（WorkbenchOverlay 等需要 useEditor 的组件）。
- */
-function TldrawInner({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
-}
 
 function toolBtnStyle(activeColor?: string, active?: boolean): React.CSSProperties {
   return {
