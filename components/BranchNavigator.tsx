@@ -327,13 +327,13 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
             borderTop: open ? "2px solid var(--accent)" : "2px solid transparent",
             borderRight: "1px solid var(--border)",
             cursor: "pointer",
-            color: open ? "var(--text)" : "var(--text-muted)",
+            color: "var(--text)",
             fontSize: 11,
             whiteSpace: "nowrap",
             transition: "color 0.1s, background 0.1s",
           }}
           onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text)"; }}
            title={t("i18n.branches")}
            aria-label={t("i18n.branches")}
           aria-pressed={open}
@@ -388,13 +388,13 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
           background: "none",
           border: "none",
           cursor: "pointer",
-          color: "var(--text-muted)",
+          color: "var(--text)",
           fontSize: 11,
           textAlign: "left",
         }}
       >
         {branchIcon}
-         <span style={{ color: "var(--text-muted)" }}>{t("i18n.branches")}</span>
+         <span style={{ color: "var(--text)" }}>{t("i18n.branches")}</span>
         {chevron}
       </button>
 

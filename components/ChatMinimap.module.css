@@ -79,7 +79,7 @@
   background: transparent;
   color: var(--text);
   font-family: inherit;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   letter-spacing: 0;
   line-height: 18px;
@@ -126,8 +126,9 @@
   background: transparent;
   color: var(--text-dim);
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
+  /* 与用户消息同等字号、同等字重——预览面板内时间轴元素视觉同级 */
+  font-size: 13px;
+  font-weight: 500;
   letter-spacing: 0;
   line-height: 26px;
   text-align: center;
