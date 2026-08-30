@@ -238,6 +238,9 @@ export function CanvasStage({
           </div>
         ) : (
           <Tldraw
+            // maxPages: 1 — 关闭 tldraw 内置多页面能力：右键「移动到页面」菜单
+            // （MoveToPageMenu）与左下角页面导航均按单页面模式自动隐藏。
+            options={{ maxPages: 1 }}
             shapeUtils={shapeUtils}
             tools={[StickyNoteTool]}
             overrides={uiOverrides}
