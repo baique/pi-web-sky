@@ -11,6 +11,8 @@ export interface BoardInfo {
   projectKey: string;
   name: string;
   isSystem: boolean;
+  /** 任务型看板：非空时即任务 id（看板 id = 任务 id）；手动看板为 null */
+  taskId: string | null;
   /** 项目内手动排序（系统看板恒置顶） */
   sortOrder: number;
   created: number;

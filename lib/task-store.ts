@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { getDb } from "./sqlite-db";
+import { deleteBoardCascade, renameTaskBoard } from "./board-store";
 
 export interface Task {
   id: string;
@@ -115,6 +116,8 @@ export function updateTask(
       const trimmed = patch.name.trim();
       if (!trimmed) throw new Error("name must not be empty");
       db.prepare("UPDATE tasks SET name = ?, updated = ? WHERE id = ?").run(trimmed, now(), id);
+      // 任务型看板名随任务同步（看板未创建则 0 行无害）
+      renameTaskBoard(id, trimmed);
     }
     if (patch.pinned !== undefined) {
       db.prepare("UPDATE tasks SET pinned = ?, updated = ? WHERE id = ?").run(
@@ -183,7 +186,8 @@ export function reorderTasks(projectKey: string, orderedIds: string[]): Task[] {
   return listTasks(projectKey);
 }
 
-/** Delete the task; all its sessions fall back to temp (task_id = NULL). */
+/** Delete the task; all its sessions fall back to temp (task_id = NULL).
+ *  任务型看板（boards.task_id = 任务 id）连带级联删除。 */
 export function deleteTask(id: string): void {
   const db = getDb();
   db.exec("BEGIN");
@@ -193,6 +197,8 @@ export function deleteTask(id: string): void {
       id,
     );
     db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+    // 任务即看板：删任务连带删其看板（含 nodes/edges/view）
+    deleteBoardCascade(id);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
