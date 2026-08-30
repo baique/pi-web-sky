@@ -143,6 +143,18 @@ try {
   const timeSpan = note.locator("span[style*='font-mono']");
   check("created time shown", (await timeSpan.count()) === 1 && (await timeSpan.innerText()).trim().length > 0, `time="${(await timeSpan.innerText()).trim()}"`);
 
+  // ========== 1.5 顶部拖拽把手：从徽记时间行拖拽应移动便笺 ==========
+  const beforeDrag = await note.boundingBox();
+  const tBox = await timeSpan.boundingBox();
+  await page.mouse.move(tBox.x + tBox.width / 2, tBox.y + tBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(tBox.x + tBox.width / 2 + 60, tBox.y + tBox.height / 2 + 35, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+  const afterDrag = await note.boundingBox();
+  const ddx = Math.abs(afterDrag.x - beforeDrag.x), ddy = Math.abs(afterDrag.y - beforeDrag.y);
+  check("top handle drag moves note", ddx > 40 || ddy > 20, `dx=${ddx.toFixed(1)} dy=${ddy.toFixed(1)}`);
+
   // ========== 2. 双击 → 编辑态顶部：徽记选择器 + 取消 + 完成 ==========
   const hint = note.locator("text=双击编辑 markdown");
   await hint.waitFor({ timeout: 5000 });

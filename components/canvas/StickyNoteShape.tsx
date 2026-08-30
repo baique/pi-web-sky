@@ -301,9 +301,9 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
       style={{ width: w, height: h, pointerEvents: "none" }}
     >
       <div style={bubbleStyle}>
-        {/* 顶部：徽记 + 时间（新建自动记录），保持左上对齐 */}
+        {/* 顶部拖拽把手：徽记 + 时间（新建自动记录）。整条是拖拽区（不拦截 pointer），
+            让 tldraw 接管——便笺可拖拽面积太小的问题主要就是内容区占满、拦事件 */}
         <div
-          onPointerDown={isolateContent}
           style={{
             flexShrink: 0,
             display: "flex",
@@ -312,6 +312,7 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
             padding: "6px var(--bubble-pad-x, 12px) 0",
             fontSize: 10,
             color: "var(--text-muted)",
+            cursor: "grab",
           }}
         >
           <span
@@ -343,8 +344,6 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
             </div>
           ) : (
             <div
-              onPointerDown={isolateContent}
-              onPointerUp={isolateContent}
               onClick={handleContentClick}
               onDoubleClick={handleContentDoubleClick}
               style={{ color: "var(--text-dim)", fontSize: 12, cursor: "text" }}
