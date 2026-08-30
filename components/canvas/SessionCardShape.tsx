@@ -1,6 +1,7 @@
 import { BaseBoxShapeUtil, HTMLContainer, T, useEditor } from "tldraw";
 import type { TLBaseShape, TLShapePartial } from "tldraw";
 import { SessionWorkbench } from "./SessionWorkbench";
+import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 
 /**
  * 会话卡 shape。props 含 w/h 满足 BaseBoxShapeUtil（可拉伸）；
@@ -12,6 +13,8 @@ export interface SessionCardProps {
   title: string;
   projectName: string;
   messageCount: number;
+  /** 最后一条 assistant 回复（收合态中间区展示），空则显示项目/消息数 */
+  lastReply: string;
   phase: "waiting_model" | "running_tools" | "running_command" | "waiting_input" | "idle" | "just-ended";
   runningMs: number;
   /** 会话结束时刻（ms epoch），仅 phase=just-ended 时有效；用于 30s 后移除 */
@@ -35,6 +38,7 @@ export const sessionCardProps = {
   title: T.string,
   projectName: T.string,
   messageCount: T.number,
+  lastReply: T.string,
   phase: T.string,
   runningMs: T.number,
   endedAt: T.number,
@@ -54,6 +58,7 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
       title: "Untitled session",
       projectName: "",
       messageCount: 0,
+      lastReply: "",
       phase: "idle",
       runningMs: 0,
       endedAt: 0,
@@ -90,14 +95,15 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
   }
 
   /** resize 钳制最小尺寸：展开态工作台不能缩到样式崩坏（消息/输入/底栏需空间），
-   *  收合态保持 280×120 下限。返回修正后的宽高。 */
+   *  收合态保持 CARD_W×CARD_H 下限。返回修正后的宽高。 */
   override onResize(
     shape: SessionCardShape,
     info: import("tldraw").TLResizeInfo<SessionCardShape>,
   ): Omit<TLShapePartial<SessionCardShape>, "id" | "type"> | undefined {
     const expanded = shape.props.expanded;
-    const minW = expanded ? 400 : 280;
-    const minH = expanded ? 480 : 120;
+    // 展开态最小宽 400（用户要求），高 500；收合态回到卡片默认下限
+    const minW = expanded ? 400 : CARD_W;
+    const minH = expanded ? 500 : CARD_H;
     // 当前 props 宽高 * 本次 resize 比例，钳制到下限
     const w = Math.max(minW, (shape.props.w || 0) * info.scaleX);
     const h = Math.max(minH, (shape.props.h || 0) * info.scaleY);
@@ -105,12 +111,12 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
   }
 
   /** 双击展开为工作台（持久化 expanded 标记，刷新后恢复）。
-   *  展开 → expanded=true，宽度保留用户已 resize 的当前宽（至少 280），高度 600
-   *  收合 → expanded=false，回到收合卡默认 280×120
-   *  宽度不强制 760：用户调过的宽度在展开/收合间保留，避免宽度跳变。 */
+   *  展开 → expanded=true，宽度保留用户已 resize 的当前宽（至少 CARD_W），高度 600
+   *  收合 → expanded=false，回到收合卡默认 CARD_W×CARD_H
+   *  宽度不强制 840：用户调过的宽度在展开/收合间保留，避免宽度跳变。 */
   override onDoubleClick(shape: SessionCardShape): TLShapePartial<SessionCardShape> | void {
-    const COLLAPSED_W = 280;
-    const COLLAPSED_H = 120;
+    const COLLAPSED_W = CARD_W;
+    const COLLAPSED_H = CARD_H;
     const EXPANDED_H = 600;
     // 展开默认宽：能容纳消息 + 底栏（spec：800px 以上）。用户已 resize 过（宽 ≠ 收合宽）则保留用户宽度。
     const EXPANDED_DEFAULT_W = 840;
@@ -136,9 +142,10 @@ const phaseMeta: Record<string, { dot: string; label: string }> = {
   "just-ended": { dot: "#10b981", label: "done" },
 };
 
-/** 收合卡渲染（280×120 默认）。状态行 + 标题 + 元信息；选中描边由 tldraw 指示器负责。 */
+/** 收合卡渲染（340×160 默认）。状态行+标题+展开按钮 / 最后回复区 / 底部时间。
+ *  选中描边由 tldraw 指示器负责。 */
 function SessionCardView({ shape }: { shape: SessionCardShape }) {
-  const { w, h, title, projectName, messageCount, phase, runningMs, stale, sessionId, expanded } = shape.props;
+  const { w, h, title, projectName, messageCount, phase, runningMs, endedAt, stale, sessionId, expanded, lastReply } = shape.props;
   const editor = useEditor();
 
   // 点击卡片置顶：两卡重叠时点哪个哪个到最上层。
@@ -146,6 +153,21 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
   // 展开态工作台内部 pointerEvents all 且 stopPropagation，不会触发这里（会话内交互不置顶）。
   const bringToFront = () => {
     editor?.bringToFront([shape.id]);
+  };
+
+  // 独立展开/收起：切换 expanded + 尺寸。收合 → 默认展开宽 840/高 600；展开 → 收合回 340×160。
+  // 收合态点展开按钮：pointerEvents all 会拦截 tldraw 拖拽，按钮独立接收点击。
+  const toggleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    editor?.updateShapes([{
+      id: shape.id,
+      type: "session-card",
+      props: {
+        expanded: !expanded,
+        w: expanded ? CARD_W : 840,
+        h: expanded ? CARD_H : 600,
+      },
+    }]);
   };
 
   // 展开态：上半部标题栏（pointerEvents none → tldraw 原生拖拽/选中），
@@ -176,7 +198,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         }}
       >
         {/* 标题栏 = 拖拽区：pointerEvents none 让 tldraw 接管（拖动/选中/缩放），
-            仅显示标题 + 状态圆点，不拦截鼠标 */}
+            仅显示标题 + 状态圆点 + 收起按钮（按钮 pointerEvents all 独立点击） */}
         <div
           style={{
             flexShrink: 0,
@@ -195,12 +217,34 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
             {title || "Untitled"}
           </span>
           <div style={{ flex: 1 }} />
-          <span style={{ fontSize: 10.5, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
-            {phaseMeta[phase]?.label ?? "idle"}
-          </span>
+          <button
+            type="button"
+            onClick={toggleExpand}
+            onPointerDown={(e) => e.stopPropagation()}
+            title="Collapse"
+            style={{
+              flexShrink: 0,
+              pointerEvents: "all",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 22,
+              height: 22,
+              padding: 0,
+              border: "none",
+              borderRadius: 5,
+              background: "transparent",
+              color: "var(--text-dim)",
+              cursor: "pointer",
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M18 15l-6-6-6 6" />
+            </svg>
+          </button>
         </div>
-        {/* 工作台：嵌卡片内，随卡片 resize 自然跟随 */}
-        <div style={{ flex: 1, minHeight: 0, pointerEvents: "all" }}>
+        {/* 工作台：嵌卡片内，随卡片 resize 自然跟随；四周留 padding 保证拖拽/调整手柄可触 */}
+        <div style={{ flex: 1, minHeight: 0, padding: "2px 3px 4px", pointerEvents: "all" }}>
           <SessionWorkbench sessionId={sessionId} />
         </div>
       </HTMLContainer>
@@ -228,53 +272,109 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         pointerEvents: "all",
         display: "flex",
         flexDirection: "column",
-        padding: "10px 12px",
+        padding: "8px 10px 6px",
         color: "var(--text)",
         userSelect: "none",
         cursor: "grab",
       }}
     >
-      {/* 状态行 */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 18 }}>
+      {/* 状态行：状态圆点 + 状态文字 + 标题（紧跟状态）+ 展开按钮 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 20, flexShrink: 0 }}>
         <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", background: meta.dot, flexShrink: 0 }} />
-        <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", flexShrink: 0, whiteSpace: "nowrap" }}>
           {meta.label}
           {runningMs > 0 && phase !== "idle" ? ` · ${formatDuration(runningMs)}` : ""}
         </span>
+        <span
+          style={{
+            fontSize: 12.5,
+            fontWeight: 600,
+            minWidth: 0,
+            flex: 1,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            color: "var(--text)",
+          }}
+        >
+          {title || "Untitled"}
+        </span>
         {stale && (
-          <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--text-dim)", border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)", borderRadius: 4, padding: "0 4px" }}>
+          <span style={{ flexShrink: 0, fontSize: 9.5, color: "var(--text-dim)", border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)", borderRadius: 4, padding: "0 4px" }}>
             stale
           </span>
         )}
+        <button
+          type="button"
+          onClick={toggleExpand}
+          onPointerDown={(e) => e.stopPropagation()}
+          title="Expand"
+          style={{
+            flexShrink: 0,
+            pointerEvents: "all",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 20,
+            height: 20,
+            padding: 0,
+            border: "none",
+            borderRadius: 5,
+            background: "transparent",
+            color: "var(--text-dim)",
+            cursor: "pointer",
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
       </div>
-      {/* 标题 */}
+      {/* 中间区：最后回复（3 行截断）；无回复则回退到项目名/消息数 */}
       <div
         style={{
           flex: 1,
           minHeight: 0,
           display: "flex",
-          alignItems: "center",
-          fontWeight: 600,
-          fontSize: 13.5,
-          lineHeight: 1.3,
+          flexDirection: "column",
+          justifyContent: "center",
+          gap: 2,
           overflow: "hidden",
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: "vertical",
-          wordBreak: "break-word",
+          padding: "2px 0",
         }}
       >
-        {title || "Untitled"}
+        {lastReply ? (
+          <div
+            style={{
+              fontSize: 11.5,
+              lineHeight: 1.45,
+              color: "var(--text-muted)",
+              overflow: "hidden",
+              display: "-webkit-box",
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: "vertical",
+              wordBreak: "break-word",
+            }}
+          >
+            {lastReply}
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, color: "var(--text-dim)" }}>
+            {projectName && (
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 1 }}>
+                {projectName}
+              </span>
+            )}
+            {messageCount > 0 && (
+              <span style={{ flexShrink: 0, whiteSpace: "nowrap" }}>{messageCount} msgs</span>
+            )}
+          </div>
+        )}
       </div>
-      {/* 元信息 */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, color: "var(--text-dim)" }}>
-        {projectName && (
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 1 }}>
-            {projectName}
-          </span>
-        )}
-        {messageCount > 0 && (
-          <span style={{ flexShrink: 0, whiteSpace: "nowrap" }}>{messageCount} msgs</span>
-        )}
+      {/* 底部：最后活动时间 */}
+      <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text-dim)", borderTop: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", paddingTop: 3 }}>
+        <span aria-hidden style={{ flexShrink: 0 }}>🕒</span>
+        <span>{formatTime(runningMs, endedAt)}</span>
       </div>
     </HTMLContainer>
   );
@@ -287,4 +387,11 @@ function formatDuration(ms: number): string {
   if (min < 60) return `${min}m${sec % 60}s`;
   const h = Math.floor(min / 60);
   return `${h}h${min % 60}m`;
+}
+
+/** 底部最后活动时间：运行中显示时长，结束/空闲显示时:分 */
+function formatTime(runningMs: number, endedAt: number): string {
+  if (runningMs > 0) return `${formatDuration(runningMs)} ago`;
+  const d = endedAt ? new Date(endedAt) : new Date();
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }

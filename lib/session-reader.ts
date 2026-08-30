@@ -83,6 +83,7 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
       // 列表不消费消息数（精确值需要全量读，已移除）；保留字段以兼容类型。
       messageCount: 0,
       firstMessage: s.firstMessage || "(no messages)",
+      lastReply: s.lastReply || "",
       parentSessionId: s.parentSessionPath ? pathToId.get(sessionPathKey(s.parentSessionPath)) : undefined,
       transient: false,
     };

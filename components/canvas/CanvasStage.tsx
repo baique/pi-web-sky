@@ -140,7 +140,11 @@ export function CanvasStage({
         ) : (
           <Tldraw
             shapeUtils={shapeUtils}
-            onMount={board.onMount}
+            onMount={(editor) => {
+              // 开启内置拖放吸附对齐（对齐线/中点/边缘），不影响展示效果
+              editor.user.updateUserPreferences({ isSnapMode: true });
+              board.onMount(editor);
+            }}
             components={components}
             autoFocus={false}
             colorScheme={isDark ? "dark" : "light"}

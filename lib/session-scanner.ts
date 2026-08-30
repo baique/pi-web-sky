@@ -25,6 +25,8 @@ export interface SessionScanResult {
   created: Date;
   modified: Date;
   firstMessage: string;
+  /** 最后一条 assistant 回复文本（截断），无则为空串 */
+  lastReply: string;
   parentSessionPath?: string;
 }
 
@@ -34,6 +36,8 @@ const HEAD_INITIAL_BYTES = 4 * 1024;
 const HEAD_MAX_BYTES = 48 * 1024;
 // 列表里的首条消息只做简述展示（sidebar 也只截取前 50 字符）。
 const FIRST_MESSAGE_PREVIEW_LENGTH = 300;
+// 最后回复展示预览：卡片中间区约 3 行，截取足够文本即可。
+const LAST_REPLY_PREVIEW_LENGTH = 500;
 
 function parseLine(line: string): unknown {
   if (!line.trim()) return null;
@@ -118,9 +122,15 @@ function scanHead(path: string, size: number): { header: HeaderEntry; firstMessa
 const NAME_BLOCK_BYTES = 64 * 1024;
 const NAME_MAX_BLOCKS = 256; // 约 16MB，超出视为无名字
 
-/** 读取文件尾部，取最后一个 session_info 的自定义名（显式清空 → undefined）。 */
-function scanNameFromTail(path: string, size: number): string | undefined {
-  if (size <= 0) return undefined;
+/** 读取文件尾部：最后一个 session_info 的自定义名 + 最后一条 assistant 回复。
+ *  同一趟反向分块里同时取两样：名字（显式清空 → undefined）、
+ *  lastReply（最后一个 text 块，截断）。返回 { name, lastReply }。 */
+function scanTail(
+  path: string,
+  size: number,
+): { name: string | undefined; lastReply: string } {
+  const result: { name: string | undefined; lastReply: string } = { name: undefined, lastReply: "" };
+  if (size <= 0) return result;
   const fd = openSync(path, "r");
   try {
     let offset = size;
@@ -132,17 +142,25 @@ function scanNameFromTail(path: string, size: number): string | undefined {
       const text = buf.toString("utf8");
       const lines = text.split("\n");
       // 块首可能截断一行（前一行的后半），跳过第一行；块尾对齐 offset 完整。
-      // 从后往前找本块内最后一个 session_info。
+      // 从后往前找本块内最后一个 session_info 与最后一条 assistant 回复。
       for (let i = lines.length - 1; i >= 1; i--) {
-        const entry = parseLine(lines[i]) as { type?: string; name?: unknown } | null;
-        if (entry?.type === "session_info" && typeof entry.name === "string") {
+        if (result.name !== undefined && result.lastReply) continue;
+        const entry = parseLine(lines[i]) as
+          | { type?: string; name?: unknown; message?: { role?: unknown; content?: unknown } }
+          | null;
+        if (!entry) continue;
+        if (result.name === undefined && entry.type === "session_info" && typeof entry.name === "string") {
           const name = entry.name.trim();
-          return name || undefined; // 显式清空 → undefined
+          if (name) result.name = name; // 显式清空 → undefined
+        } else if (!result.lastReply && entry.type === "message" && entry.message?.role === "assistant") {
+          const reply = extractTextContent(entry.message).trim();
+          if (reply) result.lastReply = reply.slice(0, LAST_REPLY_PREVIEW_LENGTH);
         }
+        if (result.name !== undefined && result.lastReply) break; // 两个都拿到，收工
       }
       offset = start;
     }
-    return undefined;
+    return result;
   } finally {
     closeSync(fd);
   }
@@ -166,14 +184,17 @@ function scanOneSessionFile(path: string): SessionScanResult | null {
   const created = new Date(typeof header.timestamp === "string" ? header.timestamp : "");
   if (Number.isNaN(created.getTime())) created.setTime(stat.mtime.getTime());
 
+  const tail = scanTail(path, stat.size);
+
   return {
     path,
     id,
     cwd: typeof header.cwd === "string" ? header.cwd : "",
-    name: scanNameFromTail(path, stat.size),
+    name: tail.name,
     created,
     modified: stat.mtime,
     firstMessage: firstMessage || "(no messages)",
+    lastReply: tail.lastReply,
     parentSessionPath: typeof header.parentSession === "string" ? header.parentSession : undefined,
   };
 }

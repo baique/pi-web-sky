@@ -17,7 +17,37 @@ import { McpConfigPanel } from "./McpConfigPanel";
 // ssr:false — xterm.js touches browser globals at import time.
 const TerminalPanel = dynamic(() => import("./TerminalPanel").then((m) => m.TerminalPanel), { ssr: false });
 // ssr:false — tldraw 依赖浏览器环境，仅进入看板模式时下载（~1MB）。
-const SessionCanvas = dynamic(() => import("./canvas/SessionCanvas").then((m) => m.SessionCanvas), { ssr: false });
+// 外层 dynamic 提供 loading 占位（避免首帧纯白），内层 CanvasStage 再按需加载 tldraw。
+const SessionCanvas = dynamic(() => import("./canvas/SessionCanvas").then((m) => m.SessionCanvas), {
+  ssr: false,
+  loading: () => (
+    <div
+      style={{
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "var(--text-muted)",
+        fontSize: 13,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span
+          aria-hidden
+          style={{
+            width: 14,
+            height: 14,
+            borderRadius: "50%",
+            border: "2px solid color-mix(in srgb, var(--text) 15%, transparent)",
+            borderTopColor: "var(--accent)",
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
+        Loading canvas…
+      </div>
+    </div>
+  ),
+});
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { SidebarGlobalSearch } from "./SidebarGlobalSearch";

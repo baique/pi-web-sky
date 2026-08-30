@@ -7,9 +7,20 @@ import type { BoardCanvas, BoardInfo, BoardNode, BoardEdge, RunningSnapshot, Run
 import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
 import { shouldRemoveEndedCard } from "@/lib/board-utils";
 
+/** 会话摘要（卡片展示用）：标题/消息数/项目/最后回复 */
+export type SessionSummary = {
+  title: string;
+  messageCount: number;
+  projectName: string;
+  lastReply: string;
+};
+
 /** 收合卡默认尺寸（与 spec §3.1 一致） */
-export const CARD_W = 280;
-export const CARD_H = 120;
+export const CARD_W = 340;
+export const CARD_H = 160;
+// 旧默认收合尺寸（280×120）→ hydrate 时升级到新默认，容纳 3 行最后回复
+const LEGACY_CARD_W = 280;
+const LEGACY_CARD_H = 120;
 /** 展开工作台默认尺寸（spec §3.2） */
 export const WORKBENCH_W = 760;
 export const WORKBENCH_H = 600;
@@ -110,19 +121,20 @@ export function useBoardCanvas({
     };
   }, []);
 
-  // ---- 会话摘要（标题/消息数）用于卡片展示 ----
-  const [sessionTitles, setSessionTitles] = useState<Record<string, { title: string; messageCount: number; projectName: string }>>({});
+  // ---- 会话摘要（标题/消息数/最后回复）用于卡片展示 ----
+  const [sessionTitles, setSessionTitles] = useState<Record<string, SessionSummary>>({});
   const loadSessionSummaries = useCallback(async () => {
     try {
       const res = await fetch("/api/sessions", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { sessions: Array<{ id: string; name?: string; firstMessage?: string; messageCount?: number; projectKey?: string; projectRoot?: string }> };
-      const map: Record<string, { title: string; messageCount: number; projectName: string }> = {};
+      const data = (await res.json()) as { sessions: Array<{ id: string; name?: string; firstMessage?: string; messageCount?: number; projectKey?: string; projectRoot?: string; lastReply?: string }> };
+      const map: Record<string, SessionSummary> = {};
       for (const s of data.sessions) {
         map[s.id] = {
           title: s.name ?? s.firstMessage ?? "Untitled",
           messageCount: s.messageCount ?? 0,
           projectName: s.projectKey ?? s.projectRoot ?? "",
+          lastReply: s.lastReply ?? "",
         };
       }
       setSessionTitles(map);
@@ -195,7 +207,7 @@ export function useBoardCanvas({
   }, []);
 
   // ---- 物化：sqlite canvas → tldraw shapes ----
-  const hydrateShapes = useCallback((editor: Editor, canvas: BoardCanvas, titles: Record<string, { title: string; messageCount: number; projectName: string }>) => {
+  const hydrateShapes = useCallback((editor: Editor, canvas: BoardCanvas, titles: Record<string, SessionSummary>) => {
     const shapes: TLShapePartial[] = [];
     for (const node of canvas.nodes) {
       if (node.kind !== "session") continue;
@@ -210,13 +222,15 @@ export function useBoardCanvas({
           title: summary?.title ?? "Untitled",
           projectName: summary?.projectName ?? "",
           messageCount: summary?.messageCount ?? 0,
+          lastReply: summary?.lastReply ?? "",
           phase: "idle",
           runningMs: 0,
           endedAt: 0,
           stale: node.refId ? !titles[node.refId] : false,
           expanded: node.expanded,
-          w: node.w || CARD_W,
-          h: node.h || CARD_H,
+          // 旧默认收合尺寸（280×120）升级到新默认（340×160），容纳最后回复区
+          w: node.w === LEGACY_CARD_W && !node.expanded ? CARD_W : node.w || CARD_W,
+          h: node.h === LEGACY_CARD_H && !node.expanded ? CARD_H : node.h || CARD_H,
         },
       });
     }
@@ -344,7 +358,7 @@ export function useBoardCanvas({
     }
   }, [running, boardId, sessionTitles]);
 
-  const reconcileRunningBoard = useCallback((editor: Editor, snapshot: RunningSnapshot, titles: Record<string, { title: string; messageCount: number; projectName: string }>) => {
+  const reconcileRunningBoard = useCallback((editor: Editor, snapshot: RunningSnapshot, titles: Record<string, SessionSummary>) => {
     const existing = new Map<string, TLShape>();
     for (const shape of editor.getCurrentPageShapes()) {
       if (shape.type === "session-card") {
@@ -374,6 +388,7 @@ export function useBoardCanvas({
             title: summary?.title ?? "Running session",
             projectName: summary?.projectName ?? "",
             messageCount: summary?.messageCount ?? 0,
+            lastReply: summary?.lastReply ?? "",
             phase,
             runningMs,
             endedAt: 0,
@@ -470,6 +485,7 @@ export function useBoardCanvas({
         title: summary?.title ?? "Untitled",
         projectName: summary?.projectName ?? "",
         messageCount: summary?.messageCount ?? 0,
+        lastReply: summary?.lastReply ?? "",
         phase: "idle",
         runningMs: 0,
         endedAt: 0,

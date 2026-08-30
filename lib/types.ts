@@ -304,6 +304,8 @@ export interface SessionInfo {
   modified: string;
   messageCount: number;
   firstMessage: string;
+  /** 最后一条 assistant 回复文本（看板卡片中间区展示用，截断），无则为空串 */
+  lastReply?: string;
   parentSessionId?: string; // set if this session was forked from another
   /** Main repo root shared by all worktrees of this cwd (cwd itself for non-git dirs).
    *  Always set by the server; optional because the client builds transient
