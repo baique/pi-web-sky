@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { listBoards, createBoard, getSystemRunningBoard } from "@/lib/board-store";
-import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
 
 export const dynamic = "force-dynamic";
 
@@ -27,5 +26,3 @@ export async function POST(request: Request) {
   const board = createBoard(projectKey, name);
   return NextResponse.json({ board }, { status: 201 });
 }
-
-export { SYSTEM_RUNNING_BOARD_ID };
