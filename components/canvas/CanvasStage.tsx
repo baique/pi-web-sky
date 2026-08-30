@@ -229,11 +229,13 @@ export function CanvasStage({
         )}
         {/* 展开工作台浮层由 WorkbenchOverlay portal 到 document.body，无需挂载点 */}
         {board.loading ? (
-          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
+          /* 覆盖层：absolute + zIndex 30 盖过 scrim（磨砂 zIndex 0），
+             否则 static 定位会被定位的 scrim 盖住、loading 文字被磨砂 blur 模糊。 */
+          <div style={{ position: "absolute", inset: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
             {t("boards.loadingCanvas")}
           </div>
         ) : board.error ? (
-          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#f87171", fontSize: 13 }}>
+          <div style={{ position: "absolute", inset: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "center", color: "#f87171", fontSize: 13 }}>
             {board.error}
           </div>
         ) : (
