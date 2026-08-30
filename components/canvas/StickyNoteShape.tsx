@@ -130,8 +130,9 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
     [editor, shape.id],
   );
 
-  // 旧便笺无 createdAt 时兜底：用当前时间（仅展示，不写回避免噪声）
-  const createdAt = shape.props.createdAt ?? Date.now();
+  // 旧便笺无 createdAt 时兜底：用挂载时刻（仅展示，不写回避免噪声）。
+  // useState 惰性初始化——只在挂载取一次，避免 render 期调用 Date.now()（React purity 规则）。
+  const [createdAt] = useState(() => shape.props.createdAt ?? Date.now());
   const badge = shape.props.badge ?? "blue";
 
   const [draft, setDraft] = useState(text);
