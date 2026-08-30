@@ -78,8 +78,17 @@ export function applyWallpaperCss(s: WallpaperSettings, hasImage: boolean): void
   el.setProperty("--glass-blur-bubble", `${Math.round(s.bubbleBlur)}px`);
   // scrim 走独立变量（--board-scrim-*），控制内容与气泡滑块完全一致：
   // 透明度 → alpha（0–1），磨砂强度 → blur 半径（px）。
+  // 关键：磨砂强度为 0 时把整个 backdrop-filter 置为 none——否则
+  // blur(0px) saturate(0.8) 中的 saturate 残留仍会对背景去饱和，
+  // 用户把透明度和磨砂都调 0 时背景还“被影响”。
   el.setProperty("--board-scrim-alpha", String(s.scrimAlpha / 100));
   el.setProperty("--board-scrim-blur", `${Math.round(s.scrimBlur)}px`);
+  el.setProperty(
+    "--board-scrim-filter",
+    s.scrimBlur > 0
+      ? `blur(${Math.round(s.scrimBlur)}px) saturate(var(--glass-saturate))`
+      : "none",
+  );
   if (s.fill && !s.repeat && hasImage) {
     el.setProperty(
       "--app-bg-fill",

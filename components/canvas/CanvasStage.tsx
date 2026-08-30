@@ -92,8 +92,9 @@ export function CanvasStage({
       >
         {/* 画布 scrim：内容层之下、壁纸之上的一层“暗色承托 + 磨砂”底。
             - absolute inset 0 铺满舞台，pointerEvents none 不拦截拖拽/选择
-            - 背景用 --board-scrim-bg（暗色 token，明暗主题都保持暗色）
-            - 磨砂用 --board-scrim-blur（右上角调节滑块驱动）
+            - 背景用 --board-scrim-bg（rgba(0,0,0,alpha)，透明度滑块驱动）
+            - 磨砂用 --board-scrim-filter：由 wallpaper-settings 计算，
+              磨砂为 0 时置 none（避免 saturate 残留仍去饱和背景）
             玻璃只挂这一层，卡片/工具条各自玻璃不在此重复叠 backdrop-filter。 */}
         <div
           style={{
@@ -102,8 +103,8 @@ export function CanvasStage({
             zIndex: 0,
             pointerEvents: "none",
             background: "var(--board-scrim-bg)",
-            backdropFilter: "blur(var(--board-scrim-blur)) saturate(var(--glass-saturate))",
-            WebkitBackdropFilter: "blur(var(--board-scrim-blur)) saturate(var(--glass-saturate))",
+            backdropFilter: "var(--board-scrim-filter, none)",
+            WebkitBackdropFilter: "var(--board-scrim-filter, none)",
           }}
         />
         {dragOver && (
