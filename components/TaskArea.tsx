@@ -360,9 +360,6 @@ function TaskCard({
             >
               <FolderIcon size={13} open={!collapsed} />
             </span>
-            <span title={`${task.name} · ${formatRelativeTime(task.created)}`} style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {task.name}
-            </span>
             {runningCount != null && runningCount > 0 && (
               <span
                 title={t("sidebar.taskRunning", { count: runningCount })}
@@ -384,6 +381,9 @@ function TaskCard({
                 {runningCount}
               </span>
             )}
+            <span title={`${task.name} · ${formatRelativeTime(task.created)}`} style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {task.name}
+            </span>
             {task.pinned && !renaming && !confirmDelete && (
               <span title={t("sidebar.pinned")} style={{ display: "inline-flex", flexShrink: 0, color: "var(--accent)" }}>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
