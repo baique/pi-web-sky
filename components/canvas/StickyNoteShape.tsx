@@ -139,8 +139,9 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
   // 徽记同样进草稿：完成才写回，取消则放弃选择
   const [draftBadge, setDraftBadge] = useState(badge);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // 取消/完成主动退出编辑时跳过 onBlur 自动保存（避免点击取消按钮先触发 blur 保存）
-  const skipBlurSaveRef = useRef(false);
+  // 取消时置 true：退出编辑的保存钩子跳过（放弃草稿）；finish 不置 → 正常保存
+  const cancelRef = useRef(false);
+  const wasEditingRef = useRef(false);
 
   // 进入编辑时同步草稿；非编辑且外部 text 变化时重置
   useEffect(() => {
@@ -159,24 +160,23 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
     }
   }, [editor, shape.id, shape.props.text, badge, draftBadge]);
 
-  // 失焦自动保存（取消/完成路径由 skipBlurSaveRef 跳过）
-  const handleBlur = useCallback(() => {
-    if (skipBlurSaveRef.current) {
-      skipBlurSaveRef.current = false;
-      return;
+  // 自动保存：监听编辑态退出（tldraw 里点击画布空白退出时 textarea 先被卸载，
+  // React 合成 onBlur 不触发，必须靠 isEditing true→false 这个时机保存）
+  useEffect(() => {
+    if (!isEditing && wasEditingRef.current && !cancelRef.current) {
+      save();
     }
-    save();
-  }, [save]);
+    cancelRef.current = false;
+    wasEditingRef.current = isEditing;
+  }, [isEditing, save]);
 
   const finish = useCallback(() => {
-    save();
-    skipBlurSaveRef.current = true;
-    editor.setEditingShape(null);
-  }, [save, editor]);
+    editor.setEditingShape(null); // 退出时上面的钩子自动保存
+  }, [editor]);
 
   // 取消：放弃草稿变更（text + badge），直接退出编辑
   const cancel = useCallback(() => {
-    skipBlurSaveRef.current = true;
+    cancelRef.current = true;
     editor.setEditingShape(null);
   }, [editor]);
 
@@ -205,34 +205,7 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
     return (
       <HTMLContainer data-testid={`sticky-note-${shape.id}`} style={{ width: w, height: h, pointerEvents: "none" }}>
         <div style={bubbleStyle}>
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(e) => { setDraft(e.target.value); draftRef.current = e.target.value; }}
-            onBlur={handleBlur}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(); }
-              else if (e.key === "Escape") { e.preventDefault(); cancel(); }
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-            spellCheck={false}
-            placeholder="Markdown 便笺…"
-            className="sticky-note-input"
-            style={{
-              flex: 1,
-              minHeight: 0,
-              resize: "none",
-              border: "none",
-              outline: "none",
-              background: "transparent",
-              color: "var(--text)",
-              fontFamily: "var(--font-mono)",
-              fontSize: 12.5,
-              lineHeight: 1.5,
-              padding: "var(--bubble-pad-y, 8px) var(--bubble-pad-x, 12px)",
-            }}
-          />
+          {/* 顶部：徽记选择 + 取消/完成（按钮区置顶） */}
           <div
             onPointerDown={(e) => e.stopPropagation()}
             style={{
@@ -241,7 +214,7 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
               alignItems: "center",
               gap: 8,
               padding: "6px 10px",
-              borderTop: "1px solid var(--bubble-hairline)",
+              borderBottom: "1px solid var(--bubble-hairline)",
             }}
           >
             {/* 徽记选择：5 色，默认蓝 */}
@@ -288,6 +261,33 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
               完成
             </button>
           </div>
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={(e) => { setDraft(e.target.value); draftRef.current = e.target.value; }}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(); }
+              else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            spellCheck={false}
+            placeholder="Markdown 便笺…"
+            className="sticky-note-input"
+            style={{
+              flex: 1,
+              minHeight: 0,
+              resize: "none",
+              border: "none",
+              outline: "none",
+              background: "transparent",
+              color: "var(--text)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 12.5,
+              lineHeight: 1.5,
+              padding: "var(--bubble-pad-y, 8px) var(--bubble-pad-x, 12px)",
+            }}
+          />
         </div>
       </HTMLContainer>
     );
