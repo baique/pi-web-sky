@@ -35,8 +35,18 @@ const apiPatch = async (p, data) => {
     headers: { "Content-Type": "application/json" },
     data,
   });
-  return { status: res.status(), body: await res.json().catch(() => null) };
+  const body = await res.json().catch(() => null);
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`PATCH ${p} failed: HTTP ${res.status} ${JSON.stringify(body)}`);
+  }
+  return { status: res.status(), body };
 };
+
+// 测试数据快照：开始时记录，finally 里无条件还原，杜绝污染
+let originalSessionIds = [];       // 任务初始会话
+let originalCanvas = null;         // 看板初始整张画布（看板原本存在时）
+let boardExistedBefore = false;    // 测试前看板是否已存在
+let taskId = null;
 
 try {
   // 0. 数据准备：确认 bug 任务存在，记录其会话数
@@ -44,9 +54,14 @@ try {
   const task = t0.body.tasks.find((x) => x.name === "bug") ?? t0.body.tasks[0];
   check("found a task to test", !!task, task?.name);
   if (!task) throw new Error("no task available");
-  const taskId = task.id;
+  taskId = task.id;
+  originalSessionIds = [...task.sessionIds];
   const beforeCount = task.sessionIds.length;
   console.log(`  task "${task.name}" (${taskId}) has ${beforeCount} sessions`);
+
+  // 看板是否已存在（懒创建）：已存在 → 测试后还原画布；不存在 → 测试后删除
+  const b0 = await api(`/api/boards/${encodeURIComponent(taskId)}`);
+  boardExistedBefore = b0.status === 200 && !!b0.body?.board;
 
   // 1. 打开应用，进入会话 tab（默认），等待侧栏任务渲染
   await page.goto(URL, { waitUntil: "domcontentloaded" });
@@ -85,6 +100,12 @@ try {
     ? decodeURIComponent(rawUrl.split("?board=")[1].split("&")[0])
     : null;
   check("board button opens board mode (?board=)", boardParam === taskId, `board=${boardParam}`);
+
+  // 看板已打开（懒创建生效）→ 记录原始画布快照，供 finally 还原
+  const canvasRes = await api(`/api/boards/${encodeURIComponent(taskId)}/canvas`);
+  if (canvasRes.status === 200 && canvasRes.body) {
+    originalCanvas = canvasRes.body;
+  }
 
   // 2c. 任务行选中态与看板条目一致（--side-active 背景）
   await page.waitForTimeout(500);
@@ -214,10 +235,6 @@ try {
       return -1;
     });
     check("new session auto-added to board", countAfter >= beforeCount + 1, `cards=${countAfter} expected=${beforeCount + 1}`);
-
-    // 清理：把该会话移出任务（还原数据）
-    await apiPatch(`/api/tasks/${taskId}`, { sessionIds: task.sessionIds });
-    console.log("  (reverted: session removed from task)");
   } else {
     console.log("  (skip auto-add check: no spare session)");
   }
@@ -226,6 +243,33 @@ try {
   console.error("FATAL", e?.message ?? e);
   fail++;
 } finally {
+  // ---- 无条件还原测试数据 ----
+  try {
+    if (taskId) {
+      // 1) 任务会话还原为初始集合（幂等：assign 与否都安全）
+      await apiPatch(`/api/tasks/${taskId}`, { sessionIds: originalSessionIds });
+      // 2) 看板还原：原本存在 → PUT 回初始画布；原本不存在（测试懒创建）→ 删除
+      if (boardExistedBefore && originalCanvas) {
+        const put = await page.request.fetch(`${URL}/api/boards/${encodeURIComponent(taskId)}/canvas`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          data: {
+            nodes: originalCanvas.nodes ?? [],
+            edges: originalCanvas.edges ?? [],
+            view: originalCanvas.view ?? null,
+          },
+        });
+        if (!put.ok) console.warn("  (restore canvas failed:", put.status, ")");
+        else console.log("  (restored canvas to pre-test state)");
+      } else {
+        const del = await page.request.delete(`${URL}/api/boards/${encodeURIComponent(taskId)}`);
+        if (!del.ok) console.warn("  (delete test board failed:", del.status, ")");
+        else console.log("  (deleted test-created board)");
+      }
+    }
+  } catch (e) {
+    console.warn("  (cleanup error:", e?.message ?? e, ")");
+  }
   if (errors.length) {
     console.log(`\nPage errors (${errors.length}):`);
     for (const e of errors.slice(0, 5)) console.log(`  - ${e}`);
