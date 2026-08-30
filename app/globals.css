@@ -209,8 +209,9 @@ html.dark {
 
   --app-bg-scrim: rgba(0, 0, 0, 0.06);
   --board-card-glass: rgba(34, 34, 37, 0.55);
-  /* 看板 scrim 暗色浓度 token 在 :root 定义（color-mix 从 alpha 推导，
-     明暗主题共用同一套值）；dark 只覆盖卡片玻璃本身 */
+  /* 看板 scrim token（--board-scrim-*）在 :root 定义，明暗主题共用同一套：
+     透明度固定 0，磨砂 blur 由滑块驱动，saturate 跟随统一 --glass-saturate
+     （浅 80% / 深 140%）。dark 只需覆盖卡片玻璃本身。 */
   --glass-bg: rgba(30, 30, 33, 0.65);
   --glass-bg-strong: rgba(34, 34, 37, 0.78);
   --glass-saturate: 140%;
