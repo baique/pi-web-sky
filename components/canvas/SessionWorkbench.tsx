@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useEditor, type TLShapeId } from "tldraw";
 import { ChatWindow } from "@/components/ChatWindow";
 import type { ChatInputHandle } from "@/components/ChatInput";
 import { SessionNavBar, type SessionNavBarHandle } from "./SessionNavBar";
@@ -40,6 +41,17 @@ export function SessionWorkbench({
 }) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
+  const editor = useEditor();
+
+  // 卡片激活判定（激活 = tldraw 选中本卡）：事件发生时实时读 editor，
+  // 不引入 React 状态/重渲染，避免打断画布平移拖拽。
+  // 卡片 shape id：展开态 HTMLContainer 的 data-node-id（shape.id 去 "shape:" 前缀）。
+  const isActive = () => {
+    const card = rootRef.current?.closest(".tl-html-container");
+    const nodeId = card?.getAttribute("data-node-id");
+    if (!nodeId) return false;
+    return editor.getSelectedShapeIds().includes(`shape:${nodeId}` as TLShapeId);
+  };
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatKey, setChatKey] = useState(0);
@@ -130,11 +142,10 @@ export function SessionWorkbench({
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
-    const stop = (e: WheelEvent) => e.stopPropagation();
-    el.addEventListener("wheel", stop, { capture: true });
+    // 仅激活时拦截 wheel（会话消息区滚动）；非激活放行给画布平移/缩放
+    const stop = (e: WheelEvent) => { if (isActive()) e.stopPropagation(); };
     el.addEventListener("wheel", stop);
     return () => {
-      el.removeEventListener("wheel", stop, { capture: true });
       el.removeEventListener("wheel", stop);
     };
   });
@@ -215,8 +226,8 @@ export function SessionWorkbench({
       // 工作台嵌在 tldraw 卡片内：阻止事件冒泡到画布。tldraw 画布在 pointerDown 上
       // preventDefault（会吞掉后续 click），导致终端/模型选择器/session/通知等无法弹出。
       // 冒泡阶段拦截：事件先正常到达目标（内部按钮可点击），再阻止冒泡到画布。
-      onPointerDown={(e) => e.stopPropagation()}
-      onPointerUp={(e) => e.stopPropagation()}
+      onPointerDown={(e) => { if (isActive()) e.stopPropagation(); }}
+      onPointerUp={(e) => { if (isActive()) e.stopPropagation(); }}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
