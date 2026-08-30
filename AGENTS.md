@@ -37,6 +37,8 @@ Browser                Next.js Server              AgentSession (in-process)
 **Session browsing** (read-only): reads `.jsonl` files through SDK `SessionManager` helpers and `lib/session-reader.ts` — no AgentSession created.  
 **Sending a message**: `startRpcSession()` in `lib/rpc-manager.ts` creates an AgentSession in-process.
 
+**Board mode** (会话看板): selecting a board (`?board=`) replaces the ChatWindow area with the tldraw canvas (`SessionCanvas`) — the sidebar stays visible, exiting / clicking a session / new-session returns to chat. Board layout (nodes/edges/camera) lives in SQLite via `lib/board-store.ts` (SDK-free, versioned migrations v3–v5), never in session files. Task boards mirror task sessions (`boards.task_id`): opening a task auto-creates its board and reconciles cards on open + 10s poll.
+
 ---
 
 ## File Map
@@ -70,10 +72,27 @@ app/api/
   skills/route.ts                 GET/PATCH loaded skills and disable-model-invocation
   skills/install/route.ts         POST install skills through npx skills add
   skills/search/route.ts          GET/POST skills.sh search
+  boards/route.ts                 GET list (projectKey) | POST create
+  boards/[id]/route.ts            GET | PATCH rename | DELETE (cascade nodes/edges/view)
+  boards/[id]/canvas/route.ts     GET canvas | PUT save (乐观锁 + 空覆盖保护)
+  boards/[id]/nodes/...           node CRUD（卡片/便笺布局）
+  boards/[id]/edges/...           edge CRUD（连线）
+  boards/reorder/route.ts         POST 手动看板排序
+  tasks/route.ts                  GET/POST 任务元数据（session_meta 旁路）
+  tasks/[id]/route.ts             GET/PATCH/DELETE（改名同步看板名；删除级联删看板）
+  tasks/[id]/board/route.ts       GET 任务看板（懒创建，看板 id = 任务 id）
   worktrees/route.ts              GET/POST/DELETE git worktrees
 
 lib/
   agent-client.ts      typed fetch helper for /api/agent commands
+  board-store.ts       boards/nodes/edges/view CRUD（SDK-free，对照 task-store）
+  board-types.ts       看板类型定义 + SYSTEM_RUNNING_BOARD_ID = "__running__"
+  board-events.ts      看板跨组件事件桥（window.dispatchEvent：open-file/forked/renamed/…）
+  board-utils.ts       看板工具（shouldRemoveEndedCard 等）
+  board-scrim-settings.ts  画布 scrim 磨砂设置持久化
+  session-stats.ts     会话统计行格式（in/out/cache/cost/context，与 AppShell 共用）
+  task-store.ts        任务元数据 CRUD（session_meta 旁路，boards.task_id 联动的源头）
+  sqlite-db.ts         SQLite 单例 + 版本化迁移（SCHEMA_VERSION = 5，boards 于 v3–v5）
   draft-store.ts       local draft persistence helpers
   file-access.ts       allowed file roots for /api/files and worktrees
   file-paths.ts        client/server path encoding helpers
@@ -91,7 +110,10 @@ lib/
 components/
   AppShell.tsx        layout + URL state + tab management
   SessionSidebar.tsx  session tree + FileExplorer
+  SessionStatsSummary.tsx  session stats compact summary（统计弹层第一行，复用 AppShell 顶栏格式）
   ChatWindow.tsx      chat composition + completion sound wrapper
+  canvas/             board mode components：SessionCanvas / SessionCardShape / SessionWorkbench /
+                      StickyNoteShape / BoardSection / CanvasStage / SessionNavBar / BoardToolbar
   ChatInput.tsx       input bar + model/thinking/tools/compact controls
   MessageView.tsx     renders one message (user/assistant/toolCall/toolResult)
   BranchNavigator.tsx in-session branch switcher
@@ -123,6 +145,7 @@ components/
 hooks/
   useAgentSession.ts  messages + streaming + SSE + fork/navigate/reconciliation logic
   useAudio.ts         completion sound + browser AudioContext unlock
+  useBoardCanvas.ts   board canvas: load/save(防抖单飞)/running snapshot/reconcile/findFreeSpot/addDraftCard
   useBroadcast.ts     composer broadcast slots (left phase / right notices, P0-P3 priority)
   useDragDrop.ts      shared drag/drop state
   useIsMobile.ts      responsive breakpoint hook
@@ -178,6 +201,37 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 - `useAgentSession` treats per-session SSE as primary for chat events and opens it before each prompt. `prompt_done` completes the current UI stage and notification immediately, but the idle SSE stays open for a 30-second grace window and is reused by the next prompt. `agent_start` cancels that close timer; `agent_settled` finishes extension-injected runs that have no wrapper-level `prompt_done` and starts a fresh grace window. Do not close on the first `agent_end`: retries, compaction, and extension-queued messages can continue the same logical prompt.
 - While a run is active, `useAgentSession` periodically calls `GET /api/agent/[id]` and also reconciles on `visibilitychange`/`online`. This fixes missed terminal events from background tabs or half-open connections.
 - Prompt runs use a monotonic run id; late SSE or slow reconciliation responses from an old run must be ignored so they cannot resurrect stale streaming bubbles.
+
+### 会话看板（boards）—— 数据层铁律
+- **迁移**：`lib/sqlite-db.ts` `SCHEMA_VERSION = 5`（v3 建 boards/board_nodes/board_edges/board_view → v4 `sort_order` → v5 `task_id`）。看板是旁路元数据，会话 jsonl 原地不动。
+- **事务铁律**：SQLite 不支持嵌套 BEGIN。`deleteBoardCascade` / `renameTaskBoard` **必须无事务**，由调用方（`deleteBoard` / `deleteTask` / `updateTask`）在自身事务内调用。board-store 的 `deleteBoard` 保持"自开事务"行为。
+- **任务即看板**：看板 id = 任务 id（`boards.task_id` 非空即任务型看板）。`GET /api/tasks/[id]/board` 懒创建；`deleteTask` 事务内级联删看板；`updateTask` 改名同步 `renameTaskBoard`。
+- **系统「运行中」看板**：`SYSTEM_RUNNING_BOARD_ID = "__running__"`，只读、跨项目自动聚合运行中会话，不落 boards 表。
+
+### 空画布保护（防看板被清空）
+- `PUT /api/boards/[id]/canvas` **默认拒绝用空 nodes 覆盖已有内容的看板**（返回 `empty-overwrite` → 409）——客户端状态未加载完成时全量保存会把看板清空，这是血泪教训。
+- 用户显式「清空画布」才传 `allowEmpty: true` 放行；客户端物化完成前禁止自动保存。
+- 乐观锁：客户端必须带读取快照时的 `boards.updated`（`baseUpdated`），期间被他人保存过则拒绝写入。
+
+### 任务即看板自动补卡
+- `reconcileTaskSessions`：打开时 diff + 复用 10s 摘要轮询周期 diff，差集（任务会话中无卡片者）→ `addSessionNode`。
+- `findFreeSpot(editor)`：收集现有 session-card 矩形，从 (60,60) 按行扫描（y 增 x 增），找与所有卡片**不重叠且间隙 ≥ 24** 的第一个空位——右下方向找空位，天然不遮挡。
+- 任务看板**不提供"从看板移除任务会话卡片"**（要移除即移出任务），否则被 diff 补回造成语义冲突。
+- `BoardSection` 列表**过滤 `taskId == null`**：任务看板不混入手动看板列表（任务行本身即入口）。
+
+### 卡片即工作台（tldraw）
+- tldraw 5.x，`next/dynamic` ssr:false 按需加载（体积 ~1MB，仅进看板时下载）。自定义 shape 用 `BaseBoxShapeUtil`。
+- 卡片两态：收合卡（340×160）↔ **展开即工作台**（同一卡片放大，默认 760×600，非弹窗）。展开态工作台 = portal 浮层 + `1/zoom` 反补偿，`zoom < 60%` 降级骨架态。
+- **draft 卡**：`sessionId` 为空的卡（新建会话），输入消息绑定真实会话后转正（`bindDraftSession`）。
+- 卡片内改名：内联输入 → `PATCH /api/sessions/[id]` → `dispatchBoardSessionRenamed` 事件桥刷左侧树 + 摘要轮询刷新标题。
+
+### tldraw 集成陷阱
+- tldraw 全局 `user-select:none` 会禁用画布内文本选中——工作台消息区与便笺 markdown 必须显式恢复选中（根因同源）。
+- 便笺是**自研 markdown 便笺**（`StickyNoteShape`），不要用 tldraw 内置 Note（拖拽会出两个控件）。
+- 看板卡片内的 `position:fixed` 弹层（如 BranchNavigator 下拉）会被 `backdrop-filter` 容器劫持导致漂移 → portal 到 body；卡片内展开时用 `[data-session-titlebar]` 定位对齐标题栏。
+- 便笺 `createdAt` 用 `useState` 惰性初始化，禁止 render 期 `Date.now()`（lint purity）。
+- 卡片状态以展开卡内 `useAgentSession` 的 SSE 为准，看板聚合态以 `/api/agent/running` 轮询为准——双源不打架。
+- 看板 URL `?board=` 持久化；退出看板 / 点会话 / 新建即回聊天。
 
 ### Worktrees and project grouping
 - `lib/worktree.ts` resolves linked worktree top-levels back to the main repo `projectRoot`; `listAllSessions()` attaches that to each `SessionInfo` so all worktrees for one repo are grouped together in the sidebar.
@@ -263,6 +317,17 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 - 思考块：折叠态同样是轻行（✧ 图标 + 思考 + 时长）；展开后是**纯文本注记**——零背景零边框，仅左侧一条细线标识思考区。思考是长文本阅读区，不用玻璃 / 卡片，最长文也舒服。
 - 工具 / 思考块**不加整圈彩色边框**，状态用圆点 / 图标表达，只用一根极淡 `--bubble-border` 中性描边。
 - header 内不两端对齐：时长紧跟文字（不用 `marginLeft:auto`）。
+
+### 画布 scrim（`--board-scrim-*`）
+
+画布内容层之下、壁纸之上的一层磨砂（SessionCanvas），右上角滑块驱动：
+
+```
+--board-scrim-alpha / -bg / -blur
+```
+
+- 磨砂只为 blur 不动饱和度（深浅色一致观感）；`blur` 为 0 时把 `backdrop-filter` 置 `none`，避免 `saturate` 残留仍去饱和背景。
+- token 在 `:root` 定义，明暗主题共用同一套，不用在 `.dark` 重复。
 
 ### 思考球 loading（`thinking-orbs`）
 
