@@ -78,7 +78,6 @@ export function SessionWorkbench({
         onSoundToggle={onSoundToggle}
         playDoneSound={playDoneSound}
         unlockAudio={unlockAudio}
-        fillWidth
       />
     </div>
   );

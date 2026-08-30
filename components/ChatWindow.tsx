@@ -63,8 +63,6 @@ interface Props {
   unlockAudio?: () => void;
   terminalOpen?: boolean;
   onToggleTerminal?: () => void;
-  /** 工作台场景：消息区不设 maxWidth，撑满容器宽度（默认 false = 居中 820 限宽） */
-  fillWidth?: boolean;
 }
 
 const CHAT_COLUMN_PADDING = 16;
@@ -251,7 +249,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal, fillWidth = false }: Props) {
+export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const { isDark } = useTheme();
@@ -830,7 +828,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       )}
 
       {isEmptyNew ? (
-        <div className={`flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8 ${fillWidth ? "" : "max-w-[820px] mx-auto w-full"}`}>
+        <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
+          <div className="w-full max-w-[820px]">
             <div
               className="mb-3"
               style={{
@@ -860,6 +859,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
             {chatInputElement}
             {/* 欢迎页不渲染底部状态栏：状态栏属于会话界面，空会话欢迎页保持干净 */}
           </div>
+        </div>
       ) : (
       <>
       <div className="relative flex min-w-0 flex-1 overflow-hidden">
@@ -872,7 +872,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
           }}
         >
           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
-            <div ref={messageContentRef} style={{ width: "100%", minWidth: 0, maxWidth: fillWidth ? "none" : 820, margin: "0 auto" }}>
+            <div ref={messageContentRef} style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
             {(() => {
               let lastUserIdx = -1;
               for (let i = messages.length - 1; i >= 0; i--) {
