@@ -99,6 +99,25 @@ type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktre
 const TOP_BAR_ICON_BUTTON_SIZE = 36;
 const LANGUAGE_MENU_WIDTH = 176;
 
+/** 当前 URL 的 board 参数（看板模式），无则 null */
+function currentBoardId(): string | null {
+  return new URLSearchParams(window.location.search).get("board");
+}
+
+/** 生成目标 URL：看板模式下保留 ?board=，避免 session/空 URL 覆盖看板地址。
+ *  看板是主区域视图（会话与看板同级切换），URL 必须以 board 为准；
+ *  否则刷新后 board 参数被 session 覆盖，下次刷新就进会话了。 */
+function boardAwareUrl(query: string): string {
+  const board = currentBoardId();
+  if (!board) return query;
+  // query 为 "/" 或空时只有 board 参数（避免 "/" 被解析成垃圾键 ?%2F=）
+  const clean = query.replace(/^\?/, "");
+  if (!clean || clean === "/") return `?board=${encodeURIComponent(board)}`;
+  const params = new URLSearchParams(clean);
+  params.set("board", board);
+  return `?${params.toString()}`;
+}
+
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -805,6 +824,8 @@ export function AppShell() {
   // is looked up against the live list so a deleted or drifted session falls
   // back to the default welcome page instead of erroring.
   const restoreWorkspaceContext = useCallback((projectKey: string) => {
+    // 看板模式：主区域是画布，不恢复上次打开的会话，也不让 session URL 覆盖看板地址。
+    if (currentBoardId()) return;
     const token = ++workspaceRestoreTokenRef.current;
     const lastOpenSessionId = getLastOpenSession(projectKey);
     if (!lastOpenSessionId) return;
@@ -906,7 +927,8 @@ export function AppShell() {
         restoreWorkspaceContext(newProject);
       }
     }
-    router.replace("/", { scroll: false });
+    // 看板模式下保留 ?board=（boardAwareUrl），否则 cwd 初始化会把看板地址清成 "/"
+    router.replace(boardAwareUrl("/"), { scroll: false });
   }, [activeCwd, invalidateWorkspaceRestore, newSessionCwd, router, selectedSession, restoreWorkspaceContext]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {

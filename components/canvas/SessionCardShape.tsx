@@ -1,4 +1,4 @@
-import { BaseBoxShapeUtil, HTMLContainer, T, useEditor } from "tldraw";
+import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, resizeBox } from "tldraw";
 import type { TLBaseShape, TLShapePartial } from "tldraw";
 import { SessionWorkbench } from "./SessionWorkbench";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
@@ -94,8 +94,8 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
     return true;
   }
 
-  /** resize 钳制最小尺寸：展开态工作台不能缩到样式崩坏（消息/输入/底栏需空间），
-   *  收合态保持 CARD_W×CARD_H 下限。返回修正后的宽高。 */
+  /** resize：左上角固定、随宽度/高度扩展（tldraw resizeBox 默认锚点），
+   *  并钳制最小尺寸：展开态 400×500，收合态回到卡片默认。 */
   override onResize(
     shape: SessionCardShape,
     info: import("tldraw").TLResizeInfo<SessionCardShape>,
@@ -104,10 +104,9 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
     // 展开态最小宽 400（用户要求），高 500；收合态回到卡片默认下限
     const minW = expanded ? 400 : CARD_W;
     const minH = expanded ? 500 : CARD_H;
-    // 当前 props 宽高 * 本次 resize 比例，钳制到下限
-    const w = Math.max(minW, (shape.props.w || 0) * info.scaleX);
-    const h = Math.max(minH, (shape.props.h || 0) * info.scaleY);
-    return { props: { w, h } };
+    // resizeBox 处理左上角固定锚点（返回 x/y）+ 最小尺寸钳制，
+    // 不手写 w/h（手写会丢锚点，拖拽时卡片会跑位）。
+    return resizeBox(shape, info, { minWidth: minW, minHeight: minH }) as Omit<TLShapePartial<SessionCardShape>, "id" | "type">;
   }
 
   /** 双击展开为工作台（持久化 expanded 标记，刷新后恢复）。

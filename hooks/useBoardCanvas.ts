@@ -15,6 +15,9 @@ export type SessionSummary = {
   lastReply: string;
 };
 
+/** 看板卡片最后回复/标题轮询间隔（ms）——会话在跑时卡片内容持续刷新 */
+const SUMMARY_POLL_MS = 10000;
+
 /** 收合卡默认尺寸（与 spec §3.1 一致） */
 export const CARD_W = 340;
 export const CARD_H = 160;
@@ -144,7 +147,26 @@ export function useBoardCanvas({
   }, []);
 
   useEffect(() => {
-    void loadSessionSummaries();
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const run = async () => {
+      await loadSessionSummaries();
+      if (!stopped) timer = setTimeout(run, SUMMARY_POLL_MS);
+    };
+    void run();
+    // 标签页回到可见时立即刷新（不等下一个周期）
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        if (timer) clearTimeout(timer);
+        void run();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, [loadSessionSummaries]);
 
   // ---- tldraw 挂载 ----
@@ -162,6 +184,34 @@ export function useBoardCanvas({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ---- 摘要轮询 → 同步到画布卡片（标题/最后回复实时刷新）----
+  // hydrate 只在 initialCanvas 非空时跑一次；此后 sessionTitles 每次轮询更新，
+  // 都需把新标题/最后回复写回已有 session-card shape（不重建卡片）。
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !editorReady) return;
+    // 摘要空（首次加载前）或初始 hydrate 未完成时不打扰
+    if (Object.keys(sessionTitles).length === 0 || hydratingRef.current) return;
+    const updates: TLShapePartial[] = [];
+    for (const shape of editor.getCurrentPageShapes()) {
+      if (shape.type !== "session-card") continue;
+      const p = shape.props as SessionCardShapeProps;
+      const s = sessionTitles[p.sessionId];
+      if (!s) continue;
+      if (p.title !== s.title || p.lastReply !== s.lastReply || p.messageCount !== s.messageCount) {
+        updates.push({
+          id: shape.id,
+          type: "session-card",
+          props: { title: s.title, lastReply: s.lastReply, messageCount: s.messageCount },
+        });
+      }
+    }
+    if (updates.length > 0) {
+      editor.updateShapes(updates);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionTitles, editorReady]);
 
   // ---- 防抖全量保存（单飞） ----
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -210,6 +260,20 @@ export function useBoardCanvas({
   const hydrateShapes = useCallback((editor: Editor, canvas: BoardCanvas, titles: Record<string, SessionSummary>) => {
     const shapes: TLShapePartial[] = [];
     for (const node of canvas.nodes) {
+      if (node.kind === "shape") {
+        // 通用 shape（text/note/geo/draw/group 等）：从 props 还原完整 shape
+        const p = node.props as { type?: string; rotation?: number; shapeProps?: Record<string, unknown> };
+        if (!p?.type || !p.shapeProps) continue;
+        shapes.push({
+          id: createShapeId(node.id),
+          type: p.type as never,
+          x: node.x,
+          y: node.y,
+          rotation: p.rotation ?? 0,
+          props: p.shapeProps as never,
+        });
+        continue;
+      }
       if (node.kind !== "session") continue;
       const summary = node.refId ? titles[node.refId] : undefined;
       shapes.push({
@@ -337,6 +401,25 @@ export function useBoardCanvas({
           label: a.props.richText ? richTextToString(a.props.richText) : null,
           color: a.props.color,
           dashed: a.props.dash === "dashed",
+          created: ts,
+          updated: ts,
+        });
+      } else {
+        // 通用 shape（text/note/geo/draw/group 等）：整个 shape 序列化进 props，
+        // 刷新后原样还原。之前只存 session-card + arrow，导致文字/图形刷新即丢。
+        const s = shape as TLShape;
+        const { x, y, rotation, props: shapeProps } = s;
+        nodes.push({
+          id: shape.id.replace("shape:", ""),
+          boardId: bid,
+          kind: "shape",
+          refId: null,
+          x,
+          y,
+          w: "w" in shapeProps ? Number(shapeProps.w) || 0 : 0,
+          h: "h" in shapeProps ? Number(shapeProps.h) || 0 : 0,
+          expanded: false,
+          props: { type: s.type, rotation, shapeProps },
           created: ts,
           updated: ts,
         });
@@ -590,6 +673,7 @@ type SessionCardShapeProps = {
   title: string;
   projectName: string;
   messageCount: number;
+  lastReply: string;
   phase: CanvasPhase;
   runningMs: number;
   endedAt: number;
