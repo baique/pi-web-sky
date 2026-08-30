@@ -9,12 +9,14 @@ import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
 import { shouldRemoveEndedCard } from "@/lib/board-utils";
 import { dispatchBoardCanvasChanged } from "@/lib/board-events";
 
-/** 会话摘要（卡片展示用）：标题/消息数/项目/最后回复 */
+/** 会话摘要（卡片展示用）：标题/消息数/项目/最后回复/最后活动时间 */
 export type SessionSummary = {
   title: string;
   messageCount: number;
   projectName: string;
   lastReply: string;
+  /** 最后一条消息时间（会话文件 mtime，ms epoch） */
+  lastActivityAt: number;
 };
 
 /** 看板卡片最后回复/标题轮询间隔（ms）——会话在跑时卡片内容持续刷新 */
@@ -152,7 +154,7 @@ export function useBoardCanvas({
     try {
       const res = await fetch("/api/sessions", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { sessions: Array<{ id: string; name?: string; firstMessage?: string; messageCount?: number; projectKey?: string; projectRoot?: string; lastReply?: string }> };
+      const data = (await res.json()) as { sessions: Array<{ id: string; name?: string; firstMessage?: string; messageCount?: number; projectKey?: string; projectRoot?: string; lastReply?: string; modified?: string }> };
       const map: Record<string, SessionSummary> = {};
       for (const s of data.sessions) {
         map[s.id] = {
@@ -160,6 +162,7 @@ export function useBoardCanvas({
           messageCount: s.messageCount ?? 0,
           projectName: s.projectKey ?? s.projectRoot ?? "",
           lastReply: s.lastReply ?? "",
+          lastActivityAt: s.modified ? Date.parse(s.modified) : 0,
         };
       }
       setSessionTitles(map);
@@ -239,11 +242,11 @@ export function useBoardCanvas({
       const p = shape.props as SessionCardShapeProps;
       const s = sessionTitles[p.sessionId];
       if (!s) continue;
-      if (p.title !== s.title || p.lastReply !== s.lastReply || p.messageCount !== s.messageCount) {
+      if (p.title !== s.title || p.lastReply !== s.lastReply || p.messageCount !== s.messageCount || p.lastActivityAt !== s.lastActivityAt) {
         updates.push({
           id: shape.id,
           type: "session-card",
-          props: { title: s.title, lastReply: s.lastReply, messageCount: s.messageCount },
+          props: { title: s.title, lastReply: s.lastReply, messageCount: s.messageCount, lastActivityAt: s.lastActivityAt },
         });
       }
     }
@@ -389,6 +392,7 @@ export function useBoardCanvas({
           projectName: summary?.projectName ?? "",
           messageCount: summary?.messageCount ?? 0,
           lastReply: summary?.lastReply ?? "",
+          lastActivityAt: summary?.lastActivityAt ?? 0,
           phase: "idle",
           runningMs: 0,
           endedAt: 0,
@@ -591,6 +595,7 @@ export function useBoardCanvas({
             projectName: summary?.projectName ?? "",
             messageCount: summary?.messageCount ?? 0,
             lastReply: summary?.lastReply ?? "",
+            lastActivityAt: summary?.lastActivityAt ?? 0,
             phase,
             runningMs,
             endedAt: 0,
@@ -609,6 +614,7 @@ export function useBoardCanvas({
             phase,
             runningMs,
             title: summary?.title ?? (shape.props as SessionCardShapeProps).title,
+            lastActivityAt: summary?.lastActivityAt ?? (shape.props as SessionCardShapeProps).lastActivityAt ?? 0,
           },
         });
       }
@@ -688,6 +694,7 @@ export function useBoardCanvas({
         projectName: summary?.projectName ?? "",
         messageCount: summary?.messageCount ?? 0,
         lastReply: summary?.lastReply ?? "",
+        lastActivityAt: summary?.lastActivityAt ?? 0,
         phase: "idle",
         runningMs: 0,
         endedAt: 0,
@@ -995,6 +1002,7 @@ type SessionCardShapeProps = {
   phase: CanvasPhase;
   runningMs: number;
   endedAt: number;
+  lastActivityAt: number;
   stale: boolean;
   expanded: boolean;
   cwd?: string;

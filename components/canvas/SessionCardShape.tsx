@@ -21,6 +21,8 @@ export interface SessionCardProps {
   runningMs: number;
   /** 会话结束时刻（ms epoch），仅 phase=just-ended 时有效；用于 30s 后移除 */
   endedAt: number;
+  /** 最后一条消息时间（会话文件 mtime，ms epoch），摘要轮询刷新；底部时间展示用 */
+  lastActivityAt: number;
   stale: boolean;
   expanded: boolean;
   /** draft 卡（新建会话）绑定目录；转正后置空 */
@@ -48,6 +50,7 @@ export const sessionCardProps = {
   phase: T.string,
   runningMs: T.number,
   endedAt: T.number,
+  lastActivityAt: T.number,
   stale: T.boolean,
   expanded: T.boolean,
   cwd: T.string,
@@ -70,6 +73,7 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
       phase: "idle",
       runningMs: 0,
       endedAt: 0,
+      lastActivityAt: 0,
       stale: false,
       expanded: false,
       cwd: "",
@@ -154,7 +158,7 @@ const phaseMeta: Record<string, { dot: string; label: string }> = {
 /** 收合卡渲染（340×160 默认）。状态行+标题+展开按钮 / 最后回复区 / 底部时间。
  *  选中描边由 tldraw 指示器负责。 */
 function SessionCardView({ shape }: { shape: SessionCardShape }) {
-  const { w, h, title, projectName, messageCount, phase, runningMs, endedAt, stale, sessionId, expanded, lastReply, cwd, taskId } = shape.props;
+  const { w, h, title, projectName, messageCount, phase, runningMs, endedAt, lastActivityAt, stale, sessionId, expanded, lastReply, cwd, taskId } = shape.props;
   const editor = useEditor();
 
   // draft 卡（新建会话）：sessionId 为空，尚未绑定真实会话
@@ -540,7 +544,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
       {/* 底部：最后活动时间 */}
       <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text-dim)", borderTop: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", paddingTop: 3 }}>
         <span aria-hidden style={{ flexShrink: 0 }}>🕒</span>
-        <span>{formatTime(runningMs, endedAt)}</span>
+        <span>{formatTime(runningMs, lastActivityAt)}</span>
       </div>
     </HTMLContainer>
   );
@@ -555,10 +559,11 @@ function formatDuration(ms: number): string {
   return `${h}h${min % 60}m`;
 }
 
-/** 底部最后活动时间：运行中显示时长，结束/空闲今天显示时:分，跨天显示 月/日 时:分 */
-function formatTime(runningMs: number, endedAt: number): string {
+/** 底部最后活动时间：运行中显示时长；空闲显示最后活动时间（今天 时:分，跨天 月/日 时:分） */
+function formatTime(runningMs: number, lastActivityAt: number): string {
   if (runningMs > 0) return `${formatDuration(runningMs)} ago`;
-  const d = endedAt ? new Date(endedAt) : new Date();
+  if (lastActivityAt <= 0) return "";
+  const d = new Date(lastActivityAt);
   const now = new Date();
   const sameDay =
     d.getFullYear() === now.getFullYear() &&
