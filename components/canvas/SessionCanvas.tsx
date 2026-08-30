@@ -167,6 +167,8 @@ export function SessionCanvas({
               whiteSpace: "nowrap",
             }}
           >
+            {/* 透明度滑块暂注释：微调即对背景影响过大，固定保持 0。
+                如需恢复，取消下面 div 注释即可（字段/逻辑仍在 wallpaper-settings）。
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ width: 14, flexShrink: 0, textAlign: "center", fontSize: 12 }}>◐</span>
               <span style={{ flexShrink: 0 }}>{t("boards.scrimAlpha")}</span>
@@ -183,6 +185,7 @@ export function SessionCanvas({
                 {wallSettings.scrimAlpha}%
               </span>
             </div>
+            */}
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ width: 14, flexShrink: 0, textAlign: "center", fontSize: 12 }}>❄</span>
               <span style={{ flexShrink: 0 }}>{t("boards.scrimBlur")}</span>
@@ -195,7 +198,7 @@ export function SessionCanvas({
                 style={{ flex: 1, minWidth: 120, accentColor: "var(--accent)", cursor: "pointer" }}
                 aria-label={t("boards.scrimBlur")}
               />
-              <span style={{ width: 30, flexShrink: 0, textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>
+              <span style={{ width: 30, flexShrink: 0, textAlign: "right", fontSize: 11, color: "var(--text)" }}>
                 {wallSettings.scrimBlur}px
               </span>
             </div>

@@ -17,6 +17,9 @@ import { useCallback, useEffect, useState } from "react";
  * - scrimBlur     : board-canvas scrim blur radius in px (0–30), written to
  *              `--board-scrim-blur` on <html>
  *
+ * 看板 scrim：透明度滑块暂注释（微调即对背景影响过大），透明度固定保持 0，
+ * 只向用户开放磨砂滑块；scrimAlpha 字段保留以备后续恢复。
+ *
  * Settings persist in localStorage and are applied to <html> as CSS custom
  * properties consumed by the wallpaper layer on `body` in app/globals.css.
  */
@@ -76,11 +79,11 @@ export function applyWallpaperCss(s: WallpaperSettings, hasImage: boolean): void
   el.setProperty("--app-bg-pos-x", `calc(50% + ${Math.round(s.offsetX)}px)`);
   el.setProperty("--bubble-alpha", String(s.bubbleOpacity / 100));
   el.setProperty("--glass-blur-bubble", `${Math.round(s.bubbleBlur)}px`);
-  // scrim 走独立变量（--board-scrim-*），控制内容与气泡滑块完全一致：
-  // 透明度 → alpha（0–1），磨砂强度 → blur 半径（px）。
+  // scrim 透明度固定保持 0（透明度滑块暂注释，微调即对背景影响过大），
+  // 只写磨砂强度。
   // 关键：磨砂强度为 0 时把整个 backdrop-filter 置为 none——否则
   // blur(0px) saturate(0.8) 中的 saturate 残留仍会对背景去饱和，
-  // 用户把透明度和磨砂都调 0 时背景还“被影响”。
+  // 用户把磨砂调 0 时背景还“被影响”。
   el.setProperty("--board-scrim-alpha", String(s.scrimAlpha / 100));
   el.setProperty("--board-scrim-blur", `${Math.round(s.scrimBlur)}px`);
   el.setProperty(
