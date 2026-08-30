@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useEditor, type TLShapeId } from "tldraw";
 import { ChatWindow } from "@/components/ChatWindow";
 import type { ChatInputHandle } from "@/components/ChatInput";
 import { SessionNavBar, type SessionNavBarHandle } from "./SessionNavBar";
@@ -41,18 +40,6 @@ export function SessionWorkbench({
 }) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
-  const editor = useEditor();
-
-  // 卡片激活判定（用户定）：激活 = tldraw 选中本卡。
-  // 事件发生时实时读 editor.getSelectedShapeIds() —— 零 React 重渲染，
-  // 不因选中变化触发卡片重渲染而打断画布平移/拖拽。
-  // 卡片 shape id：展开态 HTMLContainer 的 data-node-id（shape.id 去 "shape:" 前缀）。
-  const isActive = () => {
-    const card = rootRef.current?.closest(".tl-html-container");
-    const nodeId = card?.getAttribute("data-node-id");
-    if (!nodeId) return false;
-    return editor.getSelectedShapeIds().includes(`shape:${nodeId}` as TLShapeId);
-  };
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatKey, setChatKey] = useState(0);
@@ -133,14 +120,13 @@ export function SessionWorkbench({
   }, [sessionId]);
 
   // wheel 拦截：tldraw 在 container 监听 wheel（画布 pan/zoom），工作台内的滚轮必须被会话自己消费。
-  // 仅卡片激活时拦截（防画布吞掉会话滚动）；非激活时放行给画布平移/缩放。
   // 不用 useEffect([])：tldraw 重渲染/resize/展开收合会替换 shape 的 DOM，[] 只在首次挂载跑，
   // 监听会挂在被替换的旧元素上失效。用无依赖 effect —— 每次渲染后都清旧挂新，保证监听总在
   // 当前元素。捕获 + 冒泡双拦截，不 preventDefault（让消息区正常滚动）。
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
-    const stop = (e: WheelEvent) => { if (isActive()) e.stopPropagation(); };
+    const stop = (e: WheelEvent) => e.stopPropagation();
     el.addEventListener("wheel", stop, { capture: true });
     el.addEventListener("wheel", stop);
     return () => {
@@ -204,10 +190,10 @@ export function SessionWorkbench({
       // 工作台嵌在 tldraw 卡片内：阻止事件冒泡到画布。tldraw 画布在 pointerDown 上
       // preventDefault（会吞掉后续 click），导致终端/模型选择器/session/通知等无法弹出。
       // 冒泡阶段拦截：事件先正常到达目标（内部按钮可点击），再阻止冒泡到画布。
-      onPointerDown={(e) => { if (isActive()) e.stopPropagation(); }}
-      onPointerUp={(e) => { if (isActive()) e.stopPropagation(); }}
-      onClick={(e) => { if (isActive()) e.stopPropagation(); }}
-      onDoubleClick={(e) => { if (isActive()) e.stopPropagation(); }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerUp={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
     >
       {/* 会话导航条：portal 到卡片标题栏右侧（展开按钮之前），融入标题栏而非独立一行。
           仅已转正会话显示（draft 卡标题栏是新会话占位，无导航条） */}
