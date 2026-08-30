@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Editor, TLArrowShape, TLShape, TLShapePartial } from "tldraw";
 import { createShapeId } from "tldraw";
+import { isPageId } from "@tldraw/editor";
 import type { BoardCanvas, BoardInfo, BoardNode, BoardEdge, RunningSnapshot, RunningSessionState } from "@/lib/board-types";
 import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
 import { shouldRemoveEndedCard } from "@/lib/board-utils";
+import { dispatchBoardCanvasChanged } from "@/lib/board-events";
 
 /** 会话摘要（卡片展示用）：标题/消息数/项目/最后回复 */
 export type SessionSummary = {
@@ -45,12 +47,15 @@ export function useBoardCanvas({
   boardId,
   projectKey,
   taskId,
+  newSessionCwd,
   onOpenSession,
 }: {
   boardId: string;
   projectKey?: string;
   /** 任务看板模式：非空时按任务内会话自动补卡（任务即看板） */
   taskId?: string;
+  /** 看板新建会话绑定的工作目录（来自左侧栏选中目录 activeCwd） */
+  newSessionCwd?: string;
   onOpenSession?: (sessionId: string) => void;
 }) {
   const [board, setBoard] = useState<BoardInfo | null>(null);
@@ -120,8 +125,9 @@ export function useBoardCanvas({
         // keep last
       }
     };
+    // loop 永远自续（不因 hidden 链断）：hidden 时仅跳过 poll，恢复可见自动继续。
     const loop = () => {
-      if (stopped || document.visibilityState !== "visible") return;
+      if (stopped) return;
       timer = setTimeout(async () => {
         await poll();
         loop();
@@ -329,28 +335,36 @@ export function useBoardCanvas({
   // ---- 物化：sqlite canvas → tldraw shapes ----
   const hydrateShapes = useCallback((editor: Editor, canvas: BoardCanvas, titles: Record<string, SessionSummary>) => {
     const shapes: TLShapePartial[] = [];
+    // 节点位置索引（arrow 端点用；父子同节点算一次）
+    const nodeById = new Map<string, { x: number; y: number; w: number; h: number }>();
     for (const node of canvas.nodes) {
-      if (node.kind === "shape") {
-        // 通用 shape（text/note/geo/draw/group 等）：从 props 还原完整 shape
-        const p = node.props as { type?: string; rotation?: number; shapeProps?: Record<string, unknown> };
-        if (!p?.type || !p.shapeProps) continue;
-        shapes.push({
-          id: createShapeId(node.id),
-          type: p.type as never,
-          x: node.x,
-          y: node.y,
-          rotation: p.rotation ?? 0,
-          props: p.shapeProps as never,
-        });
-        continue;
-      }
+      nodeById.set(node.id, { x: node.x, y: node.y, w: node.w || CARD_W, h: node.h || CARD_H });
+    }
+    // 通用 shape 先建（父先子后：sorted 顺序即父先于子；parentId 直接传给 createShapes）
+    for (const node of canvas.nodes) {
+      if (node.kind !== "shape") continue;
+      const p = node.props as { type?: string; rotation?: number; shapeProps?: Record<string, unknown>; parentId?: string | null };
+      if (!p?.type || !p.shapeProps) continue;
+      shapes.push({
+        id: createShapeId(node.id),
+        type: p.type as never,
+        x: node.x,
+        y: node.y,
+        rotation: p.rotation ?? 0,
+        parentId: p.parentId ? createShapeId(p.parentId) : undefined,
+        props: p.shapeProps as never,
+      });
+    }
+    for (const node of canvas.nodes) {
       if (node.kind !== "session") continue;
       const summary = node.refId ? titles[node.refId] : undefined;
+      const pp = node.props as { parentId?: string | null };
       shapes.push({
         id: createShapeId(node.id),
         type: "session-card",
         x: node.x,
         y: node.y,
+        parentId: pp.parentId ? createShapeId(pp.parentId) : undefined,
         props: {
           sessionId: node.refId ?? "",
           title: summary?.title ?? "Untitled",
@@ -362,16 +376,13 @@ export function useBoardCanvas({
           endedAt: 0,
           stale: node.refId ? !titles[node.refId] : false,
           expanded: node.expanded,
+          cwd: (node.props as { cwd?: string }).cwd ?? "",
+          taskId: (node.props as { taskId?: string }).taskId ?? "",
           // 旧默认收合尺寸（280×120）升级到新默认（340×160），容纳最后回复区
           w: node.w === LEGACY_CARD_W && !node.expanded ? CARD_W : node.w || CARD_W,
           h: node.h === LEGACY_CARD_H && !node.expanded ? CARD_H : node.h || CARD_H,
         },
       });
-    }
-    // 节点位置索引（arrow 端点用）
-    const nodeById = new Map<string, { x: number; y: number; w: number; h: number }>();
-    for (const node of canvas.nodes) {
-      nodeById.set(node.id, { x: node.x, y: node.y, w: node.w || CARD_W, h: node.h || CARD_H });
     }
     for (const edge of canvas.edges) {
       const from = nodeById.get(edge.fromId);
@@ -399,11 +410,23 @@ export function useBoardCanvas({
           labelPosition: 0.5,
           elbowMidPoint: 0.5,
         } as TLArrowShape["props"],
-        meta: { fromId: edge.fromId, toId: edge.toId } as never,
       });
     }
     if (shapes.length > 0) {
       editor.createShapes(shapes);
+    }
+    // arrow 重建 binding：绑定到目标节点，拖动卡片连线跟随（tldraw 原生管理）。
+    // 端点从节点中心（isPrecise:false → 吸附到形状边缘），与序列化端 getBindingsInvolvingShape 闭环。
+    const bindingPartials: Parameters<typeof editor.createBindings>[0] = [];
+    for (const edge of canvas.edges) {
+      if (!nodeById.has(edge.fromId) || !nodeById.has(edge.toId)) continue;
+      bindingPartials.push(
+        { type: "arrow", fromId: createShapeId(edge.id), toId: createShapeId(edge.fromId), props: { terminal: "start", isPrecise: false, isExact: false, normalizedAnchor: { x: 0.5, y: 0.5 }, snap: "none" } },
+        { type: "arrow", fromId: createShapeId(edge.id), toId: createShapeId(edge.toId), props: { terminal: "end", isPrecise: false, isExact: false, normalizedAnchor: { x: 0.5, y: 0.5 }, snap: "none" } },
+      );
+    }
+    if (bindingPartials.length > 0) {
+      editor.createBindings(bindingPartials);
     }
   }, []);
 
@@ -411,8 +434,10 @@ export function useBoardCanvas({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || !editorReady || !initialCanvas) return;
-    // 摘要未就绪时不物化（标题/失效态依赖它），就绪后由本 effect 重跑
-    if (Object.keys(sessionTitles).length === 0 && initialCanvas.nodes.length > 0) return;
+    // 摘要未就绪时不物化（标题/失效态依赖它），就绪后由本 effect 重跑。
+    // 例外：画布只有 draft 卡（refId 全空）时不依赖摘要，直接物化。
+    const needsTitles = initialCanvas.nodes.some((n) => n.kind === "session" && n.refId);
+    if (needsTitles && Object.keys(sessionTitles).length === 0) return;
     const canvas = initialCanvas;
     console.log("[board] hydrate", canvas.nodes.length, "nodes", canvas.edges.length, "edges, titles", Object.keys(sessionTitles).length);
     hydratingRef.current = true;
@@ -435,7 +460,11 @@ export function useBoardCanvas({
     const edges: BoardEdge[] = [];
     const bid = boardIdRef.current;
     const ts = Date.now();
-    for (const shape of editor.getCurrentPageShapes()) {
+    // 用 Sorted（含 group/container 内部子 shape）而非顶层，否则 group 内 shape 全丢。
+    // Sorted 顺序为父先子后的 DFS，存 parentId 后 hydrate 可按同序重建。
+    const pageShapes = editor.getCurrentPageShapesSorted();
+    for (const shape of pageShapes) {
+      const parentId = isPageId(shape.parentId) ? null : shape.parentId.replace("shape:", "");
       if (shape.type === "session-card") {
         const p = shape.props as SessionCardShapeProps;
         nodes.push({
@@ -448,7 +477,7 @@ export function useBoardCanvas({
           w: p.w,
           h: p.h,
           expanded: Boolean(p.expanded),
-          props: {},
+          props: { parentId, cwd: p.cwd ?? "", taskId: p.taskId ?? "" },
           created: ts,
           updated: ts,
         });
@@ -491,7 +520,7 @@ export function useBoardCanvas({
           w: "w" in shapeProps ? Number(shapeProps.w) || 0 : 0,
           h: "h" in shapeProps ? Number(shapeProps.h) || 0 : 0,
           expanded: false,
-          props: { type: s.type, rotation, shapeProps },
+          props: { type: s.type, rotation, shapeProps, parentId },
           created: ts,
           updated: ts,
         });
@@ -657,6 +686,7 @@ export function useBoardCanvas({
   // session-card 不重叠且间隙 ≥ 24 即返回。画布无限，最坏也很快。
   const findFreeSpot = useCallback((editor: Editor): { x: number; y: number } => {
     const STEP = 24;
+    const PER_ROW = 4; // 每行最多 4 张卡片
     const occupied = editor.getCurrentPageShapes()
       .filter((s) => s.type === "session-card")
       .map((s) => ({ x: s.x, y: s.y, w: (s.props as SessionCardShapeProps).w || CARD_W, h: (s.props as SessionCardShapeProps).h || CARD_H }));
@@ -666,7 +696,9 @@ export function useBoardCanvas({
     let y = 60;
     let guard = 0;
     while (guard < 2000) {
-      for (let x = 60; x < 20000; x += CARD_W + STEP) {
+      // 每行固定 4 列：第 1 行 (60, 60)，第 2 行 (60, 60+行高)，依此类推
+      for (let col = 0; col < PER_ROW; col += 1) {
+        const x = 60 + col * (CARD_W + STEP);
         if (!overlaps(x, y)) return { x, y };
       }
       y += CARD_H + STEP;
@@ -675,6 +707,74 @@ export function useBoardCanvas({
     // 兜底：几乎不可能走到，给个偏移位置避免与 (60,60) 重叠
     return { x: 60 + Math.random() * 120, y: 60 + Math.random() * 120 };
   }, []);
+
+  // ---- 新建会话 draft 卡 ----
+  // 看板右上角 + 按钮：在空位创建一张展开态 draft 卡（sessionId=""，宽 840 高 600），
+  // 内部直接是新建会话工作台 + 输入框。用户在卡内发送消息 → ChatWindow 走
+  // ensure_session 拿到 realId → bindDraftSession 把卡片 sessionId 写回转正。
+  const addDraftCard = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const spot = findFreeSpot(editor);
+    editor.createShapes([{
+      id: createShapeId(),
+      type: "session-card",
+      x: spot.x,
+      y: spot.y,
+      props: {
+        sessionId: "",
+        title: "",
+        projectName: "",
+        messageCount: 0,
+        lastReply: "",
+        phase: "idle",
+        runningMs: 0,
+        endedAt: 0,
+        stale: false,
+        expanded: true,
+        cwd: newSessionCwdRef.current ?? "",
+        taskId: effectiveTaskIdRef.current ?? "",
+        w: 840,
+        h: 600,
+      },
+    }]);
+  }, [findFreeSpot]);
+
+  // draft 卡转正：用户发出首条消息、ensure_session 返回 realId 后调用。
+  // 更新卡片 sessionId（随 store 变更自动持久化）。
+  const bindDraftSession = useCallback((nodeId: string, sessionId: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.updateShapes([{
+      id: createShapeId(nodeId),
+      type: "session-card",
+      props: { sessionId },
+    }]);
+  }, []);
+
+  // draft 卡转正事件：SessionWorkbench 内 ChatWindow 拿到 realId 后派发
+  // board-session-created，本 hook 监听并把对应卡片 sessionId 写回（转正）。
+  // 同时清掉 cwd/taskId（不再需要），store 变更自动持久化。
+  useEffect(() => {
+    const onCreated = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId: string; nodeId?: string }>).detail;
+      if (!detail?.sessionId || !detail?.nodeId) return;
+      const editor = editorRef.current;
+      if (!editor) return;
+      const shapeId = createShapeId(detail.nodeId);
+      const shape = editor.getShape(shapeId);
+      if (!shape || shape.type !== "session-card") return;
+      editor.updateShapes([{
+        id: shapeId,
+        type: "session-card",
+        props: { sessionId: detail.sessionId, cwd: "", taskId: "" },
+      }]);
+      // 转正后立即拉一次摘要，让标题/消息数立刻到位（不等 10s 轮询）
+      void loadSessionSummaries();
+    };
+    window.addEventListener("pi-web:board-session-created", onCreated);
+    return () => window.removeEventListener("pi-web:board-session-created", onCreated);
+  }, [loadSessionSummaries]);
 
   // ---- 任务看板自动补卡（任务即看板）----
   // 拉取任务内会话 id（根会话集合）→ 与画布现有 session-card 差集 → 自动创建卡片。
@@ -689,12 +789,20 @@ export function useBoardCanvas({
       const data = (await res.json()) as { task?: { sessionIds?: string[] } | null };
       const sessionIds = data.task?.sessionIds ?? [];
       const existing = new Set<string>();
+      // draft 卡（taskId 匹配本任务）视为已占位：该卡正在转正（ensure_session
+      // 已把会话挂到任务下、但卡片 sessionId 尚未写回），补卡会重复建卡。
+      let hasPendingDraft = false;
       for (const shape of editor.getCurrentPageShapes()) {
-        if (shape.type === "session-card") {
-          const sid = (shape.props as SessionCardShapeProps).sessionId;
-          if (sid) existing.add(sid);
+        if (shape.type !== "session-card") continue;
+        const p = shape.props as SessionCardShapeProps;
+        if (p.sessionId) {
+          existing.add(p.sessionId);
+        } else if (p.taskId === tid) {
+          hasPendingDraft = true;
         }
       }
+      // 有待转正 draft 卡时跳过本轮补卡（下轮轮询再校验，避免重复卡）
+      if (hasPendingDraft) return;
       const missing = sessionIds.filter((sid) => !existing.has(sid));
       if (missing.length === 0) return;
       for (const sid of missing) {
@@ -707,6 +815,10 @@ export function useBoardCanvas({
   }, [addSessionNode, findFreeSpot]);
   const taskIdRef = useRef(taskId);
   taskIdRef.current = taskId;
+  // 新建会话 cwd（来自左侧栏 activeCwd）：draft 卡工作台经 props 透传，
+  // 无需经本 hook；存 ref 供将来可能需要时读取。
+  const newSessionCwdRef = useRef(newSessionCwd);
+  newSessionCwdRef.current = newSessionCwd;
 
   // 刷新场景兜底：URL ?board= 恢复任务看板时 props 没有 taskId，但看板本身
   // 是任务型（board.taskId 非空）——自动补卡同样生效。
@@ -790,6 +902,7 @@ export function useBoardCanvas({
           const toDelete = editor.getCurrentPageShapes().filter((s) => ids.has(s.id)).map((s) => s.id);
           if (toDelete.length > 0) editor.deleteShapes(toDelete);
         }
+        if (data.removed.length > 0) dispatchBoardCanvasChanged(bid);
         await load();
       }
     } catch (e) {
@@ -809,6 +922,45 @@ export function useBoardCanvas({
     return null;
   }, []);
 
+  /** 清空画布：删光本地 shapes + 显式以空 nodes/edges 落库（allowEmpty 放行防覆盖保护）。 */
+  const clearBoard = useCallback(async () => {
+    const bid = boardIdRef.current;
+    if (bid === SYSTEM_RUNNING_BOARD_ID) return;
+    const editor = editorRef.current;
+    if (!editor) return;
+    // 本地立即删光（用户所见即所得）
+    const all = editor.getCurrentPageShapes().map((s) => s.id);
+    if (all.length > 0) editor.deleteShapes(all);
+    // 服务器落空（显式 allowEmpty：绕过「空节点集拒绝覆盖非空看板」兜底）
+    const camera = editor.getCamera();
+    try {
+      const res = await fetch(`/api/boards/${encodeURIComponent(bid)}/canvas`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nodes: [], edges: [],
+          view: { boardId: bid, cameraX: camera.x, cameraY: camera.y, cameraZ: camera.z, updated: Date.now() },
+          baseUpdated: baseUpdatedRef.current ?? undefined,
+          allowEmpty: true,
+        }),
+      });
+      if (res.status === 409) {
+        console.warn("[board] clear conflict (409) — reloading latest");
+        await reloadCanvasWrap();
+        return;
+      }
+      if (!res.ok) {
+        console.error("[board] clear failed", res.status);
+        return;
+      }
+      const data = (await res.json().catch(() => null)) as { updated?: number } | null;
+      if (data?.updated) baseUpdatedRef.current = data.updated;
+      dispatchBoardCanvasChanged(bid);
+    } catch (e) {
+      console.error("[board] clear error", e);
+    }
+  }, [reloadCanvasWrap]);
+
   return useMemo(() => ({
     board,
     loading,
@@ -817,8 +969,11 @@ export function useBoardCanvas({
     runningCount: running?.runningSessionIds.length ?? 0,
     onMount,
     addSessionNode,
+    addDraftCard,
+    bindDraftSession,
     connectNodes,
     cleanupInvalid,
+    clearBoard,
     getNodeIdForSession,
     reloadCanvas: reloadCanvasWrap,
     conflictCount,
@@ -826,7 +981,7 @@ export function useBoardCanvas({
     loadSessionSummaries,
     hydrateShapes,
     reconcileTaskSessions,
-  }), [board, loading, error, running, onMount, addSessionNode, connectNodes, cleanupInvalid, getNodeIdForSession, reloadCanvasWrap, conflictCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
+  }), [board, loading, error, running, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, cleanupInvalid, clearBoard, getNodeIdForSession, reloadCanvasWrap, conflictCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
 }
 
 export type UseBoardCanvasReturn = ReturnType<typeof useBoardCanvas>;
@@ -844,6 +999,8 @@ type SessionCardShapeProps = {
   endedAt: number;
   stale: boolean;
   expanded: boolean;
+  cwd?: string;
+  taskId?: string;
   w: number;
   h: number;
 };
