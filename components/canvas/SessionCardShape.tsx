@@ -1,4 +1,4 @@
-import { BaseBoxShapeUtil, HTMLContainer, T } from "tldraw";
+import { BaseBoxShapeUtil, HTMLContainer, T, useEditor } from "tldraw";
 import type { TLBaseShape, TLShapePartial } from "tldraw";
 import { SessionWorkbench } from "./SessionWorkbench";
 
@@ -79,9 +79,29 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
     return true;
   }
 
+  /** 会话卡内部承载滚动工作台：声明可滚动，tldraw 的 wheel 劫持逻辑不吞卡片内滚轮。 */
+  override canScroll(): boolean {
+    return true;
+  }
+
   /** 会话卡不支持旋转：对话卡片旋转无意义，且工作台浮层无法跟随旋转。 */
   override hideRotateHandle(): boolean {
     return true;
+  }
+
+  /** resize 钳制最小尺寸：展开态工作台不能缩到样式崩坏（消息/输入/底栏需空间），
+   *  收合态保持 280×120 下限。返回修正后的宽高。 */
+  override onResize(
+    shape: SessionCardShape,
+    info: import("tldraw").TLResizeInfo<SessionCardShape>,
+  ): Omit<TLShapePartial<SessionCardShape>, "id" | "type"> | undefined {
+    const expanded = shape.props.expanded;
+    const minW = expanded ? 400 : 280;
+    const minH = expanded ? 480 : 120;
+    // 当前 props 宽高 * 本次 resize 比例，钳制到下限
+    const w = Math.max(minW, (shape.props.w || 0) * info.scaleX);
+    const h = Math.max(minH, (shape.props.h || 0) * info.scaleY);
+    return { props: { w, h } };
   }
 
   /** 双击展开为工作台（持久化 expanded 标记，刷新后恢复）。
@@ -119,6 +139,14 @@ const phaseMeta: Record<string, { dot: string; label: string }> = {
 /** 收合卡渲染（280×120 默认）。状态行 + 标题 + 元信息；选中描边由 tldraw 指示器负责。 */
 function SessionCardView({ shape }: { shape: SessionCardShape }) {
   const { w, h, title, projectName, messageCount, phase, runningMs, stale, sessionId, expanded } = shape.props;
+  const editor = useEditor();
+
+  // 点击卡片置顶：两卡重叠时点哪个哪个到最上层。
+  // 事件来源：收合态卡片整体 / 展开态标题栏（pointerEvents none 透传到 HTMLContainer all）。
+  // 展开态工作台内部 pointerEvents all 且 stopPropagation，不会触发这里（会话内交互不置顶）。
+  const bringToFront = () => {
+    editor?.bringToFront([shape.id]);
+  };
 
   // 展开态：上半部标题栏（pointerEvents none → tldraw 原生拖拽/选中），
   // 下半部嵌工作台（pointerEvents all → 消息/输入可交互）。
@@ -127,6 +155,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     return (
       <HTMLContainer
         data-testid={`session-card-${sessionId}`}
+        onPointerDown={bringToFront}
         style={{
           width: w,
           height: h,
@@ -183,6 +212,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
   return (
     <HTMLContainer
       data-testid={`session-card-${sessionId}`}
+      onPointerDown={bringToFront}
       style={{
         width: w,
         height: h,

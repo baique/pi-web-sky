@@ -24,17 +24,21 @@ export function SessionWorkbench({
   const [chatKey, setChatKey] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // 原生 wheel 捕获拦截：tldraw 的 usePassThroughWheelEvents 用原生 addEventListener 挂在
-  // container 上，React onWheel stopPropagation 拦不住它。这里捕获阶段 stopPropagation，
-  // 保证工作台内的滚动不传到 tldraw container（否则消息区未可滚动时被劫持成画布缩放/平移）。
-  // 不 preventDefault —— 让目标元素正常滚动。pointer 事件由下方 React 冒泡拦截覆盖，无需重复。
+  // wheel 拦截：tldraw 在 container 监听 wheel（画布 pan/zoom），工作台内的滚轮必须被会话自己消费。
+  // 不用 useEffect([])：tldraw 重渲染/resize/展开收合会替换 shape 的 DOM，[] 只在首次挂载跑，
+  // 监听会挂在被替换的旧元素上失效。用无依赖 effect —— 每次渲染后都清旧挂新，保证监听总在
+  // 当前元素。捕获 + 冒泡双拦截，不 preventDefault（让消息区正常滚动）。
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
-    const onWheelCapture = (e: WheelEvent) => e.stopPropagation();
-    el.addEventListener("wheel", onWheelCapture, { capture: true });
-    return () => el.removeEventListener("wheel", onWheelCapture, { capture: true });
-  }, []);
+    const stop = (e: WheelEvent) => e.stopPropagation();
+    el.addEventListener("wheel", stop, { capture: true });
+    el.addEventListener("wheel", stop);
+    return () => {
+      el.removeEventListener("wheel", stop, { capture: true });
+      el.removeEventListener("wheel", stop);
+    };
+  });
 
   // 拉取会话数据（cwd/projectKey 等 ChatWindow 需要）
   useEffect(() => {
@@ -92,7 +96,6 @@ export function SessionWorkbench({
       onPointerUp={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
     >
       <ChatWindow
         key={chatKey}
