@@ -2,14 +2,25 @@
 
 import "tldraw/tldraw.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Tldraw, DefaultToolbar, DefaultToolbarContent, defaultShapeUtils, type TLComponents } from "tldraw";
+import { Tldraw, DefaultToolbar, DefaultToolbarContent, getTipTapDefaultExtensions, type TLComponents } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
+import { StickyNoteUtil } from "./StickyNoteUtil";
 import { useI18n } from "@/hooks/useI18n";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
 import type { SessionInfo } from "@/lib/types";
 
-// 自定义 shape util + tldraw 默认（arrow 连线等）。
-const shapeUtils = [...defaultShapeUtils, SessionCardUtil];
+// 自定义 shape util。StickyNoteUtil 以 type="note" 覆盖 tldraw 默认便笺：渲染/编辑全继承，仅开放自由缩放。
+// 注意：不能 spread defaultShapeUtils —— tldraw 会用 merge 按 type 把默认 note 替换成我们的，
+// 若先展开默认再追加会得到两个 "note"（schema 报 defined more than once）。
+const shapeUtils = [SessionCardUtil, StickyNoteUtil];
+
+// 开启便笺内 tiptap 代码块（默认关闭）。必须保持引用恒定（模块级 const 或 useMemo）：
+// `<Tldraw>` 对 options 身份敏感，若每次渲染内联新建，会反复重建编辑器 → 画布疯狂重挂载。
+const tiptapOptions = {
+  text: {
+    tipTapConfig: { extensions: getTipTapDefaultExtensions({ codeBlock: {} }) },
+  },
+};
 
 /**
  * tldraw 画布舞台：无限画布 + 工具行 + 拖放添加会话。
@@ -68,7 +79,6 @@ export function CanvasStage({
     HelpMenu: null,
     MainMenu: null,
     PageMenu: null,
-    StylePanel: null,
     SharePanel: null,
     MenuPanel: null,
     TopPanel: null,
@@ -140,6 +150,7 @@ export function CanvasStage({
         ) : (
           <Tldraw
             shapeUtils={shapeUtils}
+            options={tiptapOptions}
             onMount={(editor) => {
               // 开启内置拖放吸附对齐（对齐线/中点/边缘），不影响展示效果
               editor.user.updateUserPreferences({ isSnapMode: true });
