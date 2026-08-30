@@ -12,6 +12,10 @@ import { useCallback, useEffect, useState } from "react";
  *              `--bubble-alpha` on <html>
  * - bubbleBlur    : frosted blur radius in px (0–30), written to
  *              `--glass-blur-bubble` on <html>
+ * - scrimAlpha    : board-canvas scrim opacity in percent (0–100), written to
+ *              `--board-scrim-alpha` on <html> (independent of bubble alpha)
+ * - scrimBlur     : board-canvas scrim blur radius in px (0–30), written to
+ *              `--board-scrim-blur` on <html>
  *
  * Settings persist in localStorage and are applied to <html> as CSS custom
  * properties consumed by the wallpaper layer on `body` in app/globals.css.
@@ -25,6 +29,8 @@ export type WallpaperSettings = {
   fillColorRight: string;
   bubbleOpacity: number;
   bubbleBlur: number;
+  scrimAlpha: number;
+  scrimBlur: number;
 };
 
 const DEFAULTS: WallpaperSettings = {
@@ -35,6 +41,8 @@ const DEFAULTS: WallpaperSettings = {
   fillColorRight: "#000000",
   bubbleOpacity: 44,
   bubbleBlur: 18,
+  scrimAlpha: 0,
+  scrimBlur: 2,
 };
 
 const LS_KEY = "wallpaper-settings";
@@ -68,6 +76,10 @@ export function applyWallpaperCss(s: WallpaperSettings, hasImage: boolean): void
   el.setProperty("--app-bg-pos-x", `calc(50% + ${Math.round(s.offsetX)}px)`);
   el.setProperty("--bubble-alpha", String(s.bubbleOpacity / 100));
   el.setProperty("--glass-blur-bubble", `${Math.round(s.bubbleBlur)}px`);
+  // scrim 走独立变量（--board-scrim-*），控制内容与气泡滑块完全一致：
+  // 透明度 → alpha（0–1），磨砂强度 → blur 半径（px）。
+  el.setProperty("--board-scrim-alpha", String(s.scrimAlpha / 100));
+  el.setProperty("--board-scrim-blur", `${Math.round(s.scrimBlur)}px`);
   if (s.fill && !s.repeat && hasImage) {
     el.setProperty(
       "--app-bg-fill",

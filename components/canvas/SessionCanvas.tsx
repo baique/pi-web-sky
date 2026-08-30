@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
 import { useBoardCanvas } from "@/hooks/useBoardCanvas";
-import { useBoardScrimSettings } from "@/lib/board-scrim-settings";
+import type { WallpaperSettings } from "@/lib/wallpaper-settings";
 import type { SessionInfo } from "@/lib/types";
 
 // ssr:false — tldraw 依赖浏览器环境，仅进入看板模式时下载（~1MB）。
@@ -51,17 +51,22 @@ export function SessionCanvas({
   projectKey,
   onOpenSession,
   onRunningSessionIdsChange,
+  wallSettings,
+  updateWallSettings,
 }: {
   boardId: string;
   projectKey?: string;
   onExit: () => void;
   onOpenSession: (session: SessionInfo, isRestore?: boolean) => void;
   onRunningSessionIdsChange?: (ids: Set<string>) => void;
+  // 复用 AppShell 同一个 useWallpaperSettings 实例：scrim 滑块与气泡滑块
+  // 完全同机制（同 localStorage、同 apply 写 CSS 变量），仅独立变量。
+  wallSettings: WallpaperSettings;
+  updateWallSettings: (patch: Partial<WallpaperSettings>) => void;
 }) {
   const { t } = useI18n();
   const { isDark } = useTheme();
   const board = useBoardCanvas({ boardId, projectKey, onOpenSession: (sid) => onOpenSession({ id: sid } as SessionInfo, false) });
-  const { settings: scrim, update: updateScrim } = useBoardScrimSettings();
   const [scrimOpen, setScrimOpen] = useState(false);
 
   // 运行中集合上报给 AppShell（顶部会话运行状态保持一致）
@@ -169,13 +174,13 @@ export function SessionCanvas({
                 type="range"
                 min={0}
                 max={100}
-                value={scrim.alpha}
-                onChange={(e) => updateScrim({ alpha: Number(e.target.value) })}
+                value={wallSettings.scrimAlpha}
+                onChange={(e) => updateWallSettings({ scrimAlpha: Number(e.target.value) })}
                 style={{ flex: 1, minWidth: 120, accentColor: "var(--accent)", cursor: "pointer" }}
                 aria-label={t("boards.scrimAlpha")}
               />
               <span style={{ width: 34, flexShrink: 0, textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>
-                {scrim.alpha}%
+                {wallSettings.scrimAlpha}%
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -185,13 +190,13 @@ export function SessionCanvas({
                 type="range"
                 min={0}
                 max={30}
-                value={scrim.blur}
-                onChange={(e) => updateScrim({ blur: Number(e.target.value) })}
+                value={wallSettings.scrimBlur}
+                onChange={(e) => updateWallSettings({ scrimBlur: Number(e.target.value) })}
                 style={{ flex: 1, minWidth: 120, accentColor: "var(--accent)", cursor: "pointer" }}
                 aria-label={t("boards.scrimBlur")}
               />
               <span style={{ width: 30, flexShrink: 0, textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>
-                {scrim.blur}px
+                {wallSettings.scrimBlur}px
               </span>
             </div>
           </div>

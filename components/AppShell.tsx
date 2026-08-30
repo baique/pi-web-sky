@@ -3029,6 +3029,8 @@ export function AppShell() {
               onExit={() => setActiveBoardId(null)}
               onOpenSession={handleSelectSession}
               onRunningSessionIdsChange={handleRunningSessionIdsChange}
+              wallSettings={wallSettings}
+              updateWallSettings={updateWallSettings}
             />
           ) : showChat ? (
             <ChatWindow
