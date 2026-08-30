@@ -1,6 +1,6 @@
-import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, resizeBox } from "tldraw";
+import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, useValue, resizeBox } from "tldraw";
 import type { TLBaseShape, TLShapePartial } from "tldraw";
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { SessionWorkbench } from "./SessionWorkbench";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 import { dispatchBoardSessionRenamed } from "@/lib/board-events";
@@ -160,6 +160,18 @@ const phaseMeta: Record<string, { dot: string; label: string }> = {
 function SessionCardView({ shape }: { shape: SessionCardShape }) {
   const { w, h, title, projectName, messageCount, phase, runningMs, endedAt, lastActivityAt, stale, sessionId, expanded, lastReply, cwd, taskId } = shape.props;
   const editor = useEditor();
+
+  // 激活态 = 展开（工作台）或 tldraw 选中（点击卡片即选中，响应式）。
+  // 非激活时整卡 pointer-events none → 事件穿透给画布：
+  // 拖拽 A 放大/平移画布路过本卡不再被阻断，卡片退化为“只读面板”。
+  const selected = useValue("selected", () => editor.getSelectedShapeIds().includes(shape.id), [editor, shape.id]);
+  const active = expanded || selected;
+
+  // 点击置顶：非激活时点卡片（事件穿透）→ tldraw 选中 → 这里补 bringToFront，
+  // 保持“点击卡片置顶”原语义（激活态点卡片空白由下方 onPointerDown 幂等触发）。
+  useEffect(() => {
+    if (selected) editor.bringToFront([shape.id]);
+  }, [selected, editor, shape.id]);
 
   // draft 卡（新建会话）：sessionId 为空，尚未绑定真实会话
   const isDraft = !sessionId;
@@ -376,6 +388,13 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
 
   const meta = phaseMeta[phase] ?? phaseMeta.idle;
 
+  // 边框随激活态：激活用 accent 明显边框（点击卡片后高亮），非激活用淡灰/近乎无边框。
+  const borderColor = stale
+    ? "color-mix(in srgb, var(--border) 80%, transparent)"
+    : active
+      ? "color-mix(in srgb, var(--accent) 55%, transparent)"
+      : "color-mix(in srgb, var(--border) 60%, transparent)";
+
   return (
     <HTMLContainer
       data-testid={`session-card-${sessionId}`}
@@ -385,20 +404,21 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         height: h,
         overflow: "hidden",
         borderRadius: 14,
-        border: `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
+        border: `1px solid ${borderColor}`,
         // 卡片磨砂玻璃：略低于消息气泡（alpha 0.55 vs 气泡 0.44，blur 12px vs 气泡 18px）
         background: "var(--board-card-glass)",
         backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
         WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
         boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
         opacity: stale ? 0.55 : 1,
-        pointerEvents: "all",
+        // 非激活整卡让位：事件穿透到 .tl-canvas，画布拖拽/平移/框选路过本卡不被阻断
+        pointerEvents: active ? "all" : "none",
         display: "flex",
         flexDirection: "column",
         padding: "8px 10px 6px",
         color: "var(--text)",
         userSelect: "none",
-        cursor: "grab",
+        cursor: active ? "default" : "grab",
       }}
     >
       {/* 状态行：状态圆点 + 状态文字 + 标题（紧跟状态）+ 展开按钮 */}
