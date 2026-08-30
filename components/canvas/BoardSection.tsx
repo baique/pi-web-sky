@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { BoardInfo } from "@/lib/board-types";
 import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
+import { BOARD_CANVAS_CHANGED_EVENT } from "@/lib/board-events";
 
 /**
  * 侧栏「看板」栏目：位于会话 tab 内、任务区上方，样式与任务条目一致。
@@ -59,6 +60,13 @@ export function BoardSection({
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // 画布结构变化（清空/清理失效）→ 刷新节点计数
+  useEffect(() => {
+    const onChange = () => void load();
+    window.addEventListener(BOARD_CANVAS_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(BOARD_CANVAS_CHANGED_EVENT, onChange);
   }, [load]);
 
   useEffect(() => {

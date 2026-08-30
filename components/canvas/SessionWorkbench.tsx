@@ -1,35 +1,42 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChatWindow } from "@/components/ChatWindow";
 import type { ChatInputHandle } from "@/components/ChatInput";
-import { SessionNavBar } from "./SessionNavBar";
+import { SessionNavBar, type SessionNavBarHandle } from "./SessionNavBar";
 import { useI18n } from "@/hooks/useI18n";
 import { useAudio } from "@/hooks/useAudio";
 import {
   dispatchBoardAgentEnd,
   dispatchBoardAttentionNeeded,
   dispatchBoardOpenFile,
+  dispatchBoardSessionCreated,
   dispatchBoardSessionForked,
-  dispatchBoardTerminalToggle,
 } from "@/lib/board-events";
-import type { SessionInfo, SessionTreeNode, TodoItem } from "@/lib/types";
+import type { SessionInfo, TodoItem } from "@/lib/types";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 
 /**
  * 工作台本体 = 复用 ChatWindow（消息 + 输入 + 底栏 widget/通知/quota 完整一套）。
  * 嵌入会话卡片下半部（见 SessionCardShape 展开态）：随卡片 resize 天然跟随宽高。
  *
- * 会话内部化改造（看板衍生问题的核心）：
- * - 顶部会话工具条：分支导航 + 统计按钮（数据经 ChatWindow 回调捕获，卡片内自渲染，
- *   不依赖 AppShell 顶栏）
- * - 断链回调补齐：chatInputRef（edit-from-here）、onOpenFile（文件面板）、
- *   onSessionForked / onAgentEnd / onAttentionNeeded（事件桥转发到 AppShell）
+ * 两种形态：
+ * - 普通卡（sessionId 非空）：会话内部化，顶部工具条 + 数据经 ChatWindow 回调捕获
+ * - draft 卡（sessionId 空 + cwd）：看板新建会话，直接以 isNew 模式挂 ChatWindow，
+ *   用户在卡内发消息 → ensure_session 拿 realId → onSessionCreated 回调
+ *   （board-session-created 事件桥）由卡片侧转正。
  */
 export function SessionWorkbench({
   sessionId,
+  cwd,
+  taskId,
 }: {
   sessionId: string;
+  /** draft 卡（新建会话）绑定目录 */
+  cwd?: string;
+  /** draft 卡（任务看板）目标任务 id */
+  taskId?: string;
 }) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
@@ -38,32 +45,58 @@ export function SessionWorkbench({
   const [chatKey, setChatKey] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
+  const navbarRef = useRef<SessionNavBarHandle | null>(null);
+  // draft 卡（新建会话）：无 sessionId，ChatWindow 以 isNew 模式工作
+  const isDraft = !sessionId;
+  // draft 卡目标任务 ref（服务端在创建会话时原子归属，消费一次后清空）
+  const pendingTaskRef = useRef<{ taskId: string; projectKey?: string } | null>(null);
+  pendingTaskRef.current = taskId ? { taskId } : null;
+  // draft 卡草稿 key：稳定标识（卡内输入框草稿持久化用）
+  const draftKeyRef = useRef(`board-new:${Math.random().toString(36).slice(2, 8)}`);
+  // 转正标记：draft 卡发出首条消息后 sessionId 从空变为 realId。此时 prompt 正在跑，
+  // 重挂 ChatWindow 会断开 SSE 丢失事件 —— 保持 isNew 模式实例继续，不重挂。
+  const wasDraftRef = useRef(true);
+  if (!isDraft && wasDraftRef.current) wasDraftRef.current = false;
 
-  // 分支导航状态（经 ChatWindow onBranchDataChange 捕获，卡片内自渲染）
-  const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
-  const [branchActiveLeafId, setBranchActiveLeafId] = useState<string | null>(null);
-  const branchLeafChangeRef = useRef<((leafId: string | null) => void) | null>(null);
+  // 导航条 portal 目标：卡片标题栏内的 slot（展开按钮之前）
+  const [navbarSlot, setNavbarSlot] = useState<HTMLElement | null>(null);
+  // tldraw 重渲染会替换 DOM，每次渲染后重新查找 slot（仅当确实变化时更新，避免无限循环）。
+  // 结构：卡片(.tl-html-container) > 标题栏 + 工作台；slot 在标题栏内。
+  useEffect(() => {
+    const card = rootRef.current?.closest(".tl-html-container");
+    const slot = card?.querySelector("[data-session-navbar-slot]") as HTMLElement | null ?? null;
+    setNavbarSlot((prev) => (prev === slot ? prev : slot));
+  });
 
-  // 会话统计 + TODO（经 ChatWindow onSessionStatsChange / onTodosChange 捕获）
+  // 会话统计 + Context 用量 + TODO（经 ChatWindow 回调捕获，卡片内自渲染）
   const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
+  const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
   const [todos, setTodos] = useState<TodoItem[]>([]);
-
-  const handleBranchDataChange = useCallback((tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => {
-    setBranchTree(tree);
-    setBranchActiveLeafId(activeLeafId);
-    branchLeafChangeRef.current = onLeafChange;
-  }, []);
-
-  const handleLeafChange = useCallback((leafId: string | null) => {
-    branchLeafChangeRef.current?.(leafId);
-  }, []);
 
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
   }, []);
 
+  // /session 命令：打开本卡的统计弹层（多会话隔离：各自 ref 只开自己）
+  const handleSessionStatsPanelOpen = useCallback(() => {
+    navbarRef.current?.openStats();
+  }, []);
+
+  // 多会话数据隔离：每个展开卡各自一个 ChatWindow/useAgentSession，回调天然绑定当前会话；
+  // 避免看板多卡并存时 contextUsage 串数据。
+  const handleContextUsageChange = useCallback((usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => {
+    setContextUsage(usage);
+  }, []);
+
   const handleTodosChange = useCallback((nextTodos: TodoItem[]) => {
     setTodos(nextTodos);
+  }, []);
+
+  // draft 卡转正：ChatWindow 拿到 realId 后回调 → 事件桥让卡片侧把 sessionId 写回转正
+  const handleSessionCreated = useCallback((created: SessionInfo) => {
+    if (!created?.id) return;
+    const nodeId = rootRef.current?.closest(".tl-html-container")?.getAttribute("data-node-id") ?? undefined;
+    dispatchBoardSessionCreated(created.id, nodeId);
   }, []);
 
   // 事件桥转发：工作台内无法直接拿 AppShell handler，走全局事件（携带 sessionId）
@@ -102,8 +135,10 @@ export function SessionWorkbench({
     };
   });
 
-  // 拉取会话数据（cwd/projectKey 等 ChatWindow 需要）
+  // 拉取会话数据（cwd/projectKey 等 ChatWindow 需要）。draft 卡跳过：
+  // 无真实会话，ChatWindow 以 isNew 模式新建。
   useEffect(() => {
+    if (isDraft) return;
     let cancelled = false;
     setSession(null);
     setError(null);
@@ -125,7 +160,7 @@ export function SessionWorkbench({
       }
     })();
     return () => { cancelled = true; };
-  }, [sessionId, t]);
+  }, [sessionId, t, isDraft]);
 
   if (error) {
     return (
@@ -137,7 +172,7 @@ export function SessionWorkbench({
     );
   }
 
-  if (!session) {
+  if (!session && !isDraft) {
     return (
       <div style={containerStyle}>
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
@@ -160,28 +195,35 @@ export function SessionWorkbench({
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
-      {/* 会话导航条：分支 / 历史 / 统计 / TODO（会话内部 UI，不依赖 AppShell 顶栏） */}
-      <SessionNavBar
-        sessionId={session.id}
-        sessionName={session.name ?? session.firstMessage}
-        branchTree={branchTree}
-        branchActiveLeafId={branchActiveLeafId}
-        onLeafChange={handleLeafChange}
-        stats={sessionStats}
-        todos={todos}
-      />
+      {/* 会话导航条：portal 到卡片标题栏右侧（展开按钮之前），融入标题栏而非独立一行。
+          仅已转正会话显示（draft 卡标题栏是新会话占位，无导航条） */}
+      {navbarSlot && session && createPortal(
+        <SessionNavBar
+          ref={navbarRef}
+          sessionId={session.id}
+          stats={sessionStats}
+          contextUsage={contextUsage}
+          todos={todos}
+        />,
+        navbarSlot,
+      )}
 
       <ChatWindow
         key={chatKey}
-        session={session}
-        newSessionCwd={null}
-        newSessionDraftKey={null}
+        // 转正后保持 isNew 实例（首条 prompt 正在跑，重挂会断 SSE）；
+        // 后续刷新/展开由摘要轮询 + 卡片标题接管，本实例不再切换
+        session={isDraft || wasDraftRef.current ? null : session}
+        newSessionCwd={isDraft || wasDraftRef.current ? (cwd ?? null) : null}
+        newSessionDraftKey={isDraft || wasDraftRef.current ? draftKeyRef.current : null}
+        pendingNewSessionTaskRef={isDraft || wasDraftRef.current ? pendingTaskRef : undefined}
         chatInputRef={chatInputRef}
         inWorkbench
-        onBranchDataChange={handleBranchDataChange}
         onSessionStatsChange={handleSessionStatsChange}
+        onContextUsageChange={handleContextUsageChange}
+        onSessionStatsPanelOpen={handleSessionStatsPanelOpen}
         onTodosChange={handleTodosChange}
         onOpenFile={handleOpenFile}
+        onSessionCreated={isDraft ? (created) => handleSessionCreated(created) : undefined}
         onSessionForked={handleSessionForked}
         onAgentEnd={handleAgentEnd}
         onAttentionNeeded={handleAttentionNeeded}
@@ -189,8 +231,6 @@ export function SessionWorkbench({
         onSoundToggle={onSoundToggle}
         playDoneSound={playDoneSound}
         unlockAudio={unlockAudio}
-        // 工作台内终端按钮：触发全局事件 → AppShell 打开底部终端面板
-        onToggleTerminal={() => dispatchBoardTerminalToggle("bottombar")}
       />
     </div>
   );

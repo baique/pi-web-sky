@@ -1,47 +1,50 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
 import { createPortal } from "react-dom";
-import { BranchNavigator } from "@/components/BranchNavigator";
 import { useI18n } from "@/hooks/useI18n";
-import type { SessionTreeNode, TodoItem } from "@/lib/types";
+import type { TodoItem } from "@/lib/types";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import { SessionStatsSummary } from "@/components/SessionStatsSummary";
 
 /**
  * 卡片顶部导航条（会话内部 UI，看板工作台专用）。
  *
- * 四个入口全部复用主界面同款组件/样式语言，数据经 ChatWindow 回调捕获：
- * - 分支：BranchNavigator 原组件（inline + compact）
+ * 入口复用主界面同款组件/样式语言，数据经 ChatWindow 回调捕获：
  * - 历史：新标签页打开会话导出页（同 AppShell handleViewFullHistory）
  * - 统计：浮层展示 SessionStatsInfo（精简版 session-info popover 样式）
  * - TODO：浮层展示 pi-todo.state（与 AppShell todo 面板同渲染逻辑）
  */
-export function SessionNavBar({
-  sessionId,
-  branchTree,
-  branchActiveLeafId,
-  onLeafChange,
-  stats,
-  todos,
-}: {
+export interface SessionNavBarHandle {
+  /** 打开统计弹层（供 /session 命令等外部触发） */
+  openStats: () => void;
+}
+
+export const SessionNavBar = forwardRef<SessionNavBarHandle, {
   sessionId: string;
-  branchTree: SessionTreeNode[];
-  branchActiveLeafId: string | null;
-  onLeafChange: (leafId: string | null) => void;
   stats: SessionStatsInfo | null;
+  contextUsage: { percent: number | null; contextWindow: number; tokens: number | null } | null;
   todos: TodoItem[];
-}) {
+}>(function SessionNavBar({
+  sessionId,
+  stats,
+  contextUsage,
+  todos,
+}, ref) {
   const { t } = useI18n();
-  const [branchOpen, setBranchOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [todoOpen, setTodoOpen] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
   const statsBtnRef = useRef<HTMLButtonElement | null>(null);
   const todoBtnRef = useRef<HTMLButtonElement | null>(null);
 
+  // /session 等外部触发打开统计弹层
+  useImperativeHandle(ref, () => ({
+    openStats: () => { setStatsOpen(true); setTodoOpen(false); },
+  }), []);
+
   // 打开一个弹层时收起其他；target="none" 全部关闭
-  const openOne = (target: "branch" | "stats" | "todo" | "none") => {
-    setBranchOpen(target === "branch");
+  const openOne = (target: "stats" | "todo" | "none") => {
     setStatsOpen(target === "stats");
     setTodoOpen(target === "todo");
   };
@@ -56,8 +59,16 @@ export function SessionNavBar({
 
   const activeTodoCount = todos.filter((todo) => todo.status !== "completed").length;
 
+  // 弹层宽度 = 标题栏宽：弹层展开在标题栏下方，与标题同宽同左。
+  // 注：标题栏是卡片外壳内、工作台上方的元素；卡片外壳含 padding 8 左右 + 边框，比标题栏宽（会超宽）。
+  const getPanelWidth = useCallback(() => {
+    return navRef.current?.closest("[data-session-titlebar]")?.clientWidth
+      ?? navRef.current?.closest(".tl-html-container")?.clientWidth
+      ?? 300;
+  }, []);
+
   // 空白处点击 / Escape 关闭所有弹层（与 AppShell 顶栏行为一致）
-  const anyOpen = branchOpen || statsOpen || todoOpen;
+  const anyOpen = statsOpen || todoOpen;
   useEffect(() => {
     if (!anyOpen) return;
     const onPointerDown = (event: PointerEvent) => {
@@ -72,13 +83,11 @@ export function SessionNavBar({
         if (document.querySelector('[data-session-nav-todo]')?.contains(target)) return;
         if (document.querySelector('.glass-top-panel')?.contains(target)) return;
       }
-      setBranchOpen(false);
       setStatsOpen(false);
       setTodoOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      setBranchOpen(false);
       setStatsOpen(false);
       setTodoOpen(false);
     };
@@ -94,31 +103,16 @@ export function SessionNavBar({
     <div
       ref={navRef}
       style={{
-        flexShrink: 0,
+        // 融入卡片标题栏：不设高度/背景/border（标题栏已提供玻璃与分隔线）
         display: "flex",
         alignItems: "center",
         gap: 2,
-        padding: "0 6px",
-        minHeight: 36,
+        padding: "0 4px",
         position: "relative",
-        // 导航条嵌在卡片玻璃内：背景保持透明（透出卡片玻璃+壁纸），
-        // 只保留底部 border + 高度对齐主界面 header。
-        borderBottom: "1px solid var(--border)",
+        pointerEvents: "all",
+        height: "100%",
       }}
     >
-      <BranchNavigator
-        tree={branchTree}
-        activeLeafId={branchActiveLeafId}
-        onLeafChange={onLeafChange}
-        inline
-        compact
-        portalDropdown
-        containerRef={navRef}
-        open={branchOpen}
-        onToggle={() => openOne(branchOpen ? "none" : "branch")}
-        hasSession
-      />
-
       {/* 历史：新标签页打开完整会话导出 */}
       <button
         type="button"
@@ -126,7 +120,7 @@ export function SessionNavBar({
         title={t("history.full")}
         aria-label={t("history.full")}
         style={navBtnStyle}
-        onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = navBgHover; }}
         onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "transparent"; }}
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -134,9 +128,10 @@ export function SessionNavBar({
           <path d="M3 3v5h5" />
           <path d="M12 7v5l3 2" />
         </svg>
+        <span style={navBtnText}>{t("history.full")}</span>
       </button>
 
-      <span style={{ flex: 1 }} />
+      <span style={navDivider} />
 
       {/* 统计 */}
       <button
@@ -148,10 +143,10 @@ export function SessionNavBar({
         aria-expanded={statsOpen}
         style={{
           ...navBtnStyle,
-          background: statsOpen ? "var(--bg-selected)" : "transparent",
+          background: statsOpen ? navBgActive : "transparent",
           color: statsOpen ? "var(--accent)" : "var(--text-muted)",
         }}
-        onMouseEnter={(e) => { if (!statsOpen) { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = "var(--bg-hover)"; } }}
+        onMouseEnter={(e) => { if (!statsOpen) { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = navBgHover; } }}
         onMouseLeave={(e) => { if (!statsOpen) { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "transparent"; } }}
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -159,6 +154,7 @@ export function SessionNavBar({
           <line x1="18" y1="20" x2="18" y2="4" />
           <line x1="6" y1="20" x2="6" y2="16" />
         </svg>
+        <span style={navBtnText}>{t("nav.stats")}</span>
       </button>
 
       {/* TODO */}
@@ -172,29 +168,30 @@ export function SessionNavBar({
           aria-expanded={todoOpen}
           style={{
             ...navBtnStyle,
-            background: todoOpen ? "var(--bg-selected)" : "transparent",
+            background: todoOpen ? navBgActive : "transparent",
             color: todoOpen ? "var(--accent)" : "var(--text-muted)",
           }}
-          onMouseEnter={(e) => { if (!todoOpen) { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = "var(--bg-hover)"; } }}
+          onMouseEnter={(e) => { if (!todoOpen) { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = navBgHover; } }}
           onMouseLeave={(e) => { if (!todoOpen) { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "transparent"; } }}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="3" y="4" width="18" height="16" rx="3" />
             <path d="M8 9h8M8 13h5" />
           </svg>
-          <span style={{ fontSize: 10, fontWeight: 700 }}>{activeTodoCount > 0 ? activeTodoCount : "✓"}</span>
+          <span style={navBtnText}>{t("nav.todo")}</span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>{activeTodoCount > 0 ? activeTodoCount : "✓"}</span>
         </button>
       )}
 
       {statsOpen && stats && (
-        <StatsPopover navRef={navRef} navWidth={navRef.current?.clientWidth ?? 300} stats={stats} onClose={() => setStatsOpen(false)} />
+        <StatsPopover navRef={navRef} navWidth={getPanelWidth()} stats={stats} contextUsage={contextUsage} onClose={() => setStatsOpen(false)} />
       )}
       {todoOpen && todos.length > 0 && (
-        <TodoPopover navRef={navRef} navWidth={navRef.current?.clientWidth ?? 300} todos={todos} onClose={() => setTodoOpen(false)} />
+        <TodoPopover navRef={navRef} navWidth={getPanelWidth()} todos={todos} onClose={() => setTodoOpen(false)} />
       )}
     </div>
   );
-}
+});
 
 const navBtnStyle: React.CSSProperties = {
   flexShrink: 0,
@@ -202,9 +199,9 @@ const navBtnStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "center",
   gap: 4,
-  width: 26,
+  width: "auto",
   height: 26,
-  padding: 0,
+  padding: "0 6px",
   border: "none",
   borderRadius: 6,
   background: "transparent",
@@ -213,16 +210,41 @@ const navBtnStyle: React.CSSProperties = {
   transition: "color 0.12s, background 0.12s",
 };
 
+/** 顶栏菜单按钮文字标签（图标 + 短文案） */
+const navBtnText: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  lineHeight: 1,
+  whiteSpace: "nowrap",
+};
+
+/** 顶栏菜单按钮之间的竖直分隔线 */
+const navDivider: React.CSSProperties = {
+  flexShrink: 0,
+  width: 1,
+  height: 16,
+  alignSelf: "center",
+  background: "color-mix(in srgb, var(--border) 70%, transparent)",
+  margin: "0 3px",
+};
+
+/* 顶栏菜单按钮的玻璃 hover/激活底色：引玻璃 token，不写死 rgba，自动跟随主题与减弱透明降级。
+   chrome 层按钮浮在卡片玻璃上，用半透明玻璃提亮，而非实底 bg-selected。 */
+const navBgHover = "color-mix(in srgb, var(--glass-bg-strong) 40%, transparent)";
+const navBgActive = "color-mix(in srgb, var(--glass-bg-strong) 60%, transparent)";
+
 /** 统计浮层：复用 AppShell session-info popover 的样式语言，展示卡片内可得的 SessionStatsInfo */
 function StatsPopover({
   navRef,
   navWidth,
   stats,
+  contextUsage,
   onClose,
 }: {
   navRef: React.RefObject<HTMLDivElement | null>;
   navWidth: number;
   stats: SessionStatsInfo;
+  contextUsage: { percent: number | null; contextWindow: number; tokens: number | null } | null;
   onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -234,14 +256,18 @@ function StatsPopover({
       const nav = navRef.current;
       if (!nav) return;
       const r = nav.getBoundingClientRect();
-      // 对齐原版：面板宽度 = 导航条宽度，上方直角贴合导航条底边
+      // 面板与标题栏同宽同左（展开在标题栏下方）：left = 标题栏左缘，top = 标题栏底（紧贴）
+      const tb = nav.closest("[data-session-titlebar]") as HTMLElement | null;
+      const tbRect = tb?.getBoundingClientRect();
       const width = navWidth;
-      const left = Math.min(r.right - width, Math.max(8, r.left));
-      setPos({ top: r.bottom, left });
+      const left = tbRect ? tbRect.left : Math.min(r.right - width, Math.max(8, r.left));
+      const top = tbRect ? tbRect.bottom : r.bottom;
+      setPos({ top, left });
     };
     update();
     const ro = new ResizeObserver(update);
     if (navRef.current) ro.observe(navRef.current);
+    if (navRef.current?.closest("[data-session-titlebar]")) ro.observe(navRef.current.closest("[data-session-titlebar]") as Element);
     window.addEventListener("resize", update);
     return () => {
       ro.disconnect();
@@ -331,7 +357,7 @@ function StatsPopover({
       data-session-nav-popover
       role="dialog"
       aria-label={t("session.title")}
-      className="glass-top-panel"
+      className="glass-panel"
       style={{
         position: "fixed",
         top: pos.top,
@@ -344,9 +370,13 @@ function StatsPopover({
         fontSize: 12,
         lineHeight: 1.5,
         fontFamily: "var(--font-mono)",
+        borderRadius: 12,
+        border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
       }}
     >
       <div style={{ display: "grid", gap: 16, fontSize: 12, lineHeight: 1.5, fontFamily: "var(--font-mono)" }}>
+        {/* 第一行：会话统计紧凑摘要（in⬆ out⬇ cache↻ cost context），复刻顶栏按钮内容格式 */}
+        <SessionStatsSummary stats={stats} contextUsage={contextUsage} />
         <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", columnGap: 12, rowGap: 8, alignItems: "start" }}>
           {sessionRows.map((row) => (
             <div key={row.label} style={{ display: "contents" }}>
@@ -387,14 +417,18 @@ function TodoPopover({
       const nav = navRef.current;
       if (!nav) return;
       const r = nav.getBoundingClientRect();
-      // 与统计面板一致：宽度 = 导航条宽度，上方直角贴合导航条底边
+      // 与统计面板一致：宽度 = 标题栏宽，left 锚定标题栏左缘，top = 标题栏底（紧贴）
+      const tb = nav.closest("[data-session-titlebar]") as HTMLElement | null;
+      const tbRect = tb?.getBoundingClientRect();
       const width = navWidth;
-      const left = Math.min(r.right - width, Math.max(8, r.left));
-      setPos({ top: r.bottom, left });
+      const left = tbRect ? tbRect.left : Math.min(r.right - width, Math.max(8, r.left));
+      const top = tbRect ? tbRect.bottom : r.bottom;
+      setPos({ top, left });
     };
     update();
     const ro = new ResizeObserver(update);
     if (navRef.current) ro.observe(navRef.current);
+    if (navRef.current?.closest("[data-session-titlebar]")) ro.observe(navRef.current.closest("[data-session-titlebar]") as Element);
     window.addEventListener("resize", update);
     return () => {
       ro.disconnect();
@@ -421,7 +455,7 @@ function TodoPopover({
       data-session-nav-todo
       role="menu"
       aria-label={t("todo.title")}
-      className="glass-top-panel"
+      className="glass-panel"
       style={{
         position: "fixed",
         top: pos.top,
@@ -431,6 +465,8 @@ function TodoPopover({
         overflowY: "auto",
         zIndex: 1200,
         fontFamily: "inherit",
+        borderRadius: 12,
+        border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
       }}
     >
       <div style={{

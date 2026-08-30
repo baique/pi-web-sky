@@ -20,9 +20,9 @@ export async function PUT(request: Request, { params }: Params) {
   if (id === SYSTEM_RUNNING_BOARD_ID) {
     return NextResponse.json({ error: "system board is read-only" }, { status: 403 });
   }
-  let body: { nodes?: unknown; edges?: unknown; view?: unknown; baseUpdated?: unknown };
+  let body: { nodes?: unknown; edges?: unknown; view?: unknown; baseUpdated?: unknown; allowEmpty?: unknown };
   try {
-    body = (await request.json()) as { nodes?: unknown; edges?: unknown; view?: unknown; baseUpdated?: unknown };
+    body = (await request.json()) as { nodes?: unknown; edges?: unknown; view?: unknown; baseUpdated?: unknown; allowEmpty?: unknown };
   } catch {
     return NextResponse.json({ error: "invalid json" }, { status: 400 });
   }
@@ -34,6 +34,8 @@ export async function PUT(request: Request, { params }: Params) {
     // 乐观锁：客户端必须带它读取快照时的 boards.updated。期间有他人保存过
     // （updated 变化）则拒绝本次写入，避免后写覆盖先写（数据静默丢失）。
     baseUpdated: typeof body.baseUpdated === "number" ? body.baseUpdated : undefined,
+    // 用户主动「清空画布」显式放行空覆盖（默认拒绝，防客户端未加载完成覆盖看板）。
+    allowEmpty: body.allowEmpty === true,
   });
   if (ok === "empty-overwrite") {
     return NextResponse.json({ error: "refusing to overwrite a populated board with an empty canvas (client state incomplete)" }, { status: 409 });

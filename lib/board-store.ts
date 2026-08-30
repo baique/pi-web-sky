@@ -310,7 +310,7 @@ export function getBoardCanvas(boardId: string): BoardCanvas | null {
 export function putBoardCanvas(
   boardId: string,
   payload: { nodes?: BoardNode[]; edges?: BoardEdge[]; view?: BoardView | null },
-  opts?: { baseUpdated?: number },
+  opts?: { baseUpdated?: number; allowEmpty?: boolean },
 ): boolean | "empty-overwrite" | "conflict" {
   if (boardId === SYSTEM_RUNNING_BOARD_ID) return false;
   const db = getDb();
@@ -323,7 +323,8 @@ export function putBoardCanvas(
   }
   // 防数据丢失（多次真实发生）：客户端物化失败/未加载时，会带着空/部分节点集自动保存，
   // 全量替换会直接把看板删空。硬性兜底：看板已有节点而本次 payload 节点为空 → 拒绝写入。
-  if (payload.nodes !== undefined && payload.nodes.length === 0) {
+  // 用户主动「清空画布」走 allowEmpty 显式放行。
+  if (!opts?.allowEmpty && payload.nodes !== undefined && payload.nodes.length === 0) {
     const existing = db.prepare("SELECT COUNT(*) c FROM board_nodes WHERE board_id = ?").get(boardId) as { c: number };
     if (existing.c > 0) return "empty-overwrite";
   }
@@ -492,31 +493,3 @@ export function deleteEdge(boardId: string, edgeId: string): boolean {
   return true;
 }
 
-/**
- * 清理失效节点：kind=session 且 ref_id 对应的会话 .jsonl 已不存在。
- * 返回被移除的节点 id 列表。系统看板返回空（运行中看板不落库）。
- */
-export function cleanupInvalidNodes(boardId: string, validSessionIds: () => Set<string>): string[] {
-  if (boardId === SYSTEM_RUNNING_BOARD_ID) return [];
-  const db = getDb();
-  const nodes = getDb()
-    .prepare("SELECT id, ref_id AS refId FROM board_nodes WHERE board_id = ?")
-    .all(boardId) as unknown as { id: string; refId: string | null }[];
-  const valid = validSessionIds();
-  const invalid = nodes.filter((n) => n.refId !== null && !valid.has(n.refId)).map((n) => n.id);
-  if (invalid.length === 0) return [];
-  const ts = now();
-  db.exec("BEGIN");
-  try {
-    const placeholders = invalid.map(() => "?").join(", ");
-    db.prepare(`DELETE FROM board_edges WHERE board_id = ? AND (from_id IN (${placeholders}) OR to_id IN (${placeholders}))`)
-      .run(boardId, ...invalid, ...invalid);
-    db.prepare(`DELETE FROM board_nodes WHERE board_id = ? AND id IN (${placeholders})`).run(boardId, ...invalid);
-    db.prepare("UPDATE boards SET updated = ? WHERE id = ?").run(ts, boardId);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-  return invalid;
-}

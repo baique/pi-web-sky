@@ -50,6 +50,7 @@ export function SessionCanvas({
   boardId,
   projectKey,
   taskId,
+  newSessionCwd,
   onOpenSession,
   onRunningSessionIdsChange,
   wallSettings,
@@ -59,6 +60,8 @@ export function SessionCanvas({
   projectKey?: string;
   /** 任务看板模式：非空时按任务内会话自动补卡（任务即看板） */
   taskId?: string;
+  /** 看板新建会话绑定的工作目录（来自左侧栏 activeCwd） */
+  newSessionCwd?: string;
   onExit: () => void;
   onOpenSession: (session: SessionInfo, isRestore?: boolean) => void;
   onRunningSessionIdsChange?: (ids: Set<string>) => void;
@@ -69,7 +72,9 @@ export function SessionCanvas({
 }) {
   const { t } = useI18n();
   const { isDark } = useTheme();
-  const board = useBoardCanvas({ boardId, projectKey, taskId, onOpenSession: (sid) => onOpenSession({ id: sid } as SessionInfo, false) });
+  const board = useBoardCanvas({ boardId, projectKey, taskId, newSessionCwd, onOpenSession: (sid) => onOpenSession({ id: sid } as SessionInfo, false) });
+  // 任务看板：卡片由任务会话驱动（自动补卡/随任务变化），清理/清空无意义且会被补回 → 禁用
+  const isTaskBoard = Boolean(board.board?.taskId ?? taskId);
   const [scrimOpen, setScrimOpen] = useState(false);
   // 乐观锁冲突提示：409 自动重载后短暂显示，说明改动被丢弃（防数据丢失的可见反馈）
   const [conflictNotice, setConflictNotice] = useState(false);
@@ -166,6 +171,17 @@ export function SessionCanvas({
         >
           <button
             type="button"
+            onClick={() => board.addDraftCard()}
+            title={t("boards.newSession")}
+            style={{ ...floatingIconBtn, color: "var(--accent)" }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+          <button
+            type="button"
             onClick={() => setScrimOpen((v) => !v)}
             title={t("boards.scrimTitle")}
             aria-expanded={scrimOpen}
@@ -189,14 +205,16 @@ export function SessionCanvas({
           </button>
           <button
             type="button"
-            onClick={() => void board.cleanupInvalid()}
-            title={t("boards.cleanupDesc")}
-            style={floatingIconBtn}
+            onClick={() => {
+              if (window.confirm(t("boards.clearConfirm"))) void board.clearBoard();
+            }}
+            title={isTaskBoard ? t("boards.taskBoardManaged") : t("boards.clearDesc")}
+            disabled={isTaskBoard}
+            style={{ ...floatingIconBtn, opacity: isTaskBoard ? 0.4 : 1, cursor: isTaskBoard ? "not-allowed" : "pointer" }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M3 6h18" />
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
             </svg>
           </button>
         </div>

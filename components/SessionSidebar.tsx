@@ -1058,6 +1058,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setAllSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, name: newName } : s)));
   }, []);
 
+  // 看板内会话改名 → 乐观更新左侧树（与上方 handleSessionRenamed 同路径，
+  // 事件桥从画布卡片广播过来；AppShell 另会 setRefreshKey 兜底全量刷新）
+  useEffect(() => {
+    const onBoardRenamed = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId: string; name?: string }>).detail;
+      if (!detail?.sessionId || !detail?.name) return;
+      handleSessionRenamed(detail.sessionId, detail.name);
+    };
+    window.addEventListener("pi-web:board-session-renamed", onBoardRenamed);
+    return () => window.removeEventListener("pi-web:board-session-renamed", onBoardRenamed);
+  }, [handleSessionRenamed]);
+
   const handleCreateTask = useCallback(async (name: string) => {
     const key = selectedProject?.key;
     if (!key) return;

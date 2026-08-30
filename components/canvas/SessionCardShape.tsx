@@ -1,7 +1,9 @@
 import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, resizeBox } from "tldraw";
 import type { TLBaseShape, TLShapePartial } from "tldraw";
+import { useState, useRef } from "react";
 import { SessionWorkbench } from "./SessionWorkbench";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
+import { dispatchBoardSessionRenamed } from "@/lib/board-events";
 
 /**
  * 会话卡 shape。props 含 w/h 满足 BaseBoxShapeUtil（可拉伸）；
@@ -21,6 +23,10 @@ export interface SessionCardProps {
   endedAt: number;
   stale: boolean;
   expanded: boolean;
+  /** draft 卡（新建会话）绑定目录；转正后置空 */
+  cwd?: string;
+  /** draft 卡（任务看板）目标任务 id；转正后置空 */
+  taskId?: string;
   w: number;
   h: number;
 }
@@ -44,6 +50,8 @@ export const sessionCardProps = {
   endedAt: T.number,
   stale: T.boolean,
   expanded: T.boolean,
+  cwd: T.string,
+  taskId: T.string,
   w: T.number,
   h: T.number,
 };
@@ -64,6 +72,8 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
       endedAt: 0,
       stale: false,
       expanded: false,
+      cwd: "",
+      taskId: "",
       w: 280,
       h: 120,
     };
@@ -144,8 +154,54 @@ const phaseMeta: Record<string, { dot: string; label: string }> = {
 /** 收合卡渲染（340×160 默认）。状态行+标题+展开按钮 / 最后回复区 / 底部时间。
  *  选中描边由 tldraw 指示器负责。 */
 function SessionCardView({ shape }: { shape: SessionCardShape }) {
-  const { w, h, title, projectName, messageCount, phase, runningMs, endedAt, stale, sessionId, expanded, lastReply } = shape.props;
+  const { w, h, title, projectName, messageCount, phase, runningMs, endedAt, stale, sessionId, expanded, lastReply, cwd, taskId } = shape.props;
   const editor = useEditor();
+
+  // draft 卡（新建会话）：sessionId 为空，尚未绑定真实会话
+  const isDraft = !sessionId;
+
+  // 改名：内联输入 → PATCH /api/sessions/[id] → 事件桥刷左侧树 + 摘要轮询刷新标题
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const startRename = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenameValue(title || "");
+    setRenaming(true);
+    // 输入框挂载后聚焦并全选
+    requestAnimationFrame(() => {
+      const input = renameInputRef.current;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+  };
+  const commitRename = async () => {
+    if (!sessionId) return;
+    const name = renameValue.trim();
+    setRenaming(false);
+    if (!name || name === title) return;
+    // 乐观更新：卡片标题立即写回（不等 10s 摘要轮询），PATCH 失败回滚
+    const prevTitle = title;
+    editor?.updateShapes([{ id: shape.id, type: "session-card", props: { title: name } }]);
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        dispatchBoardSessionRenamed(sessionId, name);
+      } else {
+        // 失败回滚标题
+        editor?.updateShapes([{ id: shape.id, type: "session-card", props: { title: prevTitle } }]);
+      }
+    } catch {
+      editor?.updateShapes([{ id: shape.id, type: "session-card", props: { title: prevTitle } }]);
+    }
+  };
+  const cancelRename = () => setRenaming(false);
 
   // 点击卡片置顶：两卡重叠时点哪个哪个到最上层。
   // 事件来源：收合态卡片整体 / 展开态标题栏（pointerEvents none 透传到 HTMLContainer all）。
@@ -156,8 +212,13 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
 
   // 独立展开/收起：切换 expanded + 尺寸。收合 → 默认展开宽 840/高 600；展开 → 收合回 340×160。
   // 收合态点展开按钮：pointerEvents all 会拦截 tldraw 拖拽，按钮独立接收点击。
+  // draft 卡不可收合：收起按钮改为删除（尚未绑定会话，收合无意义）。
   const toggleExpand = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (isDraft) {
+      editor?.deleteShapes([shape.id]);
+      return;
+    }
     editor?.updateShapes([{
       id: shape.id,
       type: "session-card",
@@ -176,6 +237,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     return (
       <HTMLContainer
         data-testid={`session-card-${sessionId}`}
+        data-node-id={shape.id.replace("shape:", "")}
         onPointerDown={bringToFront}
         style={{
           width: w,
@@ -219,9 +281,48 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           }}
         >
           <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", background: phaseMeta[phase]?.dot ?? "var(--text-dim)", flexShrink: 0 }} />
-          <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>
-            {title || "Untitled"}
-          </span>
+          {renaming ? (
+            <input
+              ref={renameInputRef}
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void commitRename();
+                if (e.key === "Escape") cancelRename();
+              }}
+              onBlur={() => void commitRename()}
+              onPointerDown={(e) => e.stopPropagation()}
+              style={{
+                flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600,
+                padding: "2px 6px", border: "1px solid var(--accent)", borderRadius: 5,
+                outline: "none", background: "var(--side-input)", color: "var(--text)",
+              }}
+            />
+          ) : (
+            <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>
+              {isDraft ? "New session" : (title || "Untitled")}
+            </span>
+          )}
+          {!isDraft && !renaming && (
+            <button
+              type="button"
+              onClick={startRename}
+              onPointerDown={(e) => e.stopPropagation()}
+              title="Rename"
+              aria-label="Rename"
+              style={{
+                flexShrink: 0,
+                pointerEvents: "all",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 20, height: 20, padding: 0, border: "none", borderRadius: 5,
+                background: "transparent", color: "var(--text-dim)", cursor: "pointer",
+              }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+              </svg>
+            </button>
+          )}
           <div style={{ flex: 1 }} />
           {/* 导航条 portal 挂载点：SessionWorkbench 将 SessionNavBar 渲染到这里（展开按钮之前） */}
           <div data-session-navbar-slot style={{ display: "flex", alignItems: "center", pointerEvents: "all" }} />
@@ -229,7 +330,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
             type="button"
             onClick={toggleExpand}
             onPointerDown={(e) => e.stopPropagation()}
-            title="Collapse"
+            title={isDraft ? "Discard" : "Collapse"}
             style={{
               flexShrink: 0,
               pointerEvents: "all",
@@ -246,15 +347,24 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
               cursor: "pointer",
             }}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M18 15l-6-6-6 6" />
-            </svg>
+            {isDraft ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6M14 11v6" />
+                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+              </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 15l-6-6-6 6" />
+              </svg>
+            )}
           </button>
         </div>
         {/* 工作台：嵌卡片内，随卡片 resize 自然跟随；四周留 padding 保证拖拽/调整手柄可触
            垂直对齐：卡片 padding 8 上下一致，底栏内容区底部从 6 减到 0，底距卡底与顶距卡顶同 8 */}
         <div style={{ flex: 1, minHeight: 0, padding: "0 4px 0", pointerEvents: "all" }}>
-          <SessionWorkbench sessionId={sessionId} />
+          <SessionWorkbench sessionId={sessionId} cwd={cwd} taskId={taskId} />
         </div>
       </HTMLContainer>
     );
@@ -294,20 +404,68 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           {meta.label}
           {runningMs > 0 && phase !== "idle" ? ` · ${formatDuration(runningMs)}` : ""}
         </span>
-        <span
-          style={{
-            fontSize: 12.5,
-            fontWeight: 600,
-            minWidth: 0,
-            flex: 1,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            color: "var(--text)",
-          }}
-        >
-          {title || "Untitled"}
-        </span>
+        {renaming ? (
+          <input
+            ref={renameInputRef}
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void commitRename();
+              if (e.key === "Escape") cancelRename();
+            }}
+            onBlur={() => void commitRename()}
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{
+              flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600,
+              padding: "2px 6px", border: "1px solid var(--accent)", borderRadius: 5,
+              outline: "none", background: "var(--side-input)", color: "var(--text)",
+            }}
+          />
+        ) : (
+          <span
+            style={{
+              fontSize: 12.5,
+              fontWeight: 600,
+              minWidth: 0,
+              flex: 1,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: "var(--text)",
+            }}
+          >
+            {title || "Untitled"}
+          </span>
+        )}
+        {!isDraft && !renaming && (
+          <button
+            type="button"
+            onClick={startRename}
+            onPointerDown={(e) => e.stopPropagation()}
+            title="Rename"
+            aria-label="Rename"
+            style={{
+              flexShrink: 0,
+              pointerEvents: "all",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 20,
+              height: 20,
+              padding: 0,
+              border: "none",
+              borderRadius: 5,
+              background: "transparent",
+              color: "var(--text-dim)",
+              cursor: "pointer",
+              opacity: 0.65,
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+            </svg>
+          </button>
+        )}
         {stale && (
           <span style={{ flexShrink: 0, fontSize: 9.5, color: "var(--text-dim)", border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)", borderRadius: 4, padding: "0 4px" }}>
             stale

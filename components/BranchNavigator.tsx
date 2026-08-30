@@ -26,6 +26,12 @@ interface Props {
   /** Inline dropdown portal to document.body：当宿主处于 backdrop-filter 容器内（如看板卡片）
    *  时，position:fixed 会相对该容器而非视口，导致弹层漂移；portal 后坐标恢复视口正确。 */
   portalDropdown?: boolean;
+  /** Inline dropdown 宽度覆盖：默认跟随锚点宽（导航条）；在看板卡片内应传卡片内容宽
+   *  使分支面板与标题栏同宽（否则只有图标窄条）。 */
+  dropdownWidth?: number;
+  /** Inline dropdown left 覆盖：默认跟随锚点 left；在看板卡片内应传卡片左+padding，
+   *  与统计面板对齐铺满卡片内容区。 */
+  dropdownLeft?: number;
 }
 
 // Find the visible entry IDs on the path from root to activeLeafId.
@@ -258,7 +264,7 @@ function TreeNodeView({ node, activePathIds, depth, isLast, parentLines, onSelec
   );
 }
 
-export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, containerRef, open: openProp, onToggle, hasSession, compact, hideInlineButton, portalDropdown = false }: Props) {
+export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, containerRef, open: openProp, onToggle, hasSession, compact, hideInlineButton, portalDropdown = false, dropdownWidth }: Props) {
   const { t } = useI18n();
   const [openInternal, setOpenInternal] = useState(false);
   const open = openProp !== undefined ? openProp : openInternal;
@@ -271,13 +277,21 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
     if (!anchor) return;
     const update = () => {
       const rect = anchor.getBoundingClientRect();
-      setDropdownPos({ top: rect.bottom, left: rect.left, width: rect.width });
+      // 面板与标题栏同宽同左（弹层在标题栏下方），top = 标题栏底 + 呼吸感。
+      const tb = anchor.closest?.("[data-session-titlebar]") as HTMLElement | null;
+      const tbRect = tb?.getBoundingClientRect();
+      setDropdownPos({
+        top: tbRect ? tbRect.bottom : rect.bottom,
+        left: tbRect ? tbRect.left : rect.left,
+        width: dropdownWidth ?? rect.width,
+      });
     };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(anchor);
+    if (anchor.closest?.("[data-session-titlebar]")) ro.observe(anchor.closest("[data-session-titlebar]") as Element);
     return () => ro.disconnect();
-  }, [open, inline, containerRef]);
+  }, [open, inline, containerRef, dropdownWidth]);
 
   const activePathIds = useMemo(
     () => buildActivePath(tree, activeLeafId),
@@ -321,7 +335,9 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
         left: dropdownPos.left,
         width: dropdownPos.width,
         zIndex: 500,
-      }} className="glass-top-panel">
+        borderRadius: 12,
+        border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+      }} className="glass-panel">
         {hasContent ? (
           <div style={{ padding: "4px 12px 8px 12px", maxHeight: 260, overflowY: "auto" }}>
             {topLevel.map((child, idx) => (
@@ -353,21 +369,22 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
           style={{
             display: hideInlineButton ? "none" : "flex",
             alignItems: "center",
-            gap: 6,
-            height: "100%",
-            padding: "0 12px",
-            background: open ? "var(--bg-selected)" : "none",
+            alignSelf: "center",
+            gap: 4,
+            height: 26,
+            padding: "0 6px",
+            background: open ? "color-mix(in srgb, var(--glass-bg-strong) 60%, transparent)" : "transparent",
             border: "none",
-            borderTop: open ? "2px solid var(--accent)" : "2px solid transparent",
-            borderRight: "1px solid var(--border)",
+            borderRadius: 6,
             cursor: "pointer",
-            color: "var(--text)",
+            color: open ? "var(--accent)" : "var(--text-muted)",
             fontSize: 11,
+            fontWeight: 600,
             whiteSpace: "nowrap",
-            transition: "color 0.1s, background 0.1s",
+            transition: "color 0.12s, background 0.12s",
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = "color-mix(in srgb, var(--glass-bg-strong) 40%, transparent)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = open ? "var(--accent)" : "var(--text-muted)"; e.currentTarget.style.background = open ? "color-mix(in srgb, var(--glass-bg-strong) 60%, transparent)" : "transparent"; }}
            title={t("i18n.branches")}
            aria-label={t("i18n.branches")}
           aria-pressed={open}

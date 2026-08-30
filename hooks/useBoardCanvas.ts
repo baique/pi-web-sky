@@ -196,6 +196,24 @@ export function useBoardCanvas({
   const onMount = useCallback((editor: Editor) => {
     editorRef.current = editor;
     setEditorReady(true);
+    // 任务看板删除保护：任务自有会话卡（sessionId ∈ task.sessionIds）不可删。
+    // 卡片由任务数据源驱动（reconcileTaskSessions 自动补卡），删除会被补回，
+    // 且任务会话只能由外部移除。外部拉入的卡（sessionId ∉ task.sessionIds）不受限。
+    const origDeleteShapes = editor.deleteShapes.bind(editor);
+    editor.deleteShapes = ((ids: Parameters<typeof origDeleteShapes>[0]) => {
+      const idArr = Array.isArray(ids) ? ids : [ids];
+      const protectedSet = new Set(taskSessionIdsRef.current);
+      const allowed = idArr.filter((id) => {
+        const idStr = typeof id === "string" ? id : id.id;
+        const shape = editor.getShape(idStr);
+        if (!shape || shape.type !== "session-card") return true;
+        const sid = (shape.props as SessionCardShapeProps).sessionId;
+        return !(protectedSet.has(sid) && effectiveTaskIdRef.current);
+      });
+      if (allowed.length === idArr.length) return origDeleteShapes(ids);
+      if (allowed.length > 0) return origDeleteShapes(allowed);
+      return editor;
+    }) as typeof origDeleteShapes;
     // 监听 shape 变更 → 防抖保存（仅普通看板）
     if (boardIdRef.current === SYSTEM_RUNNING_BOARD_ID) return;
     const unlisten = editor.store.listen(() => {
@@ -788,6 +806,7 @@ export function useBoardCanvas({
       if (!res.ok) return;
       const data = (await res.json()) as { task?: { sessionIds?: string[] } | null };
       const sessionIds = data.task?.sessionIds ?? [];
+      taskSessionIdsRef.current = sessionIds;
       const existing = new Set<string>();
       // draft 卡（taskId 匹配本任务）视为已占位：该卡正在转正（ensure_session
       // 已把会话挂到任务下、但卡片 sessionId 尚未写回），补卡会重复建卡。
@@ -815,6 +834,8 @@ export function useBoardCanvas({
   }, [addSessionNode, findFreeSpot]);
   const taskIdRef = useRef(taskId);
   taskIdRef.current = taskId;
+  // 任务自有会话 id 集合（来自 reconcileTaskSessions 拉取）：删除拦截用。
+  const taskSessionIdsRef = useRef<string[]>([]);
   // 新建会话 cwd（来自左侧栏 activeCwd）：draft 卡工作台经 props 透传，
   // 无需经本 hook；存 ref 供将来可能需要时读取。
   const newSessionCwdRef = useRef(newSessionCwd);
@@ -888,28 +909,6 @@ export function useBoardCanvas({
     }]);
   }, []);
 
-  // ---- 清理失效节点 ----
-  const cleanupInvalid = useCallback(async () => {
-    const bid = boardIdRef.current;
-    if (bid === SYSTEM_RUNNING_BOARD_ID) return;
-    try {
-      const res = await fetch(`/api/boards/${encodeURIComponent(bid)}/nodes/cleanup`, { method: "POST" });
-      if (res.ok) {
-        const data = (await res.json()) as { removed: string[] };
-        const editor = editorRef.current;
-        if (editor && data.removed.length > 0) {
-          const ids = new Set(data.removed.map((id) => `shape:${id}`));
-          const toDelete = editor.getCurrentPageShapes().filter((s) => ids.has(s.id)).map((s) => s.id);
-          if (toDelete.length > 0) editor.deleteShapes(toDelete);
-        }
-        if (data.removed.length > 0) dispatchBoardCanvasChanged(bid);
-        await load();
-      }
-    } catch (e) {
-      console.error("[board] cleanup failed", e);
-    }
-  }, [load]);
-
   // 序列化工具导出（供 Workbench 使用）
   const getNodeIdForSession = useCallback((sessionId: string): string | null => {
     const editor = editorRef.current;
@@ -972,7 +971,6 @@ export function useBoardCanvas({
     addDraftCard,
     bindDraftSession,
     connectNodes,
-    cleanupInvalid,
     clearBoard,
     getNodeIdForSession,
     reloadCanvas: reloadCanvasWrap,
@@ -981,7 +979,7 @@ export function useBoardCanvas({
     loadSessionSummaries,
     hydrateShapes,
     reconcileTaskSessions,
-  }), [board, loading, error, running, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, cleanupInvalid, clearBoard, getNodeIdForSession, reloadCanvasWrap, conflictCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
+  }), [board, loading, error, running, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, clearBoard, getNodeIdForSession, reloadCanvasWrap, conflictCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
 }
 
 export type UseBoardCanvasReturn = ReturnType<typeof useBoardCanvas>;

@@ -1235,6 +1235,19 @@ export function AppShell() {
       setRefreshKey((k) => k + 1);
       setExplorerRefreshKey((k) => k + 1);
     };
+    // 看板内新建会话（draft 卡转正）→ 刷新侧栏，新会话出现在左侧树
+    const onBoardSessionCreated = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId: string }>).detail;
+      if (!detail?.sessionId) return;
+      setRefreshKey((k) => k + 1);
+      setExplorerRefreshKey((k) => k + 1);
+    };
+    // 看板内会话改名 → 刷新侧栏（左侧树名称同步）
+    const onBoardSessionRenamed = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId: string; name?: string }>).detail;
+      if (!detail?.sessionId) return;
+      setRefreshKey((k) => k + 1);
+    };
     // 工作台内会话结束 → 刷新侧栏 + 浏览器通知
     const onBoardAgentEnd = (e: Event) => {
       const detail = (e as CustomEvent<{ sessionId: string; sessionName?: string }>).detail;
@@ -1262,11 +1275,15 @@ export function AppShell() {
     };
     window.addEventListener("pi-web:board-open-file", onBoardOpenFile);
     window.addEventListener("pi-web:board-session-forked", onBoardSessionForked);
+    window.addEventListener("pi-web:board-session-created", onBoardSessionCreated);
+    window.addEventListener("pi-web:board-session-renamed", onBoardSessionRenamed);
     window.addEventListener("pi-web:board-agent-end", onBoardAgentEnd);
     window.addEventListener("pi-web:board-attention-needed", onBoardAttentionNeeded);
     return () => {
       window.removeEventListener("pi-web:board-open-file", onBoardOpenFile);
       window.removeEventListener("pi-web:board-session-forked", onBoardSessionForked);
+      window.removeEventListener("pi-web:board-session-created", onBoardSessionCreated);
+      window.removeEventListener("pi-web:board-session-renamed", onBoardSessionRenamed);
       window.removeEventListener("pi-web:board-agent-end", onBoardAgentEnd);
       window.removeEventListener("pi-web:board-attention-needed", onBoardAttentionNeeded);
     };
@@ -3143,6 +3160,7 @@ export function AppShell() {
               boardId={activeBoardId}
               taskId={activeTaskId ?? undefined}
               projectKey={selectedSession ? (selectedSession.projectKey ?? workspaceKeyOf(selectedSession)) : undefined}
+              newSessionCwd={activeCwd ?? undefined}
               onExit={() => setActiveBoardId(null)}
               onOpenSession={handleSelectSession}
               onRunningSessionIdsChange={handleRunningSessionIdsChange}
