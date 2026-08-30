@@ -1,4 +1,4 @@
-import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, useValue, resizeBox } from "tldraw";
+import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, resizeBox } from "tldraw";
 import type { TLBaseShape, TLShapePartial } from "tldraw";
 import { useState, useRef } from "react";
 import { SessionWorkbench } from "./SessionWorkbench";
@@ -160,10 +160,6 @@ const phaseMeta: Record<string, { dot: string; label: string }> = {
 function SessionCardView({ shape }: { shape: SessionCardShape }) {
   const { w, h, title, projectName, messageCount, phase, runningMs, endedAt, lastActivityAt, stale, sessionId, expanded, lastReply, cwd, taskId } = shape.props;
   const editor = useEditor();
-
-  // 卡片激活态 = tldraw 选中（点击卡片即选中，响应式）。
-  // 判定条件（用户定）：激活 → 会话冒泡阻止生效（内部可交互）；非激活 → 放行给画布。
-  const selected = useValue("selected", () => editor.getSelectedShapeIds().includes(shape.id), [editor, shape.id]);
 
   // draft 卡（新建会话）：sessionId 为空，尚未绑定真实会话
   const isDraft = !sessionId;
@@ -370,10 +366,9 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           </button>
         </div>
         {/* 工作台：嵌卡片内，随卡片 resize 自然跟随；四周留 padding 保证拖拽/调整手柄可触
-           垂直对齐：卡片 padding 8 上下一致，底栏内容区底部从 6 减到 0，底距卡底与顶距卡顶同 8
-           active=卡片选中 → 会话内部冒泡阻止生效；非激活时放行事件给画布 */}
+           垂直对齐：卡片 padding 8 上下一致，底栏内容区底部从 6 减到 0，底距卡底与顶距卡顶同 8 */}
         <div style={{ flex: 1, minHeight: 0, padding: "0 4px 0", pointerEvents: "all" }}>
-          <SessionWorkbench sessionId={sessionId} cwd={cwd} taskId={taskId} active={selected} />
+          <SessionWorkbench sessionId={sessionId} cwd={cwd} taskId={taskId} />
         </div>
       </HTMLContainer>
     );

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useEditor, type TLShapeId } from "tldraw";
 import { ChatWindow } from "@/components/ChatWindow";
 import type { ChatInputHandle } from "@/components/ChatInput";
 import { SessionNavBar, type SessionNavBarHandle } from "./SessionNavBar";
@@ -31,18 +32,27 @@ export function SessionWorkbench({
   sessionId,
   cwd,
   taskId,
-  active,
 }: {
   sessionId: string;
   /** draft 卡（新建会话）绑定目录 */
   cwd?: string;
   /** draft 卡（任务看板）目标任务 id */
   taskId?: string;
-  /** 卡片激活状态：激活时冒泡阻止生效（会话内部可交互）；非激活时放行事件给画布 */
-  active: boolean;
 }) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
+  const editor = useEditor();
+
+  // 卡片激活判定（用户定）：激活 = tldraw 选中本卡。
+  // 事件发生时实时读 editor.getSelectedShapeIds() —— 零 React 重渲染，
+  // 不因选中变化触发卡片重渲染而打断画布平移/拖拽。
+  // 卡片 shape id：展开态 HTMLContainer 的 data-node-id（shape.id 去 "shape:" 前缀）。
+  const isActive = () => {
+    const card = rootRef.current?.closest(".tl-html-container");
+    const nodeId = card?.getAttribute("data-node-id");
+    if (!nodeId) return false;
+    return editor.getSelectedShapeIds().includes(`shape:${nodeId}` as TLShapeId);
+  };
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatKey, setChatKey] = useState(0);
@@ -56,14 +66,10 @@ export function SessionWorkbench({
   pendingTaskRef.current = taskId ? { taskId } : null;
   // draft 卡草稿 key：稳定标识（卡内输入框草稿持久化用）
   const draftKeyRef = useRef(`board-new:${Math.random().toString(36).slice(2, 8)}`);
-  // draft 卡初始 cwd：转正后卡片侧会把 cwd 字段清空（props.cwd 变 ""），但 isNew 实例
-  // 仍需 cwd 作 newSessionCwd（第二条消息 ensure_session 用），这里缓存首帧值。
-  const cwdRef = useRef(cwd ?? null);
   // 转正标记：draft 卡发出首条消息后 sessionId 从空变为 realId。此时 prompt 正在跑，
-  // 卸载/重挂 ChatWindow 会断开 SSE 丢失事件 —— 本实例生命周期内保持 isNew 模式继续，
-  // 不重挂。组件重建（收合再展开 / 刷新 / 重新打开）时 wasDraftRef 重新按 isDraft 初始化，
-  // 转正后的卡片走回普通会话模式正常加载历史。
-  const wasDraftRef = useRef(isDraft);
+  // 重挂 ChatWindow 会断开 SSE 丢失事件 —— 保持 isNew 模式实例继续，不重挂。
+  const wasDraftRef = useRef(true);
+  if (!isDraft && wasDraftRef.current) wasDraftRef.current = false;
 
   // 导航条 portal 目标：卡片标题栏内的 slot（展开按钮之前）
   const [navbarSlot, setNavbarSlot] = useState<HTMLElement | null>(null);
@@ -134,7 +140,7 @@ export function SessionWorkbench({
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
-    const stop = (e: WheelEvent) => { if (active) e.stopPropagation(); };
+    const stop = (e: WheelEvent) => { if (isActive()) e.stopPropagation(); };
     el.addEventListener("wheel", stop, { capture: true });
     el.addEventListener("wheel", stop);
     return () => {
@@ -148,27 +154,6 @@ export function SessionWorkbench({
   useEffect(() => {
     if (isDraft) return;
     let cancelled = false;
-    // draft 转正：ChatWindow 保持 isNew 实例继续（不卸载、不重挂，避免断 SSE），
-    // 仅拉 session 元数据供导航条渲染；不 setSession(null)，以免工作台闪 loading。
-    // 首条 prompt 落盘前 /api/sessions 可能查不到（pi 延迟 flush），此时不置错，
-    // 收合再展开/刷新会走普通卡路径补上。
-    if (wasDraftRef.current) {
-      setError(null);
-      void (async () => {
-        try {
-          const res = await fetch("/api/sessions", { cache: "no-store" });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = (await res.json()) as { sessions: SessionInfo[] };
-          const found = data.sessions.find((s) => s.id === sessionId);
-          if (cancelled) return;
-          if (found) setSession(found);
-        } catch (e) {
-          console.warn("draft session metadata load failed:", e);
-        }
-      })();
-      return () => { cancelled = true; };
-    }
-    // 普通卡：加载会话并重挂 ChatWindow，确保新会话干净
     setSession(null);
     setError(null);
     void (async () => {
@@ -201,7 +186,7 @@ export function SessionWorkbench({
     );
   }
 
-  if (!session && !isDraft && !wasDraftRef.current) {
+  if (!session && !isDraft) {
     return (
       <div style={containerStyle}>
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
@@ -216,12 +201,13 @@ export function SessionWorkbench({
       ref={rootRef}
       className="board-workbench"
       style={containerStyle}
-      // 工作台嵌在 tldraw 卡片内：仅激活时阻止事件冒泡到画布（会话内部交互不被画布吞掉）。
-      // 非激活时不阻止 —— 事件冒泡到 canvas，画布正常平移/拖拽/命中（把手不因会话区域被挡）。
-      onPointerDown={(e) => { if (active) e.stopPropagation(); }}
-      onPointerUp={(e) => { if (active) e.stopPropagation(); }}
-      onClick={(e) => { if (active) e.stopPropagation(); }}
-      onDoubleClick={(e) => { if (active) e.stopPropagation(); }}
+      // 工作台嵌在 tldraw 卡片内：阻止事件冒泡到画布。tldraw 画布在 pointerDown 上
+      // preventDefault（会吞掉后续 click），导致终端/模型选择器/session/通知等无法弹出。
+      // 冒泡阶段拦截：事件先正常到达目标（内部按钮可点击），再阻止冒泡到画布。
+      onPointerDown={(e) => { if (isActive()) e.stopPropagation(); }}
+      onPointerUp={(e) => { if (isActive()) e.stopPropagation(); }}
+      onClick={(e) => { if (isActive()) e.stopPropagation(); }}
+      onDoubleClick={(e) => { if (isActive()) e.stopPropagation(); }}
     >
       {/* 会话导航条：portal 到卡片标题栏右侧（展开按钮之前），融入标题栏而非独立一行。
           仅已转正会话显示（draft 卡标题栏是新会话占位，无导航条） */}
@@ -241,7 +227,7 @@ export function SessionWorkbench({
         // 转正后保持 isNew 实例（首条 prompt 正在跑，重挂会断 SSE）；
         // 后续刷新/展开由摘要轮询 + 卡片标题接管，本实例不再切换
         session={isDraft || wasDraftRef.current ? null : session}
-        newSessionCwd={isDraft || wasDraftRef.current ? (cwdRef.current ?? null) : null}
+        newSessionCwd={isDraft || wasDraftRef.current ? (cwd ?? null) : null}
         newSessionDraftKey={isDraft || wasDraftRef.current ? draftKeyRef.current : null}
         pendingNewSessionTaskRef={isDraft || wasDraftRef.current ? pendingTaskRef : undefined}
         chatInputRef={chatInputRef}
