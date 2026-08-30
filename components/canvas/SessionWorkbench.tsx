@@ -53,10 +53,14 @@ export function SessionWorkbench({
   pendingTaskRef.current = taskId ? { taskId } : null;
   // draft 卡草稿 key：稳定标识（卡内输入框草稿持久化用）
   const draftKeyRef = useRef(`board-new:${Math.random().toString(36).slice(2, 8)}`);
+  // draft 卡初始 cwd：转正后卡片侧会把 cwd 字段清空（props.cwd 变 ""），但 isNew 实例
+  // 仍需 cwd 作 newSessionCwd（第二条消息 ensure_session 用），这里缓存首帧值。
+  const cwdRef = useRef(cwd ?? null);
   // 转正标记：draft 卡发出首条消息后 sessionId 从空变为 realId。此时 prompt 正在跑，
-  // 重挂 ChatWindow 会断开 SSE 丢失事件 —— 保持 isNew 模式实例继续，不重挂。
-  const wasDraftRef = useRef(true);
-  if (!isDraft && wasDraftRef.current) wasDraftRef.current = false;
+  // 卸载/重挂 ChatWindow 会断开 SSE 丢失事件 —— 本实例生命周期内保持 isNew 模式继续，
+  // 不重挂。组件重建（收合再展开 / 刷新 / 重新打开）时 wasDraftRef 重新按 isDraft 初始化，
+  // 转正后的卡片走回普通会话模式正常加载历史。
+  const wasDraftRef = useRef(isDraft);
 
   // 导航条 portal 目标：卡片标题栏内的 slot（展开按钮之前）
   const [navbarSlot, setNavbarSlot] = useState<HTMLElement | null>(null);
@@ -140,6 +144,27 @@ export function SessionWorkbench({
   useEffect(() => {
     if (isDraft) return;
     let cancelled = false;
+    // draft 转正：ChatWindow 保持 isNew 实例继续（不卸载、不重挂，避免断 SSE），
+    // 仅拉 session 元数据供导航条渲染；不 setSession(null)，以免工作台闪 loading。
+    // 首条 prompt 落盘前 /api/sessions 可能查不到（pi 延迟 flush），此时不置错，
+    // 收合再展开/刷新会走普通卡路径补上。
+    if (wasDraftRef.current) {
+      setError(null);
+      void (async () => {
+        try {
+          const res = await fetch("/api/sessions", { cache: "no-store" });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = (await res.json()) as { sessions: SessionInfo[] };
+          const found = data.sessions.find((s) => s.id === sessionId);
+          if (cancelled) return;
+          if (found) setSession(found);
+        } catch (e) {
+          console.warn("draft session metadata load failed:", e);
+        }
+      })();
+      return () => { cancelled = true; };
+    }
+    // 普通卡：加载会话并重挂 ChatWindow，确保新会话干净
     setSession(null);
     setError(null);
     void (async () => {
@@ -172,7 +197,7 @@ export function SessionWorkbench({
     );
   }
 
-  if (!session && !isDraft) {
+  if (!session && !isDraft && !wasDraftRef.current) {
     return (
       <div style={containerStyle}>
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
@@ -213,7 +238,7 @@ export function SessionWorkbench({
         // 转正后保持 isNew 实例（首条 prompt 正在跑，重挂会断 SSE）；
         // 后续刷新/展开由摘要轮询 + 卡片标题接管，本实例不再切换
         session={isDraft || wasDraftRef.current ? null : session}
-        newSessionCwd={isDraft || wasDraftRef.current ? (cwd ?? null) : null}
+        newSessionCwd={isDraft || wasDraftRef.current ? (cwdRef.current ?? null) : null}
         newSessionDraftKey={isDraft || wasDraftRef.current ? draftKeyRef.current : null}
         pendingNewSessionTaskRef={isDraft || wasDraftRef.current ? pendingTaskRef : undefined}
         chatInputRef={chatInputRef}
