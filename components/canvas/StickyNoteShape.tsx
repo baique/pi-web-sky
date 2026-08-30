@@ -77,6 +77,34 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
   const editor = useEditor();
   const isEditing = useValue("editing", () => editor.getEditingShapeId() === shape.id, [editor, shape.id]);
 
+  // 内容区与画布手势隔离：
+  // - pointer 事件不冒泡到 .tl-canvas，tldraw 不会把这里的手势当成形状拖拽；
+  //   文本拖动 = 浏览器原生选字（CSS 已放行 user-select:text）。
+  // - 但 tldraw 的 canvas 层事件（选中 / ClickManager 双击进编辑）也因此收不到，
+  //   由本地 click / dblclick 补回（浏览器保证拖动后不派发 click，选中与拖拽天然互斥）。
+  const isolateContent = useCallback(
+    (e: React.PointerEvent) => e.stopPropagation(),
+    [],
+  );
+
+  const handleContentClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      // 若已在编辑态（如刚双击），不打断 textarea 焦点
+      if (editor.getEditingShapeId() === shape.id) return;
+      editor.select(shape.id);
+    },
+    [editor, shape.id],
+  );
+
+  const handleContentDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      editor.setEditingShape(shape.id);
+    },
+    [editor, shape.id],
+  );
+
   const [draft, setDraft] = useState(text);
   const draftRef = useRef(text);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -129,7 +157,7 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
   // —— 编辑态：textarea 写 markdown 源码 ——
   if (isEditing) {
     return (
-      <HTMLContainer style={{ width: w, height: h, pointerEvents: "none" }}>
+      <HTMLContainer data-testid={`sticky-note-${shape.id}`} style={{ width: w, height: h, pointerEvents: "none" }}>
         <div style={bubbleStyle}>
           <textarea
             ref={textareaRef}
@@ -203,11 +231,26 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
           }}
         >
           {text.trim() ? (
-            <div className="markdown-body" style={{ wordBreak: "break-word" }}>
+            <div
+              className="markdown-body"
+              onPointerDown={isolateContent}
+              onPointerUp={isolateContent}
+              onClick={handleContentClick}
+              onDoubleClick={handleContentDoubleClick}
+              style={{ wordBreak: "break-word", cursor: "text" }}
+            >
               <ReactMarkdown>{text}</ReactMarkdown>
             </div>
           ) : (
-            <div style={{ color: "var(--text-dim)", fontSize: 12 }}>双击编辑 markdown</div>
+            <div
+              onPointerDown={isolateContent}
+              onPointerUp={isolateContent}
+              onClick={handleContentClick}
+              onDoubleClick={handleContentDoubleClick}
+              style={{ color: "var(--text-dim)", fontSize: 12, cursor: "text" }}
+            >
+              双击编辑 markdown
+            </div>
           )}
         </div>
       </div>
