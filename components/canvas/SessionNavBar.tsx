@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { BranchNavigator } from "@/components/BranchNavigator";
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionTreeNode, TodoItem } from "@/lib/types";
@@ -17,7 +18,6 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
  */
 export function SessionNavBar({
   sessionId,
-  sessionName,
   branchTree,
   branchActiveLeafId,
   onLeafChange,
@@ -25,7 +25,6 @@ export function SessionNavBar({
   todos,
 }: {
   sessionId: string;
-  sessionName?: string;
   branchTree: SessionTreeNode[];
   branchActiveLeafId: string | null;
   onLeafChange: (leafId: string | null) => void;
@@ -40,8 +39,8 @@ export function SessionNavBar({
   const statsBtnRef = useRef<HTMLButtonElement | null>(null);
   const todoBtnRef = useRef<HTMLButtonElement | null>(null);
 
-  // 打开一个弹层时收起其他
-  const openOne = (target: "branch" | "stats" | "todo") => {
+  // 打开一个弹层时收起其他；target="none" 全部关闭
+  const openOne = (target: "branch" | "stats" | "todo" | "none") => {
     setBranchOpen(target === "branch");
     setStatsOpen(target === "stats");
     setTodoOpen(target === "todo");
@@ -57,6 +56,40 @@ export function SessionNavBar({
 
   const activeTodoCount = todos.filter((todo) => todo.status !== "completed").length;
 
+  // 空白处点击 / Escape 关闭所有弹层（与 AppShell 顶栏行为一致）
+  const anyOpen = branchOpen || statsOpen || todoOpen;
+  useEffect(() => {
+    if (!anyOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      // 点击弹层内部不关闭（弹层已 portal 到 body，需用各自 panel ref）
+      if (target instanceof Node) {
+        const inNav = navRef.current?.contains(target);
+        // 在导航条内点击：按钮自身 toggle 管理，不在此关闭（避免关开竞争）
+        if (inNav) return;
+        // portal 弹层内的点击不关闭
+        if (document.querySelector('[data-session-nav-popover]')?.contains(target)) return;
+        if (document.querySelector('[data-session-nav-todo]')?.contains(target)) return;
+        if (document.querySelector('.glass-top-panel')?.contains(target)) return;
+      }
+      setBranchOpen(false);
+      setStatsOpen(false);
+      setTodoOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setBranchOpen(false);
+      setStatsOpen(false);
+      setTodoOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [anyOpen]);
+
   return (
     <div
       ref={navRef}
@@ -65,10 +98,12 @@ export function SessionNavBar({
         display: "flex",
         alignItems: "center",
         gap: 2,
-        padding: "3px 6px",
-        borderBottom: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
-        minHeight: 34,
+        padding: "0 6px",
+        minHeight: 36,
         position: "relative",
+        // 导航条嵌在卡片玻璃内：背景保持透明（透出卡片玻璃+壁纸），
+        // 只保留底部 border + 高度对齐主界面 header。
+        borderBottom: "1px solid var(--border)",
       }}
     >
       <BranchNavigator
@@ -77,9 +112,10 @@ export function SessionNavBar({
         onLeafChange={onLeafChange}
         inline
         compact
+        portalDropdown
         containerRef={navRef}
         open={branchOpen}
-        onToggle={() => openOne("branch")}
+        onToggle={() => openOne(branchOpen ? "none" : "branch")}
         hasSession
       />
 
@@ -100,27 +136,13 @@ export function SessionNavBar({
         </svg>
       </button>
 
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          fontSize: 11.5,
-          fontWeight: 600,
-          color: "var(--text)",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          marginLeft: 4,
-        }}
-      >
-        {sessionName ?? "Untitled"}
-      </span>
+      <span style={{ flex: 1 }} />
 
       {/* 统计 */}
       <button
         ref={statsBtnRef}
         type="button"
-        onClick={() => openOne("stats")}
+        onClick={() => openOne(statsOpen ? "none" : "stats")}
         title={t("session.title")}
         aria-label={t("session.title")}
         aria-expanded={statsOpen}
@@ -144,7 +166,7 @@ export function SessionNavBar({
         <button
           ref={todoBtnRef}
           type="button"
-          onClick={() => openOne("todo")}
+          onClick={() => openOne(todoOpen ? "none" : "todo")}
           title={t("todo.title")}
           aria-label={t("todo.title")}
           aria-expanded={todoOpen}
@@ -165,10 +187,10 @@ export function SessionNavBar({
       )}
 
       {statsOpen && stats && (
-        <StatsPopover anchorRef={statsBtnRef} stats={stats} onClose={() => setStatsOpen(false)} />
+        <StatsPopover navRef={navRef} navWidth={navRef.current?.clientWidth ?? 300} stats={stats} onClose={() => setStatsOpen(false)} />
       )}
       {todoOpen && todos.length > 0 && (
-        <TodoPopover anchorRef={todoBtnRef} todos={todos} onClose={() => setTodoOpen(false)} />
+        <TodoPopover navRef={navRef} navWidth={navRef.current?.clientWidth ?? 300} todos={todos} onClose={() => setTodoOpen(false)} />
       )}
     </div>
   );
@@ -193,11 +215,13 @@ const navBtnStyle: React.CSSProperties = {
 
 /** 统计浮层：复用 AppShell session-info popover 的样式语言，展示卡片内可得的 SessionStatsInfo */
 function StatsPopover({
-  anchorRef,
+  navRef,
+  navWidth,
   stats,
   onClose,
 }: {
-  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  navRef: React.RefObject<HTMLDivElement | null>;
+  navWidth: number;
   stats: SessionStatsInfo;
   onClose: () => void;
 }) {
@@ -207,33 +231,34 @@ function StatsPopover({
 
   useEffect(() => {
     const update = () => {
-      const anchor = anchorRef.current;
-      if (!anchor) return;
-      const r = anchor.getBoundingClientRect();
-      const width = 300;
+      const nav = navRef.current;
+      if (!nav) return;
+      const r = nav.getBoundingClientRect();
+      // 对齐原版：面板宽度 = 导航条宽度，上方直角贴合导航条底边
+      const width = navWidth;
       const left = Math.min(r.right - width, Math.max(8, r.left));
-      setPos({ top: r.bottom + 4, left });
+      setPos({ top: r.bottom, left });
     };
     update();
     const ro = new ResizeObserver(update);
-    if (anchorRef.current) ro.observe(anchorRef.current);
+    if (navRef.current) ro.observe(navRef.current);
     window.addEventListener("resize", update);
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [anchorRef]);
+  }, [navRef, navWidth]);
 
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
       const target = e.target as Node;
       if (panelRef.current?.contains(target)) return;
-      if (anchorRef.current?.contains(target)) return;
+      if (navRef.current?.contains(target)) return;
       onClose();
     };
     document.addEventListener("pointerdown", onDown, true);
     return () => document.removeEventListener("pointerdown", onDown, true);
-  }, [anchorRef, onClose]);
+  }, [navRef, onClose]);
 
   if (!pos) return null;
 
@@ -300,26 +325,22 @@ function StatsPopover({
     </div>
   );
 
-  return (
+  const popoverEl = (
     <div
       ref={panelRef}
+      data-session-nav-popover
       role="dialog"
       aria-label={t("session.title")}
+      className="glass-top-panel"
       style={{
         position: "fixed",
         top: pos.top,
         left: pos.left,
-        width: 300,
+        width: navWidth,
         maxHeight: "min(560px, calc(100dvh - 44px))",
         overflowY: "auto",
         zIndex: 1200,
         padding: "12px 16px",
-        background: "var(--popover-glass)",
-        backdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
-        WebkitBackdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
-        border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
-        borderRadius: 10,
-        boxShadow: "0 8px 30px rgba(0,0,0,0.25)",
         fontSize: 12,
         lineHeight: 1.5,
         fontFamily: "var(--font-mono)",
@@ -341,15 +362,19 @@ function StatsPopover({
       </div>
     </div>
   );
+
+  return createPortal(popoverEl, document.body);
 }
 
 /** TODO 浮层：与 AppShell todo 面板同渲染逻辑 */
 function TodoPopover({
-  anchorRef,
+  navRef,
+  navWidth,
   todos,
   onClose,
 }: {
-  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  navRef: React.RefObject<HTMLDivElement | null>;
+  navWidth: number;
   todos: TodoItem[];
   onClose: () => void;
 }) {
@@ -359,55 +384,52 @@ function TodoPopover({
 
   useEffect(() => {
     const update = () => {
-      const anchor = anchorRef.current;
-      if (!anchor) return;
-      const r = anchor.getBoundingClientRect();
-      const width = 300;
+      const nav = navRef.current;
+      if (!nav) return;
+      const r = nav.getBoundingClientRect();
+      // 与统计面板一致：宽度 = 导航条宽度，上方直角贴合导航条底边
+      const width = navWidth;
       const left = Math.min(r.right - width, Math.max(8, r.left));
-      setPos({ top: r.bottom + 4, left });
+      setPos({ top: r.bottom, left });
     };
     update();
     const ro = new ResizeObserver(update);
-    if (anchorRef.current) ro.observe(anchorRef.current);
+    if (navRef.current) ro.observe(navRef.current);
     window.addEventListener("resize", update);
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [anchorRef]);
+  }, [navRef, navWidth]);
 
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
       const target = e.target as Node;
       if (panelRef.current?.contains(target)) return;
-      if (anchorRef.current?.contains(target)) return;
+      if (navRef.current?.contains(target)) return;
       onClose();
     };
     document.addEventListener("pointerdown", onDown, true);
     return () => document.removeEventListener("pointerdown", onDown, true);
-  }, [anchorRef, onClose]);
+  }, [navRef, onClose]);
 
   if (!pos) return null;
 
-  return (
+  const popoverEl = (
     <div
       ref={panelRef}
+      data-session-nav-todo
       role="menu"
       aria-label={t("todo.title")}
+      className="glass-top-panel"
       style={{
         position: "fixed",
         top: pos.top,
         left: pos.left,
-        width: 300,
+        width: navWidth,
         maxHeight: "min(440px, calc(100dvh - 44px))",
         overflowY: "auto",
         zIndex: 1200,
-        background: "var(--popover-glass)",
-        backdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
-        WebkitBackdropFilter: "blur(var(--glass-blur-panel)) saturate(var(--glass-saturate))",
-        border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
-        borderRadius: 10,
-        boxShadow: "0 8px 30px rgba(0,0,0,0.25)",
         fontFamily: "inherit",
       }}
     >
@@ -476,4 +498,6 @@ function TodoPopover({
       )}
     </div>
   );
+
+  return createPortal(popoverEl, document.body);
 }

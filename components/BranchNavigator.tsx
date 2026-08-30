@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import type { BranchPreview, SessionEntry, SessionTreeNode } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -22,6 +23,9 @@ interface Props {
   compact?: boolean;
   /** Keep the inline dropdown mounted while another control supplies its trigger */
   hideInlineButton?: boolean;
+  /** Inline dropdown portal to document.body：当宿主处于 backdrop-filter 容器内（如看板卡片）
+   *  时，position:fixed 会相对该容器而非视口，导致弹层漂移；portal 后坐标恢复视口正确。 */
+  portalDropdown?: boolean;
 }
 
 // Find the visible entry IDs on the path from root to activeLeafId.
@@ -254,7 +258,7 @@ function TreeNodeView({ node, activePathIds, depth, isLast, parentLines, onSelec
   );
 }
 
-export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, containerRef, open: openProp, onToggle, hasSession, compact, hideInlineButton }: Props) {
+export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, containerRef, open: openProp, onToggle, hasSession, compact, hideInlineButton, portalDropdown = false }: Props) {
   const { t } = useI18n();
   const [openInternal, setOpenInternal] = useState(false);
   const open = openProp !== undefined ? openProp : openInternal;
@@ -310,6 +314,36 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
 
 
   if (inline) {
+    const dropdownEl = open && dropdownPos ? (
+      <div style={{
+        position: "fixed",
+        top: dropdownPos.top,
+        left: dropdownPos.left,
+        width: dropdownPos.width,
+        zIndex: 500,
+      }} className="glass-top-panel">
+        {hasContent ? (
+          <div style={{ padding: "4px 12px 8px 12px", maxHeight: 260, overflowY: "auto" }}>
+            {topLevel.map((child, idx) => (
+              <TreeNodeView
+                key={child.entry.id}
+                node={child}
+                activePathIds={activePathIds}
+                depth={0}
+                isLast={idx === topLevel.length - 1}
+                parentLines={[]}
+                onSelect={handleSelect}
+              />
+            ))}
+          </div>
+        ) : (
+          <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+            {noBranchReason}
+          </div>
+        )}
+      </div>
+    ) : null;
+
     return (
       <div style={{ height: "100%", display: "flex", alignItems: "stretch" }}>
         <button
@@ -341,35 +375,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
           {branchIcon}
            {!compact && <span>{t("i18n.branches")}</span>}
         </button>
-        {open && dropdownPos && (
-          <div style={{
-            position: "fixed",
-            top: dropdownPos.top,
-            left: dropdownPos.left,
-            width: dropdownPos.width,
-            zIndex: 500,
-          }} className="glass-top-panel">
-            {hasContent ? (
-              <div style={{ padding: "4px 12px 8px 12px", maxHeight: 260, overflowY: "auto" }}>
-                {topLevel.map((child, idx) => (
-                  <TreeNodeView
-                    key={child.entry.id}
-                    node={child}
-                    activePathIds={activePathIds}
-                    depth={0}
-                    isLast={idx === topLevel.length - 1}
-                    parentLines={[]}
-                    onSelect={handleSelect}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
-                {noBranchReason}
-              </div>
-            )}
-          </div>
-        )}
+        {portalDropdown ? createPortal(dropdownEl, document.body) : dropdownEl}
       </div>
     );
   }
