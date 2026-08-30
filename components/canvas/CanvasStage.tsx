@@ -2,7 +2,7 @@
 
 import "tldraw/tldraw.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Tldraw, DefaultToolbar, DefaultToolbarContent, createShapeId, defaultShapeUtils, type TLComponents, type TLUiOverrides } from "tldraw";
+import { Tldraw, DefaultToolbar, DefaultToolbarContent, DefaultStylePanel, StylePanelColorPicker, StylePanelFillPicker, StylePanelDashPicker, StylePanelSizePicker, StylePanelFontPicker, StylePanelTextAlignPicker, StylePanelLabelAlignPicker, StylePanelGeoShapePicker, StylePanelArrowKindPicker, StylePanelArrowheadPicker, StylePanelSplinePicker, createShapeId, defaultShapeUtils, type TLComponents, type TLUiOverrides, type TLUiStylePanelProps } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
 import { StickyNoteUtil } from "./StickyNoteShape";
 import { StickyNoteTool } from "./StickyNoteTool";
@@ -51,6 +51,59 @@ const uiOverrides: TLUiOverrides[] = [{
     };
   },
 }];
+
+// 选中图形时右侧的样式面板（复用 tldraw 默认，但去掉透明度选择器）
+function BoardStylePanelSection({ children }: { children: React.ReactNode }) {
+  return <div className="tlui-style-panel__section">{children}</div>;
+}
+
+function BoardStylePanelContent() {
+  return (
+    <>
+      <BoardStylePanelSection>
+        <StylePanelColorPicker />
+        {/* 透明度选择器 —— 已按用户要求去掉 */}
+      </BoardStylePanelSection>
+      <BoardStylePanelSection>
+        <StylePanelFillPicker />
+        <StylePanelDashPicker />
+        <StylePanelSizePicker />
+      </BoardStylePanelSection>
+      <BoardStylePanelSection>
+        <StylePanelFontPicker />
+        <StylePanelTextAlignPicker />
+        <StylePanelLabelAlignPicker />
+      </BoardStylePanelSection>
+      <BoardStylePanelSection>
+        <StylePanelGeoShapePicker />
+        <StylePanelArrowKindPicker />
+        <StylePanelArrowheadPicker />
+        <StylePanelSplinePicker />
+      </BoardStylePanelSection>
+    </>
+  );
+}
+
+function BoardStylePanel(props: TLUiStylePanelProps) {
+  return (
+    // 固定在画布右下角（顶部与悬浮按钮组冲突，用户要求移到右下）
+    <div
+      style={{
+        position: "absolute",
+        right: 10,
+        bottom: 10,
+        zIndex: 70,
+        maxHeight: "70%",
+        overflow: "hidden",
+        pointerEvents: "none",
+      }}
+    >
+      <DefaultStylePanel {...props}>
+        <BoardStylePanelContent />
+      </DefaultStylePanel>
+    </div>
+  );
+}
 
 /**
  * tldraw 画布舞台：无限画布 + 工具行 + 拖放添加会话。
@@ -112,6 +165,8 @@ export function CanvasStage({
     SharePanel: null,
     MenuPanel: null,
     TopPanel: null,
+    // 样式面板：选中图形时右侧出现，去掉「透明度选择器」，保留颜色/填充/虚线/字号等
+    StylePanel: (props) => <BoardStylePanel {...props} />,
     KeyboardShortcutsDialog: null,
     DebugPanel: null,
     DebugMenu: null,
