@@ -1,16 +1,30 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatWindow } from "@/components/ChatWindow";
+import type { ChatInputHandle } from "@/components/ChatInput";
+import { SessionNavBar } from "./SessionNavBar";
 import { useI18n } from "@/hooks/useI18n";
 import { useAudio } from "@/hooks/useAudio";
-import { dispatchBoardTerminalToggle } from "@/lib/board-events";
-import type { SessionInfo } from "@/lib/types";
+import {
+  dispatchBoardAgentEnd,
+  dispatchBoardAttentionNeeded,
+  dispatchBoardOpenFile,
+  dispatchBoardSessionForked,
+  dispatchBoardTerminalToggle,
+} from "@/lib/board-events";
+import type { SessionInfo, SessionTreeNode, TodoItem } from "@/lib/types";
+import type { SessionStatsInfo } from "@/lib/pi-types";
 
 /**
  * 工作台本体 = 复用 ChatWindow（消息 + 输入 + 底栏 widget/通知/quota 完整一套）。
- * 嵌入会话卡片下半部（见 SessionCardShape 展开态）：随卡片 resize 天然跟随宽高；
- * 收合通过双击卡片（SessionCardUtil.onDoubleClick），无独立 chrome 头。
+ * 嵌入会话卡片下半部（见 SessionCardShape 展开态）：随卡片 resize 天然跟随宽高。
+ *
+ * 会话内部化改造（看板衍生问题的核心）：
+ * - 顶部会话工具条：分支导航 + 统计按钮（数据经 ChatWindow 回调捕获，卡片内自渲染，
+ *   不依赖 AppShell 顶栏）
+ * - 断链回调补齐：chatInputRef（edit-from-here）、onOpenFile（文件面板）、
+ *   onSessionForked / onAgentEnd / onAttentionNeeded（事件桥转发到 AppShell）
  */
 export function SessionWorkbench({
   sessionId,
@@ -23,6 +37,54 @@ export function SessionWorkbench({
   const [error, setError] = useState<string | null>(null);
   const [chatKey, setChatKey] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<ChatInputHandle | null>(null);
+
+  // 分支导航状态（经 ChatWindow onBranchDataChange 捕获，卡片内自渲染）
+  const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
+  const [branchActiveLeafId, setBranchActiveLeafId] = useState<string | null>(null);
+  const branchLeafChangeRef = useRef<((leafId: string | null) => void) | null>(null);
+
+  // 会话统计 + TODO（经 ChatWindow onSessionStatsChange / onTodosChange 捕获）
+  const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
+  const [todos, setTodos] = useState<TodoItem[]>([]);
+
+  const handleBranchDataChange = useCallback((tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => {
+    setBranchTree(tree);
+    setBranchActiveLeafId(activeLeafId);
+    branchLeafChangeRef.current = onLeafChange;
+  }, []);
+
+  const handleLeafChange = useCallback((leafId: string | null) => {
+    branchLeafChangeRef.current?.(leafId);
+  }, []);
+
+  const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
+    setSessionStats(stats);
+  }, []);
+
+  const handleTodosChange = useCallback((nextTodos: TodoItem[]) => {
+    setTodos(nextTodos);
+  }, []);
+
+  // 事件桥转发：工作台内无法直接拿 AppShell handler，走全局事件（携带 sessionId）
+  const handleOpenFile = useCallback((filePath: string) => {
+    dispatchBoardOpenFile(sessionId, filePath);
+  }, [sessionId]);
+
+  const handleSessionForked = useCallback((newSessionId: string) => {
+    dispatchBoardSessionForked(sessionId, newSessionId);
+  }, [sessionId]);
+
+  const handleAgentEnd = useCallback(() => {
+    dispatchBoardAgentEnd(sessionId, session?.name);
+  }, [sessionId, session?.name]);
+
+  const handleAttentionNeeded = useCallback((request: import("@/lib/types").BlockingExtensionUiRequest) => {
+    dispatchBoardAttentionNeeded(sessionId, {
+      title: request.method === "custom" ? undefined : request.title,
+      method: request.method,
+    });
+  }, [sessionId]);
 
   // wheel 拦截：tldraw 在 container 监听 wheel（画布 pan/zoom），工作台内的滚轮必须被会话自己消费。
   // 不用 useEffect([])：tldraw 重渲染/resize/展开收合会替换 shape 的 DOM，[] 只在首次挂载跑，
@@ -98,11 +160,31 @@ export function SessionWorkbench({
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
+      {/* 会话导航条：分支 / 历史 / 统计 / TODO（会话内部 UI，不依赖 AppShell 顶栏） */}
+      <SessionNavBar
+        sessionId={session.id}
+        sessionName={session.name ?? session.firstMessage}
+        branchTree={branchTree}
+        branchActiveLeafId={branchActiveLeafId}
+        onLeafChange={handleLeafChange}
+        stats={sessionStats}
+        todos={todos}
+      />
+
       <ChatWindow
         key={chatKey}
         session={session}
         newSessionCwd={null}
         newSessionDraftKey={null}
+        chatInputRef={chatInputRef}
+        inWorkbench
+        onBranchDataChange={handleBranchDataChange}
+        onSessionStatsChange={handleSessionStatsChange}
+        onTodosChange={handleTodosChange}
+        onOpenFile={handleOpenFile}
+        onSessionForked={handleSessionForked}
+        onAgentEnd={handleAgentEnd}
+        onAttentionNeeded={handleAttentionNeeded}
         soundEnabled={soundEnabled}
         onSoundToggle={onSoundToggle}
         playDoneSound={playDoneSound}

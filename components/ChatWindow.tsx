@@ -63,6 +63,9 @@ interface Props {
   unlockAudio?: () => void;
   terminalOpen?: boolean;
   onToggleTerminal?: () => void;
+  /** 看板工作台内嵌模式：多张展开卡并存时，全局 Esc 停止不生效（各卡 Esc 由 ChatInput 自理），
+   *  避免模块级 abort handler 被最后挂载的卡片接管、停错会话。 */
+  inWorkbench?: boolean;
 }
 
 const CHAT_COLUMN_PADDING = 16;
@@ -249,7 +252,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal }: Props) {
+export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal, inWorkbench = false }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const { isDark } = useTheme();
@@ -365,10 +368,13 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     playDoneSoundRef.current();
   }, [extensionDialog]);
 
-  // Register the abort handler for the global Esc shortcut
+  // Register the abort handler for the global Esc shortcut.
+  // 工作台内不注册：多张展开卡并存时模块级单例会被最后挂载的卡接管（停错会话），
+  // 卡片内的 Esc 由 ChatInput 在 textarea 内自理（isStreaming 时 onAbort）。
   useEffect(() => {
+    if (inWorkbench) return;
     registerAbortHandler(sessionBusy ? handleAbort : null);
-  }, [sessionBusy, handleAbort]);
+  }, [sessionBusy, handleAbort, inWorkbench]);
 
   // --- Lazy-load historical messages ---
   // Only render the last N messages initially. When the user scrolls to the

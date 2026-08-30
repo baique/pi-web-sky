@@ -234,6 +234,11 @@ export function AppShell() {
   const handleOpenBoard = useCallback((boardId: string) => {
     setActiveBoardId(boardId);
     setSelectedSession(null);
+    // 看板模式下顶栏会话按钮（统计/TODO）无当前会话，清掉残留数据避免误显
+    setSessionStats(null);
+    setSessionTodos([]);
+    setContextUsage(null);
+    setActiveTopPanel(null);
     router.replace(`?board=${encodeURIComponent(boardId)}`, { scroll: false });
   }, [router]);
   // The temporary id distinguishes consecutive fresh composers in one cwd.
@@ -1207,6 +1212,59 @@ export function AppShell() {
     handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null });
   }, [handleOpenFile, selectedSession?.id]);
 
+  // 看板工作台事件桥：嵌卡片内无法直接拿 AppShell handler，工作台 dispatch 事件、这里处理。
+  // 全部携带 sessionId，处理时不退出看板/不切换 selectedSession（保持看板模式）。
+  useEffect(() => {
+    // 工作台内消息里 file: 链接 → 打开右侧文件面板（sourceSessionId 记录来源会话）
+    const onBoardOpenFile = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId: string; filePath: string }>).detail;
+      if (!detail?.filePath) return;
+      handleOpenFile(detail.filePath, getFileName(detail.filePath), { sourceSessionId: detail.sessionId });
+    };
+    // 工作台内 fork 出新会话 → 刷新侧栏（不切换当前会话）
+    const onBoardSessionForked = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId: string; newSessionId: string }>).detail;
+      if (!detail?.newSessionId) return;
+      setRefreshKey((k) => k + 1);
+      setExplorerRefreshKey((k) => k + 1);
+    };
+    // 工作台内会话结束 → 刷新侧栏 + 浏览器通知
+    const onBoardAgentEnd = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId: string; sessionName?: string }>).detail;
+      if (!detail?.sessionId) return;
+      setRefreshKey((k) => k + 1);
+      setExplorerRefreshKey((k) => k + 1);
+      if (!shouldShowBrowserNotification()) return;
+      deliverSessionNotification({
+        targetSession: null,
+        title: detail.sessionName ?? translate("i18n.sessionComplete"),
+        body: translate("i18n.taskFinished"),
+      });
+    };
+    // 工作台内扩展发起阻塞请求 → 浏览器通知
+    const onBoardAttentionNeeded = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId: string; title?: string; method: string }>).detail;
+      if (!detail?.sessionId) return;
+      if (!shouldShowBrowserNotification()) return;
+      deliverSessionNotification({
+        targetSession: null,
+        title: translate("i18n.attentionNeeded"),
+        body: detail.title ?? translate("i18n.extensionInputNeeded"),
+        tag: `pi-extension-ui:${detail.sessionId}`,
+      });
+    };
+    window.addEventListener("pi-web:board-open-file", onBoardOpenFile);
+    window.addEventListener("pi-web:board-session-forked", onBoardSessionForked);
+    window.addEventListener("pi-web:board-agent-end", onBoardAgentEnd);
+    window.addEventListener("pi-web:board-attention-needed", onBoardAttentionNeeded);
+    return () => {
+      window.removeEventListener("pi-web:board-open-file", onBoardOpenFile);
+      window.removeEventListener("pi-web:board-session-forked", onBoardSessionForked);
+      window.removeEventListener("pi-web:board-agent-end", onBoardAgentEnd);
+      window.removeEventListener("pi-web:board-attention-needed", onBoardAttentionNeeded);
+    };
+  }, [deliverSessionNotification, handleOpenFile, translate]);
+
   const handleCloseFileTab = useCallback((tabId: string) => {
     setFileTabs((prev) => {
       const next = prev.filter((t) => t.id !== tabId);
@@ -1582,6 +1640,16 @@ export function AppShell() {
 
   const renderChatToolbarActions = (mobile: boolean) => {
     if (!mobile && !showChat) return null;
+    // 看板模式：顶栏会话相关按钮（历史/分支/系统提示）无当前会话可作用，隐藏；
+    // 仅保留全局的终端/MCP/主题/语言/背景。会话内部交互由工作台工具条承担。
+    if (!mobile && activeBoardId) {
+      return (
+        <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
+          {renderTerminalButton()}
+          {renderMcpButton()}
+        </div>
+      );
+    }
     return (
       <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
         <button
