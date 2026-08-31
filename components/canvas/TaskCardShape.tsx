@@ -290,6 +290,10 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   // 「高级」折叠区：默认收起
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // 展开工作台时自动展开「高级」折叠区（收起时不强制恢复）
+  useEffect(() => {
+    if (expanded) setAdvancedOpen(true);
+  }, [expanded]);
 
   // 工作目录选择：DirectoryPicker 弹窗 + worktree 列表（复用文件浏览器下方选择器逻辑）
   const [dirPickerOpen, setDirPickerOpen] = useState(false);
@@ -640,19 +644,11 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
                 style={footerBtnStyle}
                 disabled={saving || !draft?.name.trim()}
                 onClick={() => void handleSave()}
-                title="保存"
+                title="完成"
               >
-                {saving ? "保存中…" : "保存"}
+                {saving ? "保存中…" : "完成"}
               </button>
             )}
-            <button
-              type="button"
-              style={footerBtnStyle}
-              onClick={() => { editor.updateShape<TaskCardShape>({ id: shape.id, type: "task-card", props: nextExpandState(shape) }); }}
-              title={expanded ? "收起工作台" : "展开工作台"}
-            >
-              {expanded ? "收起" : "展开"}
-            </button>
           </div>
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.5 }}>
             <circle cx="9" cy="6" r="1" /><circle cx="15" cy="6" r="1" /><circle cx="9" cy="12" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="9" cy="18" r="1" /><circle cx="15" cy="18" r="1" />
