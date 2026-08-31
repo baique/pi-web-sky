@@ -479,6 +479,47 @@ export function deleteNode(boardId: string, nodeId: string): boolean {
   return true;
 }
 
+/**
+ * 批量删除节点（可跨看板）。级联删以任一被删节点为端点的边；bump 所属看板 updated。
+ * 单事务内完成（SQLite 不支持嵌套 BEGIN，调用方须在自身事务之外调用）。
+ * 返回删除的节点/边数量与受影响的看板 id 列表。系统看板节点不删。
+ */
+export function deleteNodesByIds(
+  nodeIds: string[],
+): { deletedNodes: number; deletedEdges: number; boards: string[] } {
+  if (nodeIds.length === 0) return { deletedNodes: 0, deletedEdges: 0, boards: [] };
+  const db = getDb();
+  const placeholders = nodeIds.map(() => "?").join(",");
+  // 过滤系统看板（running 只读）节点
+  const rows = db
+    .prepare(`SELECT id, board_id AS boardId FROM board_nodes WHERE id IN (${placeholders}) AND board_id != ?`)
+    .all(...nodeIds, SYSTEM_RUNNING_BOARD_ID) as Array<{ id: string; boardId: string }>;
+  if (rows.length === 0) return { deletedNodes: 0, deletedEdges: 0, boards: [] };
+  const ids = rows.map((r) => r.id);
+  const idPlaceholders = ids.map(() => "?").join(",");
+  const boardIds = [...new Set(rows.map((r) => r.boardId))];
+  const ts = now();
+  db.exec("BEGIN");
+  try {
+    // 级联删边：以任一被删节点为端点（一条边两端都在删除集时只命中一次删除）
+    const edgeResult = db
+      .prepare(`DELETE FROM board_edges WHERE from_id IN (${idPlaceholders}) OR to_id IN (${idPlaceholders})`)
+      .run(...ids, ...ids);
+    const nodeResult = db
+      .prepare(`DELETE FROM board_nodes WHERE id IN (${idPlaceholders})`)
+      .run(...ids);
+    // bump 受影响看板 updated（乐观锁基线，防迟到全量保存覆盖）
+    for (const bid of boardIds) {
+      db.prepare("UPDATE boards SET updated = ? WHERE id = ?").run(ts, bid);
+    }
+    db.exec("COMMIT");
+    return { deletedNodes: Number(nodeResult.changes), deletedEdges: Number(edgeResult.changes), boards: boardIds };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export interface CreateEdgeInput {
   fromId: string;
   toId: string;

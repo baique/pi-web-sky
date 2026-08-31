@@ -86,6 +86,9 @@ export function useBoardCanvas({
   const load = useCallback(async () => {
     try {
       setLoading(true);
+      // 懒加载清理：先删孤儿卡片（左栏删会话后遗留的卡片/连线），再读画布，
+      // 确保本次进入不出现孤儿。无孤儿时幂等，开销可忽略。
+      await fetch("/api/boards/purge-orphans", { method: "POST", cache: "no-store" }).catch(() => {});
       const [boardRes, canvasRes] = await Promise.all([
         fetch(`/api/boards/${encodeURIComponent(boardId)}`, { cache: "no-store" }),
         fetch(`/api/boards/${encodeURIComponent(boardId)}/canvas`, { cache: "no-store" }),

@@ -13,6 +13,7 @@ const { GET: listBoards, POST: createBoard } = await jiti.import("./route.ts");
 const { GET: getBoard, PATCH: patchBoard, DELETE: deleteBoard } = await jiti.import("./[id]/route.ts");
 const { GET: getCanvas, PUT: putCanvas } = await jiti.import("./[id]/canvas/route.ts");
 const { POST: addNode } = await jiti.import("./[id]/nodes/route.ts");
+const { POST: purgeOrphans } = await jiti.import("./purge-orphans/route.ts");
 const { GET: getNode, PATCH: patchNode, DELETE: deleteNode } = await jiti.import("./[id]/nodes/[nid]/route.ts");
 const { POST: addEdge } = await jiti.import("./[id]/edges/route.ts");
 const { DELETE: deleteEdge } = await jiti.import("./[id]/edges/[eid]/route.ts");
@@ -217,4 +218,33 @@ test("canvas API: full replace + node/edge sub-resources", async () => {
   const afterCanvas = await after.json();
   assert.equal(afterCanvas.nodes.length, 2);
   assert.equal(afterCanvas.edges.length, 1); // only e1 remains
+});
+
+test("purge-orphans API: 删除指向已删会话的孤儿卡片", async () => {
+  freshDb();
+  const created = await createBoard(jsonReq("http://localhost/api/boards", "POST", { projectKey: PROJECT, name: "purge" }));
+  const { board } = await created.json();
+  // 孤儿节点（会话 id 随机，文件系统必不存在）
+  const orphanRes = await addNode(jsonReq("http://localhost/api/boards/x/nodes", "POST", { refId: "purge-nonexistent-" + Math.random().toString(36).slice(2), x: 0, y: 0 }), {
+    params: Promise.resolve({ id: board.id }),
+  });
+  assert.equal(orphanRes.status, 201);
+  // draft 节点（refId 为空）保留
+  const draftRes = await addNode(jsonReq("http://localhost/api/boards/x/nodes", "POST", { refId: null, x: 100, y: 0 }), {
+    params: Promise.resolve({ id: board.id }),
+  });
+  assert.equal(draftRes.status, 201);
+
+  const purgeRes = await purgeOrphans(new Request("http://localhost/api/boards/purge-orphans", { method: "POST" }));
+  assert.equal(purgeRes.status, 200);
+  const body = await purgeRes.json();
+  assert.equal(body.deletedNodes, 1);
+  assert.deepEqual(body.boards, [board.id]);
+
+  const canvas = await getCanvas(new Request("http://localhost/api/boards/x/canvas"), {
+    params: Promise.resolve({ id: board.id }),
+  });
+  const canvasBody = await canvas.json();
+  assert.equal(canvasBody.nodes.length, 1); // draft 保留
+  assert.equal(canvasBody.nodes[0].refId, null);
 });
