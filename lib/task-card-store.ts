@@ -271,3 +271,135 @@ export function deleteCard(id: string): void {
     throw error;
   }
 }
+
+// ============================================================================
+// 依赖（前置/关联）—— 同看板，真相源在 task_card_links，画布边由 syncCardEdges 派生
+// ============================================================================
+
+const LINK_COLUMNS =
+  "id, card_id AS cardId, target_card_id AS targetCardId, kind, created";
+
+/** 本卡作为依赖方（出边）的全部依赖，按创建序。 */
+export function listLinks(cardId: string): TaskCardLink[] {
+  return getDb()
+    .prepare(`SELECT ${LINK_COLUMNS} FROM task_card_links WHERE card_id = ? ORDER BY created, rowid`)
+    .all(cardId) as unknown as TaskCardLink[];
+}
+
+/** 其他卡引用本卡（入边：被依赖方视角），按创建序。 */
+export function listInboundLinks(cardId: string): TaskCardLink[] {
+  return getDb()
+    .prepare(`SELECT ${LINK_COLUMNS} FROM task_card_links WHERE target_card_id = ? ORDER BY created, rowid`)
+    .all(cardId) as unknown as TaskCardLink[];
+}
+
+function assertLinkKind(kind: LinkKind): void {
+  if (kind !== "prerequisite" && kind !== "related") {
+    throw new Error(`invalid link kind: ${String(kind)}`);
+  }
+}
+
+/**
+ * 加依赖边。跨看板 / 自环 / 目标卡不存在返回 null；重复（UNIQUE 冲突）幂等返回已有行。
+ */
+export function addLink(
+  cardId: string,
+  targetCardId: string,
+  kind: LinkKind,
+): TaskCardLink | null {
+  assertLinkKind(kind);
+  if (cardId === targetCardId) return null;
+  const card = getCard(cardId);
+  const target = getCard(targetCardId);
+  if (!card || !target) return null;
+  if (card.boardId !== target.boardId) return null; // 任务以看板为界，不允许跨看板
+
+  getDb()
+    .prepare(
+      "INSERT OR IGNORE INTO task_card_links (id, card_id, target_card_id, kind, created) VALUES (?, ?, ?, ?, ?)",
+    )
+    .run(randomUUID(), cardId, targetCardId, kind, now());
+  return getDb()
+    .prepare(`SELECT ${LINK_COLUMNS} FROM task_card_links WHERE card_id = ? AND target_card_id = ? AND kind = ?`)
+    .get(cardId, targetCardId, kind) as TaskCardLink | undefined ?? null;
+}
+
+/** 删依赖边。 */
+export function removeLink(id: string): void {
+  getDb().prepare("DELETE FROM task_card_links WHERE id = ?").run(id);
+}
+
+/**
+ * 全量替换某卡的依赖（prerequisite + related）。事务内删旧插新。
+ * 目标卡必须存在且同看板，否则抛错（防脏数据）。
+ */
+export function replaceLinks(
+  cardId: string,
+  prerequisites: string[],
+  related: string[],
+): void {
+  const db = getDb();
+  const card = getCard(cardId);
+  if (!card) throw new Error(`task card not found: ${cardId}`);
+  const validateTarget = (targetId: string, kind: LinkKind) => {
+    const target = getCard(targetId);
+    if (!target) throw new Error(`${kind} target not found: ${targetId}`);
+    if (target.boardId !== card.boardId) {
+      throw new Error(`${kind} target 不允许跨看板: ${targetId}`);
+    }
+  };
+  for (const t of prerequisites) validateTarget(t, "prerequisite");
+  for (const t of related) validateTarget(t, "related");
+
+  const ts = now();
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM task_card_links WHERE card_id = ?").run(cardId);
+    const ins = db.prepare(
+      "INSERT OR IGNORE INTO task_card_links (id, card_id, target_card_id, kind, created) VALUES (?, ?, ?, ?, ?)",
+    );
+    for (const t of prerequisites) ins.run(randomUUID(), cardId, t, "prerequisite", ts);
+    for (const t of related) ins.run(randomUUID(), cardId, t, "related", ts);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+// ============================================================================
+// 派发查询（调度器用）
+// ============================================================================
+
+function prerequisitesDone(card: TaskCard): boolean {
+  for (const link of listLinks(card.id)) {
+    if (link.kind !== "prerequisite") continue;
+    const target = getCard(link.targetCardId);
+    // 前置卡已被删除视为依赖解除（容忍脏数据）
+    if (target && target.execStatus !== "done") return false;
+  }
+  return true;
+}
+
+/**
+ * 可派发卡：就绪=todo & (未开始 | 失败且重试未超上限) & 无前置或前置均 done。
+ * 按优先级降序、编号升序（高优先级先调度）。
+ */
+export function listDispatchableCards(): TaskCard[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT ${CARD_COLUMNS} FROM task_cards
+       WHERE ready_status = 'todo' AND (exec_status = 'not_started' OR (exec_status = 'failed' AND retry_count < max_retries))
+       ORDER BY priority DESC, number`,
+    )
+    .all() as unknown as TaskCardRow[];
+  return rows.map(rowToCard).filter(prerequisitesDone);
+}
+
+/** 调度器已派发且正在运行的任务卡数（全局并发闸门用）。 */
+export function countRunningDispatched(): number {
+  const row = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM task_cards WHERE exec_status = 'running'")
+    .get() as { n: number };
+  return row.n;
+}
