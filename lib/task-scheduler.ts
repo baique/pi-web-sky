@@ -45,8 +45,8 @@ export const BLOCK_COOLDOWN_MS = 10 * 60 * 1000;
 /** 阻塞判定冷却表（模块级即可：仅节流，热重载重置无害） */
 const blockCheckAt = new Map<string, number>();
 
-/** 会话静默期：running 卡会话不在跑但最后活动距今不足该值时，视为回合间隙不转 review */
-export const SESSION_SETTLE_MS = 30_000;
+/** 会话静默期兜底：running 卡会话不在跑但最后活动距今不足该值时，视为刚结束未及事件订阅（防派发启动竞态） */
+export const SESSION_SETTLE_MS = 5_000;
 
 declare global {
   var __piTaskScheduler: {
@@ -121,6 +121,7 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
     // 会话正忙（已在流式/处理中）：说明上一轮已发过 prompt，直接标 running，不重复发
     if (session.session.isRunning()) {
       updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
+      watchForAgentEnd(card, session.session);
       console.log(`[task-scheduler] #${card.number} ${card.name} 会话忙（复用中），标 running 不重发`);
       return true;
     }
@@ -128,6 +129,7 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
     await session.session.send({ type: "prompt", message: buildTaskPrompt(card) });
 
     updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
+    watchForAgentEnd(card, session.session);
     console.log(
       `[task-scheduler] 派发 #${card.number} ${card.name} → session ${session.realSessionId.slice(0, 8)}`,
     );
@@ -142,9 +144,25 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
 }
 
 /**
+ * 订阅执行会话 agent_end：会话跑完立即把卡转 review（待审核），不等下一轮 reconcile。
+ * 事件驱动实现「会话执行完立即进入待审核」。回调只处理卡仍为 running 的情况，避免覆盖后续流转。
+ */
+function watchForAgentEnd(card: TaskCard, session: Awaited<ReturnType<typeof startRpcSession>>["session"]): void {
+  if (typeof session.onEvent !== "function") return;
+  const unsub = session.onEvent((event) => {
+    if (event.type !== "agent_end") return;
+    unsub();
+    const fresh = getCard(card.id);
+    if (!fresh || fresh.execStatus !== "running") return;
+    updateCard(card.id, { execStatus: "review" });
+    console.log(`[task-scheduler] #${card.number} ${card.name} 执行会话结束(agent_end) → review（待审核）`);
+  });
+}
+
+/**
  * 巡检：running 卡若执行会话已不在真实运行（AI 会话结束/销毁）→ 转 review（会话结束待审核）。
  * 以真实 pi 会话执行状态为准，防止卡状态 stale 锁死并发闸门。
- * 防误判：会话不在跑但最后活动距今 < SESSION_SETTLE_MS（回合间隙/模型思考间隙）→ 不转，继续观察。
+ * 兜底：事件订阅（agent_end）之外的场景（进程重启/订阅丢失）靠本巡检，静默期防派发启动竞态。
  * 返回本次流转数。
  */
 export async function reconcileEndedRunningCards(): Promise<number> {
