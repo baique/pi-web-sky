@@ -8,9 +8,19 @@ import {
   countRunningDispatched,
   listDispatchableCards,
   listRunningDispatched,
+  listCardsByExecStatus,
+  listAnswerableQuestions,
+  createQuestion,
+  getCard,
   updateCard,
   type TaskCard,
+  type TaskCardQuestion,
 } from "./task-card-store";
+import {
+  readSessionAuditSnapshot,
+  runAuditVerdict,
+  runBlockCheck,
+} from "./audit-session";
 
 // ============================================================================
 // 任务卡调度器（S2 happy path）
@@ -22,6 +32,18 @@ import {
 
 export const TASK_SCHEDULER_INTERVAL_MS = 10_000;
 export const TASK_SCHEDULER_MAX_CONCURRENCY = 1;
+
+// ============================================================================
+// S3 巡检/审核参数
+// ============================================================================
+
+/** 阻塞检测阈值：最后一条消息超过该时长无进展 → 触发 AI 判定 */
+export const BLOCK_IDLE_MS = 5 * 60 * 1000;
+/** 每卡阻塞判定冷却：冷却期内不重复判同一卡 */
+export const BLOCK_COOLDOWN_MS = 10 * 60 * 1000;
+
+/** 阻塞判定冷却表（模块级即可：仅节流，热重载重置无害） */
+const blockCheckAt = new Map<string, number>();
 
 declare global {
   var __piTaskScheduler: {
@@ -132,6 +154,10 @@ export function reconcileEndedRunningCards(): number {
 export async function runSchedulerTick(): Promise<number> {
   // 先巡检：会话已结束的 running 卡流转走（review），释放闸门（以真实会话状态为准）
   reconcileEndedRunningCards();
+  // S3：回复队列优先 → 审核 review 卡 → 巡检阻塞
+  await processReplyQueue();
+  await processReviewCards();
+  await checkRunningCardsBlocked();
 
   let dispatched = 0;
   const running = countRunningDispatched();
@@ -154,6 +180,193 @@ export async function runSchedulerTick(): Promise<number> {
   return dispatched;
 }
 
+// ============================================================================
+// S3：回复队列 + 审核（review 卡）+ 阻塞巡检（running 卡）
+// ============================================================================
+
+/** 回复队列：answered 且卡仍在 waiting_reply → 发回复续会话 → running。 */
+export async function processReplyQueue(): Promise<number> {
+  let resumed = 0;
+  for (const q of listAnswerableQuestions()) {
+    const card = getCard(q.cardId);
+    if (!card || card.execStatus !== "waiting_reply" || !card.sessionId) continue;
+    if (countRunningDispatched() >= TASK_SCHEDULER_MAX_CONCURRENCY) break;
+    const ok = await resumeWithAnswer(card, q);
+    if (ok) {
+      resumed += 1;
+      setLastAction({ type: "resume", cardNumber: card.number, cardName: card.name, at: Date.now() });
+    }
+  }
+  return resumed;
+}
+
+async function resumeWithAnswer(card: TaskCard, q: TaskCardQuestion): Promise<boolean> {
+  try {
+    const filePath = await resolveSessionPath(card.sessionId!);
+    if (!filePath) return false;
+    const { session } = await startRpcSession(card.sessionId!, filePath, undefined);
+    await session.send({
+      type: "prompt",
+      message: `【用户回答了你的提问】\n${q.answer}\n\n请据此继续完成任务。`,
+    });
+    updateCard(card.id, { execStatus: "running" });
+    console.log(`[task-scheduler] 回复续会话 #${card.number} ${card.name}`);
+    return true;
+  } catch (error) {
+    console.error(
+      `[task-scheduler] 回复续会话失败 #${card.number}:`,
+      error instanceof Error ? error.message : error,
+    );
+    return false;
+  }
+}
+
+/** 失败记次：retry+1；未超上限 → not_started（等下轮调度重试），否则 failed。 */
+function markFailedOrRetry(card: TaskCard): void {
+  const next = card.retryCount + 1;
+  if (next < card.maxRetries) {
+    updateCard(card.id, { execStatus: "not_started", retryCount: next });
+    console.log(`[task-scheduler] #${card.number} 失败（${next}/${card.maxRetries}）→ 待重试`);
+  } else {
+    updateCard(card.id, { execStatus: "failed", retryCount: next });
+    console.log(`[task-scheduler] #${card.number} 失败（${next}/${card.maxRetries}）→ failed`);
+  }
+}
+
+/** 进入等回复：卡 → waiting_reply + 提问入待回答队列。 */
+function enterWaitingReply(card: TaskCard, questionHint: string): void {
+  updateCard(card.id, { execStatus: "waiting_reply" });
+  if (card.sessionId) {
+    createQuestion(card.id, card.sessionId, `AI 需要你回答后继续任务。\n${questionHint.slice(0, 500)}`);
+  }
+  console.log(`[task-scheduler] #${card.number} → waiting_reply（提问入队）`);
+}
+
+/** 审核 review 卡：程序检测失败→failed；否则 AI 审核 → done/failed/waiting_reply/other。 */
+export async function processReviewCards(): Promise<number> {
+  let processed = 0;
+  for (const card of listCardsByExecStatus(["review"])) {
+    const snapshot = card.sessionId ? await readSessionAuditSnapshot(card.sessionId) : null;
+
+    // 1. 程序检测：最后消息有失败迹象 → 直接 failed（计次重试）
+    if (snapshot?.failure) {
+      markFailedOrRetry(card);
+      processed += 1;
+      continue;
+    }
+    // 2. 无会话 → 视为完成（空执行）
+    if (!card.sessionId || !snapshot) {
+      updateCard(card.id, { execStatus: "done" });
+      console.log(`[task-scheduler] #${card.number} 无执行内容 → done`);
+      processed += 1;
+      continue;
+    }
+    // 3. AI 独立审核
+    const cwd = resolveDispatchCwd(card);
+    if (!cwd) continue;
+    const result = await runAuditVerdict({
+      cwd,
+      cardNumber: card.number,
+      cardName: card.name,
+      taskDescription: card.description,
+      recentMessages: snapshot.recentText,
+    });
+    if (result?.verdict === "done") {
+      updateCard(card.id, { execStatus: "done" });
+      console.log(`[task-scheduler] #${card.number} 审核通过 → done（${result.reason}）`);
+      processed += 1;
+    } else if (result?.verdict === "failed") {
+      markFailedOrRetry(card);
+      processed += 1;
+    } else if (result?.verdict === "waiting_reply") {
+      enterWaitingReply(card, snapshot.recentText);
+      processed += 1;
+    } else {
+      console.log(
+        `[task-scheduler] #${card.number} 审核未决：${result ? result.reason : "AI 判定失败"}（保持 review）`,
+      );
+    }
+  }
+  return processed;
+}
+
+/** running 卡阻塞巡检：最后消息 > BLOCK_IDLE_MS 无进展 → AI 判定阻塞类型 → 处置。 */
+export async function checkRunningCardsBlocked(): Promise<number> {
+  const now = Date.now();
+  let handled = 0;
+  for (const card of listCardsByExecStatus(["running"])) {
+    if (!card.sessionId) continue;
+    // 冷却：同一卡冷却期内不重复判定
+    const last = blockCheckAt.get(card.id) ?? 0;
+    if (now - last < BLOCK_COOLDOWN_MS) continue;
+    const snapshot = await readSessionAuditSnapshot(card.sessionId);
+    if (!snapshot || snapshot.lastActivityMs === 0) continue;
+    // 5min 内还有进展 → 继续观察
+    if (now - snapshot.lastActivityMs < BLOCK_IDLE_MS) continue;
+    blockCheckAt.set(card.id, now);
+    const cwd = resolveDispatchCwd(card);
+    if (!cwd) continue;
+    const result = await runBlockCheck({
+      cwd,
+      cardNumber: card.number,
+      cardName: card.name,
+      taskDescription: card.description,
+      recentMessages: snapshot.recentText,
+    });
+    if (!result) continue;
+    switch (result.kind) {
+      case "sync_server":
+      case "infinite_loop":
+        await abortAndReguide(card);
+        handled += 1;
+        break;
+      case "rate_limit":
+        console.log(`[task-scheduler] #${card.number} 限流退避，继续观察`);
+        break;
+      case "asking":
+        enterWaitingReply(card, snapshot.recentText);
+        handled += 1;
+        break;
+      case "error":
+        // 转 review 由审核路径判定失败/重试
+        updateCard(card.id, { execStatus: "review" });
+        handled += 1;
+        break;
+      case "normal":
+        // 长任务，继续观察
+        break;
+    }
+  }
+  return handled;
+}
+
+/** 阻塞处置：abort 会话 + 重发 tmux 引导 → 保持 running。 */
+async function abortAndReguide(card: TaskCard): Promise<void> {
+  try {
+    if (card.sessionId) {
+      const filePath = await resolveSessionPath(card.sessionId);
+      if (filePath) {
+        const { session } = await startRpcSession(card.sessionId, filePath, undefined);
+        await session.send({ type: "abort" });
+        await session.send({
+          type: "prompt",
+          message:
+            "检测到任务卡执行异常（可能是同步开启服务或死循环）。\n" +
+            "请改用 tmux 后台启动服务：tmux new-session -d '命令'，不要在前台阻塞等待日志；" +
+            "如为死循环请重新规划步骤后继续。",
+        });
+      }
+    }
+    updateCard(card.id, { execStatus: "running" });
+    console.log(`[task-scheduler] #${card.number} 阻塞处置：abort+tmux 引导，继续运行`);
+  } catch (error) {
+    console.error(
+      `[task-scheduler] 阻塞处置失败 #${card.number}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
 /** 启动调度器（instrumentation 注册；globalThis 防热重载重复启动）。 */
 export function startTaskScheduler(): void {
   if (globalThis.__piTaskScheduler) return;
@@ -165,7 +378,6 @@ export function startTaskScheduler(): void {
   timer.unref?.();
   const sched = { timer, startedAt: Date.now(), lastAction: { type: "none" as const, at: 0 } };
   globalThis.__piTaskScheduler = sched;
-  lastAction = sched.lastAction;
   console.log(`[pi-web] task scheduler started (interval ${TASK_SCHEDULER_INTERVAL_MS}ms, max ${TASK_SCHEDULER_MAX_CONCURRENCY})`);
 }
 
@@ -176,8 +388,8 @@ export function startTaskScheduler(): void {
 // ============================================================================
 
 export interface TaskSchedulerLastAction {
-  /** dispatch=派发了任务；skipped_gate=本轮并发闸门满，跳过；none=尚未动作 */
-  type: "dispatch" | "skipped_gate" | "none";
+  /** dispatch=派发了任务；resume=回复续会话；skipped_gate=并发闸门满跳过；none=尚未动作 */
+  type: "dispatch" | "resume" | "skipped_gate" | "none";
   cardNumber?: number;
   cardName?: string;
   at: number;
@@ -192,13 +404,10 @@ export interface TaskSchedulerStatus {
   lastAction: TaskSchedulerLastAction;
 }
 
-let lastAction: TaskSchedulerLastAction = { type: "none", at: 0 };
-
 function getLastAction(): TaskSchedulerLastAction {
   return globalThis.__piTaskScheduler?.lastAction ?? { type: "none", at: 0 };
 }
 function setLastAction(action: TaskSchedulerLastAction): void {
-  lastAction = action;
   if (globalThis.__piTaskScheduler) globalThis.__piTaskScheduler.lastAction = action;
 }
 

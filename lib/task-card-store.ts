@@ -412,3 +412,124 @@ export function listRunningDispatched(): TaskCard[] {
     .all() as unknown as TaskCardRow[];
   return rows.map(rowToCard);
 }
+
+/** 按执行状态枚举取卡列表（S3 审核/巡检用），按编号升序。 */
+export function listCardsByExecStatus(statuses: ExecStatus[]): TaskCard[] {
+  const placeholders = statuses.map(() => "?").join(",");
+  const rows = getDb()
+    .prepare(`SELECT ${CARD_COLUMNS} FROM task_cards WHERE exec_status IN (${placeholders}) ORDER BY number`)
+    .all(...statuses) as unknown as TaskCardRow[];
+  return rows.map(rowToCard);
+}
+
+// ============================================================================
+// 待回答队列（S3）—— task_card_questions 表
+// ============================================================================
+
+export type QuestionStatus = "pending" | "answered";
+
+export interface TaskCardQuestion {
+  id: string;
+  cardId: string;
+  sessionId: string;
+  question: string;
+  status: QuestionStatus;
+  answer: string | null;
+  created: number;
+  answered: number | null;
+}
+
+interface TaskCardQuestionRow {
+  id: string;
+  cardId: string;
+  sessionId: string;
+  question: string;
+  status: QuestionStatus;
+  answer: string | null;
+  created: number;
+  answered: number | null;
+}
+
+const QUESTION_COLUMNS =
+  "id, card_id AS cardId, session_id AS sessionId, question, status, answer, created, answered";
+
+function rowToQuestion(row: TaskCardQuestionRow): TaskCardQuestion {
+  return { ...row };
+}
+
+/** 建问答记录（AI 提问入队）。返回新记录。 */
+export function createQuestion(
+  cardId: string,
+  sessionId: string,
+  question: string,
+): TaskCardQuestion {
+  const id = randomUUID();
+  const ts = Date.now();
+  getDb()
+    .prepare(
+      "INSERT INTO task_card_questions (id, card_id, session_id, question, status, created) VALUES (?, ?, ?, ?, 'pending', ?)",
+    )
+    .run(id, cardId, sessionId, question, ts);
+  return rowToQuestion(getDb().prepare(`SELECT ${QUESTION_COLUMNS} FROM task_card_questions WHERE id = ?`).get(id) as unknown as TaskCardQuestionRow);
+}
+
+/** 问答列表：status 过滤（pending/answered/全部），按创建序。 */
+export function listQuestions(status?: QuestionStatus | "all"): TaskCardQuestion[] {
+  const where = status && status !== "all" ? "WHERE status = ?" : "";
+  const params = status && status !== "all" ? [status] : [];
+  const rows = getDb()
+    .prepare(`SELECT ${QUESTION_COLUMNS} FROM task_card_questions ${where} ORDER BY created`)
+    .all(...params) as unknown as TaskCardQuestionRow[];
+  return rows.map(rowToQuestion);
+}
+
+/** 某卡的全部问答，按创建序。 */
+export function listCardQuestions(cardId: string): TaskCardQuestion[] {
+  const rows = getDb()
+    .prepare(`SELECT ${QUESTION_COLUMNS} FROM task_card_questions WHERE card_id = ? ORDER BY created`)
+    .all(cardId) as unknown as TaskCardQuestionRow[];
+  return rows.map(rowToQuestion);
+}
+
+/** 待回答数（侧栏/看板角标用）。 */
+export function countPendingQuestions(): number {
+  const row = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM task_card_questions WHERE status = 'pending'")
+    .get() as { n: number };
+  return row.n;
+}
+
+/** 用户回答：status→answered + answer 落库 + answered 时间。记录不存在返回 null。 */
+export function answerQuestion(id: string, answer: string): TaskCardQuestion | null {
+  const db = getDb();
+  const existing = getDb().prepare(`SELECT ${QUESTION_COLUMNS} FROM task_card_questions WHERE id = ?`).get(id) as TaskCardQuestionRow | undefined;
+  if (!existing) return null;
+  if (existing.status === "answered") return rowToQuestion(existing);
+  const ts = Date.now();
+  db.prepare("UPDATE task_card_questions SET status = 'answered', answer = ?, answered = ? WHERE id = ?")
+    .run(answer, ts, id);
+  return rowToQuestion(getDb().prepare(`SELECT ${QUESTION_COLUMNS} FROM task_card_questions WHERE id = ?`).get(id) as unknown as TaskCardQuestionRow);
+}
+
+/** 取一张卡最新的待回答记录（回复队列续会话用），无则 null。 */
+export function getLatestPendingQuestion(cardId: string): TaskCardQuestion | null {
+  const row = getDb()
+    .prepare(`SELECT ${QUESTION_COLUMNS} FROM task_card_questions WHERE card_id = ? AND status = 'pending' ORDER BY created LIMIT 1`)
+    .get(cardId) as unknown as TaskCardQuestionRow | undefined;
+  return row ? rowToQuestion(row) : null;
+}
+
+/** 取最新一条 answered 待续的记录（回复队列：answered 但卡仍在 waiting_reply）。 */
+export function listAnswerableQuestions(): TaskCardQuestion[] {
+  // 卡 exec_status='waiting_reply' 且其最新 answered 记录尚未续会话
+  const rows = getDb()
+    .prepare(
+      `SELECT q.* FROM task_card_questions q
+       JOIN task_cards c ON c.id = q.card_id
+       WHERE q.status = 'answered' AND c.exec_status = 'waiting_reply'
+       AND q.id = (SELECT q2.id FROM task_card_questions q2 WHERE q2.card_id = q.card_id AND q2.status='answered' ORDER BY q2.answered DESC, q2.created DESC LIMIT 1)
+       ORDER BY q.answered`,
+    )
+    .all() as unknown as TaskCardQuestionRow[];
+  return rows.map(rowToQuestion);
+}
