@@ -42,7 +42,7 @@ export function BoardSearch({
     return filterMatches(collectSearchable(editor), query);
   }, [editor, query]);
 
-  /** 定位到第 index 个命中：居中缩放 + 选中 + 高亮描边（已失效 shape 跳过） */
+  /** 定位到第 index 个命中：居中平移（保持当前缩放，centerOnPoint）+ 选中 + 高亮描边（已失效 shape 跳过） */
   const locate = useCallback((index: number) => {
     if (!editor) return;
     const match = matches[index];
@@ -51,7 +51,8 @@ export function BoardSearch({
     if (!shape) return;
     const bounds = editor.getShapePageBounds(shape.id);
     if (!bounds) return;
-    editor.zoomToBounds(bounds, { animation: { duration: 300 }, inset: 200 });
+    // 只定位：把命中节点平移到视口中心，不改缩放级别（不做 zoom 自适应）
+    editor.centerOnPoint(bounds.center, { animation: { duration: 300 } });
     editor.select(shape.id);
     setHighlight(shape.id);
     setActiveIndex(index);

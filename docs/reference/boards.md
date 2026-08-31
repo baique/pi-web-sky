@@ -31,7 +31,7 @@
 
 ## 看板内搜索（Ctrl+F）
 
-- 常驻搜索框（画布顶部居中玻璃胶囊），匹配会话卡标题 + 便笺正文，命中后 `zoomToBounds` 定位 + accent 描边渐隐。纯前端：不写 tldraw store、不落库、刷新即消失。
+- 常驻搜索框（画布顶部居中玻璃胶囊），匹配会话卡标题 + 便笺正文，命中后 `centerOnPoint` 居中定位（保持当前缩放，不做 zoom 自适应）+ accent 描边渐隐。纯前端：不写 tldraw store、不落库、刷新即消失。
 - 设计详见 `.agent/spec/2026-08-30-board-search.md`；实现 `lib/board-search.ts`（纯函数）+ `components/canvas/BoardSearchContext.tsx`（高亮 state）+ `components/canvas/BoardSearch.tsx`（搜索框 UI，集成在 `SessionCanvas`）。
 - 高亮状态走 React context（shape 组件读 context 渲染描边），不触发防抖保存；Ctrl+F 仅看板模式生效（`SessionCanvas` 挂载期间 window keydown 捕获）。
 

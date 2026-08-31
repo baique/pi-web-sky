@@ -31,7 +31,7 @@
   → lib/board-search.ts collectSearchable(editor)   // 遍历 shapes，抽 (shapeId, kind, text)
   → filterMatches(items, query)                     // includes 子串匹配 → matches[]
   → BoardSearch 渲染下拉列表（命中项 + 命中文本片段 + 计数）
-  → 点击/Enter → highlight(id) + editor.zoomToBounds(bounds, { animation })
+  → 点击/Enter → highlight(id) + editor.centerOnPoint(bounds.center, { animation })  // 只定位，不缩放
   → BoardSearchContext.setHighlight(shapeId)        // shape 组件读 context 描边
 ```
 
@@ -56,7 +56,7 @@
 |------|------|
 | Ctrl+F / Cmd+F | 聚焦搜索框 + preventDefault（仅看板模式，即 SessionCanvas 挂载期间） |
 | 输入 | 实时过滤；下拉显示命中列表（kind 图标 + 文本片段 + 计数），无命中显示空态 |
-| Enter | 顺序跳到下一个命中（循环）：高亮 + zoomToBounds（animation 300ms, inset 200） |
+| Enter | 顺序跳到下一个命中（循环）：高亮 + centerOnPoint（animation 300ms，保持当前缩放） |
 | 点击命中项 | 定位该命中（同 Enter 逻辑） |
 | Esc | 下拉开时先关下拉；再按清空并失焦（关闭搜索） |
 | 失焦 | 不清空 query，仅收下拉；再聚焦恢复列表 |
@@ -67,7 +67,7 @@
 
 - 查询为空：不显示下拉，无副作用。
 - 无命中：下拉显示「无匹配」，不定位。
-- shape 已删除/失效：`zoomToBounds` 前 `editor.getShape()` 判空，跳过。
+- shape 已删除/失效：`centerOnPoint` 前 `editor.getShape()` 判空，跳过。
 - 画布未加载完（loading）：BoardSearch 仅在 `!board.loading` 时渲染/可交互。
 - 系统「运行中」看板：同样可用（collectSearchable 不区分看板类型）。
 

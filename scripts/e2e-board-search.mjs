@@ -93,9 +93,9 @@ try {
     }
     if (!editor) return { found: false };
     const cards = editor.getCurrentPageShapes().filter((s) => s.type === "session-card");
-    window.__zoomCalls = 0;
-    const orig = editor.zoomToBounds.bind(editor);
-    editor.zoomToBounds = (...args) => { window.__zoomCalls++; return orig(...args); };
+    window.__panCalls = 0;
+    const orig = editor.centerOnPoint.bind(editor);
+    editor.centerOnPoint = (...args) => { window.__panCalls++; return orig(...args); };
     return {
       found: true,
       cardCount: cards.length,
@@ -116,12 +116,12 @@ try {
   const itemCount = ddVisible ? await dropdown.locator("button").count() : 0;
   check("dropdown lists >=1 hit", itemCount >= 1, `hits=${itemCount}`);
 
-  // 6. 点击第一个命中 → zoomToBounds 被调用 + 卡片 accent 高亮
+  // 6. 点击第一个命中 → centerOnPoint 被调用（只定位，不平移后还验证高亮） + 卡片 accent 高亮
   if (itemCount > 0) {
     await dropdown.locator("button").first().click();
     await page.waitForTimeout(250);
-    const zoomCalls = await page.evaluate(() => window.__zoomCalls ?? 0);
-    check("click hit calls zoomToBounds", zoomCalls >= 1, `calls=${zoomCalls}`);
+    const panCalls = await page.evaluate(() => window.__panCalls ?? 0);
+    check("click hit pans to match (centerOnPoint)", panCalls >= 1, `calls=${panCalls}`);
     const highlight = await page.evaluate(() => {
       // 高亮描边挂在 HTMLContainer 渲染层（.tl-html-container）：border + box-shadow + 动画
       const els = Array.from(document.querySelectorAll('.tl-html-container'));
@@ -193,12 +193,12 @@ try {
     }
   }
 
-  // 7. Enter 循环下一个命中（多命中时）——至少不报错且再触发一次 zoom
+  // 7. Enter 循环下一个命中（多命中时）——至少不报错且再触发一次定位
   if (itemCount > 1) {
     await searchBox.press("Enter");
     await page.waitForTimeout(250);
-    const zoomCalls2 = await page.evaluate(() => window.__zoomCalls ?? 0);
-    check("Enter cycles to next hit", zoomCalls2 >= 2, `calls=${zoomCalls2}`);
+    const panCalls2 = await page.evaluate(() => window.__panCalls ?? 0);
+    check("Enter cycles to next hit", panCalls2 >= 2, `calls=${panCalls2}`);
   }
 
   // 8. 无命中 → 空态
