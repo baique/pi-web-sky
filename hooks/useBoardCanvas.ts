@@ -66,6 +66,10 @@ export function useBoardCanvas({
   const [board, setBoard] = useState<BoardInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 是否已完成首次物化（渲染用镜像，驱动加载覆盖层）：
+  // 覆盖层持续到「数据拉取 + 卡片物化」全部完成，消除空画布窗口，数据安全最大化。
+  // 与保护用 hydratedRef 同步（ref 实时读不触发渲染，state 用于 UI）。
+  const [hydrated, setHydrated] = useState(false);
   // 运行中快照：初值取模块级缓存（切换看板重挂时立即有上次数据，避免闪烁），
   // 轮询更新后写回缓存。
   const [running, setRunning] = useState<RunningSnapshot | null>(
@@ -86,6 +90,8 @@ export function useBoardCanvas({
   const load = useCallback(async () => {
     try {
       setLoading(true);
+      // 重新加载即视为未物化：覆盖层持续到本次物化完成（防重载期间空画布/覆盖保存）
+      setHydrated(false);
       // 懒加载清理：先删孤儿卡片（左栏删会话后遗留的卡片/连线），再读画布，
       // 确保本次进入不出现孤儿。无孤儿时幂等，开销可忽略。
       await fetch("/api/boards/purge-orphans", { method: "POST", cache: "no-store" }).catch(() => {});
@@ -208,6 +214,13 @@ export function useBoardCanvas({
   const onMount = useCallback((editor: Editor) => {
     editorRef.current = editor;
     setEditorReady(true);
+    // 画布重挂即视为未物化：HMR 时 Tldraw 会卸载重挂，挂载的是全新空画布。
+    // 若保留旧 hydratedRef=true，任务看板自动补卡会在空窗期把默认排列
+    // 保存覆盖服务器（用户自定义内容丢失）。复位后，物化完成前的任何
+    // createShapes（含补卡）都被 scheduleSave 拒绝写入。
+    hydratedRef.current = false;
+    hydratingRef.current = false;
+    setHydrated(false);
     // 任务看板删除保护：任务自有会话卡（sessionId ∈ task.sessionIds）不可删。
     // 卡片由任务数据源驱动（reconcileTaskSessions 自动补卡），删除会被补回，
     // 且任务会话只能由外部移除。外部拉入的卡（sessionId ∉ task.sessionIds）不受限。
@@ -344,7 +357,11 @@ export function useBoardCanvas({
       baseUpdatedRef.current = b.board.updated;
       // 清空现有 shapes：此间 store 变更必须禁止保存。hydratingRef 保持 true，
       // 由下方物化 effect 在 hydrate 完成后 800ms 统一复位（不中途复位，避免空画布窗口）。
+      // 同时复位 hydratedRef——清空后画布即“未物化”，自动补卡/保存一律跳过，
+      // 直到重新物化完成（防 reloadCanvas 窗口内补卡重建默认排列）。
       hydratingRef.current = true;
+      hydratedRef.current = false;
+      setHydrated(false);
       editor.deleteShapes(editor.getCurrentPageShapes().map((s) => s.id));
       setInitialCanvas(c); // 复用物化 effect 重新 hydrate
     } catch (e) {
@@ -591,6 +608,7 @@ export function useBoardCanvas({
     setInitialCanvas(null);
     // 物化完成才放行自动保存：未完成前的空/部分画布绝不允许覆盖看板
     hydratedRef.current = true;
+    setHydrated(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCanvas, sessionTitles, hydrateShapes, editorReady]);
 
@@ -992,6 +1010,11 @@ export function useBoardCanvas({
     const editor = editorRef.current;
     const tid = effectiveTaskIdRef.current;
     if (!editor || !tid) return;
+    // 空窗保护：画布未物化（首次加载 / HMR 重挂 / 409 重载后的空窗期）时跳过补卡。
+    // 此刻画布空是“未加载完成”，不是“会话缺失”——补卡会用默认排列重建
+    // 并保存覆盖服务器（用户自定义内容丢失）。物化完成（hydratedRef=true）后
+    // 由下一轮轮询正常补“任务里有、画布上确实没有”的新会话。
+    if (!hydratedRef.current) return;
     try {
       const res = await fetch(`/api/tasks/${encodeURIComponent(tid)}`, { cache: "no-store" });
       if (!res.ok) return;
@@ -1244,6 +1267,8 @@ export function useBoardCanvas({
   return useMemo(() => ({
     board,
     loading,
+    /** 是否已完成首次物化（CanvasStage 加载覆盖层依据） */
+    hydrated,
     error,
     running,
     runningCount: running?.runningSessionIds.length ?? 0,
@@ -1263,7 +1288,7 @@ export function useBoardCanvas({
     loadSessionSummaries,
     hydrateShapes,
     reconcileTaskSessions,
-  }), [board, loading, error, running, editorReady, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, clearBoard, getNodeIdForSession, reloadCanvasWrap, conflictCount, deleteBlockedCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
+  }), [board, loading, hydrated, error, running, editorReady, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, clearBoard, getNodeIdForSession, reloadCanvasWrap, conflictCount, deleteBlockedCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
 }
 
 export type UseBoardCanvasReturn = ReturnType<typeof useBoardCanvas>;
