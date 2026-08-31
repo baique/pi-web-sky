@@ -2,17 +2,19 @@
 
 import "tldraw/tldraw.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Tldraw, DefaultToolbar, DefaultToolbarContent, DefaultStylePanel, StylePanelColorPicker, StylePanelFillPicker, StylePanelDashPicker, StylePanelSizePicker, StylePanelFontPicker, StylePanelTextAlignPicker, StylePanelLabelAlignPicker, StylePanelGeoShapePicker, StylePanelArrowKindPicker, StylePanelArrowheadPicker, StylePanelSplinePicker, createShapeId, defaultShapeUtils, type TLComponents, type TLUiOverrides, type TLUiStylePanelProps } from "tldraw";
+import { Tldraw, DefaultToolbar, DefaultToolbarContent, DefaultStylePanel, StylePanelColorPicker, StylePanelFillPicker, StylePanelDashPicker, StylePanelSizePicker, StylePanelFontPicker, StylePanelTextAlignPicker, StylePanelLabelAlignPicker, StylePanelGeoShapePicker, StylePanelArrowKindPicker, StylePanelArrowheadPicker, StylePanelSplinePicker, TldrawUiToolbarButton, createShapeId, defaultShapeUtils, useEditor, useValue, type TLComponents, type TLUiOverrides, type TLUiStylePanelProps } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
 import { StickyNoteUtil } from "./StickyNoteShape";
 import { StickyNoteTool } from "./StickyNoteTool";
+import { TaskCardUtil } from "./TaskCardShape";
+import { TaskCardTool } from "./TaskCardTool";
 import { SyncedContextMenu } from "./SyncedContextMenu";
 import { useI18n } from "@/hooks/useI18n";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
 import type { SessionInfo } from "@/lib/types";
 
-// 自定义 shape util：会话卡 + 自研 markdown 便笺（sticky-note）。
-const shapeUtils = [...defaultShapeUtils, SessionCardUtil, StickyNoteUtil];
+// 自定义 shape util：会话卡 + 自研 markdown 便笺 + 任务卡。
+const shapeUtils = [...defaultShapeUtils, SessionCardUtil, StickyNoteUtil, TaskCardUtil];
 
 // useTools() 是硬编码列表（不含自定义工具），内置 note 工具的 onDragStart 会直接创建 type:"note"。
 // 这里用 UI overrides 把 note 工具换成我们的：
@@ -72,6 +74,29 @@ const uiOverrides: TLUiOverrides[] = [{
     };
   },
 }];
+
+// 任务卡工具栏按钮：切到 task-card 工具，在画布落点拖出空任务卡 shape。
+function TaskCardToolbarButton() {
+  const editor = useEditor();
+  const isActive = useValue("taskCardToolActive", () => editor.getCurrentToolId() === "task-card", [editor]);
+  return (
+    <TldrawUiToolbarButton
+      type="tool"
+      tooltip="任务卡"
+      isActive={isActive}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        editor.setCurrentTool("task-card");
+      }}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="M3 10h18M8 15h4" />
+      </svg>
+    </TldrawUiToolbarButton>
+  );
+}
 
 // 选中图形时右侧的样式面板（复用 tldraw 默认，但去掉透明度选择器）
 function BoardStylePanelSection({ children }: { children: React.ReactNode }) {
@@ -198,10 +223,12 @@ export function CanvasStage({
     KeyboardShortcutsDialog: null,
     DebugPanel: null,
     DebugMenu: null,
-    // 底部工具条：保留 tldraw 默认工具（note 按钮经 uiOverrides 换成我们的 sticky-note）
+    // 底部工具条：保留 tldraw 默认工具（note 按钮经 uiOverrides 换成我们的 sticky-note），
+    // 尾部追加「任务卡」按钮（独立 tool id，无内置冲突）。
     Toolbar: () => (
       <DefaultToolbar>
         <DefaultToolbarContent />
+        <TaskCardToolbarButton />
       </DefaultToolbar>
     ),
   }), []);
@@ -268,7 +295,7 @@ export function CanvasStage({
             // （MoveToPageMenu）与左下角页面导航均按单页面模式自动隐藏。
             options={{ maxPages: 1 }}
             shapeUtils={shapeUtils}
-            tools={[StickyNoteTool]}
+            tools={[StickyNoteTool, TaskCardTool]}
             overrides={uiOverrides}
             onMount={(editor) => {
               // 开启内置拖放吸附对齐（对齐线/中点/边缘），不影响展示效果
