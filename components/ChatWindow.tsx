@@ -69,6 +69,11 @@ interface Props {
 }
 
 const CHAT_COLUMN_PADDING = 16;
+/** 消息内容区桌面右 padding：让历史消息区与输入框同宽同右边界。
+ *  输入框（ChatInput）桌面右预留 52px（16 base + 36 对齐小地图）；
+ *  消息滚动区右侧已被 ChatMinimap 占 26px（flex 兄弟），故内容区右 padding = 52 − 26 = 26。
+ *  移动端无小地图，输入框右预留回到 16，消息区保持 16。 */
+const CHAT_MESSAGE_RIGHT_PADDING = 26;
 
 function NewSessionUpdateLink({
   label,
@@ -757,7 +762,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
   return (
     <div
-      className="relative flex h-full min-w-0 flex-col overflow-hidden"
+      className={`relative flex h-full min-w-0 flex-col ${inWorkbench ? "overflow-visible" : "overflow-hidden"}`}
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
@@ -834,7 +839,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       )}
 
       {isEmptyNew ? (
-        <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
+        <div className={`flex flex-1 flex-col items-center justify-center px-4 py-8 ${inWorkbench ? "overflow-visible" : "overflow-y-auto"}`}>
           <div className="w-full max-w-[820px]">
             <div
               className="mb-3"
@@ -877,7 +882,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
             setAtBottom(isScrollAtTail(el.scrollTop, el.clientHeight, el.scrollHeight));
           }}
         >
-          <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
+          <div style={{ minWidth: 0, padding: isMobile ? `0 ${CHAT_COLUMN_PADDING}px` : `0 ${CHAT_MESSAGE_RIGHT_PADDING}px 0 ${CHAT_COLUMN_PADDING}px` }}>
             <div ref={messageContentRef} style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
             {(() => {
               let lastUserIdx = -1;

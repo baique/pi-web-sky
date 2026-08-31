@@ -31,6 +31,12 @@ export interface SessionCardProps {
   taskId?: string;
   w: number;
   h: number;
+  /** 用户手动设置的展开态尺寸（收起时记录、再次展开恢复）；0 = 未设置用默认 */
+  expandedW: number;
+  expandedH: number;
+  /** 用户手动设置的收合态尺寸（展开时记录、再次收起恢复）；0 = 未设置用默认 */
+  collapsedW: number;
+  collapsedH: number;
 }
 
 export type SessionCardShape = TLBaseShape<"session-card", SessionCardProps>;
@@ -57,6 +63,10 @@ export const sessionCardProps = {
   taskId: T.string,
   w: T.number,
   h: T.number,
+  expandedW: T.number,
+  expandedH: T.number,
+  collapsedW: T.number,
+  collapsedH: T.number,
 };
 
 export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
@@ -80,6 +90,10 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
       taskId: "",
       w: 280,
       h: 120,
+      expandedW: 0,
+      expandedH: 0,
+      collapsedW: 0,
+      collapsedH: 0,
     };
   }
 
@@ -124,26 +138,43 @@ export class SessionCardUtil extends BaseBoxShapeUtil<SessionCardShape> {
   }
 
   /** 双击展开为工作台（持久化 expanded 标记，刷新后恢复）。
-   *  展开 → expanded=true，宽度保留用户已 resize 的当前宽（至少 CARD_W），高度 600
-   *  收合 → expanded=false，回到收合卡默认 CARD_W×CARD_H
-   *  宽度不强制 840：用户调过的宽度在展开/收合间保留，避免宽度跳变。 */
+   *  展开/收合尺寸切换统一走 nextExpandState：展开/收合两态的手动尺寸都各自保留。 */
   override onDoubleClick(shape: SessionCardShape): TLShapePartial<SessionCardShape> | void {
-    const COLLAPSED_W = CARD_W;
-    const COLLAPSED_H = CARD_H;
-    const EXPANDED_H = 600;
-    // 展开默认宽：能容纳消息 + 底栏（spec：800px 以上）。用户已 resize 过（宽 ≠ 收合宽）则保留用户宽度。
-    const EXPANDED_DEFAULT_W = 840;
-    const willCollapse = shape.props.expanded;
     return {
       id: shape.id,
       type: "session-card",
-      props: {
-        expanded: !shape.props.expanded,
-        w: willCollapse ? COLLAPSED_W : (shape.props.w === COLLAPSED_W ? EXPANDED_DEFAULT_W : Math.max(COLLAPSED_W, shape.props.w)),
-        h: willCollapse ? COLLAPSED_H : EXPANDED_H,
-      },
+      props: nextExpandState(shape),
     };
   }
+}
+
+/** 展开工作台默认尺寸（用户未手动调过时）。能容纳消息 + 底栏（spec：800px 以上）。 */
+const EXPANDED_DEFAULT_W = 840;
+const EXPANDED_DEFAULT_H = 600;
+
+/** 展开/收起尺寸切换：
+ *  收起：记录当前展开尺寸（expandedW/H）→ 恢复上次收合尺寸（未设置则 CARD_W×CARD_H）
+ *  展开：记录当前收合尺寸（collapsedW/H）→ 恢复上次展开尺寸（未设置则 840×600）
+ *  用户手动 resize 过的尺寸在两态间来回切换都不丢失，刷新后从 board_nodes.props 还原。 */
+function nextExpandState(shape: SessionCardShape) {
+  if (shape.props.expanded) {
+    // 展开 → 收合
+    return {
+      expanded: false,
+      expandedW: shape.props.w,
+      expandedH: shape.props.h,
+      w: shape.props.collapsedW || CARD_W,
+      h: shape.props.collapsedH || CARD_H,
+    };
+  }
+  // 收合 → 展开
+  return {
+    expanded: true,
+    collapsedW: shape.props.w,
+    collapsedH: shape.props.h,
+    w: shape.props.expandedW || EXPANDED_DEFAULT_W,
+    h: shape.props.expandedH || EXPANDED_DEFAULT_H,
+  };
 }
 
 const phaseMeta: Record<string, { dot: string; label: string }> = {
@@ -214,7 +245,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     editor?.bringToFront([shape.id]);
   };
 
-  // 独立展开/收起：切换 expanded + 尺寸。收合 → 默认展开宽 840/高 600；展开 → 收合回 340×160。
+  // 独立展开/收起：切换 expanded + 尺寸（nextExpandState 保留两态手动尺寸）。
   // 收合态点展开按钮：pointerEvents all 会拦截 tldraw 拖拽，按钮独立接收点击。
   // draft 卡不可收合：收起按钮改为删除（尚未绑定会话，收合无意义）。
   const toggleExpand = (e: React.MouseEvent) => {
@@ -226,11 +257,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     editor?.updateShapes([{
       id: shape.id,
       type: "session-card",
-      props: {
-        expanded: !expanded,
-        w: expanded ? CARD_W : 840,
-        h: expanded ? CARD_H : 600,
-      },
+      props: nextExpandState(shape),
     }]);
   };
 
@@ -246,7 +273,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         style={{
           width: w,
           height: h,
-          overflow: "hidden",
+          overflow: "visible",
           borderRadius: 18,
           border: `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
           // 卡片磨砂玻璃：略低于消息气泡（alpha 0.55 vs 气泡 0.44，blur 12px vs 气泡 18px）
@@ -406,7 +433,6 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", background: meta.dot, flexShrink: 0 }} />
         <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", flexShrink: 0, whiteSpace: "nowrap" }}>
           {meta.label}
-          {runningMs > 0 && phase !== "idle" ? ` · ${formatDuration(runningMs)}` : ""}
         </span>
         {renaming ? (
           <input
@@ -541,10 +567,14 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           </div>
         )}
       </div>
-      {/* 底部：最后活动时间 */}
+      {/* 底部：左下角最后活动时间，右下角运行时长（仅运行中） */}
       <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text-dim)", borderTop: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", paddingTop: 3 }}>
         <span aria-hidden style={{ flexShrink: 0 }}>🕒</span>
-        <span>{formatTime(runningMs, lastActivityAt)}</span>
+        <span>{formatTime(lastActivityAt)}</span>
+        <div style={{ flex: 1 }} />
+        {runningMs > 0 && phase !== "idle" && (
+          <span style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap", flexShrink: 0 }}>{formatDuration(runningMs)}</span>
+        )}
       </div>
     </HTMLContainer>
   );
@@ -559,9 +589,8 @@ function formatDuration(ms: number): string {
   return `${h}h${min % 60}m`;
 }
 
-/** 底部最后活动时间：运行中显示时长；空闲显示最后活动时间（今天 时:分，跨天 月/日 时:分） */
-function formatTime(runningMs: number, lastActivityAt: number): string {
-  if (runningMs > 0) return `${formatDuration(runningMs)} ago`;
+/** 左下角最后活动时间（今天 时:分，跨天 月/日 时:分） */
+function formatTime(lastActivityAt: number): string {
   if (lastActivityAt <= 0) return "";
   const d = new Date(lastActivityAt);
   const now = new Date();

@@ -361,7 +361,14 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
     ) : null;
 
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "stretch" }}>
+      <div style={{
+        height: "100%",
+        display: "flex",
+        alignItems: "stretch",
+        // 顶栏通栏分割线：与左右按钮（历史/系统）的 borderRight 一致。
+        // 移动端 hideInlineButton 时按钮隐藏（仅弹层），不加线避免孤立竖条。
+        borderRight: hideInlineButton ? "none" : "1px solid var(--border)",
+      }}>
         <button
           ref={btnRef}
           data-top-panel-trigger

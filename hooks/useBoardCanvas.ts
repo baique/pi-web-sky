@@ -31,6 +31,9 @@ const LEGACY_CARD_H = 120;
 /** 展开工作台默认尺寸（spec §3.2） */
 export const WORKBENCH_W = 760;
 export const WORKBENCH_H = 600;
+/** draft 新建会话默认展开尺寸（与 SessionCardShape EXPANDED_DEFAULT 一致：840×600） */
+const EXPANDED_DRAFT_W = 840;
+const EXPANDED_DRAFT_H = 600;
 
 export interface SessionCardShapeMeta {
   sessionId: string;
@@ -400,6 +403,11 @@ export function useBoardCanvas({
           expanded: node.expanded,
           cwd: (node.props as { cwd?: string }).cwd ?? "",
           taskId: (node.props as { taskId?: string }).taskId ?? "",
+          // 展开/收合两态手动尺寸：从 board_nodes.props 还原（老数据缺省 → 0 = 用默认）
+          expandedW: (node.props as { expandedW?: number }).expandedW ?? 0,
+          expandedH: (node.props as { expandedH?: number }).expandedH ?? 0,
+          collapsedW: (node.props as { collapsedW?: number }).collapsedW ?? 0,
+          collapsedH: (node.props as { collapsedH?: number }).collapsedH ?? 0,
           // 旧默认收合尺寸（280×120）升级到新默认（340×160），容纳最后回复区
           w: node.w === LEGACY_CARD_W && !node.expanded ? CARD_W : node.w || CARD_W,
           h: node.h === LEGACY_CARD_H && !node.expanded ? CARD_H : node.h || CARD_H,
@@ -499,7 +507,16 @@ export function useBoardCanvas({
           w: p.w,
           h: p.h,
           expanded: Boolean(p.expanded),
-          props: { parentId, cwd: p.cwd ?? "", taskId: p.taskId ?? "" },
+          props: {
+            parentId,
+            cwd: p.cwd ?? "",
+            taskId: p.taskId ?? "",
+            // 展开/收合两态手动尺寸随节点 props 持久化（刷新不丢）
+            expandedW: p.expandedW ?? 0,
+            expandedH: p.expandedH ?? 0,
+            collapsedW: p.collapsedW ?? 0,
+            collapsedH: p.collapsedH ?? 0,
+          },
           created: ts,
           updated: ts,
         });
@@ -734,18 +751,33 @@ export function useBoardCanvas({
   }, []);
 
   // ---- 新建会话 draft 卡 ----
-  // 看板右上角 + 按钮：在空位创建一张展开态 draft 卡（sessionId=""，宽 840 高 600），
+  // 看板右上角 + 按钮：在视口中心创建一张展开态 draft 卡（sessionId=""，宽 840 高 600），
   // 内部直接是新建会话工作台 + 输入框。用户在卡内发送消息 → ChatWindow 走
   // ensure_session 拿到 realId → bindDraftSession 把卡片 sessionId 写回转正。
+  // 连续新建的级联偏移计数（避免多张卡完全重叠在视口中心）。
+  const draftCascadeRef = useRef(0);
   const addDraftCard = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    const spot = findFreeSpot(editor);
+    const w = EXPANDED_DRAFT_W;
+    const h = EXPANDED_DRAFT_H;
+    // 视口页坐标（含相机）：新建会话出现在用户眼前（视口中心），不按画布空位扫描。
+    const vp = editor.getViewportPageBounds();
+    let x = vp.minX + (vp.width - w) / 2;
+    let y = vp.minY + (vp.height - h) / 2;
+    // 卡片比视口大：顶部/左侧对齐视口边缘（留 16 间隙），保证标题栏/收起按钮可见
+    if (h > vp.height) y = vp.minY + 16;
+    if (w > vp.width) x = vp.minX + 16;
+    // 级联：连续新建小幅右移下移，避免完全重叠
+    const cascade = (draftCascadeRef.current % 3) * 24;
+    draftCascadeRef.current += 1;
+    x += cascade;
+    y += cascade;
     editor.createShapes([{
       id: createShapeId(),
       type: "session-card",
-      x: spot.x,
-      y: spot.y,
+      x,
+      y,
       props: {
         sessionId: "",
         title: "",
@@ -759,11 +791,11 @@ export function useBoardCanvas({
         expanded: true,
         cwd: newSessionCwdRef.current ?? "",
         taskId: effectiveTaskIdRef.current ?? "",
-        w: 840,
-        h: 600,
+        w,
+        h,
       },
     }]);
-  }, [findFreeSpot]);
+  }, []);
 
   // draft 卡转正：用户发出首条消息、ensure_session 返回 realId 后调用。
   // 更新卡片 sessionId（随 store 变更自动持久化）。
@@ -1009,6 +1041,10 @@ type SessionCardShapeProps = {
   taskId?: string;
   w: number;
   h: number;
+  expandedW?: number;
+  expandedH?: number;
+  collapsedW?: number;
+  collapsedH?: number;
 };
 
 function toRichText(text: string) {

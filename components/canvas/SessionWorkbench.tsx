@@ -288,7 +288,9 @@ const containerStyle: React.CSSProperties = {
   flexDirection: "column",
   width: "100%",
   height: "100%",
-  overflow: "hidden",
+  // 展开卡容器不裁剪：卡片内元素（模型选择下拉等）超出卡片边界时保持可见，
+  // 由卡片外层 visible + tldraw 画布边界（clip）兜底，避免超高面板顶部被裁。
+  overflow: "visible",
   color: "var(--text)",
 };
 

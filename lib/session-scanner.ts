@@ -36,8 +36,6 @@ const HEAD_INITIAL_BYTES = 4 * 1024;
 const HEAD_MAX_BYTES = 48 * 1024;
 // 列表里的首条消息只做简述展示（sidebar 也只截取前 50 字符）。
 const FIRST_MESSAGE_PREVIEW_LENGTH = 300;
-// 最后回复展示预览：卡片中间区约 3 行，截取足够文本即可。
-const LAST_REPLY_PREVIEW_LENGTH = 500;
 
 function parseLine(line: string): unknown {
   if (!line.trim()) return null;
@@ -124,7 +122,7 @@ const NAME_MAX_BLOCKS = 256; // 约 16MB，超出视为无名字
 
 /** 读取文件尾部：最后一个 session_info 的自定义名 + 最后一条 assistant 回复。
  *  同一趟反向分块里同时取两样：名字（显式清空 → undefined）、
- *  lastReply（最后一个 text 块，截断）。返回 { name, lastReply }。 */
+ *  lastReply（最后一个 text 块，完整不截断）。返回 { name, lastReply }。 */
 function scanTail(
   path: string,
   size: number,
@@ -154,7 +152,8 @@ function scanTail(
           if (name) result.name = name; // 显式清空 → undefined
         } else if (!result.lastReply && entry.type === "message" && entry.message?.role === "assistant") {
           const reply = extractTextContent(entry.message).trim();
-          if (reply) result.lastReply = reply.slice(0, LAST_REPLY_PREVIEW_LENGTH);
+          // 不截断：收合卡完整展示最后一条消息（跨 64KB 块的超大回复仍可能缺块首，极端场景）
+          if (reply) result.lastReply = reply;
         }
         if (result.name !== undefined && result.lastReply) break; // 两个都拿到，收工
       }
