@@ -131,7 +131,14 @@ export async function DELETE(
   try {
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
-      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+      // 会话文件未落盘（Pi 延迟首次 JSONL flush）或已丢失：仍停止运行实例并
+      // 清理归属元数据（幂等删除）。否则“文件不存在 → 404”会让 session_meta
+      // 残留成僵尸记录（任务会话列表/看板补卡还会引用它）。
+      await getRpcSession(id)?.shutdown();
+      invalidateSessionPathCache(id);
+      invalidateSessionListCache();
+      unassignSession(id);
+      return NextResponse.json({ ok: true });
     }
 
     // Read only the bounded header before deleting.

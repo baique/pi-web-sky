@@ -153,6 +153,9 @@ export function useBoardCanvas({
 
   // ---- 会话摘要（标题/消息数/最后回复）用于卡片展示 ----
   const [sessionTitles, setSessionTitles] = useState<Record<string, SessionSummary>>({});
+  /** 会话摘要的实时 ref（供 onMount 删除保护等只挂载一次处读取最新值） */
+  const sessionTitlesRef = useRef<Record<string, SessionSummary>>({});
+  sessionTitlesRef.current = sessionTitles;
   const loadSessionSummaries = useCallback(async () => {
     try {
       const res = await fetch("/api/sessions", { cache: "no-store" });
@@ -214,7 +217,9 @@ export function useBoardCanvas({
         const shape = editor.getShape(idStr);
         if (!shape || shape.type !== "session-card") return true;
         const sid = (shape.props as SessionCardShapeProps).sessionId;
-        return !(protectedSet.has(sid) && effectiveTaskIdRef.current);
+        // 仅有效会话（会话文件存在，在 sessionTitles 里）受任务删除保护；
+        // 无效/僵尸会话（meta 残留、文件已删）放行——可删且不补回。
+        return !(protectedSet.has(sid) && effectiveTaskIdRef.current && sessionTitlesRef.current[sid]);
       });
       if (allowed.length === idArr.length) return origDeleteShapes(ids);
       if (allowed.length > 0) return origDeleteShapes(allowed);
@@ -863,14 +868,19 @@ export function useBoardCanvas({
       if (hasPendingDraft) return;
       const missing = sessionIds.filter((sid) => !existing.has(sid));
       if (missing.length === 0) return;
-      for (const sid of missing) {
+      // 只补有效会话：会话文件必须真实存在（在 sessionTitles 里）。
+      // 僵尸会话（meta 残留、文件已删）不补卡——补了只会灰化且删不掉。
+      // sessionTitles 未就绪时 filter 自然得出空集（不补），无需单独判空。
+      const validMissing = missing.filter((sid) => Boolean(sessionTitles[sid]));
+      if (validMissing.length === 0) return;
+      for (const sid of validMissing) {
         const spot = findFreeSpot(editor);
         addSessionNode(sid, spot.x, spot.y);
       }
     } catch {
       // 网络/解析失败静默，下轮重试
     }
-  }, [addSessionNode, findFreeSpot]);
+  }, [addSessionNode, findFreeSpot, sessionTitles]);
   const taskIdRef = useRef(taskId);
   taskIdRef.current = taskId;
   // 任务自有会话 id 集合（来自 reconcileTaskSessions 拉取）：删除拦截用。
@@ -960,23 +970,30 @@ export function useBoardCanvas({
     return null;
   }, []);
 
-  /** 清空画布：删光本地 shapes + 显式以空 nodes/edges 落库（allowEmpty 放行防覆盖保护）。 */
+  /** 清空画布：任务看板仅清非会话元素（连线/便笺/文本等，会话卡保留原位）；普通看板全清。显式 allowEmpty 放行防覆盖保护。 */
   const clearBoard = useCallback(async () => {
     const bid = boardIdRef.current;
     if (bid === SYSTEM_RUNNING_BOARD_ID) return;
     const editor = editorRef.current;
     if (!editor) return;
-    // 本地立即删光（用户所见即所得）
-    const all = editor.getCurrentPageShapes().map((s) => s.id);
-    if (all.length > 0) editor.deleteShapes(all);
-    // 服务器落空（显式 allowEmpty：绕过「空节点集拒绝覆盖非空看板」兜底）
+    const isTaskBoard = Boolean(effectiveTaskIdRef.current);
+    // 任务看板：会话卡由任务数据源驱动，清空不删会话卡（也不删会话），
+    // 只清连线/便笺/文本等非会话元素。普通看板：全清。
+    const targets = editor.getCurrentPageShapes();
+    const toDelete = isTaskBoard
+      ? targets.filter((s) => s.type !== "session-card").map((s) => s.id)
+      : targets.map((s) => s.id);
+    if (toDelete.length > 0) editor.deleteShapes(toDelete);
+    // 服务器落库：任务看板保留会话节点（nodes 非空），普通看板落空。
+    // 显式 allowEmpty 绕过「空节点集拒绝覆盖非空看板」兜底。
+    const { nodes, edges } = serializeShapes(editor);
     const camera = editor.getCamera();
     try {
       const res = await fetch(`/api/boards/${encodeURIComponent(bid)}/canvas`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          nodes: [], edges: [],
+          nodes, edges,
           view: { boardId: bid, cameraX: camera.x, cameraY: camera.y, cameraZ: camera.z, updated: Date.now() },
           baseUpdated: baseUpdatedRef.current ?? undefined,
           allowEmpty: true,
@@ -997,7 +1014,7 @@ export function useBoardCanvas({
     } catch (e) {
       console.error("[board] clear error", e);
     }
-  }, [reloadCanvasWrap]);
+  }, [reloadCanvasWrap, serializeShapes]);
 
   return useMemo(() => ({
     board,

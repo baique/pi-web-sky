@@ -73,7 +73,8 @@ export function SessionCanvas({
   const { t } = useI18n();
   const { isDark } = useTheme();
   const board = useBoardCanvas({ boardId, projectKey, taskId, newSessionCwd, onOpenSession: (sid) => onOpenSession({ id: sid } as SessionInfo, false) });
-  // 任务看板：卡片由任务会话驱动（自动补卡/随任务变化），清理/清空无意义且会被补回 → 禁用
+  // 任务看板：卡片由任务会话驱动（自动补卡/随任务变化），会话卡不可从看板移除；
+  // 但清空允许——仅作用于非会话元素（连线/便笺/文本），会话卡片保留。
   const isTaskBoard = Boolean(board.board?.taskId ?? taskId);
   const [scrimOpen, setScrimOpen] = useState(false);
   // 乐观锁冲突提示：409 自动重载后短暂显示，说明改动被丢弃（防数据丢失的可见反馈）
@@ -206,11 +207,10 @@ export function SessionCanvas({
           <button
             type="button"
             onClick={() => {
-              if (window.confirm(t("boards.clearConfirm"))) void board.clearBoard();
+              if (window.confirm(isTaskBoard ? t("boards.clearTaskConfirm") : t("boards.clearConfirm"))) void board.clearBoard();
             }}
-            title={isTaskBoard ? t("boards.taskBoardManaged") : t("boards.clearDesc")}
-            disabled={isTaskBoard}
-            style={{ ...floatingIconBtn, opacity: isTaskBoard ? 0.4 : 1, cursor: isTaskBoard ? "not-allowed" : "pointer" }}
+            title={isTaskBoard ? t("boards.clearTaskBoardDesc") : t("boards.clearDesc")}
+            style={floatingIconBtn}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M18 6 6 18" />
