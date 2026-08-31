@@ -102,7 +102,7 @@ export async function readSessionAuditSnapshot(sessionId: string): Promise<Sessi
     let failure = false;
     let lastActivityMs = 0;
     const recent: string[] = [];
-    for (const e of messages.slice(-8)) {
+    for (const e of messages.slice(-4)) {
       const m = e.message;
       const ts = typeof m.timestamp === "number" ? m.timestamp : new Date(e.timestamp).getTime();
       if (!Number.isNaN(ts)) lastActivityMs = Math.max(lastActivityMs, ts);
