@@ -21,7 +21,7 @@ export interface BoardInfo {
   nodeCount: number;
 }
 
-export type BoardNodeKind = "session" | "shape";
+export type BoardNodeKind = "session" | "shape" | "taskcard";
 
 export interface BoardNode {
   id: string;

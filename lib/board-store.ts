@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { getDb } from "./sqlite-db";
+import { getCard, listLinks, type LinkKind } from "./task-card-store";
 import {
   SYSTEM_RUNNING_BOARD_ID,
   type BoardCanvas,
@@ -446,6 +447,23 @@ export function getNodeByGlobalId(nodeId: string): BoardNode | undefined {
   return row ? rowToNode(row) : undefined;
 }
 
+/** 按看板内 refId 查节点（任务卡 node 用：ref_id = cardId）；可选按 kind 过滤。 */
+export function getNodeByRefId(
+  boardId: string,
+  refId: string,
+  kind?: BoardNodeKind,
+): BoardNode | undefined {
+  const sql =
+    "SELECT id, board_id AS boardId, kind, ref_id AS refId, x, y, w, h, expanded, props, created, updated FROM board_nodes " +
+    (kind
+      ? "WHERE board_id = ? AND ref_id = ? AND kind = ?"
+      : "WHERE board_id = ? AND ref_id = ?");
+  const row = kind
+    ? getDb().prepare(sql).get(boardId, refId, kind)
+    : getDb().prepare(sql).get(boardId, refId);
+  return row ? rowToNode(row as unknown as BoardNodeRow) : undefined;
+}
+
 export interface PatchNodeInput {
   /** 会话卡绑定的会话 id（draft 转正时写入）。null 显式解绑；缺省不改。 */
   refId?: string | null;
@@ -584,3 +602,46 @@ export function deleteEdge(boardId: string, edgeId: string): boolean {
   return true;
 }
 
+
+/**
+ * 按任务卡的依赖关系 reconcile 画布自动连线（label=kind 识别，禁删语义）。
+ * 真相源是 task_card_links：缺失的依赖边补回、多余的自动边删除。
+ * 只 reconcile 本卡的「出边」（from=本卡 node），避免双向 reconcile 打架。
+ * 本函数不包事务（内部多次 addEdge/deleteEdge 无事务），由调用方包事务。
+ */
+export function syncCardEdges(cardId: string): void {
+  const card = getCard(cardId);
+  if (!card) return;
+  const db = getDb();
+  const node = getNodeByRefId(card.boardId, cardId, "taskcard");
+  if (!node) return;
+
+  const existing = db
+    .prepare(
+      "SELECT id, from_id AS fromId, to_id AS toId, label FROM board_edges " +
+        "WHERE board_id = ? AND from_id = ? AND label IN ('prerequisite', 'related')",
+    )
+    .all(card.boardId, node.id) as Array<{ id: string; fromId: string; toId: string; label: string | null }>;
+
+  const wanted = listLinks(cardId)
+    .map((link) => {
+      const targetNode = getNodeByRefId(card.boardId, link.targetCardId, "taskcard");
+      return targetNode ? { toId: targetNode.id, label: link.kind } : null;
+    })
+    .filter((x): x is { toId: string; label: LinkKind } => x !== null);
+
+  const keyOf = (toId: string, label: string) => `${toId}:${label}`;
+  const wantedKeys = new Set(wanted.map((w) => keyOf(w.toId, w.label)));
+  const existingKeys = new Set(existing.map((e) => keyOf(e.toId, e.label ?? "")));
+
+  for (const e of existing) {
+    if (!wantedKeys.has(keyOf(e.toId, e.label ?? ""))) {
+      deleteEdge(card.boardId, e.id);
+    }
+  }
+  for (const w of wanted) {
+    if (!existingKeys.has(keyOf(w.toId, w.label))) {
+      addEdge(card.boardId, { fromId: node.id, toId: w.toId, label: w.label });
+    }
+  }
+}
