@@ -462,12 +462,12 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         onChange={(e) => set("name", e.target.value)}
         placeholder="任务名称"
       />
-      <label style={LABEL_STYLE}>需求说明（Markdown）</label>
+      <label style={LABEL_STYLE}>需求说明</label>
       <textarea
         style={{ ...FIELD_STYLE, minHeight: 70, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 11 }}
         value={draft.description}
         onChange={(e) => set("description", e.target.value)}
-        placeholder="任务描述，支持 markdown"
+        placeholder="任务描述"
         spellCheck={false}
       />
       <CollapsibleSection title="高级" open={advancedOpen} onToggle={() => setAdvancedOpen((v) => !v)}>
