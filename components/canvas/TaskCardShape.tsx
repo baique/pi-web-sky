@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { BaseBoxShapeUtil, HTMLContainer, T, resizeBox, useEditor } from "tldraw";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { BaseBoxShapeUtil, HTMLContainer, T, resizeBox, useEditor, useValue } from "tldraw";
 import type { TLBaseShape, TLShapeId, TLShapePartial } from "tldraw";
 import type { ExecStatus, ReadyStatus, TaskCard } from "@/lib/task-card-store";
 import { linkTargetIds, useTaskCard } from "@/hooks/useTaskCards";
@@ -409,6 +409,50 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     if (!isCreating && cardId) void saveCard({ readyStatus: v as ReadyStatus });
   };
 
+  // —— 未保存编辑（dirty）判定：与 detail 对比（就绪状态已即时保存，不计入 dirty）——
+  const isDirty = useMemo(() => {
+    if (isCreating || !detail?.card || !draft) return false;
+    const c = detail.card;
+    return (
+      draft.name !== c.name ||
+      draft.description !== c.description ||
+      draft.priority !== c.priority ||
+      draft.due !== c.due ||
+      draft.cwd !== c.cwd ||
+      draft.useWorktree !== c.useWorktree ||
+      draft.maxRetries !== c.maxRetries ||
+      JSON.stringify(draft.attachments ?? []) !== JSON.stringify(c.attachments ?? []) ||
+      JSON.stringify([...draftPrereq].sort()) !== JSON.stringify(linkTargetIds(detail.links, "prerequisite").sort()) ||
+      JSON.stringify([...draftRelated].sort()) !== JSON.stringify(linkTargetIds(detail.links, "related").sort())
+    );
+  }, [isCreating, detail, draft, draftPrereq, draftRelated]);
+
+  // —— 离开卡片自动保存（与便笺“退出编辑自动保存”一致）：选中 → 未选中且 dirty 时保存。
+  // 用 useValue 订阅选中态（返回 boolean，store 变化时才重渲染）；handler 走 ref 避免 effect 依赖抖动。
+  const isSelected = useValue("selected", () => editor.getSelectedShapeIds().includes(shape.id), [editor, shape.id]);
+  const wasSelectedRef = useRef(isSelected);
+  const dirtyRef = useRef(isDirty);
+  dirtyRef.current = isDirty;
+  const saveRef = useRef(handleSave);
+  saveRef.current = handleSave;
+  useEffect(() => {
+    const wasSelected = wasSelectedRef.current;
+    wasSelectedRef.current = isSelected;
+    if (wasSelected && !isSelected && !isCreating && dirtyRef.current) {
+      void saveRef.current();
+    }
+  }, [isSelected, isCreating]);
+
+  // —— 取消：撤销未保存编辑，恢复 detail 原值（含依赖与工作区选中）——
+  const handleCancelEdit = () => {
+    if (!detail) return;
+    setDraft({ ...detail.card });
+    setDraftPrereq(linkTargetIds(detail.links, "prerequisite"));
+    setDraftRelated(linkTargetIds(detail.links, "related"));
+    setWtPath(null);
+    setSaveError(null);
+  };
+
   const formBody = draft ? (
     <>
       {isCreating && (
@@ -639,21 +683,28 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
               >
                 {saving ? "创建中…" : "创建"}
               </button>
-            ) : (
-              <button
-                type="button"
-                style={footerBtnStyle}
-                disabled={saving || !draft?.name.trim()}
-                onClick={() => void handleSave()}
-                title="完成"
-              >
-                {saving ? "保存中…" : "完成"}
-              </button>
-            )}
+            ) : isDirty ? (
+              <>
+                <button
+                  type="button"
+                  style={footerBtnStyle}
+                  onClick={handleCancelEdit}
+                  title="撤销本次编辑"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  style={footerBtnStyle}
+                  disabled={saving || !draft?.name.trim()}
+                  onClick={() => void handleSave()}
+                  title="完成（保存）"
+                >
+                  {saving ? "保存中…" : "完成"}
+                </button>
+              </>
+            ) : null}
           </div>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.5 }}>
-            <circle cx="9" cy="6" r="1" /><circle cx="15" cy="6" r="1" /><circle cx="9" cy="12" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="9" cy="18" r="1" /><circle cx="15" cy="18" r="1" />
-          </svg>
         </div>
         {/* 内容区：左表单 + 右工作台 */}
         <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
