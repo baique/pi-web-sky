@@ -51,6 +51,8 @@ worktrees/route.ts              GET/POST/DELETE git worktrees
 ```
 agent-client.ts      typed fetch helper for /api/agent commands
 board-store.ts       boards/nodes/edges/view CRUD（SDK-free，对照 task-store）
+task-card-store.ts   任务卡元数据 CRUD（task_cards/links，SDK-free）
+board-purge.ts       孤儿看板卡片清理（排除 taskcard kind）
 board-types.ts       看板类型定义 + SYSTEM_RUNNING_BOARD_ID = "__running__"
 board-events.ts      看板跨组件事件桥（window.dispatchEvent：open-file/forked/renamed/…）
 board-utils.ts       看板工具（shouldRemoveEndedCard 等）
@@ -81,7 +83,8 @@ SessionSidebar.tsx  session tree + FileExplorer
 SessionStatsSummary.tsx  session stats compact summary（统计弹层第一行，复用 AppShell 顶栏格式）
 ChatWindow.tsx      chat composition + completion sound wrapper
 canvas/             board mode components：SessionCanvas / SessionCardShape / SessionWorkbench /
-                    StickyNoteShape / BoardSection / CanvasStage / SessionNavBar / BoardToolbar
+                    StickyNoteShape / TaskCardShape / TaskCardTool / ThemedSelect / BoardSection /
+                    CanvasStage / SessionNavBar / BoardToolbar / SyncedContextMenu
 ChatInput.tsx       input bar + model/thinking/tools/compact controls
 MessageView.tsx     renders one message (user/assistant/toolCall/toolResult)
 BranchNavigator.tsx in-session branch switcher
@@ -117,6 +120,7 @@ TurnWrittenFiles.tsx    files written this turn (buttons opening each in the vie
 useAgentSession.ts  messages + streaming + SSE + fork/navigate/reconciliation logic
 useAudio.ts         completion sound + browser AudioContext unlock
 useBoardCanvas.ts   board canvas: load/save(防抖单飞)/running snapshot/reconcile/findFreeSpot/addDraftCard
+useTaskCards.ts     task card 数据 hook（详情/候选卡/建卡/保存）
 useBroadcast.ts     composer broadcast slots (left phase / right notices, P0-P3 priority)
 useDragDrop.ts      shared drag/drop state
 useIsMobile.ts      responsive breakpoint hook

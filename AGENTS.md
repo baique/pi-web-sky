@@ -72,6 +72,7 @@ Browser                Next.js Server              AgentSession (in-process)
 | 看板交互与事件层 | [docs/reference/board-events.md](docs/reference/board-events.md) | 改卡片交互 / 滚轮 / 右键菜单 / 事件劫持 / 焦点 / 新增自定义 shape 卡片 |
 | 认证与模型 | [docs/reference/auth-models.md](docs/reference/auth-models.md) | 改 provider 列表 / 登录 / models.json / 模型选择 / enabledModels / 思考级别 |
 | Worktree 与文件白名单 | [docs/reference/worktrees-files.md](docs/reference/worktrees-files.md) | 改 worktree / 项目分组 / /api/files / 文件浏览权限 |
+| 任务卡 | [docs/reference/task-cards.md](docs/reference/task-cards.md) | 改任务卡 / 任务卡数据模型 / 依赖线 / 任务卡表单 |
 | 插件与技能 | [docs/reference/plugins-skills.md](docs/reference/plugins-skills.md) | 改 /api/plugins / /api/skills / 技能开关 / 插件安装移除 |
 | 完整文件清单 | [docs/reference/file-map.md](docs/reference/file-map.md) | 新增 API 路由 / 组件 / hook / lib，或要查某文件职责 |
 | CSS 变量体系 | [docs/reference/css-tokens.md](docs/reference/css-tokens.md) | 调 UI 观感 / 加样式 / 气泡 token / scrim / 思考球 |
