@@ -7,6 +7,7 @@ import type { ExecStatus, ReadyStatus, TaskCard } from "@/lib/task-card-store";
 import { linkTargetIds, useTaskCard } from "@/hooks/useTaskCards";
 import { SessionWorkbench } from "./SessionWorkbench";
 import { ThemedSelect } from "./ThemedSelect";
+import { TaskCardMultiSelect } from "./TaskCardMultiSelect";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
 
 /**
@@ -486,36 +487,22 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         value={draft.maxRetries}
         onChange={(e) => set("maxRetries", Math.max(0, Number(e.target.value) || 0))}
       />
-      <>
-          <label style={LABEL_STYLE}>前置任务（可多选）</label>
-          <div style={{ maxHeight: 90, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, padding: 4 }}>
-            {candidates.filter((c) => c.id !== cardId).map((c) => (
-              <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text)", cursor: "pointer", padding: "1px 0" }}>
-                <input
-                  type="checkbox"
-                  checked={draftPrereq.includes(c.id)}
-                  onChange={(e) => setDraftPrereq((p) => (e.target.checked ? [...p, c.id] : p.filter((x) => x !== c.id)))}
-                />
-                #{c.number} {c.name}
-              </label>
-            ))}
-            {candidates.length <= 1 && <div style={{ color: "var(--text-dim)", fontSize: 10 }}>无其他任务卡可选</div>}
-          </div>
-          <label style={LABEL_STYLE}>关联任务（可多选）</label>
-          <div style={{ maxHeight: 90, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, padding: 4 }}>
-            {candidates.filter((c) => c.id !== cardId).map((c) => (
-              <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text)", cursor: "pointer", padding: "1px 0" }}>
-                <input
-                  type="checkbox"
-                  checked={draftRelated.includes(c.id)}
-                  onChange={(e) => setDraftRelated((p) => (e.target.checked ? [...p, c.id] : p.filter((x) => x !== c.id)))}
-                />
-                #{c.number} {c.name}
-              </label>
-            ))}
-            {candidates.length <= 1 && <div style={{ color: "var(--text-dim)", fontSize: 10 }}>无其他任务卡可选</div>}
-          </div>
-      </>
+      <label style={LABEL_STYLE}>前置任务（可多选）</label>
+      <TaskCardMultiSelect
+        candidates={candidates}
+        selected={draftPrereq}
+        onChange={setDraftPrereq}
+        excludeId={cardId}
+        placeholder="本看板内选择前置任务…"
+      />
+      <label style={LABEL_STYLE}>关联任务（可多选）</label>
+      <TaskCardMultiSelect
+        candidates={candidates}
+        selected={draftRelated}
+        onChange={setDraftRelated}
+        excludeId={cardId}
+        placeholder="本看板内选择关联任务…"
+      />
       <label style={LABEL_STYLE}>附件（引用文件路径，每行一个）</label>
       <textarea
         style={{ ...FIELD_STYLE, minHeight: 46, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 11 }}
@@ -565,17 +552,45 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
           boxShadow: "0 2px 10px -6px rgba(0,0,0,0.2)",
           color: "var(--text)",
           display: "flex",
+          flexDirection: "column",
           overflow: "hidden",
           pointerEvents: "all",
           userSelect: "none",
         }}
-        onPointerDown={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
-        onPointerUp={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
-        onClick={(e) => e.stopPropagation()}
-        onDoubleClick={(e) => e.stopPropagation()}
       >
+        {/* 拖拽把手：不拦 pointer（事件冒泡到 tldraw 接管拖动），与便笺同模式 */}
+        <div
+          style={{
+            flexShrink: 0,
+            height: 30,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "0 10px",
+            borderBottom: "1px solid var(--bubble-hairline)",
+            cursor: "grab",
+            fontSize: 11,
+            color: "var(--text-muted)",
+          }}
+        >
+          {draft?.number ? <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-dim)" }}>#{draft.number}</span> : null}
+          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
+          </span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.5 }}>
+            <circle cx="9" cy="6" r="1" /><circle cx="15" cy="6" r="1" /><circle cx="9" cy="12" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="9" cy="18" r="1" /><circle cx="15" cy="18" r="1" />
+          </svg>
+        </div>
+        {/* 内容区：左表单 + 右工作台 */}
+        <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
         {/* 左：编辑表单 / 建卡向导（常驻） */}
-        <div style={{ width: 340, flexShrink: 0, borderRight: expanded ? "1px solid var(--bubble-hairline)" : "none", overflowY: "auto", padding: "10px 12px" }}>
+        <div
+          style={{ width: 340, flexShrink: 0, borderRight: expanded ? "1px solid var(--bubble-hairline)" : "none", overflowY: "auto", padding: "10px 12px" }}
+          onPointerDown={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
+          onPointerUp={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
           {formBody}
         </div>
         {/* 右：执行会话工作台 / 空态（expanded 才显示） */}
@@ -602,6 +617,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
           )}
         </div>
         )}
+      </div>
       </div>
     </HTMLContainer>
   );

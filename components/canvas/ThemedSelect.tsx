@@ -84,10 +84,12 @@ export function ThemedSelect({
             minWidth: 120,
             maxHeight: 200,
             overflowY: "auto",
-            background: "var(--side-bg)",
+            // 浮层弹窗玻璃：比 chrome 浓（--popover-glass），避免列表浮在画布/壁纸上显得发虚。
+            // 卡内不挂 backdrop-filter（卡根已有 blur，嵌套 backdrop root 只会重复模糊）。
+            background: "var(--popover-glass)",
             border: "1px solid var(--border)",
             borderRadius: 6,
-            boxShadow: "0 6px 20px -6px rgba(0,0,0,0.3)",
+            boxShadow: "0 6px 20px -6px rgba(0,0,0,0.35)",
             padding: 4,
           }}
         >
