@@ -100,6 +100,28 @@ export function SessionCanvas({
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, []);
   const [scrimOpen, setScrimOpen] = useState(false);
+  // 调度器状态（看板左上角展示：正在运行 xxx任务）——轮询，仅看板模式
+  const [sched, setSched] = useState<{
+    started: boolean;
+    running: Array<{ number: number; name: string; execStatus: string }>;
+    lastAction: { type: string; cardNumber?: number; cardName?: string; at: number };
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/task-scheduler/status", { cache: "no-store" });
+        if (!res.ok) return;
+        const d = (await res.json()) as { status: typeof sched };
+        if (!cancelled) setSched(d.status);
+      } catch {
+        // 静默：调度器接口不可用时不显示状态
+      }
+    };
+    void load();
+    const timer = setInterval(load, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
   // 乐观锁冲突提示：409 自动重载后短暂显示，说明改动被丢弃（防数据丢失的可见反馈）
   const [conflictNotice, setConflictNotice] = useState(false);
   const prevConflictCount = useRef(0);
@@ -251,6 +273,48 @@ export function SessionCanvas({
           </svg>
           <span style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {board.board.name}
+          </span>
+        </div>
+      )}
+      {/* 调度器状态：有运行中的调度任务时，看板名下方淡一档小字提示“正在运行 xxx任务” */}
+      {!board.loading && sched && sched.running.length > 0 && (
+        <div
+          title={`调度器正在执行 ${sched.running.length} 个任务`}
+          style={{
+            position: "absolute",
+            top: 52,
+            left: 12,
+            zIndex: 40,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            maxWidth: 260,
+            padding: "3px 10px",
+            borderRadius: 999,
+            background: "color-mix(in srgb, var(--board-card-glass) 85%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--border) 45%, transparent)",
+            color: "var(--text-dim)",
+            fontSize: 10.5,
+            lineHeight: 1.4,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              flexShrink: 0,
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: "#10b981",
+              boxShadow: "0 0 6px 1px rgba(16,185,129,0.6)",
+              animation: "pulse 1.6s ease-in-out infinite",
+            }}
+          />
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+            正在运行 {sched.running.map((r) => `#${r.number} ${r.name}`).join("、")}
           </span>
         </div>
       )}

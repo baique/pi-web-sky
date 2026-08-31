@@ -404,3 +404,11 @@ export function countRunningDispatched(): number {
     .get() as { n: number };
   return row.n;
 }
+
+/** 调度器已派发且正在运行的任务卡列表（看板调度状态展示用），按编号升序。 */
+export function listRunningDispatched(): TaskCard[] {
+  const rows = getDb()
+    .prepare(`SELECT ${CARD_COLUMNS} FROM task_cards WHERE exec_status = 'running' ORDER BY number`)
+    .all() as unknown as TaskCardRow[];
+  return rows.map(rowToCard);
+}
