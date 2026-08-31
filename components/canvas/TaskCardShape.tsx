@@ -455,11 +455,6 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
 
   const formBody = draft ? (
     <>
-      {isCreating && (
-        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>
-          新建任务卡
-        </div>
-      )}
       <label style={LABEL_STYLE}>任务名称 *</label>
       <input
         style={FIELD_STYLE}
