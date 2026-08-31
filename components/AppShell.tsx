@@ -216,7 +216,19 @@ export function AppShell() {
   // is not mounted. ChatWindow receives the audio callbacks as props.
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio, soundEnabledRef } = useAudio();
   const notifiedAttentionRequestIdsRef = useRef(new Set<string>());
-  const handleBackgroundTaskDone = useCallback(() => {
+  // 看板卡片工作台已播过完成音的会话（卡片 ChatWindow 在 onAgentEnd 里播完才派发
+  // board-agent-end 事件）。侧边栏「后台完成」判定不包含看板卡片会话的完成音——
+  // 否则卡片会话完成会双响（卡片工作台播一次 + 侧边栏后台完成再播一次）。
+  const boardSoundedSessionIdsRef = useRef(new Set<string>());
+  const handleBackgroundTaskDone = useCallback((completedIds?: string[]) => {
+    // 完成会话全部由看板卡片工作台播过完成音（board-agent-end 已登记）→ 跳过，防双响
+    if (completedIds && completedIds.length > 0) {
+      const sounded = boardSoundedSessionIdsRef.current;
+      const allSounded = completedIds.every((id) => sounded.has(id));
+      // 消费后移除登记（会话已结束且已判定，避免集合无限增长）
+      for (const id of completedIds) sounded.delete(id);
+      if (allSounded) return;
+    }
     if (soundEnabledRef.current) playDoneSound();
   }, [playDoneSound, soundEnabledRef]);
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
@@ -1252,6 +1264,15 @@ export function AppShell() {
     const onBoardAgentEnd = (e: Event) => {
       const detail = (e as CustomEvent<{ sessionId: string; sessionName?: string }>).detail;
       if (!detail?.sessionId) return;
+      // 卡片工作台 ChatWindow 已在 onAgentEnd 里播过完成音（先播后派发本事件）：
+      // 登记会话，侧边栏「后台完成」判定跳过它，避免双响。
+      // 容量保护：只保留最近完成的会话（正常会被 handleBackgroundTaskDone 消费删除，
+      // 兜底防极端场景集合无限增长）。
+      const sounded = boardSoundedSessionIdsRef.current;
+      sounded.add(detail.sessionId);
+      if (sounded.size > 100) {
+        for (const id of [...sounded].slice(0, sounded.size - 100)) sounded.delete(id);
+      }
       setRefreshKey((k) => k + 1);
       setExplorerRefreshKey((k) => k + 1);
       if (!shouldShowBrowserNotification()) return;

@@ -103,8 +103,9 @@ interface Props {
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onAtMentions?: (relativePaths: string[]) => void;
   /** Fired when a session that is not currently selected finishes running.
-   *  Lets the app play a cross-workspace completion tone. */
-  onBackgroundTaskDone?: () => void;
+   *  Lets the app play a cross-workspace completion tone.
+   *  completedIds：本次判定的后台完成会话 id 列表（供上层过滤已由看板侧播过完成音的会话）。 */
+  onBackgroundTaskDone?: (completedIds?: string[]) => void;
   onRunningSessionIdsChange?: (ids: Set<string>) => void;
   /** A session should be spawned pre-assigned to this task (task row "+").
    *  projectKey lets the parent attach the new session to the task reliably
@@ -555,7 +556,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       loadSessions(false, true);
     }
     if (completedInBackground.length > 0) {
-      onBackgroundTaskDone?.();
+      onBackgroundTaskDone?.(completedInBackground);
     }
 
     previousRunningSessionIdsRef.current = runningSessionIds;
