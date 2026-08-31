@@ -43,7 +43,7 @@ const DEFAULTS: WallpaperSettings = {
   fillColorLeft: "#000000",
   fillColorRight: "#000000",
   bubbleOpacity: 44,
-  bubbleBlur: 18,
+  bubbleBlur: 8,
   scrimAlpha: 0,
   scrimBlur: 2,
 };

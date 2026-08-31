@@ -64,6 +64,10 @@ import {
 } from "@/lib/wallpaper-settings";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
+
+// 气泡磨砂默认值（与 lib/wallpaper-settings.ts DEFAULTS.bubbleBlur 保持一致，
+// 改默认磨砂时两处必须同步修改，避免「重置默认」按钮与初始值不一致）。
+const DEFAULT_BUBBLE_BLUR = 8;
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import {
   claimExtensionAttentionNotification,
@@ -2478,17 +2482,17 @@ export function AppShell() {
               </div>
               <button
                 type="button"
-                onClick={() => updateWallSettings({ bubbleOpacity: 44, bubbleBlur: 18 })}
-                disabled={wallSettings.bubbleOpacity === 44 && wallSettings.bubbleBlur === 18}
+                onClick={() => updateWallSettings({ bubbleOpacity: 44, bubbleBlur: DEFAULT_BUBBLE_BLUR })}
+                disabled={wallSettings.bubbleOpacity === 44 && wallSettings.bubbleBlur === DEFAULT_BUBBLE_BLUR}
                 style={{
                   display: "flex", alignItems: "center", gap: 8, width: "100%",
                   padding: "7px 10px",
                   background: "transparent",
-                  color: wallSettings.bubbleOpacity === 44 && wallSettings.bubbleBlur === 18 ? "var(--text-dim)" : "var(--text)",
+                  color: wallSettings.bubbleOpacity === 44 && wallSettings.bubbleBlur === DEFAULT_BUBBLE_BLUR ? "var(--text-dim)" : "var(--text)",
                   border: "1px solid var(--border)", borderRadius: 8,
-                  fontSize: 12.5, cursor: wallSettings.bubbleOpacity === 44 && wallSettings.bubbleBlur === 18 ? "default" : "pointer",
+                  fontSize: 12.5, cursor: wallSettings.bubbleOpacity === 44 && wallSettings.bubbleBlur === DEFAULT_BUBBLE_BLUR ? "default" : "pointer",
                   textAlign: "left",
-                  opacity: wallSettings.bubbleOpacity === 44 && wallSettings.bubbleBlur === 18 ? 0.55 : 1,
+                  opacity: wallSettings.bubbleOpacity === 44 && wallSettings.bubbleBlur === DEFAULT_BUBBLE_BLUR ? 0.55 : 1,
                   transition: "background 0.12s",
                 }}
               >
