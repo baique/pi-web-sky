@@ -1124,6 +1124,8 @@ export function useBoardCanvas({
     error,
     running,
     runningCount: running?.runningSessionIds.length ?? 0,
+    /** tldraw editor 实例（挂载后可用；BoardSearch 等需要访问画布的地方用） */
+    editor: editorReady ? editorRef.current : null,
     onMount,
     addSessionNode,
     addDraftCard,
@@ -1138,7 +1140,7 @@ export function useBoardCanvas({
     loadSessionSummaries,
     hydrateShapes,
     reconcileTaskSessions,
-  }), [board, loading, error, running, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, clearBoard, getNodeIdForSession, reloadCanvasWrap, conflictCount, deleteBlockedCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
+  }), [board, loading, error, running, editorReady, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, clearBoard, getNodeIdForSession, reloadCanvasWrap, conflictCount, deleteBlockedCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
 }
 
 export type UseBoardCanvasReturn = ReturnType<typeof useBoardCanvas>;

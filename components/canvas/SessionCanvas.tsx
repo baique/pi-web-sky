@@ -7,6 +7,8 @@ import { useTheme } from "@/hooks/useTheme";
 import { useBoardCanvas } from "@/hooks/useBoardCanvas";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
 import type { SessionInfo } from "@/lib/types";
+import { BoardSearchProvider } from "./BoardSearchContext";
+import { BoardSearch } from "./BoardSearch";
 
 // ssr:false — tldraw 依赖浏览器环境，仅进入看板模式时下载（~1MB）。
 const CanvasStage = dynamic(() => import("./CanvasStage").then((m) => m.CanvasStage), {
@@ -76,6 +78,26 @@ export function SessionCanvas({
   // 任务看板：卡片由任务会话驱动（自动补卡/随任务变化），会话卡不可从看板移除；
   // 但清空允许——仅作用于非会话元素（连线/便笺/文本），会话卡片保留。
   const isTaskBoard = Boolean(board.board?.taskId ?? taskId);
+  // 看板搜索框 input ref：Ctrl+F 聚焦目标（仅看板模式生效）
+  const searchBoxRef = useRef<HTMLInputElement>(null);
+  // Ctrl+F / Cmd+F：聚焦看板搜索框（preventDefault 拦浏览器查找栏）。
+  // 捕获阶段挂载，确保先于 tldraw 拿到事件；仅看板模式（本组件挂载期间）生效。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "f") return;
+      const ae = document.activeElement as HTMLElement | null;
+      // 其他输入框（侧栏搜索等）不拦截；看板搜索框已聚焦时保持焦点不打扰
+      if (ae && ae !== searchBoxRef.current) {
+        const tag = ae.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || ae.isContentEditable) return;
+      }
+      e.preventDefault();
+      searchBoxRef.current?.focus();
+      searchBoxRef.current?.select();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
   const [scrimOpen, setScrimOpen] = useState(false);
   // 乐观锁冲突提示：409 自动重载后短暂显示，说明改动被丢弃（防数据丢失的可见反馈）
   const [conflictNotice, setConflictNotice] = useState(false);
@@ -118,13 +140,16 @@ export function SessionCanvas({
         position: "relative",
       }}
     >
+      {/* 搜索高亮 context：shape 组件（会话卡/便笺）读它渲染 accent 描边。
+          必须包住 CanvasStage（tldraw），让自定义 shape 能读到 context。 */}
+      <BoardSearchProvider>
       {/* 乐观锁冲突提示 toast：数据未丢失但本地未保存改动被丢弃（服务器权威） */}
       {conflictNotice && (
         <div
           role="status"
           style={{
             position: "absolute",
-            top: 12,
+            top: 64,
             left: "50%",
             transform: "translateX(-50%)",
             zIndex: 80,
@@ -161,7 +186,7 @@ export function SessionCanvas({
           role="status"
           style={{
             position: "absolute",
-            top: 52,
+            top: 108,
             left: "50%",
             transform: "translateX(-50%)",
             zIndex: 80,
@@ -192,6 +217,20 @@ export function SessionCanvas({
         </div>
       )}
 
+      {/* 看板搜索框：常驻，画布顶部居中（玻璃胶囊）。loading 期间不渲染 */}
+      {!board.loading && (
+        <div
+          style={{
+            position: "absolute",
+            top: 12,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 40,
+          }}
+        >
+          <BoardSearch editor={board.editor} inputRef={searchBoxRef} />
+        </div>
+      )}
       {/* 顶部悬浮按钮组：清理失效 + 磨砂调节 */}
       <div
         style={{
@@ -327,6 +366,7 @@ export function SessionCanvas({
         board={board}
         isDark={isDark}
       />
+      </BoardSearchProvider>
     </div>
   );
 }

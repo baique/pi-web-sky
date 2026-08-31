@@ -1492,6 +1492,19 @@ span.token.table {
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
+/* 看板搜索命中高亮：accent 描边 + 泛光，1.8s 渐隐（与 BoardSearchContext HIGHLIGHT_MS 同步）。
+   挂在命中 shape 的 box-shadow 上：box-shadow 绘制于元素盒子外侧，
+   即使卡片容器 overflow:hidden 也不被裁剪，安全作为高亮层。 */
+@keyframes board-search-glow {
+  from {
+    box-shadow: 0 0 0 3px var(--accent), 0 0 24px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 0%, transparent),
+      0 0 24px color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

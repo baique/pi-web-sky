@@ -458,6 +458,10 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
   );
 }
 
+/** 搜索命中高亮描边：accent 外圈 + 泛光（渐隐由 board-search-glow keyframes 控制） */
+const NOTE_HIGHLIGHT_SHADOW =
+  "0 0 0 3px var(--accent), 0 0 24px color-mix(in srgb, var(--accent) 45%, transparent)";
+
 const footerBtnStyle: React.CSSProperties = {
   border: "none",
   background: "color-mix(in srgb, var(--border) 30%, transparent)",

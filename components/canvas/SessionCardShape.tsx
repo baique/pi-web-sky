@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { SessionWorkbench } from "./SessionWorkbench";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 import { dispatchBoardSessionRenamed } from "@/lib/board-events";
+import { useBoardSearch } from "./BoardSearchContext";
 
 /**
  * 会话卡 shape。props 含 w/h 满足 BaseBoxShapeUtil（可拉伸）；
@@ -191,6 +192,9 @@ const phaseMeta: Record<string, { dot: string; label: string }> = {
 function SessionCardView({ shape }: { shape: SessionCardShape }) {
   const { w, h, title, projectName, messageCount, phase, runningMs, endedAt, lastActivityAt, stale, sessionId, expanded, lastReply, cwd, taskId } = shape.props;
   const editor = useEditor();
+  // 搜索高亮：命中时 accent 描边 + 泛光渐隐（由 BoardSearchContext 驱动，不落库）
+  const { highlightId } = useBoardSearch();
+  const isHighlighted = highlightId === shape.id;
 
   // draft 卡（新建会话）：sessionId 为空，尚未绑定真实会话
   const isDraft = !sessionId;
@@ -275,12 +279,13 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           height: h,
           overflow: "visible",
           borderRadius: 18,
-          border: `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
+          border: isHighlighted ? "2px solid var(--accent)" : `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
           // 卡片磨砂玻璃：略低于消息气泡（alpha 0.55 vs 气泡 0.44，blur 12px vs 气泡 18px）
           background: "var(--board-card-glass)",
           backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
           WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-          boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
+          boxShadow: isHighlighted ? BOARD_HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
+          animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
           opacity: stale ? 0.55 : 1,
           pointerEvents: "all",
           display: "flex",
@@ -412,12 +417,13 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         height: h,
         overflow: "hidden",
         borderRadius: 14,
-        border: `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
+        border: isHighlighted ? "2px solid var(--accent)" : `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
         // 卡片磨砂玻璃：略低于消息气泡（alpha 0.55 vs 气泡 0.44，blur 12px vs 气泡 18px）
         background: "var(--board-card-glass)",
         backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
         WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-        boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
+        boxShadow: isHighlighted ? BOARD_HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
+        animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
         opacity: stale ? 0.55 : 1,
         pointerEvents: "all",
         display: "flex",
@@ -579,6 +585,10 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     </HTMLContainer>
   );
 }
+
+/** 搜索命中高亮描边：accent 外圈 + 泛光（渐隐由 board-search-glow keyframes 控制） */
+const BOARD_HIGHLIGHT_SHADOW =
+  "0 0 0 3px var(--accent), 0 0 24px color-mix(in srgb, var(--accent) 45%, transparent)";
 
 function formatDuration(ms: number): string {
   const sec = Math.max(1, Math.round(ms / 1000));
