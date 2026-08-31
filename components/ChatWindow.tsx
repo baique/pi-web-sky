@@ -735,7 +735,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       soundEnabled={soundEnabled}
       onSoundToggle={onSoundToggle}
       onAudioUnlock={unlockAudio}
-      draftKey={session?.id ?? newSessionDraftKey ?? undefined}
+      draftKey={session?.id ?? (sessionIdRef.current ?? newSessionDraftKey) ?? undefined}
       cwd={session?.cwd ?? newSessionCwd}
       taskName={taskName}
       atBottom={atBottom}

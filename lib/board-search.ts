@@ -38,13 +38,16 @@ export function collectSearchable(editor: Editor): SearchableItem[] {
   return out;
 }
 
-/** 按 query 过滤（大小写不敏感子串匹配）。空 query 返回空结果。 */
+/** 按 query 过滤：空格分隔多个关键字，全部命中（AND）才算匹配。空 query 返回空结果。 */
 export function filterMatches(items: SearchableItem[], query: string): SearchMatch[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return [];
   return items
-    .filter((it) => it.text.toLowerCase().includes(q))
-    .map((it) => ({ item: it, snippet: makeSnippet(it.text, query) }));
+    .filter((it) => {
+      const text = it.text.toLowerCase();
+      return terms.every((term) => text.includes(term));
+    })
+    .map((it) => ({ item: it, snippet: makeSnippet(it.text, terms[0]) }));
 }
 
 /** 命中片段：以首个命中位置为中心截取 ~44 字符，两端加省略号。 */

@@ -229,8 +229,13 @@ export async function searchSessions(
 
   let rows: SearchRow[];
   const titleIds = new Set<string>();
-  if (query.length >= 3) {
-    const phrase = fuzzyQueryForTerm(query);
+  // 多关键字：空格分隔，全部命中（AND）。
+  // FTS5 trigram 对 1-2 字符词不可靠：任一词 <3 字符 → 整条退化为 LIKE 逐词 AND。
+  const terms = query.split(/\s+/).filter(Boolean);
+  const allLong = terms.every((term) => term.length >= 3);
+  if (allLong) {
+    // 每个词一个 FTS 短语，AND 组合（各词均为子串命中）
+    const phrase = terms.map(fuzzyQueryForTerm).join(" AND ");
     rows = db
       .prepare(
         "SELECT session_id, ifnull(snippet(session_search, 2, '[', ']', '…', 12), '') AS snip " +
@@ -241,14 +246,15 @@ export async function searchSessions(
       titleIds.add(r.session_id);
     }
   } else {
-    const like = `%${query}%`;
+    // LIKE 逐词 AND：每个词 (title LIKE ? OR body LIKE ?)，组合成 AND
+    const where = terms.map(() => "(title LIKE ? OR body LIKE ?)").join(" AND ");
+    const params = terms.flatMap((term) => [`%${term}%`, `%${term}%`]);
     rows = db
-      .prepare(
-        "SELECT session_id, '' AS snip FROM session_search " +
-          "WHERE title LIKE ? OR body LIKE ? LIMIT ?",
-      )
-      .all(like, like, cap) as unknown as SearchRow[];
-    for (const r of db.prepare("SELECT session_id FROM session_search WHERE title LIKE ?").all(like) as { session_id: string }[]) {
+      .prepare(`SELECT session_id, '' AS snip FROM session_search WHERE ${where} LIMIT ?`)
+      .all(...params, cap) as unknown as SearchRow[];
+    const titleWhere = terms.map(() => "title LIKE ?").join(" AND ");
+    const titleParams = terms.map((term) => `%${term}%`);
+    for (const r of db.prepare(`SELECT session_id FROM session_search WHERE ${titleWhere}`).all(...titleParams) as { session_id: string }[]) {
       titleIds.add(r.session_id);
     }
   }

@@ -57,14 +57,23 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
     );
   }, [sessionId]);
 
+  // 统计按钮文案：拿到模型上下文占用（percent）+ 上下文长度（contextWindow）时，
+  // 把「统计」二字换成实时占用摘要（如 42% / 1.0M），否则保持「统计」。（同 AppShell 顶栏）
+  const statsLabel = contextUsage?.contextWindow && contextUsage.percent !== null
+    ? `${contextUsage.percent.toFixed(0)}% / ${formatCompact(contextUsage.contextWindow)}`
+    : t("nav.stats");
+
   const activeTodoCount = todos.filter((todo) => todo.status !== "completed").length;
 
-  // 弹层宽度 = 标题栏宽：弹层展开在标题栏下方，与标题同宽同左。
+  // 弹层宽度 = 标题栏可视宽：弹层展开在标题栏下方，与标题同宽同左。
   // 注：标题栏是卡片外壳内、工作台上方的元素；卡片外壳含 padding 8 左右 + 边框，比标题栏宽（会超宽）。
+  // 宽度必须用 getBoundingClientRect（屏幕可视宽，已含画布 zoom 缩放），不能用 clientWidth（布局宽）——
+  // 面板 portal 到 body 不受画布 zoom，用布局宽会在 zoom≠1 时比标题栏宽（超宽）或窄。
   const getPanelWidth = useCallback(() => {
-    return navRef.current?.closest("[data-session-titlebar]")?.clientWidth
-      ?? navRef.current?.closest(".tl-html-container")?.clientWidth
-      ?? 300;
+    const tb = navRef.current?.closest("[data-session-titlebar]");
+    const w = tb?.getBoundingClientRect().width;
+    if (w) return w;
+    return navRef.current?.closest(".tl-html-container")?.getBoundingClientRect().width ?? 300;
   }, []);
 
   // 空白处点击 / Escape 关闭所有弹层（与 AppShell 顶栏行为一致）
@@ -154,7 +163,7 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
           <line x1="18" y1="20" x2="18" y2="4" />
           <line x1="6" y1="20" x2="6" y2="16" />
         </svg>
-        <span style={navBtnText}>{t("nav.stats")}</span>
+        <span style={navBtnText}>{statsLabel}</span>
       </button>
 
       {/* TODO */}
@@ -233,6 +242,15 @@ const navDivider: React.CSSProperties = {
 const navBgHover = "color-mix(in srgb, var(--glass-bg-strong) 40%, transparent)";
 const navBgActive = "color-mix(in srgb, var(--glass-bg-strong) 60%, transparent)";
 
+/** token 数紧凑格式化：1M / 12k / 345（与 AppShell 顶栏统计按钮同规约） */
+function formatCompact(n: number): string {
+  return n >= 1_000_000
+    ? `${(n / 1_000_000).toFixed(1)}M`
+    : n >= 1000
+      ? `${(n / 1000).toFixed(0)}k`
+      : String(n);
+}
+
 /** 统计浮层：复用 AppShell session-info popover 的样式语言，展示卡片内可得的 SessionStatsInfo */
 function StatsPopover({
   navRef,
@@ -298,7 +316,6 @@ function StatsPopover({
     if (m > 0) return `${m}m ${s}s`;
     return `${s}s`;
   };
-  const formatCompact = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
   const totalActiveMs = stats.totalActiveMs ?? 0;
 
   const sessionRows = [
