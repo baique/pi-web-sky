@@ -88,7 +88,7 @@ export function initSchema(db: DatabaseSync): void {
  * 老库打开时自动按序补齐缺失的迁移（每个迁移一个事务，成功后推进版本号），
  * 新库建表后从 v0 一路迁到 SCHEMA_VERSION。重复打开不再执行已完成的迁移。
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 interface Migration {
   version: number;
@@ -149,6 +149,20 @@ const MIGRATIONS: Migration[] = [
       // 任务看板 id = 任务 id，task_id 必须唯一。SQLite UNIQUE 索引允许多个 NULL，
       // 手动看板（task_id=NULL）不受影响。并发懒创建时由数据库层拒绝重复插入。
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_boards_task_unique ON boards(task_id);",
+    ],
+  },
+  {
+    version: 7,
+    name: "task cards",
+    statements: [
+      "CREATE TABLE IF NOT EXISTS task_cards (\n  id            TEXT PRIMARY KEY,\n  board_id      TEXT NOT NULL,\n  project_key   TEXT NOT NULL,\n  number        INTEGER NOT NULL,\n  name          TEXT NOT NULL,\n  description   TEXT NOT NULL DEFAULT '',\n  ready_status  TEXT NOT NULL DEFAULT 'draft',\n  exec_status   TEXT NOT NULL DEFAULT 'not_started',\n  priority      INTEGER NOT NULL DEFAULT 0,\n  due           INTEGER,\n  attachments   TEXT NOT NULL DEFAULT '[]',\n  cwd           TEXT,\n  use_worktree  INTEGER NOT NULL DEFAULT 0,\n  max_retries   INTEGER NOT NULL DEFAULT 3,\n  retry_count   INTEGER NOT NULL DEFAULT 0,\n  session_id    TEXT,\n  created       INTEGER NOT NULL,\n  updated       INTEGER NOT NULL\n);",
+      "CREATE INDEX IF NOT EXISTS idx_task_cards_board ON task_cards(board_id);",
+      "CREATE INDEX IF NOT EXISTS idx_task_cards_project ON task_cards(project_key);",
+      "CREATE INDEX IF NOT EXISTS idx_task_cards_status ON task_cards(ready_status, exec_status);",
+      "CREATE TABLE IF NOT EXISTS task_card_links (\n  id             TEXT PRIMARY KEY,\n  card_id        TEXT NOT NULL,\n  target_card_id TEXT NOT NULL,\n  kind           TEXT NOT NULL,\n  created        INTEGER NOT NULL,\n  UNIQUE(card_id, target_card_id, kind)\n);",
+      "CREATE INDEX IF NOT EXISTS idx_task_links_card ON task_card_links(card_id);",
+      "CREATE TABLE IF NOT EXISTS task_card_questions (\n  id         TEXT PRIMARY KEY,\n  card_id    TEXT NOT NULL,\n  session_id TEXT NOT NULL,\n  question   TEXT NOT NULL,\n  status     TEXT NOT NULL DEFAULT 'pending',\n  answer     TEXT,\n  created    INTEGER NOT NULL,\n  answered   INTEGER\n);",
+      "CREATE INDEX IF NOT EXISTS idx_task_questions_status ON task_card_questions(status);",
     ],
   },
 ];
