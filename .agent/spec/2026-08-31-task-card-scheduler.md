@@ -30,7 +30,7 @@
 | 3 | 执行状态机：`not_started → running → review → done/failed/waiting_reply`；`failed(retry<max) → not_started`；`waiting_reply →(用户回复+调度)→ running`；`abandoned` 人工 | 完成判定不纠结：程序判得了的用程序，判不了的交 AI 审核 |
 | 4 | 审核/阻塞判定用 `SessionManager.inMemory()`（`--no-session` 等价）临时会话，**不落盘、不污染执行会话文件** | SDK 已支持（`--no-session` = `SessionManager.inMemory`，已验证）；执行会话上下文干净，重试不带审核噪音 |
 | 5 | 调度/巡检两个定时器 in-process（`instrumentation.ts` 注册，挂 `globalThis.__piTaskScheduler` 防热重载重复启动） | 与 `__piSessions` 同模式；单进程 dev server，无需外部 cron |
-| 6 | 全局并发闸门只数**调度器派发的 running 任务卡**；用户手动会话不计数、不受限 | 后台自动化克制，人工操作自由 |
+| 6 | 全局并发闸门只数**调度器派发的 running 任务卡**；**手动 run = 前台直接运行，不入队列、不占闸门**；用户手动会话不受限 | 后台自动化克制，人工操作自由 |
 | 7 | 派发会话命名 `#N 标题`（`PATCH /api/sessions/[id]` 设置显示名）；任务看板内 `assignSessionToTask` 归属任务，否则落临时区 | 侧栏归属与「任务即看板」既有逻辑一致 |
 | 8 | 回复续会话走统一调度闸门（不立即发） | 与「调度优先级」一致，避免绕过并发控制 |
 
@@ -104,7 +104,7 @@ CREATE INDEX IF NOT EXISTS idx_task_questions_status ON task_card_questions(stat
 ```
 GET/POST   /api/task-cards                      ?boardId 列表/建卡（含依赖）
 GET/PATCH/DELETE /api/task-cards/[id]           详情/改字段(含依赖同步边)/删(级联)
-POST       /api/task-cards/[id]/run             手动触发调度（立即排入调度器队列，走并发闸门）
+POST       /api/task-cards/[id]/run             手动前台运行（直接派发执行，不入调度队列、不占并发闸门；running 中则 409）
 POST       /api/task-cards/[id]/abort           停止执行会话（转 review→程序判失败或人工）
 GET        /api/task-card-questions             pending/answered 列表
 POST       /api/task-card-questions/[id]/answer 用户回答（status→answered，answer 落库）
@@ -112,17 +112,17 @@ GET        /api/task-cards/[id]/context         （供审核用）执行会话�
 ```
 
 - 建卡 POST body：`{ boardId, name, description, readyStatus, priority, due, attachments, cwd, useWorktree, prerequisites:[], related:[] }`；服务端补 `project_key`（=board 的 project_key）与 `number`。
-- 手动运行：入调度队列而非直接开跑（保证并发闸门与优先级一致）。
+- **手动运行（前台）**：不入调度队列、不占并发闸门，直接走派发流程（§5.1）立即执行；`exec=running` 时拒绝（409）。与「用户手动会话随便并发」一致。
 
 ## 5. 调度定时器（S2）
 
 - 启动：`lib/task-scheduler.ts` 在 `instrumentation.ts` register 里 `startTaskScheduler()`，挂 `globalThis.__piTaskScheduler` 防重。调度周期 ~10s；巡检周期 ~30s（两个 setInterval 同模块）。
-- **并发闸门**：`countRunningDispatched()`（running 的任务卡数）≥ 全局上限（默认 1，可配置）→ 本轮不派发新卡。
+- **并发闸门**：`countRunningDispatched()`（running 的任务卡数）≥ 全局上限（默认 1，可配置）→ 本轮不派发新卡。**仅约束调度器自动派发**；手动 run（§4）与用户手动会话绕过闸门前台直跑。
 - **每轮派发优先级**：
   1. **回复队列**：`task_card_questions` 取 `status=answered` 未续的（按 answered 时间序）→ 续会话：把 `answer` 发执行会话（若会话是 `waiting_input` 挂起 → `extension_ui_response`；否则 `prompt` 发回复）→ `exec= running`。
   2. **新任务**：`ready=todo & exec=not_started & 无前置或前置均 done`（前置 = `task_card_links kind=prerequisite` 且其卡 `exec_status=done`）。
   3. **重试**：`exec=failed & retry_count<max_retries`（reset retry 时机见 §7）。
-- **派发流程**（新任务/重试）：
+- **派发流程**（§5.1，新任务/重试/手动 run 共用）：
   1. 定 cwd：`use_worktree` → 复用/创建 worktree（`lib/worktree.ts`）取路径；否则 `cwd || 项目根`。
   2. `startRpcSession` 建执行会话（`session_id` 空时；已存在复用），`toolNames` 默认 FULL 预设。
   3. 会话命名 `#N 标题`（`PATCH /api/sessions/[id]` 显示名）。
