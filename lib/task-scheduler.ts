@@ -45,6 +45,10 @@ export const BLOCK_COOLDOWN_MS = 10 * 60 * 1000;
 /** 阻塞判定冷却表（模块级即可：仅节流，热重载重置无害） */
 const blockCheckAt = new Map<string, number>();
 
+/** 审核冷却：review 卡 AI 判定未决（other/失败）时，冷却期内不重复审核（防每 10s 烧一次模型） */
+export const AUDIT_COOLDOWN_MS = 5 * 60 * 1000;
+const reviewAuditAt = new Map<string, number>();
+
 /** 会话静默期兜底：running 卡会话不在跑但最后活动距今不足该值时，视为刚结束未及事件订阅（防派发启动竞态） */
 export const SESSION_SETTLE_MS = 5_000;
 
@@ -278,6 +282,7 @@ function enterWaitingReply(card: TaskCard, questionHint: string): void {
 
 /** 审核 review 卡：程序检测失败→failed；否则 AI 审核 → done/failed/waiting_reply/other。 */
 export async function processReviewCards(): Promise<number> {
+  const now = Date.now();
   let processed = 0;
   for (const card of listCardsByExecStatus(["review"])) {
     const snapshot = card.sessionId ? await readSessionAuditSnapshot(card.sessionId) : null;
@@ -295,7 +300,10 @@ export async function processReviewCards(): Promise<number> {
       processed += 1;
       continue;
     }
-    // 3. AI 独立审核
+    // 3. AI 独立审核（冷却：未决时冷却期内不重复烧模型）
+    const lastAudit = reviewAuditAt.get(card.id) ?? 0;
+    if (now - lastAudit < AUDIT_COOLDOWN_MS) continue;
+    reviewAuditAt.set(card.id, now);
     const cwd = resolveDispatchCwd(card);
     if (!cwd) continue;
     const result = await runAuditVerdict({
@@ -389,6 +397,7 @@ async function abortAndReguide(card: TaskCard): Promise<void> {
             "请改用 tmux 后台启动服务：tmux new-session -d '命令'，不要在前台阻塞等待日志；" +
             "如为死循环请重新规划步骤后继续。",
         });
+        watchForAgentEnd(card, session);
       }
     }
     updateCard(card.id, { execStatus: "running" });

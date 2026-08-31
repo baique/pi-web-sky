@@ -512,14 +512,6 @@ export function answerQuestion(id: string, answer: string): TaskCardQuestion | n
 }
 
 /** 取一张卡最新的待回答记录（回复队列续会话用），无则 null。 */
-export function getLatestPendingQuestion(cardId: string): TaskCardQuestion | null {
-  const row = getDb()
-    .prepare(`SELECT ${QUESTION_COLUMNS} FROM task_card_questions WHERE card_id = ? AND status = 'pending' ORDER BY created LIMIT 1`)
-    .get(cardId) as unknown as TaskCardQuestionRow | undefined;
-  return row ? rowToQuestion(row) : null;
-}
-
-/** 取最新一条 answered 待续的记录（回复队列：answered 但卡仍在 waiting_reply）。 */
 export function listAnswerableQuestions(): TaskCardQuestion[] {
   // 卡 exec_status='waiting_reply' 且其最新 answered 记录尚未续会话
   const rows = getDb()
