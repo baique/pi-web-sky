@@ -74,6 +74,12 @@ export class StickyNoteUtil extends BaseBoxShapeUtil<StickyNoteShape> {
     return true;
   }
 
+  /** 便笺内部可滚动（编辑态 textarea / 非编辑态 markdown 内容区）：
+   *  声明后 tldraw 在编辑本便笺时豁免 wheel（不劫持成画布平移），让内部正常滚动。 */
+  override canScroll(): boolean {
+    return true;
+  }
+
   override hideRotateHandle(): boolean {
     return true;
   }
@@ -107,8 +113,9 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
   //   文本拖动 = 浏览器原生选字（CSS 已放行 user-select:text）。
   // - 但 tldraw 的 canvas 层事件（选中 / ClickManager 双击进编辑）也因此收不到，
   //   由本地 click / dblclick 补回（浏览器保证拖动后不派发 click，选中与拖拽天然互斥）。
+  // - 仅拦左键(0)：右键必须冒泡到 tldraw 打开上下文菜单（右键便笺失灵根因）。
   const isolateContent = useCallback(
-    (e: React.PointerEvent) => e.stopPropagation(),
+    (e: React.PointerEvent) => { if (e.button === 0) e.stopPropagation(); },
     [],
   );
 
@@ -300,12 +307,18 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
             ref={textareaRef}
             value={draft}
             onChange={(e) => { setDraft(e.target.value); draftRef.current = e.target.value; }}
+            onWheel={(e) => {
+              // 编辑态 textarea 内部滚动：内容溢出时才是用户在滚它 → 拦截放行内部滚动；
+              // ctrl/meta+wheel 缩放交给画布（canScroll 豁免兜底，双保险）
+              if (e.ctrlKey || e.metaKey) return;
+              if (e.currentTarget.scrollHeight > e.currentTarget.clientHeight) e.stopPropagation();
+            }}
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(); }
               else if (e.key === "Escape") { e.preventDefault(); cancel(); }
             }}
-            onPointerDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => { if (e.button === 0) e.stopPropagation(); }}
             spellCheck={false}
             placeholder="Markdown 便笺…"
             className="sticky-note-input"
@@ -398,6 +411,12 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
             overflowY: "auto",
             padding: "4px var(--bubble-pad-x, 12px) var(--bubble-pad-y, 8px)",
             textAlign: "left",
+          }}
+          onWheel={(e) => {
+            // 非编辑态 markdown 内容滚动：内容溢出时才劫持（用户在滚内容），放行内部滚动；
+            // ctrl/meta+wheel 缩放交给画布
+            if (e.ctrlKey || e.metaKey) return;
+            if (e.currentTarget.scrollHeight > e.currentTarget.clientHeight) e.stopPropagation();
           }}
         >
           {text.trim() ? (

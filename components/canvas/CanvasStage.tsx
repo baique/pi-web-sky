@@ -250,6 +250,10 @@ export function CanvasStage({
               // 开启内置拖放吸附对齐（对齐线/中点/边缘），不影响展示效果
               editor.user.updateUserPreferences({ isSnapMode: true });
               board.onMount(editor);
+              // 聚焦画布：解除 tldraw 的 isFocused 死锁。autoFocus={false} 下 isFocused 恒 false，
+              // tldraw 的 wheel（画布缩放/平移 + ctrl+wheel 防页面缩放）与键盘全被门控失效。
+              // 聚焦后 ctrl+wheel 缩放画布、滚轮平移、快捷键恢复；侧栏输入框点击时焦点自然转移。
+              editor.focus();
             }}
             components={components}
             autoFocus={false}

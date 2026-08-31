@@ -138,12 +138,19 @@ export function SessionWorkbench({
   // wheel 拦截：tldraw 在 container 监听 wheel（画布 pan/zoom），工作台内的滚轮必须被会话自己消费。
   // 不用 useEffect([])：tldraw 重渲染/resize/展开收合会替换 shape 的 DOM，[] 只在首次挂载跑，
   // 监听会挂在被替换的旧元素上失效。用无依赖 effect —— 每次渲染后都清旧挂新，保证监听总在
-  // 当前元素。捕获 + 冒泡双拦截，不 preventDefault（让消息区正常滚动）。
+  // 当前元素。判定「按需」：目标在工作台内某个可滚动容器（或其内部）时拦截（stopPropagation，
+  // 不 preventDefault —— 让消息区正常滚动）；否则放行给画布平移/缩放。
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
-    // 仅激活时拦截 wheel（会话消息区滚动）；非激活放行给画布平移/缩放
-    const stop = (e: WheelEvent) => { if (isActive()) e.stopPropagation(); };
+    const stop = (e: WheelEvent) => {
+      // ctrl/meta+wheel 是缩放手势：放行给画布（tldraw 缩放），不吞
+      if (e.ctrlKey || e.metaKey) return;
+      const t = e.target;
+      if (t instanceof Node && el.contains(t) && hasScrollableAncestor(t, el)) {
+        e.stopPropagation();
+      }
+    };
     el.addEventListener("wheel", stop);
     return () => {
       el.removeEventListener("wheel", stop);
@@ -226,8 +233,9 @@ export function SessionWorkbench({
       // 工作台嵌在 tldraw 卡片内：阻止事件冒泡到画布。tldraw 画布在 pointerDown 上
       // preventDefault（会吞掉后续 click），导致终端/模型选择器/session/通知等无法弹出。
       // 冒泡阶段拦截：事件先正常到达目标（内部按钮可点击），再阻止冒泡到画布。
-      onPointerDown={(e) => { if (isActive()) e.stopPropagation(); }}
-      onPointerUp={(e) => { if (isActive()) e.stopPropagation(); }}
+      // 仅左键（button 0）拦截；右键(2)/中键(1)放行 —— 右键必须冒泡到 tldraw 打开菜单。
+      onPointerDown={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
+      onPointerUp={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
@@ -280,3 +288,27 @@ const containerStyle: React.CSSProperties = {
   overflow: "hidden",
   color: "var(--text)",
 };
+
+/** 从目标向上找可滚动容器（到 root 为止）：目标在可滚动容器内 → 滚轮属于它，不冒泡到画布。
+ *  与 tldraw usePassThroughWheelEvents 同思路：内容溢出 + overflow 可滚动才算数。 */
+function hasScrollableAncestor(target: Node, root: HTMLElement): boolean {
+  let elm: Element | null = target instanceof Element ? target : target.parentElement;
+  while (elm && elm instanceof HTMLElement) {
+    if (elm === root) break;
+    const overflowsY = elm.scrollHeight > elm.clientHeight;
+    const overflowsX = elm.scrollWidth > elm.clientWidth;
+    if (overflowsY || overflowsX) {
+      const style = getComputedStyle(elm);
+      const oy = style.overflowY;
+      const ox = style.overflowX;
+      if (
+        (overflowsY && (oy === "auto" || oy === "scroll" || oy === "overlay")) ||
+        (overflowsX && (ox === "auto" || ox === "scroll" || ox === "overlay"))
+      ) {
+        return true;
+      }
+    }
+    elm = elm.parentElement;
+  }
+  return false;
+}
