@@ -244,6 +244,19 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   const isCreating = !cardId;
   const sessionId = detail?.card.sessionId ?? null;
 
+  // 轮询器状态同步：画布层 2.5s 轮询会把本 shape 的 execStatus props 更新为调度器最新状态，
+  // 这里镜像进 draft——头部徽章（读 draft.execStatus）自动刷新，保存时也不会用旧值覆盖调度器状态。
+  const shapeExecStatus = useValue("execStatus", () => {
+    const s = editor.getShape(shape.id);
+    return (s?.props as TaskCardProps | undefined)?.execStatus ?? null;
+  }, [editor, shape.id]);
+  useEffect(() => {
+    if (shapeExecStatus && draft && draft.execStatus !== shapeExecStatus) {
+      set("execStatus", shapeExecStatus as ExecStatus);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shapeExecStatus]);
+
   // 表单草稿（受控）。空卡=默认草稿（建卡向导）；已建卡=detail 加载后初始化一次。
   const [draft, setDraft] = useState<TaskCard | null>(() =>
     isCreating

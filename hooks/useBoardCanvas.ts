@@ -135,6 +135,25 @@ export function useBoardCanvas({
         const data = (await res.json()) as RunningSnapshot;
         if (stopped) return;
         setRunningCached(data);
+        // 任务卡状态同步：快照里的活跃卡若属于本画布 → 更新对应 task-card shape 的 execStatus（头部徽章自动刷新）
+        const bid = boardIdRef.current;
+        const editor = editorRef.current;
+        if (bid && editor && data.taskCards?.length) {
+          const mine = data.taskCards.filter((c) => c.boardId === bid);
+          if (mine.length > 0) {
+            const updates: TLShapePartial[] = [];
+            for (const shape of editor.getCurrentPageShapes()) {
+              if (shape.type !== "task-card") continue;
+              const p = shape.props as { cardId?: string; execStatus?: string };
+              if (!p.cardId) continue;
+              const st = mine.find((c) => c.cardId === p.cardId);
+              if (st && st.execStatus !== p.execStatus) {
+                updates.push({ id: shape.id, type: "task-card", props: { execStatus: st.execStatus as never } });
+              }
+            }
+            if (updates.length > 0) editor.updateShapes(updates);
+          }
+        }
       } catch {
         // keep last
       }
@@ -1023,9 +1042,11 @@ export function useBoardCanvas({
     try {
       const res = await fetch(`/api/tasks/${encodeURIComponent(tid)}`, { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { task?: { sessionIds?: string[] } | null };
+      const data = (await res.json()) as { task?: { sessionIds?: string[] } | null; occupiedSessionIds?: string[] };
       const sessionIds = data.task?.sessionIds ?? [];
       taskSessionIdsRef.current = sessionIds;
+      // 任务卡占用的执行会话不单独成卡（已在任务卡工作台展示）——补卡时排除
+      const occupied = new Set(data.occupiedSessionIds ?? []);
       const existing = new Set<string>();
       // draft 卡（taskId 匹配本任务）视为已占位：该卡正在转正（ensure_session
       // 已把会话挂到任务下、但卡片 sessionId 尚未写回），补卡会重复建卡。
@@ -1041,7 +1062,15 @@ export function useBoardCanvas({
       }
       // 有待转正 draft 卡时跳过本轮补卡（下轮轮询再校验，避免重复卡）
       if (hasPendingDraft) return;
-      const missing = sessionIds.filter((sid) => !existing.has(sid));
+      // 已被任务卡占用的会话不再单独展示（任务卡工作台已承载）：移除画布上对应的 session-card
+      const toRemove: TLShape[] = [];
+      for (const shape of editor.getCurrentPageShapes()) {
+        if (shape.type !== "session-card") continue;
+        const sid = (shape.props as SessionCardShapeProps).sessionId;
+        if (sid && occupied.has(sid)) toRemove.push(shape);
+      }
+      if (toRemove.length > 0) editor.deleteShapes(toRemove.map((s) => s.id));
+      const missing = sessionIds.filter((sid) => !existing.has(sid) && !occupied.has(sid));
       if (missing.length === 0) return;
       // 只补有效会话：会话文件必须真实存在（在 sessionTitles 里）。
       // 僵尸会话（meta 残留、文件已删）不补卡——补了只会灰化且删不掉。

@@ -82,4 +82,15 @@ export interface RunningSnapshot {
   runningSessionIds: string[];
   /** 细分状态：只含运行中的会话 id */
   states: Record<string, RunningSessionState>;
+  /** 任务卡状态：调度器活跃态卡（running/review/waiting_reply），前端按 boardId 过滤本画布后更新徽章 */
+  taskCards: TaskCardRunningState[];
+}
+
+/** 任务卡运行状态（轮询器透传给前端，供看板卡片自动刷新 execStatus 徽章） */
+export interface TaskCardRunningState {
+  cardId: string;
+  boardId: string;
+  number: number;
+  name: string;
+  execStatus: string;
 }
