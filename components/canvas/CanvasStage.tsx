@@ -2,7 +2,7 @@
 
 import "tldraw/tldraw.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Tldraw, DefaultToolbar, DefaultToolbarContent, DefaultStylePanel, StylePanelColorPicker, StylePanelFillPicker, StylePanelDashPicker, StylePanelSizePicker, StylePanelFontPicker, StylePanelTextAlignPicker, StylePanelLabelAlignPicker, StylePanelGeoShapePicker, StylePanelArrowKindPicker, StylePanelArrowheadPicker, StylePanelSplinePicker, TldrawUiToolbarButton, createShapeId, defaultShapeUtils, useEditor, useValue, type TLComponents, type TLUiOverrides, type TLUiStylePanelProps } from "tldraw";
+import { Tldraw, DefaultToolbarContent, DefaultStylePanel, StylePanelColorPicker, StylePanelFillPicker, StylePanelDashPicker, StylePanelSizePicker, StylePanelFontPicker, StylePanelTextAlignPicker, StylePanelLabelAlignPicker, StylePanelGeoShapePicker, StylePanelArrowKindPicker, StylePanelArrowheadPicker, StylePanelSplinePicker, TldrawUiToolbar, TldrawUiToolbarButton, TldrawUiOrientationProvider, OverflowingToolbar, ToggleToolLockedButton, createShapeId, defaultShapeUtils, useEditor, useTldrawUiComponents, useValue, type TLComponents, type TLUiOverrides, type TLUiStylePanelProps } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
 import { StickyNoteUtil } from "./StickyNoteShape";
 import { StickyNoteTool } from "./StickyNoteTool";
@@ -95,6 +95,46 @@ function TaskCardToolbarButton() {
         <path d="M3 10h18M8 15h4" />
       </svg>
     </TldrawUiToolbarButton>
+  );
+}
+
+/**
+ * 底部工具条（自定义，替代 DefaultToolbar）：保留 tldraw 默认工具
+ * （DefaultToolbarContent，溢出进 More），任务卡按钮固定在 extras 区
+ * （OverflowingToolbar 之外，始终可见不折叠）。
+ * 结构复刻 DefaultToolbar（tlui-main-toolbar__extras + OverflowingToolbar）。
+ */
+function TaskCardToolbar() {
+  const editor = useEditor();
+  const activeToolId = useValue("current tool id", () => editor.getCurrentToolId(), [editor]);
+  const { ActionsMenu, QuickActions } = useTldrawUiComponents();
+  return (
+    <TldrawUiOrientationProvider orientation="horizontal" tooltipSide="top">
+      <div className="tlui-main-toolbar tlui-main-toolbar--horizontal">
+        <div className="tlui-main-toolbar__inner">
+          <div className="tlui-main-toolbar__left">
+            <div className="tlui-main-toolbar__extras">
+              <TldrawUiToolbar orientation="horizontal" className="tlui-main-toolbar__extras__controls" label="extras">
+                {QuickActions ? <QuickActions /> : null}
+                {ActionsMenu ? <ActionsMenu /> : null}
+                <TaskCardToolbarButton />
+              </TldrawUiToolbar>
+              <ToggleToolLockedButton activeToolId={activeToolId} />
+            </div>
+            <OverflowingToolbar
+              orientation="horizontal"
+              sizingParentClassName="tlui-main-toolbar"
+              minItems={1}
+              minSizePx={310}
+              maxItems={8}
+              maxSizePx={470}
+            >
+              <DefaultToolbarContent />
+            </OverflowingToolbar>
+          </div>
+        </div>
+      </div>
+    </TldrawUiOrientationProvider>
   );
 }
 
@@ -223,14 +263,8 @@ export function CanvasStage({
     KeyboardShortcutsDialog: null,
     DebugPanel: null,
     DebugMenu: null,
-    // 底部工具条：保留 tldraw 默认工具（note 按钮经 uiOverrides 换成我们的 sticky-note），
-    // 尾部追加「任务卡」按钮（独立 tool id，无内置冲突）。
-    Toolbar: () => (
-      <DefaultToolbar>
-        <DefaultToolbarContent />
-        <TaskCardToolbarButton />
-      </DefaultToolbar>
-    ),
+    // 底部工具条：自定义 TaskCardToolbar（默认工具 + 任务卡按钮固定在外不折叠）
+    Toolbar: () => <TaskCardToolbar />,
   }), []);
 
   return (
