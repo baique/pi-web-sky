@@ -735,28 +735,62 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         >
           {formBody}
         </div>
-        {/* 右：执行会话工作台 / 空态（expanded 才显示） */}
+        {/* 右：执行会话面板（expanded 才显示）——独立标题栏 + 工作台，与左表单互不干扰。
+            标题栏结构对齐会话卡片展开态（data-session-titlebar + data-session-navbar-slot）：
+            SessionWorkbench 会把 SessionNavBar（历史/统计/TODO）portal 到 slot，弹层定位也
+            以 data-session-titlebar 为锚（宽度 = 右面板宽）。 */}
         {expanded && (
-        <div style={{ flex: 1, minWidth: 0, borderLeft: "1px solid var(--bubble-hairline)", position: "relative" }}>
-          {sessionId ? (
-            <SessionWorkbench sessionId={sessionId} />
-          ) : (
-            <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--text-dim)", fontSize: 12 }}>
-              {isCreating ? (
-                <>
-                  <div>填写左侧信息创建任务卡</div>
-                  <div style={{ fontSize: 10 }}>创建后调度器将自动派发执行（就绪=待办时）</div>
-                </>
-              ) : (
-                <>
-                  <div>尚未派发执行</div>
-                  <div style={{ fontSize: 10 }}>
-                    {detail?.card.execStatus === "not_started" ? "就绪=待办后调度器自动派发" : `执行状态：${EXEC_BADGE[detail?.card.execStatus ?? "not_started"].label}`}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+        <div style={{ flex: 1, minWidth: 0, borderLeft: "1px solid var(--bubble-hairline)", display: "flex", flexDirection: "column" }}>
+          {/* 会话面板标题栏：pointerEvents none 让 tldraw 接管拖拽（与会话卡同模式）；
+              导航条 slot 独立接收点击（stopPropagation 隔离拖拽，与任务卡头部按钮区同模式） */}
+          <div
+            data-session-titlebar
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "0 10px",
+              height: 36,
+              borderBottom: "1px solid var(--bubble-hairline)",
+              cursor: "grab",
+              pointerEvents: "none",
+              position: "relative",
+            }}
+          >
+            <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>
+              执行会话
+            </span>
+            <div style={{ flex: 1 }} />
+            {/* 导航条 portal 挂载点：SessionWorkbench 将 SessionNavBar 渲染到这里 */}
+            <div
+              data-session-navbar-slot
+              style={{ display: "flex", alignItems: "center", pointerEvents: "all" }}
+              onPointerDown={(e) => e.stopPropagation()}
+            />
+          </div>
+          {/* 工作台 / 空态 */}
+          <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+            {sessionId ? (
+              <SessionWorkbench sessionId={sessionId} />
+            ) : (
+              <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--text-dim)", fontSize: 12 }}>
+                {isCreating ? (
+                  <>
+                    <div>填写左侧信息创建任务卡</div>
+                    <div style={{ fontSize: 10 }}>创建后调度器将自动派发执行（就绪=待办时）</div>
+                  </>
+                ) : (
+                  <>
+                    <div>尚未派发执行</div>
+                    <div style={{ fontSize: 10 }}>
+                      {detail?.card.execStatus === "not_started" ? "就绪=待办后调度器自动派发" : `执行状态：${EXEC_BADGE[detail?.card.execStatus ?? "not_started"].label}`}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         )}
       </div>
