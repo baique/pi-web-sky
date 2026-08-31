@@ -291,9 +291,9 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   // 「高级」折叠区：默认收起
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  // 展开工作台时自动展开「高级」折叠区（收起时不强制恢复）
+  // 展开工作台时自动展开「高级」折叠区；收起时自动收起（与展开态保持一致）
   useEffect(() => {
-    if (expanded) setAdvancedOpen(true);
+    setAdvancedOpen(expanded);
   }, [expanded]);
 
   // 工作目录选择：DirectoryPicker 弹窗
