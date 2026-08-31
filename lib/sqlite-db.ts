@@ -158,6 +158,7 @@ const MIGRATIONS: Migration[] = [
       "CREATE TABLE IF NOT EXISTS task_cards (\n  id            TEXT PRIMARY KEY,\n  board_id      TEXT NOT NULL,\n  project_key   TEXT NOT NULL,\n  number        INTEGER NOT NULL,\n  name          TEXT NOT NULL,\n  description   TEXT NOT NULL DEFAULT '',\n  ready_status  TEXT NOT NULL DEFAULT 'draft',\n  exec_status   TEXT NOT NULL DEFAULT 'not_started',\n  priority      INTEGER NOT NULL DEFAULT 0,\n  due           INTEGER,\n  attachments   TEXT NOT NULL DEFAULT '[]',\n  cwd           TEXT,\n  use_worktree  INTEGER NOT NULL DEFAULT 0,\n  max_retries   INTEGER NOT NULL DEFAULT 3,\n  retry_count   INTEGER NOT NULL DEFAULT 0,\n  session_id    TEXT,\n  created       INTEGER NOT NULL,\n  updated       INTEGER NOT NULL\n);",
       "CREATE INDEX IF NOT EXISTS idx_task_cards_board ON task_cards(board_id);",
       "CREATE INDEX IF NOT EXISTS idx_task_cards_project ON task_cards(project_key);",
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_task_cards_number ON task_cards(project_key, number);",
       "CREATE INDEX IF NOT EXISTS idx_task_cards_status ON task_cards(ready_status, exec_status);",
       "CREATE TABLE IF NOT EXISTS task_card_links (\n  id             TEXT PRIMARY KEY,\n  card_id        TEXT NOT NULL,\n  target_card_id TEXT NOT NULL,\n  kind           TEXT NOT NULL,\n  created        INTEGER NOT NULL,\n  UNIQUE(card_id, target_card_id, kind)\n);",
       "CREATE INDEX IF NOT EXISTS idx_task_links_card ON task_card_links(card_id);",

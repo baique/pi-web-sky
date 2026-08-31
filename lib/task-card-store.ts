@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { getDb } from "./sqlite-db";
+import { SYSTEM_RUNNING_BOARD_ID } from "./board-types";
 
 // ============================================================================
 // 任务卡（工作项卡）元数据 —— SDK-free，参照 task-store 模式。
@@ -75,6 +76,24 @@ interface TaskCardRow {
 
 const now = () => Date.now();
 
+const READY_STATUSES = new Set<ReadyStatus>(["draft", "todo"]);
+const EXEC_STATUSES = new Set<ExecStatus>([
+  "not_started",
+  "running",
+  "review",
+  "done",
+  "failed",
+  "abandoned",
+  "waiting_reply",
+]);
+
+function assertReadyStatus(v: ReadyStatus | undefined): void {
+  if (v !== undefined && !READY_STATUSES.has(v)) throw new Error(`invalid readyStatus: ${String(v)}`);
+}
+function assertExecStatus(v: ExecStatus | undefined): void {
+  if (v !== undefined && !EXEC_STATUSES.has(v)) throw new Error(`invalid execStatus: ${String(v)}`);
+}
+
 function rowToCard(row: TaskCardRow): TaskCard {
   return {
     ...row,
@@ -132,6 +151,7 @@ export function createCard(input: {
   if (!input.projectKey) throw new Error("projectKey is required");
   if (!input.boardId) throw new Error("boardId is required");
   if (!name) throw new Error("name must not be empty");
+  assertReadyStatus(input.readyStatus);
 
   const id = randomUUID();
   const ts = now();
@@ -198,8 +218,8 @@ export function updateCard(
     bump("name", trimmed);
   }
   if (patch.description !== undefined) bump("description", patch.description);
-  if (patch.readyStatus !== undefined) bump("ready_status", patch.readyStatus);
-  if (patch.execStatus !== undefined) bump("exec_status", patch.execStatus);
+  if (patch.readyStatus !== undefined) { assertReadyStatus(patch.readyStatus); bump("ready_status", patch.readyStatus); }
+  if (patch.execStatus !== undefined) { assertExecStatus(patch.execStatus); bump("exec_status", patch.execStatus); }
   if (patch.priority !== undefined) bump("priority", patch.priority);
   if (patch.due !== undefined) bump("due", patch.due);
   if (patch.attachments !== undefined) bump("attachments", JSON.stringify(patch.attachments));
@@ -230,10 +250,10 @@ export function deleteCard(id: string): void {
     db.prepare("DELETE FROM task_card_links WHERE card_id = ? OR target_card_id = ?").run(id, id);
     db.prepare("DELETE FROM task_card_questions WHERE card_id = ?").run(id);
 
-    // 找该卡的 taskcard 画布节点（可能多个/可能没有）
+    // 找该卡的 taskcard 画布节点（可能多个/可能没有；排除只读系统看板）
     const nodes = db
-      .prepare("SELECT id, board_id AS boardId FROM board_nodes WHERE kind = 'taskcard' AND ref_id = ?")
-      .all(id) as Array<{ id: string; boardId: string }>;
+      .prepare("SELECT id, board_id AS boardId FROM board_nodes WHERE kind = 'taskcard' AND ref_id = ? AND board_id != ?")
+      .all(id, SYSTEM_RUNNING_BOARD_ID) as Array<{ id: string; boardId: string }>;
     for (const node of nodes) {
       db.prepare("DELETE FROM board_edges WHERE board_id = ? AND (from_id = ? OR to_id = ?)").run(
         node.boardId,
