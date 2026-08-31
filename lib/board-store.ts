@@ -223,15 +223,35 @@ export function createBoard(projectKey: string, name: string, taskId?: string): 
 }
 
 /**
- * 任务看板懒创建（upsert）：查 boards WHERE task_id = ?；不存在则创建
+ * 任务看板懒创建（原子 upsert）：查 boards WHERE task_id = ?；不存在则创建
  * （id = taskId，名 = 任务名）。返回 BoardInfo。
+ *
+ * 并发安全：boards.task_id 有 UNIQUE 索引（迁移 v6），多请求同时懒创建时
+ * 只有一个 INSERT 成功，其余 `INSERT OR IGNORE` 静默跳过；统一以最后查回
+ * 的结果返回——无论谁插入，所有并发请求都拿到同一行，不会重复创建。
  */
 export function getOrCreateTaskBoard(taskId: string, projectKey: string, name: string): BoardInfo {
-  const row = getDb()
-    .prepare("SELECT id, project_key AS projectKey, name, is_system AS isSystem, task_id AS taskId, sort_order AS sortOrder, created, updated FROM boards WHERE task_id = ?")
-    .get(taskId) as BoardRow | undefined;
-  if (row) return rowToBoard(row, countNodes(row.id));
-  return createBoard(projectKey, name, taskId);
+  const db = getDb();
+  const query = "SELECT id, project_key AS projectKey, name, is_system AS isSystem, task_id AS taskId, sort_order AS sortOrder, created, updated FROM boards WHERE task_id = ?";
+  const existing = db.prepare(query).get(taskId) as BoardRow | undefined;
+  if (existing) return rowToBoard(existing, countNodes(existing.id));
+
+  // 原子插入：task_id UNIQUE 约束下并发只有一个成功，其余被 IGNORE
+  const trimmed = name.trim();
+  const ts = now();
+  // 新看板置顶：sort_order 取当前项目最小值 - 1（并发算同值无害，仅排序并列）
+  const minRow = db.prepare("SELECT MIN(sort_order) AS minOrder FROM boards WHERE project_key = ?").get(projectKey) as { minOrder: number | null };
+  const sortOrder = minRow.minOrder === null ? 0 : minRow.minOrder - 1;
+  db.prepare("INSERT OR IGNORE INTO boards (id, project_key, name, is_system, task_id, sort_order, created, updated) VALUES (?, ?, ?, 0, ?, ?, ?, ?)")
+    .run(taskId, projectKey, trimmed, taskId, sortOrder, ts, ts);
+
+  // 统一查回：无论刚插入还是并发者已插入，task_id 唯一 → 同一行
+  const row = db.prepare(query).get(taskId) as BoardRow | undefined;
+  if (!row) {
+    // 理论不可达（INSERT OR IGNORE 后必存在）；防御性兜底
+    throw new Error(`Failed to create task board for task ${taskId}`);
+  }
+  return rowToBoard(row, countNodes(row.id));
 }
 
 /** 改名。系统看板 / 不存在返回 null。 */

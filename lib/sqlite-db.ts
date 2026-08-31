@@ -88,7 +88,7 @@ export function initSchema(db: DatabaseSync): void {
  * 老库打开时自动按序补齐缺失的迁移（每个迁移一个事务，成功后推进版本号），
  * 新库建表后从 v0 一路迁到 SCHEMA_VERSION。重复打开不再执行已完成的迁移。
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 interface Migration {
   version: number;
@@ -140,6 +140,15 @@ const MIGRATIONS: Migration[] = [
     statements: [
       "ALTER TABLE boards ADD COLUMN task_id TEXT NULL;",
       "CREATE INDEX IF NOT EXISTS idx_boards_task ON boards(task_id);",
+    ],
+  },
+  {
+    version: 6,
+    name: "boards.task_id unique (防并发重复创建任务看板)",
+    statements: [
+      // 任务看板 id = 任务 id，task_id 必须唯一。SQLite UNIQUE 索引允许多个 NULL，
+      // 手动看板（task_id=NULL）不受影响。并发懒创建时由数据库层拒绝重复插入。
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_boards_task_unique ON boards(task_id);",
     ],
   },
 ];
