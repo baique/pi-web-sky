@@ -1,6 +1,6 @@
 import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, resizeBox } from "tldraw";
 import type { TLBaseShape, TLShapePartial } from "tldraw";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { SessionWorkbench } from "./SessionWorkbench";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 import { dispatchBoardSessionRenamed } from "@/lib/board-events";
@@ -198,6 +198,24 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
 
   // draft 卡（新建会话）：sessionId 为空，尚未绑定真实会话
   const isDraft = !sessionId;
+  // 收合态中间区滚动容器 ref：内容溢出时支持滚轮内部滚动（激活态才拦截）。
+  // 放组件顶部：Hooks 必须在所有条件 return 之前调用（展开态分支提前 return）。
+  const replyScrollRef = useRef<HTMLDivElement | null>(null);
+  // 滚轮拦截（board-events 规范）：卡片被选中（激活）且光标在滚动容器内才
+  // stopPropagation（内部滚动）；未激活/光标在别处放行给画布。无依赖 effect：
+  // tldraw 重渲染会替换 DOM，每次渲染后重挂监听。
+  useEffect(() => {
+    const el = replyScrollRef.current;
+    if (!el) return;
+    const stop = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return; // 缩放交画布
+      const selected = editor.getSelectedShapeIds();
+      if (!selected.includes(shape.id)) return; // 未激活放行
+      if (el.scrollHeight > el.clientHeight) e.stopPropagation(); // 内容溢出才拦
+    };
+    el.addEventListener("wheel", stop);
+    return () => el.removeEventListener("wheel", stop);
+  });
 
   // 改名：内联输入 → PATCH /api/sessions/[id] → 事件桥刷左侧树 + 摘要轮询刷新标题
   const [renaming, setRenaming] = useState(false);
@@ -533,8 +551,10 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           </svg>
         </button>
       </div>
-      {/* 中间区：最后回复 —— 流体高度 + 左上对齐（不截断行数），拉高卡片可看完整内容 */}
+      {/* 中间区：最后回复 —— 流体高度 + 左上对齐；内容溢出时内部滚动（激活态滚轮拦截），
+          文本 pre-wrap + break-word 自动换行，无需横向滚动 */}
       <div
+        ref={replyScrollRef}
         style={{
           flex: 1,
           minHeight: 0,
@@ -543,8 +563,11 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           alignItems: "flex-start",
           justifyContent: "flex-start",
           gap: 2,
-          overflow: "hidden",
-          padding: "2px 0",
+          overflowY: "auto",
+          overflowX: "hidden",
+          padding: "2px 2px 2px 0",
+          scrollbarWidth: "thin",
+          scrollbarColor: "color-mix(in srgb, var(--border) 70%, transparent) transparent",
         }}
       >
         {lastReply ? (
@@ -554,8 +577,10 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
               lineHeight: 1.45,
               color: "var(--text-muted)",
               wordBreak: "break-word",
+              overflowWrap: "anywhere",
               whiteSpace: "pre-wrap",
               maxWidth: "100%",
+              userSelect: "text",
             }}
           >
             {lastReply}

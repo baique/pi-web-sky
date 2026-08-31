@@ -217,6 +217,41 @@ export function SessionCanvas({
         </div>
       )}
 
+      {/* 看板名称：左上角常驻，与搜索框/右侧菜单同一水平线（玻璃胶囊）。loading 期间不渲染。 */}
+      {!board.loading && board.board?.name && (
+        <div
+          style={{
+            position: "absolute",
+            top: 12,
+            left: 12,
+            zIndex: 40,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            maxWidth: 260,
+            height: 34,
+            padding: "0 12px",
+            borderRadius: 999,
+            background: "var(--board-card-glass)",
+            backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+            WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+            border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+            boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
+            color: "var(--text)",
+          }}
+          title={board.board.name}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: 0.7 }}>
+            <rect x="3" y="3" width="7" height="7" rx="1.5" />
+            <rect x="14" y="3" width="7" height="7" rx="1.5" />
+            <rect x="3" y="14" width="7" height="7" rx="1.5" />
+            <rect x="14" y="14" width="7" height="7" rx="1.5" />
+          </svg>
+          <span style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {board.board.name}
+          </span>
+        </div>
+      )}
       {/* 看板搜索框：常驻，画布顶部居中（玻璃胶囊）。loading 期间不渲染 */}
       {!board.loading && (
         <div
