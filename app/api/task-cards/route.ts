@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createCard, deleteCard, listCards, replaceLinks } from "@/lib/task-card-store";
+import { createCard, deleteCard, getCard, listCards, replaceLinks } from "@/lib/task-card-store";
 import { addNode, getBoard, getNodeByRefId, syncCardEdges } from "@/lib/board-store";
 
 export const dynamic = "force-dynamic";
@@ -76,10 +76,28 @@ export async function POST(req: Request) {
     if (prerequisites === null || related === null) {
       return NextResponse.json({ error: "prerequisites/related must be string arrays" }, { status: 400 });
     }
+    const attachments = body.attachments === undefined ? undefined : parseStringArray(body.attachments);
+    if (attachments === null) {
+      return NextResponse.json({ error: "attachments must be a string array" }, { status: 400 });
+    }
 
     const board = getBoard(body.boardId);
     if (!board) {
       return NextResponse.json({ error: "Board not found" }, { status: 404 });
+    }
+    if (board.isSystem) {
+      return NextResponse.json({ error: "任务卡不能建在系统看板" }, { status: 400 });
+    }
+
+    // 依赖预校验（目标存在 + 同看板），避免 replaceLinks 抛错导致 500
+    for (const targetId of [...prerequisites, ...related]) {
+      const target = getCard(targetId);
+      if (!target) {
+        return NextResponse.json({ error: `dependency target not found: ${targetId}` }, { status: 400 });
+      }
+      if (target.boardId !== board.id) {
+        return NextResponse.json({ error: "依赖不允许跨看板" }, { status: 400 });
+      }
     }
 
     const card = createCard({
@@ -90,7 +108,7 @@ export async function POST(req: Request) {
       readyStatus: body.readyStatus as "draft" | "todo" | undefined,
       priority: typeof body.priority === "number" ? body.priority : undefined,
       due: typeof body.due === "number" ? body.due : body.due === null ? null : undefined,
-      attachments: Array.isArray(body.attachments) ? body.attachments.filter((x): x is string => typeof x === "string") : undefined,
+      attachments,
       cwd: typeof body.cwd === "string" ? body.cwd : undefined,
       useWorktree: typeof body.useWorktree === "boolean" ? body.useWorktree : undefined,
       maxRetries: typeof body.maxRetries === "number" ? body.maxRetries : undefined,

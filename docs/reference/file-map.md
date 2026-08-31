@@ -38,6 +38,8 @@ boards/[id]/canvas/route.ts     GET canvas | PUT save (乐观锁 + 空覆盖保�
 boards/[id]/nodes/...           node CRUD（卡片/便笺布局）
 boards/[id]/edges/...           edge CRUD（连线）
 boards/reorder/route.ts         POST 手动看板排序
+task-cards/route.ts              GET 任务卡列表(?boardId) | POST 建卡（带 node/依赖/连线）
+task-cards/[id]/route.ts         GET/PATCH/DELETE 任务卡（依赖替换同步边、级联删）
 tasks/route.ts                  GET/POST 任务元数据（session_meta 旁路）
 tasks/[id]/route.ts             GET/PATCH/DELETE（改名同步看板名；删除级联删看板）
 tasks/[id]/board/route.ts       GET 任务看板（懒创建，看板 id = 任务 id）

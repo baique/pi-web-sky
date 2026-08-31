@@ -136,3 +136,60 @@ test("校验：name 空 400、跨看板依赖 400、board 不存在 404", async 
   const badEnum = await patchTaskCard(jsonReq(`http://localhost/api/task-cards/${c1.id}`, "PATCH", { execStatus: "nonsense" }), { params: Promise.resolve({ id: c1.id }) });
   assert.equal(badEnum.status, 400);
 });
+
+test("POST 校验增强：跨看板依赖/目标不存在 400 且无残留、readyStatus/attachments 400、系统看板 400", async () => {
+  freshDb();
+  const b1 = createBoard(PROJECT, "看板A");
+  const b2 = createBoard("other-proj", "看板B");
+  const r1 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b1.id, name: "A" }));
+  const { card: c1 } = await r1.json();
+  const r2 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b2.id, name: "B" }));
+  const { card: c2 } = await r2.json();
+
+  const cross = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b1.id, name: "X", prerequisites: [c2.id] }));
+  assert.equal(cross.status, 400); // 跨看板依赖 → 400（不再是 500）
+  const missing = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b1.id, name: "X", prerequisites: ["nope"] }));
+  assert.equal(missing.status, 400); // 目标不存在 → 400
+  const badStatus = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b1.id, name: "X", readyStatus: "bogus" }));
+  assert.equal(badStatus.status, 400);
+  const badAtt = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b1.id, name: "X", attachments: ["ok", 3] }));
+  assert.equal(badAtt.status, 400);
+
+  // 无残留：board 里只有 c1/c2 各自一张卡（跨看板失败那次 X 没建成）
+  const list1 = await listTaskCards(new Request("http://localhost/api/task-cards?boardId=" + b1.id));
+  const { cards: cards1 } = await list1.json();
+  assert.equal(cards1.length, 1); // 只有 A
+  const list2 = await listTaskCards(new Request("http://localhost/api/task-cards?boardId=" + b2.id));
+  const { cards: cards2 } = await list2.json();
+  assert.equal(cards2.length, 1); // 只有 B
+
+  const sys = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: "__running__", name: "S" }));
+  assert.equal(sys.status, 400); // 系统看板不能建卡
+});
+
+test("POST 默认 x/y=60；GET 单卡 404；DELETE 不存在幂等", async () => {
+  freshDb();
+  const b = createBoard(PROJECT, "看板A");
+  const r1 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b.id, name: "A" }));
+  const { card: c1, nodeId } = await r1.json();
+  const canvas = getBoardCanvas(b.id);
+  const node = canvas.nodes.find((n) => n.id === nodeId);
+  assert.equal(node.x, 60);
+  assert.equal(node.y, 60);
+
+  const missing = await getTaskCard(new Request("http://localhost/api/task-cards/nope"), { params: Promise.resolve({ id: "nope" }) });
+  assert.equal(missing.status, 404);
+
+  const del = await deleteTaskCard(new Request("http://localhost/api/task-cards/nope", { method: "DELETE" }), { params: Promise.resolve({ id: "nope" }) });
+  assert.equal(del.status, 200); // 幂等
+  assert.equal(c1.id !== "nope", true);
+});
+
+test("PATCH 自环依赖 400", async () => {
+  freshDb();
+  const b = createBoard(PROJECT, "看板A");
+  const r1 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b.id, name: "A" }));
+  const { card: c1 } = await r1.json();
+  const selfDep = await patchTaskCard(jsonReq(`http://localhost/api/task-cards/${c1.id}`, "PATCH", { prerequisites: [c1.id] }), { params: Promise.resolve({ id: c1.id }) });
+  assert.equal(selfDep.status, 400);
+});

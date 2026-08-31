@@ -92,6 +92,12 @@ export async function PATCH(
     if (body.due !== undefined && body.due !== null && (typeof body.due !== "number" || !Number.isFinite(body.due))) {
       return NextResponse.json({ error: "due must be a number or null" }, { status: 400 });
     }
+    if (body.description !== undefined && typeof body.description !== "string") {
+      return NextResponse.json({ error: "description must be a string" }, { status: 400 });
+    }
+    if (body.cwd !== undefined && body.cwd !== null && typeof body.cwd !== "string") {
+      return NextResponse.json({ error: "cwd must be a string or null" }, { status: 400 });
+    }
     if (body.useWorktree !== undefined && typeof body.useWorktree !== "boolean") {
       return NextResponse.json({ error: "useWorktree must be a boolean" }, { status: 400 });
     }
@@ -105,8 +111,11 @@ export async function PATCH(
     }
     const depsProvided = prerequisites !== undefined || related !== undefined;
     if (depsProvided) {
-      // 先校验依赖目标同看板，避免 replaceLinks 抛错造成字段已更新但依赖未变的半更新
+      // 先校验依赖目标同看板 + 非自环，避免 replaceLinks 抛错造成字段已更新但依赖未变的半更新
       for (const targetId of [...(prerequisites ?? []), ...(related ?? [])]) {
+        if (targetId === id) {
+          return NextResponse.json({ error: "依赖不能指向自身" }, { status: 400 });
+        }
         const target = getCard(targetId);
         if (!target) {
           return NextResponse.json({ error: `dependency target not found: ${targetId}` }, { status: 400 });
