@@ -141,8 +141,7 @@ test("POST 校验增强：跨看板依赖/目标不存在 400 且无残留、rea
   freshDb();
   const b1 = createBoard(PROJECT, "看板A");
   const b2 = createBoard("other-proj", "看板B");
-  const r1 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b1.id, name: "A" }));
-  const { card: c1 } = await r1.json();
+  await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b1.id, name: "A" }));
   const r2 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b2.id, name: "B" }));
   const { card: c2 } = await r2.json();
 
