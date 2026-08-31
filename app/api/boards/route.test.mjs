@@ -168,6 +168,20 @@ test("canvas API: full replace + node/edge sub-resources", async () => {
   assert.equal(patched.x, 99);
   assert.deepEqual(patched.props, { color: "#f00" });
 
+  // PATCH 支持定向写入 refId（draft 卡转正）+ 返回 boards.updated（乐观锁基线）
+  const patchRefIdRes = await patchNode(jsonReq("http://localhost/x", "PATCH", { refId: "session-real-9" }), {
+    params: Promise.resolve({ id: board.id, nid: added.id }),
+  });
+  assert.equal(patchRefIdRes.status, 200);
+  const patchRefIdBody = await patchRefIdRes.json();
+  assert.equal(patchRefIdBody.node.refId, "session-real-9");
+  assert.equal(typeof patchRefIdBody.updated, "number");
+  // 缺省 refId 时保持不变（移动卡片不丢绑定）
+  const patchMoveRes = await patchNode(jsonReq("http://localhost/x", "PATCH", { x: 120 }), {
+    params: Promise.resolve({ id: board.id, nid: added.id }),
+  });
+  assert.equal((await patchMoveRes.json()).node.refId, "session-real-9");
+
   // edge sub-resource
   const edgeRes = await addEdge(jsonReq("http://localhost/api/boards/x/edges", "POST", { fromId: added.id, toId: "n1", dashed: true, label: "dep" }), {
     params: Promise.resolve({ id: board.id }),

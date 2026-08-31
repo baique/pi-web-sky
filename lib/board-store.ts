@@ -400,6 +400,8 @@ function getNode(boardId: string, nodeId: string): BoardNode | undefined {
 }
 
 export interface PatchNodeInput {
+  /** 会话卡绑定的会话 id（draft 转正时写入）。null 显式解绑；缺省不改。 */
+  refId?: string | null;
   x?: number;
   y?: number;
   w?: number;
@@ -408,7 +410,7 @@ export interface PatchNodeInput {
   props?: Record<string, unknown>;
 }
 
-/** 更新节点（移动/改尺寸/展开标记/属性）。系统看板或节点不存在返回 null。 */
+/** 更新节点（移动/改尺寸/展开标记/refId/属性）。系统看板或节点不存在返回 null。 */
 export function patchNode(boardId: string, nodeId: string, patch: PatchNodeInput): BoardNode | null {
   if (boardId === SYSTEM_RUNNING_BOARD_ID) return null;
   const db = getDb();
@@ -416,6 +418,7 @@ export function patchNode(boardId: string, nodeId: string, patch: PatchNodeInput
   if (!existing) return null;
   const ts = now();
   const next = {
+    refId: patch.refId !== undefined ? patch.refId : existing.refId,
     x: patch.x ?? existing.x,
     y: patch.y ?? existing.y,
     w: patch.w ?? existing.w,
@@ -424,8 +427,8 @@ export function patchNode(boardId: string, nodeId: string, patch: PatchNodeInput
     props: patch.props !== undefined ? { ...existing.props, ...patch.props } : existing.props,
   };
   db.prepare(
-    "UPDATE board_nodes SET x = ?, y = ?, w = ?, h = ?, expanded = ?, props = ?, updated = ? WHERE board_id = ? AND id = ?",
-  ).run(next.x, next.y, next.w, next.h, next.expanded ? 1 : 0, JSON.stringify(next.props), ts, boardId, nodeId);
+    "UPDATE board_nodes SET ref_id = ?, x = ?, y = ?, w = ?, h = ?, expanded = ?, props = ?, updated = ? WHERE board_id = ? AND id = ?",
+  ).run(next.refId, next.x, next.y, next.w, next.h, next.expanded ? 1 : 0, JSON.stringify(next.props), ts, boardId, nodeId);
   db.prepare("UPDATE boards SET updated = ? WHERE id = ?").run(ts, boardId);
   return getNode(boardId, nodeId)!;
 }

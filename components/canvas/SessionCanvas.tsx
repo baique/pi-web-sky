@@ -89,6 +89,18 @@ export function SessionCanvas({
     }
   }, [board.conflictCount]);
 
+  // 任务内置会话卡删除被拦截提示（任务会话不可从看板删除）
+  const [deleteBlockedNotice, setDeleteBlockedNotice] = useState(false);
+  const prevDeleteBlockedCount = useRef(0);
+  useEffect(() => {
+    if (board.deleteBlockedCount > prevDeleteBlockedCount.current) {
+      prevDeleteBlockedCount.current = board.deleteBlockedCount;
+      setDeleteBlockedNotice(true);
+      const timer = setTimeout(() => setDeleteBlockedNotice(false), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [board.deleteBlockedCount]);
+
   // 运行中集合上报给 AppShell（顶部会话运行状态保持一致）
   useEffect(() => {
     onRunningSessionIdsChange?.(new Set(board.running?.runningSessionIds ?? []));
@@ -140,6 +152,43 @@ export function SessionCanvas({
             </svg>
           </span>
           {t("boards.conflictReload")}
+        </div>
+      )}
+
+      {/* 任务内置会话卡删除被拦截 toast：任务会话由任务驱动，不可从看板删除 */}
+      {deleteBlockedNotice && (
+        <div
+          role="status"
+          style={{
+            position: "absolute",
+            top: 52,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 80,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 14px",
+            borderRadius: 999,
+            background: "var(--board-card-glass)",
+            backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+            WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+            border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+            boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
+            color: "var(--text)",
+            fontSize: 12.5,
+            whiteSpace: "nowrap",
+            animation: "toast-in 0.2s ease-out",
+          }}
+        >
+          <span aria-hidden style={{ color: "#3b82f6", display: "inline-flex" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+          </span>
+          {t("boards.deleteBlocked")}
         </div>
       )}
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Editor, TLArrowShape, TLShape, TLShapePartial } from "tldraw";
 import { createShapeId } from "tldraw";
 import { isPageId } from "@tldraw/editor";
-import type { BoardCanvas, BoardInfo, BoardNode, BoardEdge, RunningSnapshot, RunningSessionState } from "@/lib/board-types";
+import type { BoardCanvas, BoardInfo, BoardNode, BoardEdge, BoardView, RunningSnapshot, RunningSessionState } from "@/lib/board-types";
 import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
 import { shouldRemoveEndedCard } from "@/lib/board-utils";
 import { dispatchBoardCanvasChanged } from "@/lib/board-events";
@@ -221,6 +221,14 @@ export function useBoardCanvas({
         // 无效/僵尸会话（meta 残留、文件已删）放行——可删且不补回。
         return !(protectedSet.has(sid) && effectiveTaskIdRef.current && sessionTitlesRef.current[sid]);
       });
+      // 有任务内置会话卡被删除拦截：给一次可见提示（节流，防连续 Delete 刷屏）
+      if (allowed.length < idArr.length) {
+        const now = Date.now();
+        if (now - deleteBlockedAtRef.current > 3000) {
+          deleteBlockedAtRef.current = now;
+          setDeleteBlockedCount((c) => c + 1);
+        }
+      }
       if (allowed.length === idArr.length) return origDeleteShapes(ids);
       if (allowed.length > 0) return origDeleteShapes(allowed);
       return editor;
@@ -230,8 +238,43 @@ export function useBoardCanvas({
     const unlisten = editor.store.listen(() => {
       scheduleSave(editor);
     });
+    // 切看板/组件卸载时兜底补写：500ms 防抖窗口内切板会把 pending 保存静默丢弃
+    // （tldraw dispose 在 store.dispose 之前 emit 'unmount'，此刻 editor 仍可序列化）。
+    // 若保存正在途中（saveInFlight），把最终 payload 暂存，由 flushSave 结束后发送
+    // （携带最新乐观锁基线，避免被 409 拒绝；也避免对已 dispose 的 editor 反序列化）。
+    const onUnmount = () => {
+      if (!hydratedRef.current || hydratingRef.current) return;
+      const bid = boardIdRef.current;
+      if (bid === SYSTEM_RUNNING_BOARD_ID) return;
+      const hadPending = Boolean(saveTimerRef.current || pendingSaveRef.current);
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      if (!hadPending) return;
+      let payload: { nodes: BoardNode[]; edges: BoardEdge[]; view: BoardView } | null = null;
+      try {
+        const { nodes, edges } = serializeShapes(editor);
+        if (nodes.length === 0 && edges.length === 0) return;
+        const camera = editor.getCamera();
+        payload = {
+          nodes,
+          edges,
+          view: { boardId: bid, cameraX: camera.x, cameraY: camera.y, cameraZ: camera.z, updated: Date.now() },
+        };
+      } catch {
+        return;
+      }
+      if (saveInFlightRef.current) {
+        pendingFinalPayloadRef.current = payload;
+        return;
+      }
+      void sendFinalPayload(bid, payload);
+    };
+    editor.on("unmount", onUnmount);
     return () => {
       unlisten?.();
+      editor.off("unmount", onUnmount);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -268,6 +311,8 @@ export function useBoardCanvas({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveInFlightRef = useRef(false);
   const pendingSaveRef = useRef(false);
+  /** 卸载兜底补写暂存：在途保存进行中时卸载，存下最终 payload，由 flushSave 结束后发送 */
+  const pendingFinalPayloadRef = useRef<{ nodes: BoardNode[]; edges: BoardEdge[]; view: BoardView } | null>(null);
   /** hydrate 期间为 true：忽略 store 变更，避免把空画布覆盖到已保存数据 */
   const hydratingRef = useRef(false);
   /** 初始物化是否已完成：未完成前禁止自动保存（防止未加载/物化失败的空客户端覆盖看板） */
@@ -306,10 +351,36 @@ export function useBoardCanvas({
 
   // 冲突计数 +1（供 UI 提示「已加载最新版本」）；409 自动重载与手动重载共用
   const [conflictCount, setConflictCount] = useState(0);
+  // 任务内置会话卡删除被拦截计数（供 UI 提示）+ 节流 ref（防连续 Delete 刷屏）
+  const [deleteBlockedCount, setDeleteBlockedCount] = useState(0);
+  const deleteBlockedAtRef = useRef(0);
   const reloadCanvasWrap = useCallback(async () => {
     await reloadCanvas();
     setConflictCount((c) => c + 1);
   }, [reloadCanvas]);
+
+  /** 卸载兜底补写：发送最终画布快照（不依赖 editor，卸载后也可调用）。
+   *  带最新乐观锁基线；409（他人并发保存）则放弃，绝不覆盖。 */
+  const sendFinalPayload = useCallback(async (bid: string, payload: { nodes: BoardNode[]; edges: BoardEdge[]; view: BoardView }) => {
+    try {
+      const res = await fetch(`/api/boards/${encodeURIComponent(bid)}/canvas`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          baseUpdated: baseUpdatedRef.current ?? undefined,
+        }),
+      });
+      if (!res.ok) {
+        if (res.status !== 409) console.error("[board] final flush failed", res.status);
+        return;
+      }
+      const data = (await res.json().catch(() => null)) as { updated?: number } | null;
+      if (data?.updated) baseUpdatedRef.current = data.updated;
+    } catch {
+      // 卸载后的补写失败：静默（防抖路径已尽力，不阻塞）
+    }
+  }, []);
 
   const flushSave = useCallback(async (editor: Editor) => {
     const bid = boardIdRef.current;
@@ -354,12 +425,19 @@ export function useBoardCanvas({
       console.error("[board] canvas save error", e);
     } finally {
       saveInFlightRef.current = false;
-      if (pendingSaveRef.current) {
+      // 卸载兜底补写优先：卸载时若保存仍在途中，unmount 已把最终 payload 暂存，
+      // 此处以最新乐观锁基线发送（editor 可能已 dispose，不能反序列化）。
+      const finalPayload = pendingFinalPayloadRef.current;
+      if (finalPayload) {
+        pendingFinalPayloadRef.current = null;
+        const bid = boardIdRef.current;
+        void sendFinalPayload(bid, finalPayload);
+      } else if (pendingSaveRef.current) {
         pendingSaveRef.current = false;
         void flushSave(editor);
       }
     }
-  }, [reloadCanvasWrap]);
+  }, [reloadCanvasWrap, sendFinalPayload]);
 
   // ---- 物化：sqlite canvas → tldraw shapes ----
   const hydrateShapes = useCallback((editor: Editor, canvas: BoardCanvas, titles: Record<string, SessionSummary>) => {
@@ -821,16 +899,40 @@ export function useBoardCanvas({
     const onCreated = (e: Event) => {
       const detail = (e as CustomEvent<{ sessionId: string; nodeId?: string }>).detail;
       if (!detail?.sessionId || !detail?.nodeId) return;
+      const sessionId = detail.sessionId;
+      const nodeId = detail.nodeId;
       const editor = editorRef.current;
       if (!editor) return;
-      const shapeId = createShapeId(detail.nodeId);
+      const shapeId = createShapeId(nodeId);
       const shape = editor.getShape(shapeId);
       if (!shape || shape.type !== "session-card") return;
       editor.updateShapes([{
         id: shapeId,
         type: "session-card",
-        props: { sessionId: detail.sessionId, cwd: "", taskId: "" },
+        props: { sessionId, cwd: "", taskId: "" },
       }]);
+      // 转正绑定定向持久化：立即把节点 refId 写库，不依赖 500ms 防抖全量保存
+      // （切板窗口内防抖保存会被丢弃，导致切回后卡片仍是 draft「New session」）。
+      // PATCH 会 bump boards.updated → 携带旧基线的迟到全量保存会被 409 拒绝，
+      // 不会回头把绑定覆盖回 draft。成功后刷新乐观锁基线避免下次保存误报 409。
+      const bid = boardIdRef.current;
+      if (bid !== SYSTEM_RUNNING_BOARD_ID) {
+        void (async () => {
+          try {
+            const res = await fetch(`/api/boards/${encodeURIComponent(bid)}/nodes/${encodeURIComponent(nodeId)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ refId: sessionId }),
+            });
+            if (res.ok) {
+              const data = (await res.json().catch(() => null)) as { updated?: number } | null;
+              if (data?.updated) baseUpdatedRef.current = data.updated;
+            }
+          } catch {
+            // 兜底：内存已转正，防抖全量保存会带正确 refId
+          }
+        })();
+      }
       // 转正后立即拉一次摘要，让标题/消息数立刻到位（不等 10s 轮询）
       void loadSessionSummaries();
     };
@@ -1031,11 +1133,12 @@ export function useBoardCanvas({
     getNodeIdForSession,
     reloadCanvas: reloadCanvasWrap,
     conflictCount,
+    deleteBlockedCount,
     sessionTitles,
     loadSessionSummaries,
     hydrateShapes,
     reconcileTaskSessions,
-  }), [board, loading, error, running, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, clearBoard, getNodeIdForSession, reloadCanvasWrap, conflictCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
+  }), [board, loading, error, running, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, clearBoard, getNodeIdForSession, reloadCanvasWrap, conflictCount, deleteBlockedCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
 }
 
 export type UseBoardCanvasReturn = ReturnType<typeof useBoardCanvas>;

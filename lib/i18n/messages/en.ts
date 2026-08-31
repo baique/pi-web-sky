@@ -194,6 +194,7 @@ export const enLocale: LocalePlugin = {
     "boards.clearConfirm": "Clear the entire canvas? This cannot be undone.",
     "boards.clearTaskBoardDesc": "Clear the canvas (non-session elements only; session cards stay)",
     "boards.clearTaskConfirm": "Clear the canvas? Notes/edges/text will be removed; session cards stay (session data untouched).",
+    "boards.deleteBlocked": "Task-managed session cards can't be deleted from the canvas — delete the session from the sidebar/tasks instead",
     "boards.conflictReload": "Canvas was modified by another window/device — loaded the latest version (your unsaved changes were dropped)",
     "boards.scrimTitle": "Adjust canvas frost",
     "boards.scrimAlpha": "Opacity",
