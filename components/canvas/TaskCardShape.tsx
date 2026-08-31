@@ -567,6 +567,9 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     <HTMLContainer
       data-node-id={shape.id.replace("shape:", "")}
       data-testid={`task-card-${shape.id}`}
+      // 点卡片置顶（与会话卡同模式）：两卡重叠时点哪个哪个到最上层；
+      // 表单区已选中时 stopPropagation，不会重复触发
+      onPointerDown={() => editor.bringToFront([shape.id])}
       style={{ width: w, height: h, pointerEvents: "none" }}
     >
       <div
