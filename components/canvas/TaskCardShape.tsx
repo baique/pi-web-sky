@@ -43,6 +43,12 @@ export interface TaskCardProps {
   expanded: boolean;
   w: number;
   h: number;
+  /** 展开态手动尺寸（收起时记录，刷新保留）；0 = 未设置用默认 */
+  expandedW: number;
+  expandedH: number;
+  /** 收合态手动尺寸（展开时记录，刷新保留）；0 = 未设置用默认 */
+  collapsedW: number;
+  collapsedH: number;
 }
 
 export type TaskCardShape = TLBaseShape<"task-card", TaskCardProps>;
@@ -64,6 +70,10 @@ export const taskCardProps = {
   expanded: T.boolean,
   w: T.number,
   h: T.number,
+  expandedW: T.number,
+  expandedH: T.number,
+  collapsedW: T.number,
+  collapsedH: T.number,
 };
 
 /** 就绪状态徽章配色 */
@@ -86,8 +96,14 @@ export const EXEC_BADGE: Record<ExecStatus, { color: string; label: string }> = 
 /** 常态 = 编辑表单栏（左侧常驻）；展开 = 右侧追加工作台 */
 const FORM_W = 340;
 const FORM_H = 300;
-const EXPANDED_W = 900;
+/** 工作台区域最小尺寸：对齐会话卡片展开态最小（600×500） */
+const WORKBENCH_MIN_W = 600;
+const WORKBENCH_MIN_H = 500;
+/** 展开态整卡宽 = 表单 340 + 工作台最小宽（对齐会话卡片展开态最小 600） */
+const EXPANDED_W = FORM_W + WORKBENCH_MIN_W; // 940
 const EXPANDED_H = 600;
+/** 收起态最小高（表单：名称/描述 + 折叠的「高级」标题） */
+const COLLAPSED_MIN_H = 240;
 
 export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
   static override type = "task-card" as const;
@@ -104,6 +120,10 @@ export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
       expanded: false,
       w: FORM_W,
       h: FORM_H,
+      expandedW: 0,
+      expandedH: 0,
+      collapsedW: 0,
+      collapsedH: 0,
     };
   }
 
@@ -123,19 +143,20 @@ export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
     return true;
   }
 
-  /** 双击切换右侧工作台展开（常态 340 表单栏 ↔ 展开 900 表单+工作台）。 */
+  /** 双击切换右侧工作台展开（常态 340 表单栏 ↔ 展开 940 表单+工作台），两态手动尺寸各自保留。 */
   override onDoubleClick(shape: TaskCardShape): TLShapePartial<TaskCardShape> | void {
-    if (shape.props.expanded) {
-      return { id: shape.id, type: "task-card", props: { expanded: false, w: FORM_W, h: shape.props.h } };
-    }
-    return { id: shape.id, type: "task-card", props: { expanded: true, w: EXPANDED_W, h: EXPANDED_H } };
+    return { id: shape.id, type: "task-card", props: nextExpandState(shape) };
   }
 
   override onResize(
     shape: TaskCardShape,
     info: import("tldraw").TLResizeInfo<TaskCardShape>,
   ): Omit<TLShapePartial<TaskCardShape>, "id" | "type"> | undefined {
-    return resizeBox(shape, info, { minWidth: FORM_W, minHeight: 240 });
+    // 收起/展开两态分别限制最小尺寸：展开态工作台区 ≥ 会话卡片展开态最小（600×500）
+    const expanded = shape.props.expanded;
+    const minW = expanded ? FORM_W + WORKBENCH_MIN_W : FORM_W;
+    const minH = expanded ? WORKBENCH_MIN_H : COLLAPSED_MIN_H;
+    return resizeBox(shape, info, { minWidth: minW, minHeight: minH });
   }
 
   override getIndicatorPath(shape: TaskCardShape) {
@@ -148,6 +169,30 @@ export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
   override component(shape: TaskCardShape) {
     return <TaskCardView shape={shape} />;
   }
+}
+
+/** 展开/收起尺寸切换（参考会话卡片）：收起时记录展开尺寸（expandedW/H）→ 恢复上次收合尺寸；
+ *  展开时记录收合尺寸（collapsedW/H）→ 恢复上次展开尺寸。两态手动 resize 的尺寸来回切换不丢失，
+ *  刷新后从 board_nodes props 还原。 */
+function nextExpandState(shape: TaskCardShape) {
+  if (shape.props.expanded) {
+    // 展开 → 收合
+    return {
+      expanded: false,
+      expandedW: shape.props.w,
+      expandedH: shape.props.h,
+      w: shape.props.collapsedW || FORM_W,
+      h: shape.props.collapsedH || FORM_H,
+    };
+  }
+  // 收合 → 展开
+  return {
+    expanded: true,
+    collapsedW: shape.props.w,
+    collapsedH: shape.props.h,
+    w: shape.props.expandedW || EXPANDED_W,
+    h: shape.props.expandedH || EXPANDED_H,
+  };
 }
 
 function TaskCardView({ shape }: { shape: TaskCardShape }) {
@@ -243,6 +288,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 「高级」折叠区：默认收起
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // 工作目录选择：DirectoryPicker 弹窗 + worktree 列表（复用文件浏览器下方选择器逻辑）
   const [dirPickerOpen, setDirPickerOpen] = useState(false);
@@ -381,6 +428,12 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     }
   };
 
+  // 就绪状态即时生效：编辑态 change 即保存（PATCH 部分字段）；建卡态仅记草稿，创建时提交
+  const handleReadyChange = (v: string) => {
+    set("readyStatus", v as ReadyStatus);
+    if (!isCreating && cardId) void saveCard({ readyStatus: v as ReadyStatus });
+  };
+
   const formBody = draft ? (
     <>
       {isCreating && (
@@ -403,26 +456,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         placeholder="任务描述，支持 markdown"
         spellCheck={false}
       />
-      <label style={LABEL_STYLE}>就绪状态</label>
-      <ThemedSelect
-        value={draft.readyStatus}
-        onChange={(v) => set("readyStatus", v as ReadyStatus)}
-        options={[
-          { value: "draft", label: "草稿" },
-          { value: "todo", label: "待办" },
-        ]}
-      />
-      <label style={LABEL_STYLE}>执行状态</label>
-      {/* 执行状态由调度器维护，用户只读查看 */}
-      <div
-        style={{
-          display: "flex", alignItems: "center", gap: 6, height: 28, padding: "0 8px",
-          border: "1px solid var(--border)", borderRadius: 5, fontSize: 11, color: "var(--text-muted)",
-        }}
-      >
-        <span aria-hidden style={{ width: 8, height: 8, borderRadius: "50%", background: (EXEC_BADGE[draft.execStatus] ?? EXEC_BADGE.not_started).color }} />
-        {(EXEC_BADGE[draft.execStatus] ?? EXEC_BADGE.not_started).label}
-      </div>
+      <CollapsibleSection title="高级" open={advancedOpen} onToggle={() => setAdvancedOpen((v) => !v)}>
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1 }}>
           <label style={LABEL_STYLE}>优先级</label>
@@ -452,7 +486,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         />
         <button
           type="button"
-          style={btnGhost}
+          style={footerBtnStyle}
           onClick={() => setDirPickerOpen(true)}
         >
           选择目录
@@ -511,21 +545,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         placeholder="/path/to/file"
         spellCheck={false}
       />
+      </CollapsibleSection>
       {(saveError || error) && <div style={{ color: "#f87171", fontSize: 11, marginTop: 6 }}>{saveError ?? error}</div>}
-      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        {isCreating ? (
-          <button type="button" style={btnPrimary} disabled={saving || !draft.name.trim() || !boardId} onClick={() => void handleCreate()}>
-            {saving ? "创建中…" : "创建任务卡"}
-          </button>
-        ) : (
-          <button type="button" style={btnPrimary} disabled={saving || !draft.name.trim()} onClick={() => void handleSave()}>
-            {saving ? "保存中…" : "保存"}
-          </button>
-        )}
-        <button type="button" style={btnGhost} onClick={() => { editor.updateShape<TaskCardShape>({ id: shape.id, type: "task-card", props: expanded ? { expanded: false, w: FORM_W } : { expanded: true, w: EXPANDED_W, h: EXPANDED_H } }); }}>
-          {expanded ? "收起工作台" : "展开工作台"}
-        </button>
-      </div>
     </>
   ) : loading ? (
     <div style={{ color: "var(--text-dim)", fontSize: 12, padding: 20, textAlign: "center" }}>加载中…</div>
@@ -558,11 +579,12 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
           userSelect: "none",
         }}
       >
-        {/* 拖拽把手：不拦 pointer（事件冒泡到 tldraw 接管拖动），与便笺同模式 */}
+        {/* 拖拽把手：不拦 pointer（事件冒泡到 tldraw 接管拖动），与便笺同模式；
+            右上角就绪下拉 + 操作按钮独立接收点击（stopPropagation 隔离拖拽） */}
         <div
           style={{
             flexShrink: 0,
-            height: 30,
+            height: 36,
             display: "flex",
             alignItems: "center",
             gap: 6,
@@ -573,19 +595,74 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
             color: "var(--text-muted)",
           }}
         >
-          {draft?.number ? <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-dim)" }}>#{draft.number}</span> : null}
+          {/* 执行状态徽章：从表单挪出，放名称前 */}
+          <span
+            title={`执行状态：${(EXEC_BADGE[draft?.execStatus ?? "not_started"] ?? EXEC_BADGE.not_started).label}`}
+            style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}
+          >
+            <span aria-hidden style={{ width: 8, height: 8, borderRadius: "50%", background: (EXEC_BADGE[draft?.execStatus ?? "not_started"] ?? EXEC_BADGE.not_started).color }} />
+            <span style={{ fontSize: 10, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+              {(EXEC_BADGE[draft?.execStatus ?? "not_started"] ?? EXEC_BADGE.not_started).label}
+            </span>
+          </span>
+          {draft?.number ? <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-dim)", flexShrink: 0 }}>#{draft.number}</span> : null}
           <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
           </span>
+          {/* 右上角：就绪状态下拉（在操作按钮之前）+ 操作按钮（对齐便笺小 ghost 样式） */}
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <div style={{ width: 68 }}>
+              <ThemedSelect
+                value={draft?.readyStatus ?? "draft"}
+                options={[
+                  { value: "draft", label: "草稿" },
+                  { value: "todo", label: "待办" },
+                ]}
+                onChange={handleReadyChange}
+              />
+            </div>
+            {isCreating ? (
+              <button
+                type="button"
+                style={footerBtnStyle}
+                disabled={saving || !draft?.name.trim() || !boardId}
+                onClick={() => void handleCreate()}
+                title="创建任务卡"
+              >
+                {saving ? "创建中…" : "创建"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                style={footerBtnStyle}
+                disabled={saving || !draft?.name.trim()}
+                onClick={() => void handleSave()}
+                title="保存"
+              >
+                {saving ? "保存中…" : "保存"}
+              </button>
+            )}
+            <button
+              type="button"
+              style={footerBtnStyle}
+              onClick={() => { editor.updateShape<TaskCardShape>({ id: shape.id, type: "task-card", props: nextExpandState(shape) }); }}
+              title={expanded ? "收起工作台" : "展开工作台"}
+            >
+              {expanded ? "收起" : "展开"}
+            </button>
+          </div>
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.5 }}>
             <circle cx="9" cy="6" r="1" /><circle cx="15" cy="6" r="1" /><circle cx="9" cy="12" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="9" cy="18" r="1" /><circle cx="15" cy="18" r="1" />
           </svg>
         </div>
         {/* 内容区：左表单 + 右工作台 */}
         <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        {/* 左：编辑表单 / 建卡向导（常驻） */}
+        {/* 左：编辑表单 / 建卡向导（常驻）——收起态自适应卡片宽度（可拉更宽）；展开态固定 340 + 右侧工作台 */}
         <div
-          style={{ width: 340, flexShrink: 0, borderRight: expanded ? "1px solid var(--bubble-hairline)" : "none", overflowY: "auto", padding: "10px 12px" }}
+          style={{ flex: expanded ? "0 0 340px" : "1 1 auto", minWidth: 0, width: expanded ? 340 : undefined, borderRight: expanded ? "1px solid var(--bubble-hairline)" : "none", overflowY: "auto", padding: "10px 12px" }}
           onPointerDown={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
           onPointerUp={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
           onClick={(e) => e.stopPropagation()}
@@ -623,27 +700,71 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   );
 }
 
-const btnPrimary: React.CSSProperties = {
+/** 操作按钮：对齐便笺右上角小 ghost 样式（无边框、半透明灰底、圆角 5、字号 11）。 */
+const footerBtnStyle: React.CSSProperties = {
   border: "none",
-  background: "var(--accent)",
-  color: "var(--accent-contrast, #fff)",
-  borderRadius: 6,
-  padding: "5px 14px",
-  fontSize: 12,
-  fontWeight: 600,
+  background: "color-mix(in srgb, var(--border) 30%, transparent)",
+  color: "var(--text-muted)",
+  borderRadius: 5,
+  padding: "2px 10px",
+  fontSize: 11,
   cursor: "pointer",
-  opacity: 1,
+  whiteSpace: "nowrap",
 };
 
-const btnGhost: React.CSSProperties = {
-  border: "1px solid var(--border)",
-  background: "transparent",
-  color: "var(--text-muted)",
-  borderRadius: 6,
-  padding: "5px 14px",
-  fontSize: 12,
-  cursor: "pointer",
-};
+/** 「高级」折叠区标题行：分隔线 + 箭头 + 标题（默认收起）。 */
+function CollapsibleSection({
+  title,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          width: "100%",
+          marginTop: 10,
+          padding: "5px 0 3px",
+          border: "none",
+          borderTop: "1px solid var(--bubble-hairline)",
+          background: "transparent",
+          color: "var(--text-muted)",
+          fontSize: 11,
+          fontWeight: 600,
+          cursor: "pointer",
+          textAlign: "left",
+        }}
+      >
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ flexShrink: 0, transform: open ? "rotate(90deg)" : "none", transition: "transform 0.12s" }}
+        >
+          <polyline points="3 2 6.5 5 3 8" />
+        </svg>
+        {title}
+      </button>
+      {open && <div>{children}</div>}
+    </div>
+  );
+}
 
 /** ms epoch → datetime-local 输入值（本地时间） */
 /**

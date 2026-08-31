@@ -532,6 +532,11 @@ export function useBoardCanvas({
         props: {
           ...(pp.shapeProps as object),
           cardId: node.refId ?? "",
+          // 展开/收合两态手动尺寸：从 shapeProps 还原（旧数据缺省 → 0 = 用默认）
+          expandedW: (pp.shapeProps?.expandedW as number) ?? 0,
+          expandedH: (pp.shapeProps?.expandedH as number) ?? 0,
+          collapsedW: (pp.shapeProps?.collapsedW as number) ?? 0,
+          collapsedH: (pp.shapeProps?.collapsedH as number) ?? 0,
           w: node.w || (pp.shapeProps.w as number) || 220,
           h: node.h || (pp.shapeProps.h as number) || 120,
         } as never,
