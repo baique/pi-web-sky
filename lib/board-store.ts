@@ -399,6 +399,33 @@ function getNode(boardId: string, nodeId: string): BoardNode | undefined {
   return row ? rowToNode(row) : undefined;
 }
 
+/**
+ * 按全局 nodeId 绑定会话（draft 卡服务端转正用）。
+ * nodeId 是 board_nodes.id（randomUUID，全局唯一），无需 boardId。
+ * 绑定成功 bump 所属看板 updated（乐观锁基线），返回更新后的节点；
+ * 节点不存在 / 属于系统看板返回 null。
+ */
+export function bindNodeToSession(nodeId: string, sessionId: string): BoardNode | null {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT board_id AS boardId FROM board_nodes WHERE id = ?")
+    .get(nodeId) as { boardId: string } | undefined;
+  if (!row) return null;
+  if (row.boardId === SYSTEM_RUNNING_BOARD_ID) return null;
+  const ts = now();
+  db.prepare("UPDATE board_nodes SET ref_id = ?, updated = ? WHERE id = ?").run(sessionId, ts, nodeId);
+  db.prepare("UPDATE boards SET updated = ? WHERE id = ?").run(ts, row.boardId);
+  return getNode(row.boardId, nodeId) ?? null;
+}
+
+/** 按全局 nodeId 读节点（未转正卡轮询用）；不存在返回 undefined。 */
+export function getNodeByGlobalId(nodeId: string): BoardNode | undefined {
+  const row = getDb()
+    .prepare("SELECT id, board_id AS boardId, kind, ref_id AS refId, x, y, w, h, expanded, props, created, updated FROM board_nodes WHERE id = ?")
+    .get(nodeId) as BoardNodeRow | undefined;
+  return row ? rowToNode(row) : undefined;
+}
+
 export interface PatchNodeInput {
   /** 会话卡绑定的会话 id（draft 转正时写入）。null 显式解绑；缺省不改。 */
   refId?: string | null;

@@ -6,6 +6,7 @@ import { allowFileRoot } from "@/lib/file-access";
 import { invalidateSessionListCache } from "@/lib/session-reader";
 import { startRpcSession } from "@/lib/rpc-manager";
 import { assignSessionToTask } from "@/lib/task-store";
+import { bindNodeToSession } from "@/lib/board-store";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -46,7 +47,7 @@ export async function POST(req: Request) {
     }
 
     // Use a one-time key so startRpcSession's lock doesn't conflict with real session ids
-    const { provider, modelId, toolNames, thinkingLevel, taskId, ...promptCommand } = command as { provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: unknown; taskId?: unknown; [key: string]: unknown };
+    const { provider, modelId, toolNames, thinkingLevel, taskId, boardNodeId, ...promptCommand } = command as { provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: unknown; taskId?: unknown; boardNodeId?: unknown; [key: string]: unknown };
     if ((provider && !modelId) || (!provider && modelId)) {
       throw new Error("provider and modelId must be provided together");
     }
@@ -74,6 +75,14 @@ export async function POST(req: Request) {
       if (!assignSessionToTask(realSessionId, taskId)) {
         throw new Error(`Task not found: ${taskId}`);
       }
+    }
+
+    // 看板卡片服务端转正：创建会话的请求带着卡片 nodeId（K1）时，
+    // 会话出生即绑定到卡片（写 board_nodes.ref_id）。这是后台动作，
+    // 与前端组件生命周期完全解耦——用户切走看板/刷新页面都不影响，
+    // 任何时刻重新进入看板 hydrate 都能读到 ref_id 转正。
+    if (typeof boardNodeId === "string" && boardNodeId) {
+      bindNodeToSession(boardNodeId, realSessionId);
     }
 
     const state = await session.send({ type: "get_state" }) as {

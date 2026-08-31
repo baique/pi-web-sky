@@ -40,7 +40,7 @@ interface Props {
   sessionRunning?: boolean;
   newSessionCwd: string | null;
   newSessionDraftKey: string | null;
-  pendingNewSessionTaskRef?: React.MutableRefObject<{ taskId: string; projectKey?: string } | null>;
+  pendingNewSessionTaskRef?: React.MutableRefObject<{ taskId?: string; projectKey?: string; nodeId?: string } | null>;
   onAgentEnd?: () => void;
   onAttentionNeeded?: (request: BlockingExtensionUiRequest) => void;
   onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;

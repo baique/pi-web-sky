@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
-import { getBoard, patchNode, deleteNode } from "@/lib/board-store";
+import { getBoard, patchNode, deleteNode, getNodeByGlobalId } from "@/lib/board-store";
 import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string; nid: string }> };
+
+// GET /api/boards/[id]/nodes/[nid] — 按全局 nodeId 读节点（未转正卡轮询 ref_id 用）
+export async function GET(_request: Request, { params }: Params) {
+  const { nid } = await params;
+  const node = getNodeByGlobalId(nid);
+  if (!node) return NextResponse.json({ error: "node not found" }, { status: 404 });
+  return NextResponse.json({ node });
+}
 
 // PATCH /api/boards/[id]/nodes/[nid] — { refId?, x?, y?, w?, h?, expanded?, props? }
 export async function PATCH(request: Request, { params }: Params) {

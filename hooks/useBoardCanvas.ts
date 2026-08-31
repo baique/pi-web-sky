@@ -1026,6 +1026,84 @@ export function useBoardCanvas({
     };
   }, [effectiveTaskId, reconcileTaskSessions]);
 
+  // ---- 未转正 draft 卡轮询：服务端已绑定（ref_id 已写入）则本地转正 ----
+  // 覆盖「创建会话期间切走再切回」：会话创建是服务端异步动作，会话出生即写
+  // board_nodes.ref_id（/api/agent/new 带 boardNodeId）。本卡在画布上仍是 draft
+  // （sessionId=""），轮询发现 DB 里 ref_id 已有值 → 更新 shape 转正。
+  // 适用手动看板 + 任务看板；与任务补卡互不冲突（补卡只看会话，转正只看 draft 卡）。
+  const reconcilePendingDrafts = useCallback(async () => {
+    const editor = editorRef.current;
+    const bid = boardIdRef.current;
+    if (!editor || !bid || bid === SYSTEM_RUNNING_BOARD_ID) return;
+    const drafts: string[] = [];
+    for (const shape of editor.getCurrentPageShapes()) {
+      if (shape.type !== "session-card") continue;
+      const p = shape.props as SessionCardShapeProps;
+      // 仅轮询未转正卡（sessionId 空）；已转正的跳过
+      if (!p.sessionId) drafts.push(shape.id.replace("shape:", ""));
+    }
+    if (drafts.length === 0) return;
+    const toBind: Array<{ shapeId: string; nodeId: string; sessionId: string }> = [];
+    await Promise.all(drafts.map(async (nodeId) => {
+      try {
+        const res = await fetch(`/api/boards/${encodeURIComponent(bid)}/nodes/${encodeURIComponent(nodeId)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { node?: { refId?: string | null } };
+        const refId = data.node?.refId;
+        if (refId) toBind.push({ shapeId: `shape:${nodeId}`, nodeId, sessionId: refId });
+      } catch {
+        // 单卡失败静默，下轮重试
+      }
+    }));
+    if (toBind.length === 0) return;
+    for (const b of toBind) {
+      const shape = editor.getShape(b.shapeId as never);
+      if (!shape || shape.type !== "session-card") continue;
+      editor.updateShapes([{
+        id: b.shapeId as never,
+        type: "session-card",
+        props: { sessionId: b.sessionId, cwd: "", taskId: "" },
+      }]);
+    }
+    // 服务端绑定会 bump boards.updated：刷新乐观锁基线，避免下一次全量保存误报 409
+    try {
+      const boardRes = await fetch(`/api/boards/${encodeURIComponent(bid)}`, { cache: "no-store" });
+      if (boardRes.ok) {
+        const b = (await boardRes.json()) as { board?: { updated?: number } };
+        if (b.board?.updated) baseUpdatedRef.current = b.board.updated;
+      }
+    } catch {
+      // 静默
+    }
+    // 拉一次摘要，让标题/消息数立刻到位
+    void loadSessionSummaries();
+  }, [loadSessionSummaries]);
+
+  // 未转正卡轮询：进入看板后先跑一次（避开 hydrate 窗口），之后与摘要同频 10s。
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const run = async () => {
+      if (stopped) return;
+      await reconcilePendingDrafts();
+      if (!stopped) timer = setTimeout(run, SUMMARY_POLL_MS);
+    };
+    const first = setTimeout(() => { void run(); }, 1500);
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        if (timer) clearTimeout(timer);
+        void run();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      clearTimeout(first);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [reconcilePendingDrafts]);
+
   // ---- 连线 ----
   const connectNodes = useCallback((fromNodeId: string, toNodeId: string, label?: string, color?: string, dashed?: boolean) => {
     const editor = editorRef.current;

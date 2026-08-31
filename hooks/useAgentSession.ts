@@ -166,8 +166,9 @@ export interface UseAgentSessionOptions {
   onSystemPromptLoaderChange?: (loader: (() => Promise<void>) | null) => void;
   onSessionStatsPanelOpen?: () => void;
   setToolPreset?: (preset: ToolPreset) => void;
-  /** 从任务行发起时携带的目标任务 id（创建请求时附带，服务端原子归属）。 */
-  pendingNewSessionTaskRef?: React.MutableRefObject<{ taskId: string; projectKey?: string } | null>;
+  /** 从任务行/看板 draft 卡发起时携带的关联信息（创建请求附带，服务端原子归属任务 + 绑定看板卡片）。
+   *  taskId：服务端把会话挂到任务；nodeId：服务端把会话绑定到看板卡片（ref_id 后台转正）。 */
+  pendingNewSessionTaskRef?: React.MutableRefObject<{ taskId?: string; projectKey?: string; nodeId?: string } | null>;
 }
 
 export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -706,6 +707,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           type: "ensure_session",
           toolNames,
           ...(pendingTask ? { taskId: pendingTask.taskId } : {}),
+          // 看板 draft 卡：服务端创建会话后直接把卡片转正（写 board_nodes.ref_id）
+          ...(pendingTask?.nodeId ? { boardNodeId: pendingTask.nodeId } : {}),
           ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
           ...(selectedThinkingLevel
             ? { thinkingLevel: selectedThinkingLevel }

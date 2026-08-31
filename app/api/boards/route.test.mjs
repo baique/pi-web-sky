@@ -13,7 +13,7 @@ const { GET: listBoards, POST: createBoard } = await jiti.import("./route.ts");
 const { GET: getBoard, PATCH: patchBoard, DELETE: deleteBoard } = await jiti.import("./[id]/route.ts");
 const { GET: getCanvas, PUT: putCanvas } = await jiti.import("./[id]/canvas/route.ts");
 const { POST: addNode } = await jiti.import("./[id]/nodes/route.ts");
-const { PATCH: patchNode, DELETE: deleteNode } = await jiti.import("./[id]/nodes/[nid]/route.ts");
+const { GET: getNode, PATCH: patchNode, DELETE: deleteNode } = await jiti.import("./[id]/nodes/[nid]/route.ts");
 const { POST: addEdge } = await jiti.import("./[id]/edges/route.ts");
 const { DELETE: deleteEdge } = await jiti.import("./[id]/edges/[eid]/route.ts");
 const { PUT: reorderBoards } = await jiti.import("./reorder/route.ts");
@@ -181,6 +181,17 @@ test("canvas API: full replace + node/edge sub-resources", async () => {
     params: Promise.resolve({ id: board.id, nid: added.id }),
   });
   assert.equal((await patchMoveRes.json()).node.refId, "session-real-9");
+
+  // GET 按全局 nodeId 读节点（未转正卡轮询 ref_id 用；跨 board 前缀仍能命中）
+  const getRes = await getNode(new Request("http://localhost/x"), {
+    params: Promise.resolve({ id: board.id, nid: added.id }),
+  });
+  assert.equal(getRes.status, 200);
+  assert.equal((await getRes.json()).node.refId, "session-real-9");
+  const get404 = await getNode(new Request("http://localhost/x"), {
+    params: Promise.resolve({ id: board.id, nid: "no-such" }),
+  });
+  assert.equal(get404.status, 404);
 
   // edge sub-resource
   const edgeRes = await addEdge(jsonReq("http://localhost/api/boards/x/edges", "POST", { fromId: added.id, toId: "n1", dashed: true, label: "dep" }), {
