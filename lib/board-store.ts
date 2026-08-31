@@ -645,3 +645,47 @@ export function syncCardEdges(cardId: string): void {
     }
   }
 }
+
+/**
+ * 任务卡画布节点 upsert：nodeId 存在 → 绑定 ref_id=cardId（转正）；
+ * 不存在 → 新建 taskcard node（id=nodeId，与 tldraw shape.id 对齐，后续全量保存覆盖不重复）。
+ * 无事务（单语句 + bump），由调用方包事务。
+ */
+export function upsertTaskCardNode(
+  nodeId: string,
+  boardId: string,
+  card: { id: string; number: number; name: string; readyStatus: string; execStatus: string; priority: number; due: number | null },
+  x: number,
+  y: number,
+): BoardNode | null {
+  const db = getDb();
+  if (boardId === SYSTEM_RUNNING_BOARD_ID) return null;
+  if (!getBoardRow(boardId)) return null;
+  const ts = now();
+  // 完整 shapeProps 落库：hydrate 恢复 task-card shape 依赖它（建卡时 node 可能不存在）
+  const shapeProps = {
+    cardId: card.id,
+    number: card.number,
+    name: card.name,
+    readyStatus: card.readyStatus,
+    execStatus: card.execStatus,
+    priority: card.priority,
+    due: card.due ?? undefined,
+    expanded: false,
+    w: 220,
+    h: 120,
+  };
+  const props = JSON.stringify({ parentId: null, shapeProps });
+  const existing = db.prepare("SELECT id FROM board_nodes WHERE id = ?").get(nodeId);
+  if (existing) {
+    db.prepare("UPDATE board_nodes SET ref_id = ?, props = ?, updated = ? WHERE id = ?").run(card.id, props, ts, nodeId);
+    db.prepare("UPDATE boards SET updated = ? WHERE id = ?").run(ts, boardId);
+  } else {
+    db.prepare(
+      "INSERT INTO board_nodes (id, board_id, kind, ref_id, x, y, w, h, expanded, props, created, updated) " +
+        "VALUES (?, ?, 'taskcard', ?, ?, ?, 220, 120, 0, ?, ?, ?)",
+    ).run(nodeId, boardId, card.id, x, y, props, ts, ts);
+    db.prepare("UPDATE boards SET updated = ? WHERE id = ?").run(ts, boardId);
+  }
+  return getNode(boardId, nodeId) ?? null;
+}

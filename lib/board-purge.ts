@@ -23,9 +23,10 @@ export interface PurgeResult {
 
 /** 清理全部看板上的孤儿卡片（级联删连线）。无孤儿时返回全 0。 */
 export async function purgeOrphanBoardCards(): Promise<PurgeResult> {
-  // 1. 收集全部绑定节点（refId 非空），跳过系统看板（running 只读）
+  // 1. 收集全部绑定节点（refId 非空），跳过系统看板（running 只读）与任务卡节点
+  //    （taskcard 的 refId = task_cards.id，不是会话 id，必须排除否则误删）
   const nodes = getDb()
-    .prepare("SELECT id, board_id AS boardId, ref_id AS refId FROM board_nodes WHERE ref_id IS NOT NULL AND board_id != ?")
+    .prepare("SELECT id, board_id AS boardId, ref_id AS refId FROM board_nodes WHERE ref_id IS NOT NULL AND board_id != ? AND kind != 'taskcard'")
     .all(SYSTEM_RUNNING_BOARD_ID) as Array<{ id: string; boardId: string; refId: string }>;
   if (nodes.length === 0) return { deletedNodes: 0, deletedEdges: 0, boards: [] };
 

@@ -2,7 +2,7 @@
 
 import "tldraw/tldraw.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Tldraw, DefaultToolbarContent, DefaultStylePanel, StylePanelColorPicker, StylePanelFillPicker, StylePanelDashPicker, StylePanelSizePicker, StylePanelFontPicker, StylePanelTextAlignPicker, StylePanelLabelAlignPicker, StylePanelGeoShapePicker, StylePanelArrowKindPicker, StylePanelArrowheadPicker, StylePanelSplinePicker, TldrawUiToolbar, TldrawUiToolbarButton, TldrawUiOrientationProvider, OverflowingToolbar, ToggleToolLockedButton, createShapeId, defaultShapeUtils, useEditor, useTldrawUiComponents, useValue, type TLComponents, type TLUiOverrides, type TLUiStylePanelProps } from "tldraw";
+import { Tldraw, DefaultToolbar, DefaultStylePanel, StylePanelColorPicker, StylePanelFillPicker, StylePanelDashPicker, StylePanelSizePicker, StylePanelFontPicker, StylePanelTextAlignPicker, StylePanelLabelAlignPicker, StylePanelGeoShapePicker, StylePanelArrowKindPicker, StylePanelArrowheadPicker, StylePanelSplinePicker, TldrawUiToolbarButton, SelectToolbarItem, HandToolbarItem, DrawToolbarItem, EraserToolbarItem, ArrowToolbarItem, TextToolbarItem, NoteToolbarItem, AssetToolbarItem, RectangleToolbarItem, EllipseToolbarItem, TriangleToolbarItem, DiamondToolbarItem, HexagonToolbarItem, OvalToolbarItem, RhombusToolbarItem, StarToolbarItem, CloudToolbarItem, HeartToolbarItem, XBoxToolbarItem, CheckBoxToolbarItem, ArrowLeftToolbarItem, ArrowUpToolbarItem, ArrowDownToolbarItem, ArrowRightToolbarItem, LineToolbarItem, HighlightToolbarItem, LaserToolbarItem, FrameToolbarItem, createShapeId, defaultShapeUtils, useEditor, useValue, type TLComponents, type TLUiOverrides, type TLUiStylePanelProps } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
 import { StickyNoteUtil } from "./StickyNoteShape";
 import { StickyNoteTool } from "./StickyNoteTool";
@@ -99,42 +99,43 @@ function TaskCardToolbarButton() {
 }
 
 /**
- * 底部工具条（自定义，替代 DefaultToolbar）：保留 tldraw 默认工具
- * （DefaultToolbarContent，溢出进 More），任务卡按钮固定在 extras 区
- * （OverflowingToolbar 之外，始终可见不折叠）。
- * 结构复刻 DefaultToolbar（tlui-main-toolbar__extras + OverflowingToolbar）。
+ * 底部工具条内容（自定义，替代 DefaultToolbarContent）：复刻 tldraw 默认工具列表
+ * （Select/Hand/Draw/…/Note/形状…），在便笺（Note）后插入「任务卡」按钮 ——
+ * 像便笺一样嵌在主工具条（工具区），溢出时与默认工具一起折叠进 More。
  */
-function TaskCardToolbar() {
-  const editor = useEditor();
-  const activeToolId = useValue("current tool id", () => editor.getCurrentToolId(), [editor]);
-  const { ActionsMenu, QuickActions } = useTldrawUiComponents();
+function TaskCardToolbarContent() {
   return (
-    <TldrawUiOrientationProvider orientation="horizontal" tooltipSide="top">
-      <div className="tlui-main-toolbar tlui-main-toolbar--horizontal">
-        <div className="tlui-main-toolbar__inner">
-          <div className="tlui-main-toolbar__left">
-            <div className="tlui-main-toolbar__extras">
-              <TldrawUiToolbar orientation="horizontal" className="tlui-main-toolbar__extras__controls" label="extras">
-                {QuickActions ? <QuickActions /> : null}
-                {ActionsMenu ? <ActionsMenu /> : null}
-                <TaskCardToolbarButton />
-              </TldrawUiToolbar>
-              <ToggleToolLockedButton activeToolId={activeToolId} />
-            </div>
-            <OverflowingToolbar
-              orientation="horizontal"
-              sizingParentClassName="tlui-main-toolbar"
-              minItems={1}
-              minSizePx={310}
-              maxItems={8}
-              maxSizePx={470}
-            >
-              <DefaultToolbarContent />
-            </OverflowingToolbar>
-          </div>
-        </div>
-      </div>
-    </TldrawUiOrientationProvider>
+    <>
+      <SelectToolbarItem />
+      <HandToolbarItem />
+      <DrawToolbarItem />
+      <EraserToolbarItem />
+      <ArrowToolbarItem />
+      <TextToolbarItem />
+      <NoteToolbarItem />
+      <TaskCardToolbarButton />
+      <AssetToolbarItem />
+      <RectangleToolbarItem />
+      <EllipseToolbarItem />
+      <TriangleToolbarItem />
+      <DiamondToolbarItem />
+      <HexagonToolbarItem />
+      <OvalToolbarItem />
+      <RhombusToolbarItem />
+      <StarToolbarItem />
+      <CloudToolbarItem />
+      <HeartToolbarItem />
+      <XBoxToolbarItem />
+      <CheckBoxToolbarItem />
+      <ArrowLeftToolbarItem />
+      <ArrowUpToolbarItem />
+      <ArrowDownToolbarItem />
+      <ArrowRightToolbarItem />
+      <LineToolbarItem />
+      <HighlightToolbarItem />
+      <LaserToolbarItem />
+      <FrameToolbarItem />
+    </>
   );
 }
 
@@ -263,8 +264,12 @@ export function CanvasStage({
     KeyboardShortcutsDialog: null,
     DebugPanel: null,
     DebugMenu: null,
-    // 底部工具条：自定义 TaskCardToolbar（默认工具 + 任务卡按钮固定在外不折叠）
-    Toolbar: () => <TaskCardToolbar />,
+    // 底部工具条：默认工具（溢出进 More）+ 任务卡按钮嵌在便笺旁（自定义 content）
+    Toolbar: () => (
+      <DefaultToolbar>
+        <TaskCardToolbarContent />
+      </DefaultToolbar>
+    ),
   }), []);
 
   return (

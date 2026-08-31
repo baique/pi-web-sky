@@ -8,6 +8,7 @@ import { useBoardCanvas } from "@/hooks/useBoardCanvas";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
 import type { SessionInfo } from "@/lib/types";
 import { BoardSearchProvider } from "./BoardSearchContext";
+import { BoardIdContext } from "./TaskCardShape";
 import { BoardSearch } from "./BoardSearch";
 
 // ssr:false — tldraw 依赖浏览器环境，仅进入看板模式时下载（~1MB）。
@@ -142,6 +143,7 @@ export function SessionCanvas({
     >
       {/* 搜索高亮 context：shape 组件（会话卡/便笺）读它渲染 accent 描边。
           必须包住 CanvasStage（tldraw），让自定义 shape 能读到 context。 */}
+      <BoardIdContext.Provider value={board.board?.id ?? null}>
       <BoardSearchProvider>
       {/* 乐观锁冲突提示 toast：数据未丢失但本地未保存改动被丢弃（服务器权威） */}
       {conflictNotice && (
@@ -402,6 +404,7 @@ export function SessionCanvas({
         isDark={isDark}
       />
       </BoardSearchProvider>
+      </BoardIdContext.Provider>
     </div>
   );
 }

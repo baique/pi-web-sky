@@ -500,6 +500,26 @@ export function useBoardCanvas({
         },
       });
     }
+    for (const node of canvas.nodes) {
+      // 任务卡：shapeProps 全量恢复（含 cardId/名称/状态/展开等），
+      // refId 是服务端绑定的 cardId（转正为准，覆盖 shapeProps 里的旧值）
+      if (node.kind !== "taskcard") continue;
+      const pp = node.props as { shapeProps?: Record<string, unknown>; parentId?: string | null };
+      if (!pp.shapeProps) continue;
+      shapes.push({
+        id: createShapeId(node.id),
+        type: "task-card",
+        x: node.x,
+        y: node.y,
+        parentId: pp.parentId ? createShapeId(pp.parentId) : undefined,
+        props: {
+          ...(pp.shapeProps as object),
+          cardId: node.refId ?? "",
+          w: node.w || (pp.shapeProps.w as number) || 220,
+          h: node.h || (pp.shapeProps.h as number) || 120,
+        } as never,
+      });
+    }
     for (const edge of canvas.edges) {
       const from = nodeById.get(edge.fromId);
       const to = nodeById.get(edge.toId);
@@ -603,6 +623,24 @@ export function useBoardCanvas({
             collapsedW: p.collapsedW ?? 0,
             collapsedH: p.collapsedH ?? 0,
           },
+          created: ts,
+          updated: ts,
+        });
+      } else if (shape.type === "task-card") {
+        // 任务卡：kind=taskcard，refId=cardId（空卡 cardId 为空串→null）。
+        // 建卡后由服务端绑定 refId（不新建 node），shape props 全量存 shapeProps 供 hydrate 恢复。
+        const p = shape.props as { cardId?: string; expanded?: boolean; w?: number; h?: number };
+        nodes.push({
+          id: shape.id.replace("shape:", ""),
+          boardId: bid,
+          kind: "taskcard",
+          refId: p.cardId || null,
+          x: shape.x,
+          y: shape.y,
+          w: p.w ?? 0,
+          h: p.h ?? 0,
+          expanded: Boolean(p.expanded),
+          props: { parentId, shapeProps: { ...shape.props } },
           created: ts,
           updated: ts,
         });
