@@ -36,6 +36,13 @@
 
 **结论**：右键菜单能否打开，取决于 `contextmenu` 事件是否完整冒泡到 Trigger span。**卡片内任何 `stopPropagation` 吞掉 pointerdown 或 contextmenu 都会让菜单打不开**。
 
+**⚠ 已知失同步坑（tldraw#10566）**：tldraw 5.3.2 依赖 `radix-ui ^1.4.2`，若解析到 1.5+（本项目为 1.6.x），左键点击画布关闭菜单后右键**永远打不开**（Escape 关闭正常）：
+1. 右键打开菜单 → Radix internal open=true + tlmenus 记菜单
+2. 左键点画布 → `MenuClickCapture.clearOpenMenus()` 只清 tlmenus、不通知 Radix；且 tlmenus 清空导致 `{isOpen && <Content>}` 卸载、DismissableLayer 消失，Radix 失去 outside-click 关闭通道 → **Radix internal open 卡 true**
+3. 此后任何右键的 `handleOpen` 都不再生效
+
+**修复（本项目）**：CanvasStage 用 `SyncedContextMenu`（`components/canvas/SyncedContextMenu.tsx`）override 默认 ContextMenu，把 Radix Root 改为**受控** `open={isOpen}`（isOpen 派生自 tlmenus）——菜单被清空时受控 prop 直接驱动 Radix 复位，与官方 #10567 同方案。**新增类似卡片时不要动这个 override**。
+
 ### 4. React 合成事件 vs 原生监听（最容易踩的坑）
 
 - tldraw 的 wheel / gesture 用**原生 `addEventListener`** 挂在 `.tl-container`（比 React root 更内层）。
@@ -123,6 +130,7 @@ onPointerUp={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
 | 初次进入看板 ctrl+滚轮触发浏览器缩放，画布不缩放 | `autoFocus={false}` → `isFocused` 恒 false → tldraw wheel 全门控失效 | `onMount` 里 `editor.focus()` |
 | 编辑便笺 / 滚动消息区 = 画布平移，内部滚不动 | ① shape util 未声明 `canScroll()`；② 卡片 wheel 拦截用 React 合成 `onWheel`（时机晚于 tldraw 原生监听，来不及 stop） | `canScroll()=true` + 原生 `addEventListener` 拦截 |
 | 右键卡片（便笺/展开工作台）只弹一次或弹不出 | pointer 拦截无条件/条件化吞掉 `button===2`，`contextmenu` 链路被断 | pointer 拦截仅 `button===0`，右键放行 |
+| 右键打开菜单 → 左键点画布关闭后，**任何**右键都弹不出（含画布空白） | tldraw#10566：radix-ui 解析到 1.5+，`MenuClickCapture.clearOpenMenus()` 不通知 Radix，Radix internal open 卡死 | 受控化 ContextMenu override（`SyncedContextMenu`），Root `open={isOpen}` 同步 tlmenus |
 | 展开卡未激活时滚消息区也滚动会话历史 | wheel 拦截只看几何（目标在滚动区）不叠加激活态 | 加 `if (!isActive()) return`——未激活让给画布（常见场景：展开会话看内容但想移画布） |
 | 画布拖拽/平移路过展开卡被阻断 | 容器级无条件 `stopPropagation` 整块拦 pointer | pointer 仅拦左键 + 激活态，非激活放行 |
 
@@ -132,4 +140,5 @@ onPointerUp={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
 - `components/canvas/SessionCardShape.tsx` — 会话卡 shape（展开/收合）
 - `components/canvas/SessionWorkbench.tsx` — 展开工作台（ChatWindow 嵌入），wheel/pointer 拦截范例
 - `components/canvas/StickyNoteShape.tsx` — 便笺 shape（canScroll + 原生 wheel 拦截范例）
+- `components/canvas/SyncedContextMenu.tsx` — 受控化右键菜单（修复 tldraw#10566），见「右键菜单链路」
 - 数据/结构层面看板规则见 [boards.md](boards.md)

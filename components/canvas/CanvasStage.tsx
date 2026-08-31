@@ -6,6 +6,7 @@ import { Tldraw, DefaultToolbar, DefaultToolbarContent, DefaultStylePanel, Style
 import { SessionCardUtil } from "./SessionCardShape";
 import { StickyNoteUtil } from "./StickyNoteShape";
 import { StickyNoteTool } from "./StickyNoteTool";
+import { SyncedContextMenu } from "./SyncedContextMenu";
 import { useI18n } from "@/hooks/useI18n";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
 import type { SessionInfo } from "@/lib/types";
@@ -171,6 +172,9 @@ export function CanvasStage({
     LoadingScreen: null,
     // 样式面板：选中图形时右侧出现，去掉「透明度选择器」，保留颜色/填充/虚线/字号等
     StylePanel: (props) => <BoardStylePanel {...props} />,
+    // 右键菜单：受控化替代默认（修复 tldraw#10566 — radix-ui 1.5+ 下左键关闭菜单后
+    // Radix internal open 失同步，右键永远打不开）
+    ContextMenu: SyncedContextMenu,
     KeyboardShortcutsDialog: null,
     DebugPanel: null,
     DebugMenu: null,
