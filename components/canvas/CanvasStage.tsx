@@ -18,6 +18,46 @@ const shapeUtils = [...defaultShapeUtils, SessionCardUtil, StickyNoteUtil];
 // 这里用 UI overrides 把 note 工具换成我们的：
 // - onSelect → setCurrentTool("note")（编辑器里的 note 已被 StickyNoteTool 替换为 sticky-note）
 // - onDragStart → 直接创建 sticky-note（避免拖拽出内置便笺）
+//
+// 防重复创建：tldraw 的 useDraggableEvents 把拖拽状态放在 useMemo 闭包里（依赖
+// onDragStart/onSelect/editor 引用），若拖拽中途这些引用变化（tools() 每次返回新对象）导致
+// useMemo 重建、状态重置，同一手势可能重复触发 onDragStart → 画布上出现两个便笺。
+// 处理：onSelect/onDragStart 提取为模块级稳定函数（引用不再随渲染变化），并在 onDragStart
+// 里检测「已在拖拽一个 sticky-note」时忽略重复调用——双保险，杜绝添加出两个。
+function handleNoteSelect(
+  editor: import("tldraw").Editor,
+  note: { onSelect?: (s: unknown) => void },
+  source: unknown,
+) {
+  editor.setCurrentTool("note");
+  note.onSelect?.(source);
+}
+function handleNoteDragStart(editor: import("tldraw").Editor, info: unknown) {
+  // 已在拖拽一个 sticky-note（select.translating + 唯一选中为便笺）→ 忽略重复触发
+  if (
+    editor.isIn("select.translating")
+    && editor.getSelectedShapeIds().length === 1
+    && editor.getOnlySelectedShape()?.type === "sticky-note"
+  ) {
+    return;
+  }
+  const { x, y } = editor.inputs.getCurrentPagePoint();
+  const id = createShapeId();
+  const mark = editor.markHistoryStoppingPoint("drag sticky-note");
+  editor.createShape({ id, type: "sticky-note", x, y });
+  const shape = editor.getShape(id);
+  if (!shape) { editor.setCurrentTool("select.idle"); return; }
+  const bounds = editor.getShapePageBounds(id);
+  const w = bounds?.w ?? 260;
+  const h = bounds?.h ?? 200;
+  editor.updateShape({ id, type: "sticky-note", x: x - w / 2, y: y - h / 2 });
+  editor.select(id);
+  editor.setCurrentTool("select.translating", {
+    ...(info as object), target: "shape", shape, isCreating: true, creatingMarkId: mark,
+    onCreate() { editor.setCurrentTool("select.idle"); editor.select(id); },
+  });
+}
+
 const uiOverrides: TLUiOverrides[] = [{
   tools(editor, tools) {
     const note = tools["note"];
@@ -26,28 +66,8 @@ const uiOverrides: TLUiOverrides[] = [{
       ...tools,
       note: {
         ...note,
-        onSelect(source) {
-          editor.setCurrentTool("note");
-          (note as { onSelect?: (s: unknown) => void }).onSelect?.(source);
-        },
-        onDragStart(source, info) {
-          // 拖拽从工具栏创建我们的 sticky-note；不要调原始 onDragStart（它会再建一个内置 note，导致两个控件）
-          const { x, y } = editor.inputs.getCurrentPagePoint();
-          const id = createShapeId();
-          const mark = editor.markHistoryStoppingPoint("drag sticky-note");
-          editor.createShape({ id, type: "sticky-note", x, y });
-          const shape = editor.getShape(id);
-          if (!shape) { editor.setCurrentTool("select.idle"); return; }
-          const bounds = editor.getShapePageBounds(id);
-          const w = bounds?.w ?? 260;
-          const h = bounds?.h ?? 200;
-          editor.updateShape({ id, type: "sticky-note", x: x - w / 2, y: y - h / 2 });
-          editor.select(id);
-          editor.setCurrentTool("select.translating", {
-            ...info, target: "shape", shape, isCreating: true, creatingMarkId: mark,
-            onCreate() { editor.setCurrentTool("select.idle"); editor.select(id); },
-          });
-        },
+        onSelect: (source) => handleNoteSelect(editor, note as unknown as { onSelect?: (s: unknown) => void }, source),
+        onDragStart: (source, info) => handleNoteDragStart(editor, info),
       },
     };
   },

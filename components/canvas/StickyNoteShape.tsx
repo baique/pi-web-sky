@@ -183,10 +183,31 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
     };
   });
 
+  // copy 拦截（原生监听，bubble 阶段）：预览态选中文本后 Ctrl+C 会被 tldraw 劫持——
+  // 单击内容区会选中 shape（handleContentClick → editor.select），tldraw 的 useNativeClipboardEvents
+  // 发现 selectedShapeIds 非空即 preventDefault 并复制 shape，sticky-note 无可提取文本时
+  // 写入一个空格（`textContent = " "`），选区文本被丢弃。这里在事件冒泡到 document
+  // （tldraw 监听处）之前，若存在非空文本选区就 stopPropagation，放行浏览器原生复制选区；
+  // 无文本选区（shape 选中复制）则放行给 tldraw 正常复制。无依赖 effect：DOM 随渲染替换。
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const onCopy = (e: ClipboardEvent) => {
+      const sel = window.getSelection();
+      if (sel && sel.toString().length > 0) e.stopPropagation();
+    };
+    el.addEventListener("copy", onCopy);
+    return () => el.removeEventListener("copy", onCopy);
+  });
+
   const copyContent = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      void navigator.clipboard.writeText(shape.props.text).then(() => {
+      // 复制「渲染后」的格式文本（非 markdown 源码）：直接取已渲染的 .markdown-body 文本，
+      // 所见即所得（标题/粗体/列表/链接均按显示样式展开）；空便笺（无渲染 DOM）回退原始 text。
+      const rendered =
+        contentRef.current?.querySelector<HTMLElement>(".markdown-body")?.innerText ?? shape.props.text;
+      void navigator.clipboard.writeText(rendered).then(() => {
         setCopied(true);
         if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
         copiedTimerRef.current = setTimeout(() => setCopied(false), 1200);
@@ -194,7 +215,7 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
         // 剪贴板不可用（无焦点/权限）：回退到临时 textarea
         try {
           const ta = document.createElement("textarea");
-          ta.value = shape.props.text;
+          ta.value = rendered;
           document.body.appendChild(ta);
           ta.select();
           document.execCommand("copy");

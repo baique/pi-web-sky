@@ -403,17 +403,7 @@ function TaskCard({
             )}
             {(hovered || moreOpen || confirmDelete) && !renaming && (
               <span ref={actionsRef} style={{ position: "relative", display: "flex", gap: 3, flexShrink: 0, alignItems: "center" }}>
-                <button
-                  type="button"
-                  title={t("sidebar.newTaskSession")}
-                  onClick={(e) => { e.stopPropagation(); onNewSession(task.id); }}
-                  style={{ ...iconStyle, width: 28, height: 28 }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-active)"; e.currentTarget.style.color = "var(--accent)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
-                >
-                  {bubbleIcon}
-                </button>
-                {/* 打开看板（任务即看板）：hover 操作行，位于新建会话之后、编辑之前 */}
+                {/* 打开看板（任务即看板）：首位（用户要求：进入看板优先于新建会话） */}
                 <button
                   type="button"
                   title={t("sidebar.taskOpenBoard")}
@@ -423,6 +413,16 @@ function TaskCard({
                   onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = isActive ? "var(--accent)" : "var(--text-muted)"; }}
                 >
                   {boardIcon}
+                </button>
+                <button
+                  type="button"
+                  title={t("sidebar.newTaskSession")}
+                  onClick={(e) => { e.stopPropagation(); onNewSession(task.id); }}
+                  style={{ ...iconStyle, width: 28, height: 28 }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-active)"; e.currentTarget.style.color = "var(--accent)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
+                >
+                  {bubbleIcon}
                 </button>
                 <button type="button" title={t("sidebar.rename")} onClick={(e) => { e.stopPropagation(); setRenameValue(task.name); setRenaming(true); setMoreOpen(false); }} style={{ ...iconStyle, width: 28, height: 28 }} onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-active)"; e.currentTarget.style.color = "var(--accent)"; }} onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}>
                   {pencilIcon}
