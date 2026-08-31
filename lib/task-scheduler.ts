@@ -45,6 +45,9 @@ export const BLOCK_COOLDOWN_MS = 10 * 60 * 1000;
 /** 阻塞判定冷却表（模块级即可：仅节流，热重载重置无害） */
 const blockCheckAt = new Map<string, number>();
 
+/** 会话静默期：running 卡会话不在跑但最后活动距今不足该值时，视为回合间隙不转 review */
+export const SESSION_SETTLE_MS = 30_000;
+
 declare global {
   var __piTaskScheduler: {
     timer: ReturnType<typeof setInterval>;
@@ -115,6 +118,13 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
     // 注意：不 bind 执行会话到 taskcard node —— bindNodeToSession 会覆盖 node.ref_id（=cardId），
     // 导致 getNodeByRefId/水合拿不到卡、刷新后卡从画布消失。会话绑定已在卡上行存（sessionId）。
 
+    // 会话正忙（已在流式/处理中）：说明上一轮已发过 prompt，直接标 running，不重复发
+    if (session.session.isRunning()) {
+      updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
+      console.log(`[task-scheduler] #${card.number} ${card.name} 会话忙（复用中），标 running 不重发`);
+      return true;
+    }
+
     await session.session.send({ type: "prompt", message: buildTaskPrompt(card) });
 
     updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
@@ -133,19 +143,25 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
 
 /**
  * 巡检：running 卡若执行会话已不在真实运行（AI 会话结束/销毁）→ 转 review（会话结束待审核）。
- * 以真实 pi 会话执行状态为准，防止卡状态 stale 锁死并发闸门（会话结束卡还挂着 running）。
+ * 以真实 pi 会话执行状态为准，防止卡状态 stale 锁死并发闸门。
+ * 防误判：会话不在跑但最后活动距今 < SESSION_SETTLE_MS（回合间隙/模型思考间隙）→ 不转，继续观察。
  * 返回本次流转数。
  */
-export function reconcileEndedRunningCards(): number {
+export async function reconcileEndedRunningCards(): Promise<number> {
   const runningIds = new Set(getRunningRpcSessionIds());
+  const now = Date.now();
   let flipped = 0;
   for (const card of listRunningDispatched()) {
     if (!card.sessionId) continue;
-    if (!runningIds.has(card.sessionId)) {
-      updateCard(card.id, { execStatus: "review" });
-      console.log(`[task-scheduler] #${card.number} ${card.name} 执行会话已结束 → review（待审核）`);
-      flipped += 1;
-    }
+    // 会话真实在跑 → 保持 running
+    if (runningIds.has(card.sessionId)) continue;
+    // 会话不在跑：确认已静默一段时间（防回合间隙误判），才转 review
+    const snapshot = await readSessionAuditSnapshot(card.sessionId);
+    if (!snapshot || snapshot.lastActivityMs === 0) continue;
+    if (now - snapshot.lastActivityMs < SESSION_SETTLE_MS) continue;
+    updateCard(card.id, { execStatus: "review" });
+    console.log(`[task-scheduler] #${card.number} ${card.name} 执行会话已结束 → review（待审核）`);
+    flipped += 1;
   }
   return flipped;
 }
@@ -153,7 +169,7 @@ export function reconcileEndedRunningCards(): number {
 /** 单轮调度：并发闸门未满才派发；最多补满到全局上限。返回本轮派发数。 */
 export async function runSchedulerTick(): Promise<number> {
   // 先巡检：会话已结束的 running 卡流转走（review），释放闸门（以真实会话状态为准）
-  reconcileEndedRunningCards();
+  await reconcileEndedRunningCards();
   // S3：回复队列优先 → 审核 review 卡 → 巡检阻塞
   await processReplyQueue();
   await processReviewCards();
@@ -370,10 +386,18 @@ async function abortAndReguide(card: TaskCard): Promise<void> {
 /** 启动调度器（instrumentation 注册；globalThis 防热重载重复启动）。 */
 export function startTaskScheduler(): void {
   if (globalThis.__piTaskScheduler) return;
+  let tickInFlight = false;
   const timer = setInterval(() => {
-    void runSchedulerTick().catch((error) => {
-      console.error("[task-scheduler] tick error:", error instanceof Error ? error.message : error);
-    });
+    // 防 tick 重叠：上一轮未跑完（AI 审核耗时可能超过周期）则跳过本轮
+    if (tickInFlight) return;
+    tickInFlight = true;
+    void runSchedulerTick()
+      .catch((error) => {
+        console.error("[task-scheduler] tick error:", error instanceof Error ? error.message : error);
+      })
+      .finally(() => {
+        tickInFlight = false;
+      });
   }, TASK_SCHEDULER_INTERVAL_MS);
   timer.unref?.();
   const sched = { timer, startedAt: Date.now(), lastAction: { type: "none" as const, at: 0 } };
