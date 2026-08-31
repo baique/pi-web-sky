@@ -120,6 +120,20 @@ export function useBoardCanvas({
     void load();
   }, [load]);
 
+  // 任务卡 API 操作（建卡/改依赖/删卡）会 bump boards.updated：监听事件刷新乐观锁基线。
+  // 否则本客户端携带旧基线的防抖全量保存会被 409 拒绝 → 触发 reloadCanvasWrap →
+  // 弹「保存冲突」提示 + reloadCanvas 全量删 shape 又误触「禁止删除会话」拦截。
+  useEffect(() => {
+    const onBaseUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<{ boardId: string; updated: number }>).detail;
+      if (!detail || typeof detail.updated !== "number") return;
+      if (detail.boardId !== boardIdRef.current) return;
+      baseUpdatedRef.current = detail.updated;
+    };
+    window.addEventListener("pi-web:board-base-updated", onBaseUpdated);
+    return () => window.removeEventListener("pi-web:board-base-updated", onBaseUpdated);
+  }, []);
+
   // 初次物化数据（editor 挂载后再用）
   const [initialCanvas, setInitialCanvas] = useState<BoardCanvas | null>(null);
 

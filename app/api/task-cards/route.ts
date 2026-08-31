@@ -174,7 +174,7 @@ export async function POST(req: Request) {
       throw error;
     }
 
-    return NextResponse.json({ card, nodeId: node?.id ?? null }, { status: 201 });
+    return NextResponse.json({ card, nodeId: node?.id ?? null, updated: getBoard(board.id)?.updated ?? null }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }

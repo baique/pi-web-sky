@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ExecStatus, LinkKind, ReadyStatus, TaskCard, TaskCardLink } from "@/lib/task-card-store";
+import { dispatchBoardBaseUpdated } from "@/lib/board-events";
 
 /**
  * 任务卡数据 hook：拉取单卡详情（含依赖两向）+ 同看板候选卡（依赖选择用），
@@ -21,6 +22,9 @@ export function useTaskCard(cardId: string | null, boardId: string | null, pollM
   const [candidates, setCandidates] = useState<TaskCard[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // detail 最新值 ref（saveCard 用，避免轮询更新重建 callback）
+  const detailRef = useRef<TaskCardDetail | null>(null);
+  detailRef.current = detail;
 
   const fetchDetail = useCallback(async (silent = false) => {
     if (!cardId) {
@@ -106,7 +110,10 @@ export function useTaskCard(cardId: string | null, boardId: string | null, pollM
         const j = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(j.error ?? `HTTP ${res.status}`);
       }
-      const j = (await res.json()) as { card: TaskCard };
+      const j = (await res.json()) as { card: TaskCard; updated?: number | null };
+      // 建卡会 bump boards.updated：派发事件让 useBoardCanvas 刷新乐观锁基线，
+      // 避免后续防抖全量保存携带过期基线被 409 拒绝（保存冲突提示的根因）。
+      if (typeof j.updated === "number") dispatchBoardBaseUpdated(input.boardId, j.updated);
       return j.card;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -139,6 +146,11 @@ export function useTaskCard(cardId: string | null, boardId: string | null, pollM
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(j.error ?? `HTTP ${res.status}`);
+      }
+      const j = (await res.json()) as { card: TaskCard; updated?: number | null };
+      // 依赖变更（syncCardEdges）会 bump boards.updated：派发事件刷新乐观锁基线。
+      if (typeof j.updated === "number" && detailRef.current?.card.boardId) {
+        dispatchBoardBaseUpdated(detailRef.current.card.boardId, j.updated);
       }
       await reload();
       return true;
