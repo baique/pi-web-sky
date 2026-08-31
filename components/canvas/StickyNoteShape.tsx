@@ -147,6 +147,8 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
   // 徽记同样进草稿：完成才写回，取消则放弃选择
   const [draftBadge, setDraftBadge] = useState(badge);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 非编辑态 markdown 内容区（滚动拦截挂这里，原生监听）
+  const contentRef = useRef<HTMLDivElement>(null);
   // 取消时置 true：退出编辑的保存钩子跳过（放弃草稿）；finish 不置 → 正常保存
   const cancelRef = useRef(false);
   const wasEditingRef = useRef(false);
@@ -154,7 +156,29 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 复制便笺内容（markdown 源码）到剪贴板
+  // wheel 拦截（原生监听，非 React 合成）：tldraw 的原生 wheel 监听在 .tl-container（更内层、
+  // 先触发），React 合成 onWheel 在 React root 派发（晚于 tldraw），stopPropagation 根本来不及 ——
+  // 这是便笺被选中时滚动仍平移画布的根因。改原生 addEventListener 挂在内容容器上（bubble），
+  // 事件冒泡到 tldraw container 之前先拦截。无依赖 effect：便笺 DOM 随 tldraw 重渲染替换，
+  // 每次渲染重挂保证监听在当前元素。仅内容溢出时拦截（按需），ctrl/meta 缩放交给画布。
+  useEffect(() => {
+    const attach = (el: HTMLElement | null) => {
+      if (!el) return;
+      const stop = (e: WheelEvent) => {
+        if (e.ctrlKey || e.metaKey) return;
+        if (el.scrollHeight > el.clientHeight) e.stopPropagation();
+      };
+      el.addEventListener("wheel", stop);
+      return () => el.removeEventListener("wheel", stop);
+    };
+    const detachTA = attach(textareaRef.current);
+    const detachContent = attach(contentRef.current);
+    return () => {
+      detachTA?.();
+      detachContent?.();
+    };
+  });
+
   const copyContent = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -307,12 +331,6 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
             ref={textareaRef}
             value={draft}
             onChange={(e) => { setDraft(e.target.value); draftRef.current = e.target.value; }}
-            onWheel={(e) => {
-              // 编辑态 textarea 内部滚动：内容溢出时才是用户在滚它 → 拦截放行内部滚动；
-              // ctrl/meta+wheel 缩放交给画布（canScroll 豁免兜底，双保险）
-              if (e.ctrlKey || e.metaKey) return;
-              if (e.currentTarget.scrollHeight > e.currentTarget.clientHeight) e.stopPropagation();
-            }}
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(); }
@@ -405,18 +423,13 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
           </button>
         </div>
         <div
+          ref={contentRef}
           style={{
             flex: 1,
             minHeight: 0,
             overflowY: "auto",
             padding: "4px var(--bubble-pad-x, 12px) var(--bubble-pad-y, 8px)",
             textAlign: "left",
-          }}
-          onWheel={(e) => {
-            // 非编辑态 markdown 内容滚动：内容溢出时才劫持（用户在滚内容），放行内部滚动；
-            // ctrl/meta+wheel 缩放交给画布
-            if (e.ctrlKey || e.metaKey) return;
-            if (e.currentTarget.scrollHeight > e.currentTarget.clientHeight) e.stopPropagation();
           }}
         >
           {text.trim() ? (
