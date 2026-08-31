@@ -740,7 +740,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
             SessionWorkbench 会把 SessionNavBar（历史/统计/TODO）portal 到 slot，弹层定位也
             以 data-session-titlebar 为锚（宽度 = 右面板宽）。 */}
         {expanded && (
-        <div style={{ flex: 1, minWidth: 0, borderLeft: "1px solid var(--bubble-hairline)", display: "flex", flexDirection: "column" }}>
+        <div style={{ flex: 1, minWidth: 0, borderLeft: "1px solid var(--bubble-hairline)", display: "flex", flexDirection: "column", padding: 8 }}>
           {/* 会话面板标题栏：pointerEvents none 让 tldraw 接管拖拽（与会话卡同模式）；
               导航条 slot 独立接收点击（stopPropagation 隔离拖拽，与任务卡头部按钮区同模式） */}
           <div
@@ -750,7 +750,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
               display: "flex",
               alignItems: "center",
               gap: 6,
-              padding: "0 10px",
+              padding: "0 4px",
               height: 36,
               borderBottom: "1px solid var(--bubble-hairline)",
               cursor: "grab",
@@ -769,8 +769,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
               onPointerDown={(e) => e.stopPropagation()}
             />
           </div>
-          {/* 工作台 / 空态 */}
-          <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+          {/* 工作台 / 空态：四周留 padding 对齐会话卡片展开态（胶囊化），拖拽/调整手柄可触 */}
+          <div style={{ flex: 1, minHeight: 0, position: "relative", padding: "0 4px 0" }}>
             {sessionId ? (
               <SessionWorkbench sessionId={sessionId} />
             ) : (
