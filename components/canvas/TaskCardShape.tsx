@@ -1,11 +1,13 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { BaseBoxShapeUtil, HTMLContainer, T, resizeBox, useEditor } from "tldraw";
 import type { TLBaseShape, TLShapeId, TLShapePartial } from "tldraw";
 import type { ExecStatus, ReadyStatus, TaskCard } from "@/lib/task-card-store";
 import { linkTargetIds, useTaskCard } from "@/hooks/useTaskCards";
 import { SessionWorkbench } from "./SessionWorkbench";
+import { ThemedSelect } from "./ThemedSelect";
+import { DirectoryPicker } from "@/components/DirectoryPicker";
 
 /**
  * 任务卡（task-card）：看板上的工作项卡，独立实体（业务字段在 task_cards 表）。
@@ -15,10 +17,14 @@ import { SessionWorkbench } from "./SessionWorkbench";
  * - 依赖线由 task_card_links 派生（label=kind），禁删
  */
 
-/** 当前看板 id（SessionCanvas 提供）：建卡向导 POST 需要；shape 本身不存 boardId。 */
-export const BoardIdContext = createContext<string | null>(null);
+/** 当前看板上下文（SessionCanvas 提供）：boardId + 左侧栏当前选中目录（建卡 cwd 默认值）。 */
+export const BoardIdContext = createContext<{ boardId: string | null; defaultCwd: string | null } | null>(null);
 export function useBoardId(): string | null {
-  return useContext(BoardIdContext);
+  return useContext(BoardIdContext)?.boardId ?? null;
+}
+/** 左侧栏当前选中目录（newSessionCwd），任务卡建卡时 cwd 默认值。 */
+export function useBoardDefaultCwd(): string | null {
+  return useContext(BoardIdContext)?.defaultCwd ?? null;
 }
 
 export interface TaskCardProps {
@@ -128,7 +134,7 @@ export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
     shape: TaskCardShape,
     info: import("tldraw").TLResizeInfo<TaskCardShape>,
   ): Omit<TLShapePartial<TaskCardShape>, "id" | "type"> | undefined {
-    return resizeBox(shape, info, { minWidth: 180, minHeight: 100 });
+    return resizeBox(shape, info, { minWidth: FORM_W, minHeight: 240 });
   }
 
   override getIndicatorPath(shape: TaskCardShape) {
@@ -175,6 +181,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   const { cardId, w, h, expanded } = shape.props;
   const editor = useEditor();
   const boardId = useBoardId();
+  const defaultCwd = useBoardDefaultCwd();
   const { detail, candidates, loading, error, reload, createCard, saveCard } = useTaskCard(cardId || null, boardId);
 
   // 卡片激活判定（与 SessionWorkbench 同模式）：实时读 editor，不引 React 重渲染
@@ -205,7 +212,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
           priority: 0,
           due: null,
           attachments: [],
-          cwd: null,
+          cwd: defaultCwd,
           useWorktree: false,
           maxRetries: 3,
           retryCount: 0,
@@ -235,6 +242,41 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // 工作目录选择：DirectoryPicker 弹窗 + worktree 列表（复用文件浏览器下方选择器逻辑）
+  const [dirPickerOpen, setDirPickerOpen] = useState(false);
+  const [worktrees, setWorktrees] = useState<Array<{ path: string; branch: string; isMain: boolean }>>([]);
+  // 当前选中 worktree 路径（null = 用 cwd 本身，可能是主 checkout 或非 git）
+  const [wtPath, setWtPath] = useState<string | null>(null);
+
+  // 加载 cwd 所在项目的 worktrees（git 项目才有）
+  useEffect(() => {
+    const cwd = draft?.cwd;
+    if (!cwd) { setWorktrees([]); setWtPath(null); return; }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/worktrees?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { worktrees?: Array<{ path: string; branch: string; isMain: boolean }>; isGit?: boolean };
+        if (cancelled) return;
+        setWorktrees(data.isGit ? (data.worktrees ?? []) : []);
+        // 当前 cwd 若正好是某 worktree 路径，选中它
+        const cur = data.worktrees?.find((w) => w.path === cwd);
+        setWtPath(cur?.path ?? null);
+      } catch {
+        // 静默：非 git / 目录不可访问时 worktree 区不显示
+      } finally {
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [draft?.cwd]);
+
+  // 选择 worktree：cwd 联动到 worktree 路径（主 checkout 则回到项目根）
+  const handleWorktreeSelect = (path: string) => {
+    setWtPath(path);
+    set("cwd", path);
+  };
 
   const set = <K extends keyof TaskCard>(key: K, value: TaskCard[K]) => {
     setDraft((d) => (d ? { ...d, [key]: value } : d));
@@ -361,50 +403,81 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         spellCheck={false}
       />
       <label style={LABEL_STYLE}>就绪状态</label>
-      <select style={FIELD_STYLE} value={draft.readyStatus} onChange={(e) => set("readyStatus", e.target.value as ReadyStatus)}>
-        <option value="draft">草稿</option>
-        <option value="todo">待办</option>
-      </select>
+      <ThemedSelect
+        value={draft.readyStatus}
+        onChange={(v) => set("readyStatus", v as ReadyStatus)}
+        options={[
+          { value: "draft", label: "草稿" },
+          { value: "todo", label: "待办" },
+        ]}
+      />
       <label style={LABEL_STYLE}>执行状态</label>
-      <select style={FIELD_STYLE} value={draft.execStatus} onChange={(e) => set("execStatus", e.target.value as ExecStatus)}>
-        {Object.entries(EXEC_BADGE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-      </select>
+      {/* 执行状态由调度器维护，用户只读查看 */}
+      <div
+        style={{
+          display: "flex", alignItems: "center", gap: 6, height: 28, padding: "0 8px",
+          border: "1px solid var(--border)", borderRadius: 5, fontSize: 11, color: "var(--text-muted)",
+        }}
+      >
+        <span aria-hidden style={{ width: 8, height: 8, borderRadius: "50%", background: (EXEC_BADGE[draft.execStatus] ?? EXEC_BADGE.not_started).color }} />
+        {(EXEC_BADGE[draft.execStatus] ?? EXEC_BADGE.not_started).label}
+      </div>
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1 }}>
           <label style={LABEL_STYLE}>优先级</label>
-          <select style={FIELD_STYLE} value={draft.priority} onChange={(e) => set("priority", Number(e.target.value))}>
-            <option value={1}>高</option>
-            <option value={0}>中</option>
-            <option value={-1}>低</option>
-          </select>
+          <ThemedSelect
+            value={String(draft.priority)}
+            onChange={(v) => set("priority", Number(v))}
+            options={[
+              { value: "1", label: "高" },
+              { value: "0", label: "中" },
+              { value: "-1", label: "低" },
+            ]}
+          />
         </div>
         <div style={{ flex: 1 }}>
           <label style={LABEL_STYLE}>预计截止</label>
-          <input
-            style={FIELD_STYLE}
-            type="datetime-local"
-            value={draft.due ? toLocalInput(draft.due) : ""}
-            onChange={(e) => set("due", e.target.value ? new Date(e.target.value).getTime() : null)}
-          />
+          <DuePicker due={draft.due ?? null} onChange={(ms) => set("due", ms)} />
         </div>
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1 }}>
-          <label style={LABEL_STYLE}>工作目录 cwd</label>
-          <input
-            style={FIELD_STYLE}
-            value={draft.cwd ?? ""}
-            onChange={(e) => set("cwd", e.target.value || null)}
-            placeholder="默认项目根目录"
-          />
-        </div>
-        <div style={{ flex: 1, display: "flex", alignItems: "flex-end", paddingBottom: 4 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-muted)", cursor: "pointer" }}>
-            <input type="checkbox" checked={draft.useWorktree} onChange={(e) => set("useWorktree", e.target.checked)} />
-            用 worktree
-          </label>
-        </div>
+      <label style={LABEL_STYLE}>工作目录</label>
+      <div style={{ display: "flex", gap: 6 }}>
+        <input
+          style={{ ...FIELD_STYLE, flex: 1 }}
+          value={draft.cwd ?? ""}
+          onChange={(e) => set("cwd", e.target.value || null)}
+          placeholder="默认项目根目录"
+          readOnly
+        />
+        <button
+          type="button"
+          style={btnGhost}
+          onClick={() => setDirPickerOpen(true)}
+        >
+          选择目录
+        </button>
       </div>
+      {dirPickerOpen && draft && (
+        <DirectoryPicker
+          onCancel={() => setDirPickerOpen(false)}
+          onSelect={(path) => { set("cwd", path); setDirPickerOpen(false); }}
+        />
+      )}
+      {worktrees.length > 0 && (
+        <>
+          <label style={LABEL_STYLE}>Worktree（git 分支）</label>
+          <ThemedSelect
+            value={wtPath ?? ""}
+            onChange={handleWorktreeSelect}
+            options={[
+              ...worktrees.map((w) => ({
+                value: w.path,
+                label: w.isMain ? `主 checkout（${w.branch ?? ""}）` : `${w.branch ?? ""}`,
+              })),
+            ]}
+          />
+        </>
+      )}
       <label style={LABEL_STYLE}>最大重试次数</label>
       <input
         style={FIELD_STYLE}
@@ -413,9 +486,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         value={draft.maxRetries}
         onChange={(e) => set("maxRetries", Math.max(0, Number(e.target.value) || 0))}
       />
-      {!isCreating && (
-        <>
-          <label style={LABEL_STYLE}>前置任务</label>
+      <>
+          <label style={LABEL_STYLE}>前置任务（可多选）</label>
           <div style={{ maxHeight: 90, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, padding: 4 }}>
             {candidates.filter((c) => c.id !== cardId).map((c) => (
               <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text)", cursor: "pointer", padding: "1px 0" }}>
@@ -429,7 +501,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
             ))}
             {candidates.length <= 1 && <div style={{ color: "var(--text-dim)", fontSize: 10 }}>无其他任务卡可选</div>}
           </div>
-          <label style={LABEL_STYLE}>关联任务</label>
+          <label style={LABEL_STYLE}>关联任务（可多选）</label>
           <div style={{ maxHeight: 90, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, padding: 4 }}>
             {candidates.filter((c) => c.id !== cardId).map((c) => (
               <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text)", cursor: "pointer", padding: "1px 0" }}>
@@ -443,8 +515,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
             ))}
             {candidates.length <= 1 && <div style={{ color: "var(--text-dim)", fontSize: 10 }}>无其他任务卡可选</div>}
           </div>
-        </>
-      )}
+      </>
       <label style={LABEL_STYLE}>附件（引用文件路径，每行一个）</label>
       <textarea
         style={{ ...FIELD_STYLE, minHeight: 46, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 11 }}
@@ -559,10 +630,39 @@ const btnGhost: React.CSSProperties = {
 };
 
 /** ms epoch → datetime-local 输入值（本地时间） */
-function toLocalInput(ms: number): string {
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/**
+ * 预计截止：年/月/日 三个主题化下拉联动（无原生控件，观感对齐表单其余部分）。
+ * 无日期时默认当天；选完组装 ms epoch（当日 00:00 本地）。
+ */
+function DuePicker({ due, onChange }: { due: number | null; onChange: (ms: number | null) => void }) {
+  const now = new Date();
+  const d = due ? new Date(due) : now;
+  const [y, m, day] = [d.getFullYear(), d.getMonth() + 1, d.getDate()];
+
+  const years: string[] = [];
+  for (let i = now.getFullYear() - 2; i <= now.getFullYear() + 3; i++) years.push(String(i));
+  const months = Array.from({ length: 12 }, (_, i) => String(i + 1));
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const days = Array.from({ length: daysInMonth }, (_, i) => String(i + 1));
+
+  const assemble = (ny: number, nm: number, nd: number) => {
+    const t = new Date(ny, nm - 1, nd, 0, 0, 0, 0).getTime();
+    onChange(Number.isNaN(t) ? null : t);
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      <div style={{ flex: 1.4, minWidth: 0 }}>
+        <ThemedSelect value={String(y)} options={years.map((v) => ({ value: v, label: v }))} onChange={(v) => assemble(Number(v), m, Math.min(day, daysInMonth))} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <ThemedSelect value={String(m)} options={months.map((v) => ({ value: v, label: `${v}月` }))} onChange={(v) => assemble(y, Number(v), Math.min(day, new Date(y, Number(v), 0).getDate()))} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <ThemedSelect value={String(day)} options={days.map((v) => ({ value: v, label: v }))} onChange={(v) => assemble(y, m, Number(v))} />
+      </div>
+    </div>
+  );
 }
 
 /** 从目标向上找可滚动容器（到 root 为止）。 */

@@ -529,6 +529,10 @@ export function useBoardCanvas({
         type: "arrow",
         x: 0,
         y: 0,
+        // 依赖线标记（task_card_links 派生）：前置/关联边供右键菜单禁删识别
+        meta: edge.label === "prerequisite" || edge.label === "related"
+          ? { taskLinkLabel: edge.label }
+          : undefined,
         props: {
           start: { x: from.x + from.w / 2, y: from.y + from.h / 2 },
           end: { x: to.x + to.w / 2, y: to.y + to.h / 2 },

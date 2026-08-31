@@ -143,7 +143,7 @@ export function SessionCanvas({
     >
       {/* 搜索高亮 context：shape 组件（会话卡/便笺）读它渲染 accent 描边。
           必须包住 CanvasStage（tldraw），让自定义 shape 能读到 context。 */}
-      <BoardIdContext.Provider value={board.board?.id ?? null}>
+      <BoardIdContext.Provider value={{ boardId: board.board?.id ?? null, defaultCwd: newSessionCwd ?? null }}>
       <BoardSearchProvider>
       {/* 乐观锁冲突提示 toast：数据未丢失但本地未保存改动被丢弃（服务器权威） */}
       {conflictNotice && (
@@ -423,3 +423,4 @@ const floatingIconBtn: React.CSSProperties = {
   borderRadius: 7,
   transition: "background 0.12s, color 0.12s",
 };
+// hmr-repro probe 1788174065

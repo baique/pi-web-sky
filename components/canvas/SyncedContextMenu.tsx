@@ -6,6 +6,8 @@ import {
 import {
   DefaultContextMenuContent,
   TldrawUiMenuContextProvider,
+  TldrawUiMenuGroup,
+  TldrawUiMenuItem,
   preventDefault,
   useContainer,
   useDirection,
@@ -38,6 +40,31 @@ import type { ReactNode } from "react";
  *
  * 其余逻辑完整复刻 tldraw 默认实现（menuCanOpen / Escape 防失焦 / 粗指针长按 / portal）。
  */
+const TASK_LINK_LABELS = new Set(["prerequisite", "related"]);
+
+/**
+ * 右键菜单内容：选中对象含依赖线（meta.taskLinkLabel）时只显示只读提示，
+ * 不提供删除等操作（依赖线由 task_card_links 派生，禁删）；否则默认菜单。
+ */
+function BoardContextMenuContent() {
+  const editor = useEditor();
+  const selected = useValue("ctx-selection", () => editor.getSelectedShapes(), [editor]);
+  const hasTaskLink = selected.some((s) => {
+    const meta = s.meta as { taskLinkLabel?: string } | undefined;
+    return meta?.taskLinkLabel !== undefined && TASK_LINK_LABELS.has(meta.taskLinkLabel);
+  });
+  if (!hasTaskLink) {
+    return <DefaultContextMenuContent />;
+  }
+  return (
+    <TldrawUiMenuContextProvider type="menu" sourceId="context-menu">
+      <TldrawUiMenuGroup id="task-link">
+        <TldrawUiMenuItem id="task-link-readonly" label="依赖连线（自动生成，不可删除）" disabled noClose onSelect={() => {}} />
+      </TldrawUiMenuGroup>
+    </TldrawUiMenuContextProvider>
+  );
+}
+
 export const SyncedContextMenu = memo(function SyncedContextMenu({
   children,
   disabled = false,
@@ -126,7 +153,7 @@ export const SyncedContextMenu = memo(function SyncedContextMenu({
   // 驱动 Radix setOpen(false) 复位 internal state（修复 tldraw#10566 失同步）
   const [isOpen, handleOpenChange] = useMenuIsOpen("context menu", cb);
 
-  const content = children ?? <DefaultContextMenuContent />;
+  const content = children ?? <BoardContextMenuContent />;
 
   return (
     <_ContextMenu.Root
