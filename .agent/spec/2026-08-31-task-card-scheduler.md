@@ -26,7 +26,7 @@
 | # | 决策 | 理由 |
 |---|------|------|
 | 1 | 业务字段进新表 `task_cards`，画布布局走 `board_nodes`（`kind="taskcard"`，`refId=cardId`，与会话卡同构） | 任务卡有大量业务状态（执行状态/依赖/会话绑定/重试计数）被调度器读写，塞 shape props 里调度器无法可靠读取 |
-| 2 | 依赖关系存业务表 `task_card_links`（**真相源**），画布连线由它派生进 `board_edges`（props 标记 `auto:1`），加载/变更时 reconcile 补回 | 调度器读依赖不依赖画布状态；自动补回 = 等效禁删 |
+| 2 | 依赖关系存业务表 `task_card_links`（**真相源**），画布连线由它派生进 `board_edges`（`label=kind` 标记，BoardEdge 无 props 字段，label 即识别符），加载/变更时 reconcile 补回 | 调度器读依赖不依赖画布状态；自动补回 = 等效禁删 |
 | 3 | 执行状态机：`not_started → running → review → done/failed/waiting_reply`；`failed(retry<max) → not_started`；`waiting_reply →(用户回复+调度)→ running`；`abandoned` 人工 | 完成判定不纠结：程序判得了的用程序，判不了的交 AI 审核 |
 | 4 | 审核/阻塞判定用 `SessionManager.inMemory()`（`--no-session` 等价）临时会话，**不落盘、不污染执行会话文件** | SDK 已支持（`--no-session` = `SessionManager.inMemory`，已验证）；执行会话上下文干净，重试不带审核噪音 |
 | 5 | 调度/巡检两个定时器 in-process（`instrumentation.ts` 注册，挂 `globalThis.__piTaskScheduler` 防热重载重复启动） | 与 `__piSessions` 同模式；单进程 dev server，无需外部 cron |
@@ -96,7 +96,7 @@ CREATE INDEX IF NOT EXISTS idx_task_questions_status ON task_card_questions(stat
   - **展开态**（向右展开 ~900×600）：**左=编辑表单，右=现有会话工作台（`SessionWorkbench` 复用，绑定执行会话），中间竖线分隔**。表单：名称、描述(md 编辑)、就绪、执行状态（显示+人工可改）、优先级、截止、附件(引用文件选择器，复用文件浏览能力)、前置/关联(同看板卡多选)、工作区(项目/cwd/worktree)、重试上限。工作台空态：未派发时显示「等待调度 / 手动运行」按钮。
   - 交互遵守 [board-events.md](board-events.md)（焦点、原生 wheel 拦截、右键放行、无依赖 effect）。
 - 建卡：工具栏按钮（`TaskCardTool extends BaseBoxShapeTool`，照 `StickyNoteTool`）→ 点画布弹出建卡向导（必填名称/描述 + 工作区选择 + 前置/关联）→ 落库 + 建 node。
-- **依赖连线**：卡保存时 `syncCardEdges`——按 `task_card_links` 生成/更新 `board_edges`（from=本卡 node，to=目标卡 node，`props:{auto:1, kind}`），画布加载与卡变更时 reconcile 补回（缺失重插）；`auto:1` 的边前端禁用删除（右键菜单无删除项 / 删除即补回）。
+- **依赖连线**：卡保存时 `syncCardEdges`——按 `task_card_links` 生成/更新 `board_edges`（from=本卡 node，to=目标卡 node，`label=kind`），画布加载与卡变更时 reconcile 补回（缺失重插、多余自动边删除）；`label ∈ {prerequisite, related}` 且两端为 taskcard node 的边即依赖线，前端禁用删除（右键菜单无删除项 / 删除即补回）。
 - 状态变更事件：卡执行状态变化通过 `board-events.ts` 事件桥广播（`dispatchBoard…` 模式）刷新看板聚合态 + 侧栏。
 
 ## 4. API
