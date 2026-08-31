@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { BaseBoxShapeUtil, HTMLContainer, T, resizeBox, useEditor, useValue } from "tldraw";
+import { BaseBoxShapeUtil, HTMLContainer, T, resizeBox, useEditor } from "tldraw";
 import type { TLBaseShape, TLShapeId, TLShapePartial } from "tldraw";
 import type { ExecStatus, ReadyStatus, TaskCard } from "@/lib/task-card-store";
 import { linkTargetIds, useTaskCard } from "@/hooks/useTaskCards";
@@ -9,8 +9,8 @@ import { SessionWorkbench } from "./SessionWorkbench";
 
 /**
  * 任务卡（task-card）：看板上的工作项卡，独立实体（业务字段在 task_cards 表）。
- * - 收合态：编号 + 名称 + 就绪/执行状态徽章 + 优先级 + 截止
- * - 展开态：向右展开（默认 900×600），左=编辑表单（含建卡向导），右=执行会话工作台，竖线分隔
+ * - 常态（表单栏常驻）：左=编辑表单（空卡=建卡向导），宽 340
+ * - 展开：右侧追加执行会话工作台，宽 900（双击/按钮切换）
  * - 布局走 board_nodes（kind=taskcard, ref_id=cardId），shape.id 去 "shape:" 前缀 = node id
  * - 依赖线由 task_card_links 派生（label=kind），禁删
  */
@@ -76,11 +76,11 @@ export const EXEC_BADGE: Record<ExecStatus, { color: string; label: string }> = 
   waiting_reply: { color: "#3184f8", label: "等回复" },
 };
 
-const PRIORITY_STAR = { 1: "★", 0: "", [-1]: "☆" } as Record<number, string>;
+/** 常态 = 编辑表单栏（左侧常驻）；展开 = 右侧追加工作台 */
+const FORM_W = 340;
+const FORM_H = 300;
 const EXPANDED_W = 900;
 const EXPANDED_H = 600;
-const COLLAPSED_W = 220;
-const COLLAPSED_H = 120;
 
 export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
   static override type = "task-card" as const;
@@ -95,8 +95,8 @@ export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
       execStatus: "not_started",
       priority: 0,
       expanded: false,
-      w: COLLAPSED_W,
-      h: COLLAPSED_H,
+      w: FORM_W,
+      h: FORM_H,
     };
   }
 
@@ -116,10 +116,10 @@ export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
     return true;
   }
 
-  /** 双击切换展开/收合（展开 900×600，收合 220×120；两态手动尺寸不保留，YAGNI）。 */
+  /** 双击切换右侧工作台展开（常态 340 表单栏 ↔ 展开 900 表单+工作台）。 */
   override onDoubleClick(shape: TaskCardShape): TLShapePartial<TaskCardShape> | void {
     if (shape.props.expanded) {
-      return { id: shape.id, type: "task-card", props: { expanded: false, w: COLLAPSED_W, h: COLLAPSED_H } };
+      return { id: shape.id, type: "task-card", props: { expanded: false, w: FORM_W, h: shape.props.h } };
     }
     return { id: shape.id, type: "task-card", props: { expanded: true, w: EXPANDED_W, h: EXPANDED_H } };
   }
@@ -144,107 +144,11 @@ export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
 }
 
 function TaskCardView({ shape }: { shape: TaskCardShape }) {
-  const { w, h, expanded } = shape.props;
-
-  if (expanded) {
-    return <TaskCardExpanded shape={shape} />;
-  }
-
-  return <TaskCardCollapsed shape={shape} w={w} h={h} />;
+  return <TaskCardBody shape={shape} />;
 }
 
 // ============================================================================
-// 收合态
-// ============================================================================
-
-function TaskCardCollapsed({ shape, w, h }: { shape: TaskCardShape; w: number; h: number }) {
-  const { cardId, number, name, readyStatus, execStatus, priority, due } = shape.props;
-  const editor = useEditor();
-  const isSelected = useValue("selected", () => editor.getSelectedShapeIds().includes(shape.id), [editor, shape.id]);
-
-  const exec = EXEC_BADGE[execStatus] ?? EXEC_BADGE.not_started;
-  const ready = READY_BADGE[readyStatus] ?? READY_BADGE.draft;
-
-  const dueText = useMemo(() => {
-    if (!due) return null;
-    const d = new Date(due);
-    return `${d.getMonth() + 1}/${d.getDate()}`;
-  }, [due]);
-
-  // 卡片样式直接在 HTMLContainer 上（pointerEvents all，与 SessionCardShape 一致）
-  const bubbleStyle: React.CSSProperties = {
-    width: w,
-    height: h,
-    borderRadius: "var(--bubble-radius, 12px)",
-    border: isSelected ? "2px solid var(--accent)" : "1px solid var(--bubble-border)",
-    background: "var(--assistant-card-glass)",
-    backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-    WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-    boxShadow: "0 2px 10px -6px rgba(0,0,0,0.2)",
-    color: "var(--text)",
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-    fontSize: 13,
-    lineHeight: 1.5,
-    pointerEvents: "all",
-    userSelect: "none",
-    cursor: "grab",
-  };
-
-  return (
-    <HTMLContainer
-      data-testid={`task-card-${shape.id}`}
-      onPointerDown={() => editor.bringToFront([shape.id])}
-      style={bubbleStyle}
-    >
-      {/* 顶部行：就绪/执行状态徽章 + 优先级星标 */}
-      <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "6px 10px 0", fontSize: 10 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: ready.color, fontWeight: 600 }}>
-          <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", background: ready.color }} />
-          {ready.label}
-        </span>
-        <span
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 4, color: exec.color, fontWeight: 600,
-            animation: execStatus === "running" ? "board-running-pulse 1.6s ease-in-out infinite" : undefined,
-          }}
-        >
-          <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", background: exec.color }} />
-          {exec.label}
-        </span>
-        <div style={{ flex: 1 }} />
-        {priority !== 0 && (
-          <span title={`优先级 ${priority > 0 ? "高" : "低"}`} style={{ color: "var(--text-dim)", fontSize: 11, letterSpacing: 1 }}>
-            {PRIORITY_STAR[priority] ?? ""}
-          </span>
-        )}
-      </div>
-      {/* 主体：#号 + 名称 */}
-      <div
-        style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", padding: "4px 10px", overflow: "hidden" }}
-      >
-        <span
-          style={{
-            display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
-            fontSize: 13, fontWeight: 600, lineHeight: 1.35, wordBreak: "break-word",
-          }}
-        >
-          {cardId ? <span style={{ color: "var(--text-dim)", fontWeight: 500, marginRight: 5, fontFamily: "var(--font-mono)" }}>#{number}</span> : null}
-          {name}
-        </span>
-      </div>
-      {/* 底部行：截止 + 空位 */}
-      <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 8, padding: "0 10px 6px", fontSize: 10, color: "var(--text-dim)" }}>
-        {dueText ? <span>📅 {dueText}</span> : <span>—</span>}
-        <div style={{ flex: 1 }} />
-      </div>
-    </HTMLContainer>
-  );
-}
-
-// ============================================================================
-// 展开态：左=编辑表单（空卡=建卡向导），右=执行会话工作台，竖线分隔
+// 任务卡本体：左=编辑表单（空卡=建卡向导）常驻；expanded 时右侧追加执行会话工作台
 // ============================================================================
 
 const FIELD_STYLE: React.CSSProperties = {
@@ -267,8 +171,8 @@ const LABEL_STYLE: React.CSSProperties = {
   margin: "8px 0 3px",
 };
 
-function TaskCardExpanded({ shape }: { shape: TaskCardShape }) {
-  const { cardId, w, h } = shape.props;
+function TaskCardBody({ shape }: { shape: TaskCardShape }) {
+  const { cardId, w, h, expanded } = shape.props;
   const editor = useEditor();
   const boardId = useBoardId();
   const { detail, candidates, loading, error, reload, createCard, saveCard } = useTaskCard(cardId || null, boardId);
@@ -560,8 +464,8 @@ function TaskCardExpanded({ shape }: { shape: TaskCardShape }) {
             {saving ? "保存中…" : "保存"}
           </button>
         )}
-        <button type="button" style={btnGhost} onClick={() => { editor.setEditingShape(null); }}>
-          收合
+        <button type="button" style={btnGhost} onClick={() => { editor.updateShape<TaskCardShape>({ id: shape.id, type: "task-card", props: expanded ? { expanded: false, w: FORM_W } : { expanded: true, w: EXPANDED_W, h: EXPANDED_H } }); }}>
+          {expanded ? "收起工作台" : "展开工作台"}
         </button>
       </div>
     </>
@@ -599,11 +503,12 @@ function TaskCardExpanded({ shape }: { shape: TaskCardShape }) {
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
-        {/* 左：编辑表单 / 建卡向导 */}
-        <div style={{ width: 340, flexShrink: 0, borderRight: "1px solid var(--bubble-hairline)", overflowY: "auto", padding: "10px 12px" }}>
+        {/* 左：编辑表单 / 建卡向导（常驻） */}
+        <div style={{ width: 340, flexShrink: 0, borderRight: expanded ? "1px solid var(--bubble-hairline)" : "none", overflowY: "auto", padding: "10px 12px" }}>
           {formBody}
         </div>
-        {/* 右：执行会话工作台 / 空态 */}
+        {/* 右：执行会话工作台 / 空态（expanded 才显示） */}
+        {expanded && (
         <div style={{ flex: 1, minWidth: 0, borderLeft: "1px solid var(--bubble-hairline)", position: "relative" }}>
           {sessionId ? (
             <SessionWorkbench sessionId={sessionId} />
@@ -625,6 +530,7 @@ function TaskCardExpanded({ shape }: { shape: TaskCardShape }) {
             </div>
           )}
         </div>
+        )}
       </div>
     </HTMLContainer>
   );

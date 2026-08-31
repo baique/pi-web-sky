@@ -2,7 +2,7 @@
 
 import "tldraw/tldraw.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Tldraw, DefaultToolbar, DefaultStylePanel, StylePanelColorPicker, StylePanelFillPicker, StylePanelDashPicker, StylePanelSizePicker, StylePanelFontPicker, StylePanelTextAlignPicker, StylePanelLabelAlignPicker, StylePanelGeoShapePicker, StylePanelArrowKindPicker, StylePanelArrowheadPicker, StylePanelSplinePicker, TldrawUiToolbarButton, SelectToolbarItem, HandToolbarItem, DrawToolbarItem, EraserToolbarItem, ArrowToolbarItem, TextToolbarItem, NoteToolbarItem, AssetToolbarItem, RectangleToolbarItem, EllipseToolbarItem, TriangleToolbarItem, DiamondToolbarItem, HexagonToolbarItem, OvalToolbarItem, RhombusToolbarItem, StarToolbarItem, CloudToolbarItem, HeartToolbarItem, XBoxToolbarItem, CheckBoxToolbarItem, ArrowLeftToolbarItem, ArrowUpToolbarItem, ArrowDownToolbarItem, ArrowRightToolbarItem, LineToolbarItem, HighlightToolbarItem, LaserToolbarItem, FrameToolbarItem, createShapeId, defaultShapeUtils, useEditor, useValue, type TLComponents, type TLUiOverrides, type TLUiStylePanelProps } from "tldraw";
+import { Tldraw, DefaultToolbar, DefaultStylePanel, StylePanelColorPicker, StylePanelFillPicker, StylePanelDashPicker, StylePanelSizePicker, StylePanelFontPicker, StylePanelTextAlignPicker, StylePanelLabelAlignPicker, StylePanelGeoShapePicker, StylePanelArrowKindPicker, StylePanelArrowheadPicker, StylePanelSplinePicker, ToolbarItem, SelectToolbarItem, HandToolbarItem, DrawToolbarItem, EraserToolbarItem, ArrowToolbarItem, TextToolbarItem, NoteToolbarItem, AssetToolbarItem, RectangleToolbarItem, EllipseToolbarItem, TriangleToolbarItem, DiamondToolbarItem, HexagonToolbarItem, OvalToolbarItem, RhombusToolbarItem, StarToolbarItem, CloudToolbarItem, HeartToolbarItem, XBoxToolbarItem, CheckBoxToolbarItem, ArrowLeftToolbarItem, ArrowUpToolbarItem, ArrowDownToolbarItem, ArrowRightToolbarItem, LineToolbarItem, HighlightToolbarItem, LaserToolbarItem, FrameToolbarItem, createShapeId, defaultShapeUtils, useEditor, type TLComponents, type TLUiOverrides, type TLUiStylePanelProps } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
 import { StickyNoteUtil } from "./StickyNoteShape";
 import { StickyNoteTool } from "./StickyNoteTool";
@@ -60,49 +60,66 @@ function handleNoteDragStart(editor: import("tldraw").Editor, info: unknown) {
   });
 }
 
+/** 任务卡拖出创建（像便笺）：从工具栏拖到画布 → 在落点创建空任务卡（表单栏常态 340×300）。 */
+function handleTaskCardDragStart(editor: import("tldraw").Editor, info: unknown) {
+  if (
+    editor.isIn("select.translating")
+    && editor.getSelectedShapeIds().length === 1
+    && editor.getOnlySelectedShape()?.type === "task-card"
+  ) {
+    return;
+  }
+  const { x, y } = editor.inputs.getCurrentPagePoint();
+  const id = createShapeId();
+  const mark = editor.markHistoryStoppingPoint("drag task-card");
+  editor.createShape({ id, type: "task-card", x, y });
+  const shape = editor.getShape(id);
+  if (!shape) { editor.setCurrentTool("select.idle"); return; }
+  const bounds = editor.getShapePageBounds(id);
+  const w = bounds?.w ?? 340;
+  const h = bounds?.h ?? 300;
+  editor.updateShape({ id, type: "task-card", x: x - w / 2, y: y - h / 2 });
+  editor.select(id);
+  editor.setCurrentTool("select.translating", {
+    ...(info as object), target: "shape", shape, isCreating: true, creatingMarkId: mark,
+    onCreate() { editor.setCurrentTool("select.idle"); editor.select(id); },
+  });
+}
+
 const uiOverrides: TLUiOverrides[] = [{
   tools(editor, tools) {
     const note = tools["note"];
-    if (!note) return tools;
+    const base = note
+      ? {
+          ...tools,
+          note: {
+            ...note,
+            onSelect: (source: unknown) => handleNoteSelect(editor, note as unknown as { onSelect?: (s: unknown) => void }, source),
+            onDragStart: (source: unknown, info: unknown) => handleNoteDragStart(editor, info),
+          },
+        }
+      : tools;
     return {
-      ...tools,
-      note: {
-        ...note,
-        onSelect: (source) => handleNoteSelect(editor, note as unknown as { onSelect?: (s: unknown) => void }, source),
-        onDragStart: (source, info) => handleNoteDragStart(editor, info),
+      ...base,
+      // 任务卡工具：点按钮切工具（画布点击添加），或从工具栏拖出创建（像便笺）
+      "task-card": {
+        id: "task-card",
+        label: "任务卡",
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="M3 10h18M8 15h4" />
+          </svg>
+        ),
+        onSelect: (source: unknown) => { editor.setCurrentTool("task-card"); },
+        onDragStart: (source: unknown, info: unknown) => handleTaskCardDragStart(editor, info),
       },
     };
   },
 }];
 
-// 任务卡工具栏按钮：切到 task-card 工具，在画布落点拖出空任务卡 shape。
-function TaskCardToolbarButton() {
-  const editor = useEditor();
-  const isActive = useValue("taskCardToolActive", () => editor.getCurrentToolId() === "task-card", [editor]);
-  return (
-    <TldrawUiToolbarButton
-      type="tool"
-      tooltip="任务卡"
-      isActive={isActive}
-      onPointerDown={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        editor.setCurrentTool("task-card");
-      }}
-    >
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="3" y="5" width="18" height="14" rx="2" />
-        <path d="M3 10h18M8 15h4" />
-      </svg>
-    </TldrawUiToolbarButton>
-  );
-}
-
-/**
- * 底部工具条内容（自定义，替代 DefaultToolbarContent）：复刻 tldraw 默认工具列表
- * （Select/Hand/Draw/…/Note/形状…），在便笺（Note）后插入「任务卡」按钮 ——
- * 像便笺一样嵌在主工具条（工具区），溢出时与默认工具一起折叠进 More。
- */
+// 任务卡工具按钮：走 tldraw ToolbarItem 机制（useTools 定义 icon/label/onDragStart），
+// 支持从工具栏直接拖出到画布创建（像便笺）。
 function TaskCardToolbarContent() {
   return (
     <>
@@ -113,7 +130,7 @@ function TaskCardToolbarContent() {
       <ArrowToolbarItem />
       <TextToolbarItem />
       <NoteToolbarItem />
-      <TaskCardToolbarButton />
+      <ToolbarItem tool="task-card" />
       <AssetToolbarItem />
       <RectangleToolbarItem />
       <EllipseToolbarItem />
