@@ -95,8 +95,8 @@ export const EXEC_BADGE: Record<ExecStatus, { color: string; label: string }> = 
 };
 
 /** 常态 = 编辑表单栏（左侧常驻）；展开 = 右侧追加工作台 */
-const FORM_W = 360;
-const FORM_H = 285;
+const FORM_W = 380;
+const FORM_H = 270;
 /** 工作台区域最小尺寸：对齐会话卡片展开态最小（600×500） */
 const WORKBENCH_MIN_W = 600;
 const WORKBENCH_MIN_H = 500;
