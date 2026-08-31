@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { SessionWorkbench } from "./SessionWorkbench";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 import { dispatchBoardSessionRenamed } from "@/lib/board-events";
-import { useBoardSearch } from "./BoardSearchContext";
+import { HIGHLIGHT_SHADOW, useBoardSearch } from "./BoardSearchContext";
 
 /**
  * 会话卡 shape。props 含 w/h 满足 BaseBoxShapeUtil（可拉伸）；
@@ -284,7 +284,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           background: "var(--board-card-glass)",
           backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
           WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-          boxShadow: isHighlighted ? BOARD_HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
+          boxShadow: isHighlighted ? HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
           animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
           opacity: stale ? 0.55 : 1,
           pointerEvents: "all",
@@ -422,7 +422,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         background: "var(--board-card-glass)",
         backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
         WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-        boxShadow: isHighlighted ? BOARD_HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
+        boxShadow: isHighlighted ? HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
         animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
         opacity: stale ? 0.55 : 1,
         pointerEvents: "all",
@@ -585,10 +585,6 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     </HTMLContainer>
   );
 }
-
-/** 搜索命中高亮描边：accent 外圈 + 泛光（渐隐由 board-search-glow keyframes 控制） */
-const BOARD_HIGHLIGHT_SHADOW =
-  "0 0 0 3px var(--accent), 0 0 24px color-mix(in srgb, var(--accent) 45%, transparent)";
 
 function formatDuration(ms: number): string {
   const sec = Math.max(1, Math.round(ms / 1000));

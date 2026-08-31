@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BaseBoxShapeUtil, HTMLContainer, T, resizeBox, useEditor, useValue } from "tldraw";
 import type { TLBaseShape, TLShapePartial } from "tldraw";
 import ReactMarkdown from "react-markdown";
+import { HIGHLIGHT_SHADOW, useBoardSearch } from "./BoardSearchContext";
 
 /**
  * 自研 markdown 便笺（sticky-note）。
@@ -106,6 +107,9 @@ export class StickyNoteUtil extends BaseBoxShapeUtil<StickyNoteShape> {
 function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
   const { w, h, text } = shape.props;
   const editor = useEditor();
+  // 搜索高亮：命中时 accent 描边 + 泛光渐隐（由 BoardSearchContext 驱动，不落库）
+  const { highlightId } = useBoardSearch();
+  const isHighlighted = highlightId === shape.id;
   const isEditing = useValue("editing", () => editor.getEditingShapeId() === shape.id, [editor, shape.id]);
 
   // 内容区与画布手势隔离：
@@ -251,11 +255,12 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
     width: w,
     height: h,
     borderRadius: "var(--bubble-radius, 12px)",
-    border: "1px solid var(--bubble-border)",
+    border: isHighlighted ? "2px solid var(--accent)" : "1px solid var(--bubble-border)",
     background: "var(--assistant-card-glass)",
     backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
     WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-    boxShadow: "0 2px 10px -6px rgba(0,0,0,0.2)",
+    boxShadow: isHighlighted ? HIGHLIGHT_SHADOW : "0 2px 10px -6px rgba(0,0,0,0.2)",
+    animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
     color: "var(--text)",
     display: "flex",
     flexDirection: "column",
@@ -457,10 +462,6 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
     </HTMLContainer>
   );
 }
-
-/** 搜索命中高亮描边：accent 外圈 + 泛光（渐隐由 board-search-glow keyframes 控制） */
-const NOTE_HIGHLIGHT_SHADOW =
-  "0 0 0 3px var(--accent), 0 0 24px color-mix(in srgb, var(--accent) 45%, transparent)";
 
 const footerBtnStyle: React.CSSProperties = {
   border: "none",

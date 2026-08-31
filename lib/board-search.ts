@@ -6,15 +6,13 @@
  * 画布节点量级小（几十个），includes 子串匹配足够，无需索引。
  */
 
-import type { Editor, TLShape, TLShapeId } from "tldraw";
+import type { Editor, TLShapeId } from "tldraw";
 
 export type SearchableKind = "session-card" | "sticky-note";
 
 export interface SearchableItem {
   shapeId: TLShapeId;
   kind: SearchableKind;
-  /** 文本来源：卡片标题 / 便笺正文 */
-  field: "title" | "note";
   /** 完整原文（匹配用全文） */
   text: string;
 }
@@ -31,10 +29,10 @@ export function collectSearchable(editor: Editor): SearchableItem[] {
   for (const shape of editor.getCurrentPageShapes()) {
     if (shape.type === "session-card") {
       const title = String((shape.props as { title?: unknown }).title ?? "").trim();
-      if (title) out.push({ shapeId: shape.id, kind: "session-card", field: "title", text: title });
+      if (title) out.push({ shapeId: shape.id, kind: "session-card", text: title });
     } else if (shape.type === "sticky-note") {
       const text = String((shape.props as { text?: unknown }).text ?? "").trim();
-      if (text) out.push({ shapeId: shape.id, kind: "sticky-note", field: "note", text });
+      if (text) out.push({ shapeId: shape.id, kind: "sticky-note", text });
     }
   }
   return out;
@@ -59,11 +57,4 @@ export function makeSnippet(text: string, query: string, maxLen = 44): string {
   const head = start > 0 ? "…" : "";
   const tail = end < text.length ? "…" : "";
   return `${head}${text.slice(start, end)}${tail}`;
-}
-
-/** 定位用：取 shape 页坐标 bounds（供 zoomToBounds；已失效返回 null）。 */
-export function shapePageBounds(editor: Editor, shapeId: TLShapeId) {
-  const shape: TLShape | undefined = editor.getShape(shapeId);
-  if (!shape) return null;
-  return editor.getShapePageBounds(shape.id) ?? null;
 }

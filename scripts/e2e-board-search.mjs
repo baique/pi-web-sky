@@ -135,6 +135,64 @@ try {
     if (highlight.found) check("glow animation running", highlight.anim === "board-search-glow", highlight.anim);
   }
 
+  // 6b. 便笺搜索 + 高亮（sticky-note 走同一 context 机制）：创建一张便笺 → 搜索其文本 → 命中高亮
+  const noteId = "shape:search-e2e-note-1";
+  const noteCreated = await page.evaluate((nid) => {
+    const root = document.getElementById("__next") || document.body;
+    const stack = [root];
+    const seen = new Set();
+    let editor = null;
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node || typeof node !== "object") continue;
+      let f = node[Object.keys(node).find((k) => k.startsWith("__reactFiber"))];
+      while (f && !seen.has(f)) {
+        seen.add(f);
+        const memo = f.memoizedProps;
+        if (memo) for (const k of Object.keys(memo)) {
+          const v = memo[k];
+          if (v && typeof v === "object" && typeof v.createShape === "function" && typeof v.getCurrentPageShapes === "function") {
+            editor = v; break;
+          }
+        }
+        if (editor) break;
+        f = f.return;
+      }
+      if (editor) break;
+      for (const c of node.children || []) stack.push(c);
+    }
+    if (!editor) return false;
+    editor.createShape({ id: nid, type: "sticky-note", x: 200, y: 400, props: { text: "升级登录界面配色", w: 260, h: 200, badge: "blue", createdAt: Date.now() } });
+    return !!editor.getShape(nid);
+  }, noteId);
+  check("created sticky-note on canvas", noteCreated);
+  if (noteCreated) {
+    await searchBox.fill("升级登录");
+    await page.waitForTimeout(300);
+    const dd2 = page.locator("[data-testid=board-search-dropdown]");
+    const hits2 = await dd2.isVisible().then((v) => (v ? dd2.locator("button").count() : 0)).catch(() => 0);
+    check("dropdown hits sticky-note text", hits2 >= 1, `hits=${hits2}`);
+    if (hits2 > 0) {
+      await dd2.locator("button").first().click();
+      await page.waitForTimeout(250);
+      const noteHighlight = await page.evaluate((nid) => {
+        const root = document.querySelector(`[data-testid="sticky-note-${nid}"]`);
+        if (!root) return { found: false, reason: "no element" };
+        // 便笺高亮 boxShadow 挂在内层 bubbleStyle div（HTMLContainer 外层无 shadow）
+        const targets = [root, ...root.querySelectorAll("div")];
+        for (const el of targets) {
+          const cs = getComputedStyle(el);
+          if (cs.boxShadow.includes("0px 0px 0px 3px")) {
+            return { found: true, bs: cs.boxShadow.slice(0, 60), anim: cs.animationName };
+          }
+        }
+        return { found: false, count: targets.length };
+      }, noteId);
+      check("sticky-note highlight ring", noteHighlight.found, noteHighlight.bs ?? noteHighlight.reason);
+      if (noteHighlight.found) check("sticky-note glow animation", noteHighlight.anim === "board-search-glow", noteHighlight.anim);
+    }
+  }
+
   // 7. Enter 循环下一个命中（多命中时）——至少不报错且再触发一次 zoom
   if (itemCount > 1) {
     await searchBox.press("Enter");
