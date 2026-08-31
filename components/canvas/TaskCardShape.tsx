@@ -464,7 +464,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
       />
       <label style={LABEL_STYLE}>需求说明</label>
       <textarea
-        style={{ ...FIELD_STYLE, minHeight: 70, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 11 }}
+        style={{ ...FIELD_STYLE, flex: 1, minHeight: 70, resize: "none", fontFamily: "var(--font-mono)", fontSize: 11 }}
         value={draft.description}
         onChange={(e) => set("description", e.target.value)}
         placeholder="任务描述"
@@ -710,7 +710,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
             隐藏滚动条（[scrollbar-width:none]，与 ChatWindow 同惯例） */}
         <div
           className="[scrollbar-width:none]"
-          style={{ flex: expanded ? `0 0 ${FORM_W}px` : "1 1 auto", minWidth: 0, width: expanded ? FORM_W : undefined, borderRight: expanded ? "1px solid var(--bubble-hairline)" : "none", overflowY: "auto", padding: "10px 12px" }}
+          style={{ flex: expanded ? `0 0 ${FORM_W}px` : "1 1 auto", minWidth: 0, width: expanded ? FORM_W : undefined, borderRight: expanded ? "1px solid var(--bubble-hairline)" : "none", overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column" }}
           onPointerDown={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
           onPointerUp={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
           onClick={(e) => e.stopPropagation()}
