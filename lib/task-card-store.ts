@@ -524,7 +524,8 @@ export function listAnswerableQuestions(): TaskCardQuestion[] {
   // 卡 exec_status='waiting_reply' 且其最新 answered 记录尚未续会话
   const rows = getDb()
     .prepare(
-      `SELECT q.* FROM task_card_questions q
+      `SELECT q.id, q.card_id AS cardId, q.session_id AS sessionId, q.question, q.status, q.answer, q.created, q.answered
+       FROM task_card_questions q
        JOIN task_cards c ON c.id = q.card_id
        WHERE q.status = 'answered' AND c.exec_status = 'waiting_reply'
        AND q.id = (SELECT q2.id FROM task_card_questions q2 WHERE q2.card_id = q.card_id AND q2.status='answered' ORDER BY q2.answered DESC, q2.created DESC LIMIT 1)
