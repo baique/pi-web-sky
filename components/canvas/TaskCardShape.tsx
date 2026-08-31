@@ -12,8 +12,8 @@ import { DirectoryPicker } from "@/components/DirectoryPicker";
 
 /**
  * 任务卡（task-card）：看板上的工作项卡，独立实体（业务字段在 task_cards 表）。
- * - 常态（表单栏常驻）：左=编辑表单（空卡=建卡向导），宽 340
- * - 展开：右侧追加执行会话工作台，宽 900（双击/按钮切换）
+ * - 常态（表单栏常驻）：左=编辑表单（空卡=建卡向导），宽 340；描述之下字段收进「高级」折叠区
+ * - 展开：右侧追加执行会话工作台，宽 940（双击/按钮切换）
  * - 布局走 board_nodes（kind=taskcard, ref_id=cardId），shape.id 去 "shape:" 前缀 = node id
  * - 依赖线由 task_card_links 派生（label=kind），禁删
  */
