@@ -217,6 +217,23 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     return () => el.removeEventListener("wheel", stop);
   });
 
+  // copy 拦截（原生监听，bubble 阶段）：收合卡中间区（lastReply）选中文本后 Ctrl+C 会被 tldraw 劫持——
+  // 卡片处于选中态（selectedShapeIds 非空）且焦点不在输入元素时，useNativeClipboardEvents 在 document
+  // 上 preventDefault 并复制 shape，写出的 text/plain 是 shape 文本而非选区（会话卡 getText 提不出内容，
+  // 实际是空/空白）。这里在事件冒泡到 document（tldraw 监听处）之前，若存在非空文本选区就
+  // stopPropagation，放行浏览器原生复制选区；无文本选区（shape 选中复制）则放行给 tldraw 正常复制。
+  // 与便笺 StickyNoteShape / 工作台 SessionWorkbench 同方案。无依赖 effect：DOM 随渲染替换。
+  useEffect(() => {
+    const el = replyScrollRef.current;
+    if (!el) return;
+    const onCopy = (e: ClipboardEvent) => {
+      const sel = window.getSelection();
+      if (sel && sel.toString().length > 0) e.stopPropagation();
+    };
+    el.addEventListener("copy", onCopy);
+    return () => el.removeEventListener("copy", onCopy);
+  });
+
   // 改名：内联输入 → PATCH /api/sessions/[id] → 事件桥刷左侧树 + 摘要轮询刷新标题
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");

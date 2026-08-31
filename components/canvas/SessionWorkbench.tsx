@@ -192,6 +192,23 @@ export function SessionWorkbench({
     };
   });
 
+  // copy 拦截（原生监听，bubble 阶段）：工作台内（消息区等）选中文本后 Ctrl+C 会被 tldraw 劫持——
+  // 卡片处于选中态（selectedShapeIds 非空）且焦点不在输入元素时，tldraw 的 useNativeClipboardEvents
+  // 在 document 上 preventDefault 并复制 shape，写出的 text/plain 是 shape 的文本而非选区（会话卡
+  // getText 提不出内容，实际是空/空白）。这里在事件冒泡到 document（tldraw 监听处）之前，若存在
+  // 非空文本选区就 stopPropagation，放行浏览器原生复制选区；无文本选区（shape 选中复制）则放行给
+  // tldraw 正常复制。与便笺 StickyNoteShape 同方案。无依赖 effect：DOM 随渲染替换。
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const onCopy = (e: ClipboardEvent) => {
+      const sel = window.getSelection();
+      if (sel && sel.toString().length > 0) e.stopPropagation();
+    };
+    el.addEventListener("copy", onCopy);
+    return () => el.removeEventListener("copy", onCopy);
+  });
+
   // 拉取会话数据（cwd/projectKey 等 ChatWindow 需要）。draft 卡跳过：
   // 无真实会话，ChatWindow 以 isNew 模式新建。
   useEffect(() => {
