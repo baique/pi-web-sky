@@ -342,6 +342,7 @@ export function replaceLinks(
   const card = getCard(cardId);
   if (!card) throw new Error(`task card not found: ${cardId}`);
   const validateTarget = (targetId: string, kind: LinkKind) => {
+    if (targetId === cardId) throw new Error(`${kind} target 不能是自身`);
     const target = getCard(targetId);
     if (!target) throw new Error(`${kind} target not found: ${targetId}`);
     if (target.boardId !== card.boardId) {
