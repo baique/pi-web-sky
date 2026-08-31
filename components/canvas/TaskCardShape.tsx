@@ -9,6 +9,7 @@ import { SessionWorkbench } from "./SessionWorkbench";
 import { ThemedSelect } from "./ThemedSelect";
 import { TaskCardMultiSelect } from "./TaskCardMultiSelect";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
+import { WorktreePicker } from "./WorktreePicker";
 
 /**
  * 任务卡（task-card）：看板上的工作项卡，独立实体（业务字段在 task_cards 表）。
@@ -295,40 +296,10 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     if (expanded) setAdvancedOpen(true);
   }, [expanded]);
 
-  // 工作目录选择：DirectoryPicker 弹窗 + worktree 列表（复用文件浏览器下方选择器逻辑）
+  // 工作目录选择：DirectoryPicker 弹窗
   const [dirPickerOpen, setDirPickerOpen] = useState(false);
-  const [worktrees, setWorktrees] = useState<Array<{ path: string; branch: string; isMain: boolean }>>([]);
-  // 当前选中 worktree 路径（null = 用 cwd 本身，可能是主 checkout 或非 git）
+  // 当前选中 worktree 路径（null = 用 cwd 本身，可能是主 checkout 或非 git）；WorktreePicker 接管列表/新建
   const [wtPath, setWtPath] = useState<string | null>(null);
-
-  // 加载 cwd 所在项目的 worktrees（git 项目才有）
-  useEffect(() => {
-    const cwd = draft?.cwd;
-    if (!cwd) { setWorktrees([]); setWtPath(null); return; }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch(`/api/worktrees?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" });
-        if (!res.ok) return;
-        const data = (await res.json()) as { worktrees?: Array<{ path: string; branch: string; isMain: boolean }>; isGit?: boolean };
-        if (cancelled) return;
-        setWorktrees(data.isGit ? (data.worktrees ?? []) : []);
-        // 当前 cwd 若正好是某 worktree 路径，选中它
-        const cur = data.worktrees?.find((w) => w.path === cwd);
-        setWtPath(cur?.path ?? null);
-      } catch {
-        // 静默：非 git / 目录不可访问时 worktree 区不显示
-      } finally {
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [draft?.cwd]);
-
-  // 选择 worktree：cwd 联动到 worktree 路径（主 checkout 则回到项目根）
-  const handleWorktreeSelect = (path: string) => {
-    setWtPath(path);
-    set("cwd", path);
-  };
 
   const set = <K extends keyof TaskCard>(key: K, value: TaskCard[K]) => {
     setDraft((d) => (d ? { ...d, [key]: value } : d));
@@ -452,7 +423,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         onChange={(e) => set("name", e.target.value)}
         placeholder="任务名称"
       />
-      <label style={LABEL_STYLE}>描述（Markdown）</label>
+      <label style={LABEL_STYLE}>需求说明（Markdown）</label>
       <textarea
         style={{ ...FIELD_STYLE, minHeight: 70, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 11 }}
         value={draft.description}
@@ -461,24 +432,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         spellCheck={false}
       />
       <CollapsibleSection title="高级" open={advancedOpen} onToggle={() => setAdvancedOpen((v) => !v)}>
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1 }}>
-          <label style={LABEL_STYLE}>优先级</label>
-          <ThemedSelect
-            value={String(draft.priority)}
-            onChange={(v) => set("priority", Number(v))}
-            options={[
-              { value: "1", label: "高" },
-              { value: "0", label: "中" },
-              { value: "-1", label: "低" },
-            ]}
-          />
-        </div>
-        <div style={{ flex: 1 }}>
-          <label style={LABEL_STYLE}>预计截止</label>
-          <DuePicker due={draft.due ?? null} onChange={(ms) => set("due", ms)} />
-        </div>
-      </div>
+      {/* 1. 工作目录 */}
       <label style={LABEL_STYLE}>工作目录</label>
       <div style={{ display: "flex", gap: 6 }}>
         <input
@@ -502,29 +456,41 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
           onSelect={(path) => { set("cwd", path); setDirPickerOpen(false); }}
         />
       )}
-      {worktrees.length > 0 && (
-        <>
-          <label style={LABEL_STYLE}>Worktree（git 分支）</label>
+      {/* 2. 工作区（worktree，支持手动新建） */}
+      <label style={LABEL_STYLE}>工作区</label>
+      <WorktreePicker
+        cwd={draft.cwd}
+        value={wtPath}
+        onChange={(p) => { setWtPath(p); set("cwd", p); }}
+      />
+      {/* 3. 预计截止（单独一行） */}
+      <label style={LABEL_STYLE}>预计截止</label>
+      <DuePicker due={draft.due ?? null} onChange={(ms) => set("due", ms)} />
+      {/* 4. 优先级 + 最大重试次数（两列一行） */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <label style={LABEL_STYLE}>优先级</label>
           <ThemedSelect
-            value={wtPath ?? ""}
-            onChange={handleWorktreeSelect}
+            value={String(draft.priority)}
+            onChange={(v) => set("priority", Number(v))}
             options={[
-              ...worktrees.map((w) => ({
-                value: w.path,
-                label: w.isMain ? `主 checkout（${w.branch ?? ""}）` : `${w.branch ?? ""}`,
-              })),
+              { value: "1", label: "高" },
+              { value: "0", label: "中" },
+              { value: "-1", label: "低" },
             ]}
           />
-        </>
-      )}
-      <label style={LABEL_STYLE}>最大重试次数</label>
-      <input
-        style={FIELD_STYLE}
-        type="number"
-        min={0}
-        value={draft.maxRetries}
-        onChange={(e) => set("maxRetries", Math.max(0, Number(e.target.value) || 0))}
-      />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={LABEL_STYLE}>最大重试次数</label>
+          <input
+            style={FIELD_STYLE}
+            type="number"
+            min={0}
+            value={draft.maxRetries}
+            onChange={(e) => set("maxRetries", Math.max(0, Number(e.target.value) || 0))}
+          />
+        </div>
+      </div>
       <label style={LABEL_STYLE}>前置任务（可多选）</label>
       <TaskCardMultiSelect
         candidates={candidates}
@@ -618,16 +584,51 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
             style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}
             onPointerDown={(e) => e.stopPropagation()}
           >
-            <div style={{ width: 68 }}>
-              <ThemedSelect
-                value={draft?.readyStatus ?? "draft"}
-                options={[
-                  { value: "draft", label: "草稿" },
-                  { value: "todo", label: "待办" },
-                ]}
-                onChange={handleReadyChange}
-              />
-            </div>
+            {/* 就绪状态复选框：勾选=激活（待办）→ 文案「就绪」；未勾=草稿，默认不激活。无任何装饰，仅文字+勾选小方块 */}
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={draft?.readyStatus === "todo"}
+              onClick={() => handleReadyChange(draft?.readyStatus === "todo" ? "draft" : "todo")}
+              title={draft?.readyStatus === "todo" ? "已激活（待办），点击改为草稿" : "点击激活（待办）"}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                padding: 0,
+                background: "transparent",
+                border: "none",
+                borderRadius: 0,
+                color: draft?.readyStatus === "todo" ? "var(--text)" : "var(--text-muted)",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 11,
+                  height: 11,
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: 2,
+                  border: "1px solid var(--border)",
+                  background: "transparent",
+                  color: "var(--accent)",
+                }}
+              >
+                {draft?.readyStatus === "todo" && (
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                )}
+              </span>
+              {draft?.readyStatus === "todo" ? "就绪" : "草稿"}
+            </button>
             {isCreating ? (
               <button
                 type="button"
