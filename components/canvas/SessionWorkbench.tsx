@@ -138,14 +138,17 @@ export function SessionWorkbench({
   // wheel 拦截：tldraw 在 container 监听 wheel（画布 pan/zoom），工作台内的滚轮必须被会话自己消费。
   // 不用 useEffect([])：tldraw 重渲染/resize/展开收合会替换 shape 的 DOM，[] 只在首次挂载跑，
   // 监听会挂在被替换的旧元素上失效。用无依赖 effect —— 每次渲染后都清旧挂新，保证监听总在
-  // 当前元素。判定「按需」：目标在工作台内某个可滚动容器（或其内部）时拦截（stopPropagation，
-  // 不 preventDefault —— 让消息区正常滚动）；否则放行给画布平移/缩放。
+  // 当前元素。判定「按需」= 状态 × 几何：卡片激活（用户当前关注此卡）且目标在可滚动容器内
+  // 才拦截（stopPropagation，不 preventDefault —— 让消息区正常滚动）；未激活或不在滚动区则
+  // 放行给画布平移/缩放 —— 展开卡未激活时滚轮应作用于画布（常见：展开会话看内容但想移画布）。
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
     const stop = (e: WheelEvent) => {
       // ctrl/meta+wheel 是缩放手势：放行给画布（tldraw 缩放），不吞
       if (e.ctrlKey || e.metaKey) return;
+      // 未激活（未选中）：滚轮放行给画布，即使光标在消息区上（背景卡不吞滚轮）
+      if (!isActive()) return;
       const t = e.target;
       if (t instanceof Node && el.contains(t) && hasScrollableAncestor(t, el)) {
         e.stopPropagation();
