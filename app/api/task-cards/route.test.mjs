@@ -49,6 +49,16 @@ test("POST 建卡：card + node 落库（kind=taskcard, refId），编号自增"
   assert.equal(node.x, 10);
 });
 
+test("POST 建卡：nodeId 复用仅允许空白 taskcard 节点，session 节点 400", async () => {
+  freshDb();
+  const b = createBoard(PROJECT, "看板B");
+  const { addNode } = await jiti.import("@/lib/board-store.ts");
+  const sessionNode = addNode(b.id, { kind: "session", x: 10, y: 10, w: 300, h: 200 });
+  assert.ok(sessionNode);
+  const r = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b.id, name: "X", nodeId: sessionNode.id }));
+  assert.equal(r.status, 400);
+});
+
 test("GET 列表：每卡带 nodeId；GET 单卡：links + inbound 两向", async () => {
   freshDb();
   const b = createBoard(PROJECT, "看板A");
@@ -181,7 +191,6 @@ test("POST 默认 x/y=60；GET 单卡 404；DELETE 不存在幂等", async () =>
 
   const del = await deleteTaskCard(new Request("http://localhost/api/task-cards/nope", { method: "DELETE" }), { params: Promise.resolve({ id: "nope" }) });
   assert.equal(del.status, 200); // 幂等
-  assert.equal(c1.id !== "nope", true);
 });
 
 test("PATCH 自环依赖 400", async () => {

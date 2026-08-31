@@ -1,7 +1,7 @@
 "use client";
 
 import "tldraw/tldraw.css";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Tldraw, DefaultToolbar, DefaultStylePanel, StylePanelColorPicker, StylePanelFillPicker, StylePanelDashPicker, StylePanelSizePicker, StylePanelFontPicker, StylePanelTextAlignPicker, StylePanelLabelAlignPicker, StylePanelGeoShapePicker, StylePanelArrowKindPicker, StylePanelArrowheadPicker, StylePanelSplinePicker, ToolbarItem, SelectToolbarItem, HandToolbarItem, DrawToolbarItem, EraserToolbarItem, ArrowToolbarItem, TextToolbarItem, NoteToolbarItem, AssetToolbarItem, RectangleToolbarItem, EllipseToolbarItem, TriangleToolbarItem, DiamondToolbarItem, HexagonToolbarItem, OvalToolbarItem, RhombusToolbarItem, StarToolbarItem, CloudToolbarItem, HeartToolbarItem, XBoxToolbarItem, CheckBoxToolbarItem, ArrowLeftToolbarItem, ArrowUpToolbarItem, ArrowDownToolbarItem, ArrowRightToolbarItem, LineToolbarItem, HighlightToolbarItem, LaserToolbarItem, FrameToolbarItem, createShapeId, defaultShapeUtils, type TLComponents, type TLUiOverrides, type TLUiStylePanelProps } from "tldraw";
 import { SessionCardUtil } from "./SessionCardShape";
 import { StickyNoteUtil } from "./StickyNoteShape";
@@ -76,8 +76,8 @@ function handleTaskCardDragStart(editor: import("tldraw").Editor, info: unknown)
   const shape = editor.getShape(id);
   if (!shape) { editor.setCurrentTool("select.idle"); return; }
   const bounds = editor.getShapePageBounds(id);
-  const w = bounds?.w ?? 340;
-  const h = bounds?.h ?? 300;
+  const w = bounds?.w ?? 380;
+  const h = bounds?.h ?? 270;
   editor.updateShape({ id, type: "task-card", x: x - w / 2, y: y - h / 2 });
   editor.select(id);
   editor.setCurrentTool("select.translating", {
@@ -380,5 +380,3 @@ export function CanvasStage({
     </div>
   );
 }
-
-// recompile force

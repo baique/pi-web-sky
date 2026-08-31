@@ -37,7 +37,7 @@ Browser                Next.js Server              AgentSession (in-process)
 **Session browsing** (read-only): reads `.jsonl` files through SDK `SessionManager` helpers and `lib/session-reader.ts` — no AgentSession created.  
 **Sending a message**: `startRpcSession()` in `lib/rpc-manager.ts` creates an AgentSession in-process.
 
-**Board mode** (会话看板): selecting a board (`?board=`) replaces the ChatWindow area with the tldraw canvas (`SessionCanvas`) — the sidebar stays visible, exiting / clicking a session / new-session returns to chat. Board layout (nodes/edges/camera) lives in SQLite via `lib/board-store.ts` (SDK-free, versioned migrations v3–v5), never in session files. Task boards mirror task sessions (`boards.task_id`): opening a task auto-creates its board and reconciles cards on open + 10s poll.
+**Board mode** (会话看板): selecting a board (`?board=`) replaces the ChatWindow area with the tldraw canvas (`SessionCanvas`) — the sidebar stays visible, exiting / clicking a session / new-session returns to chat. Board layout (nodes/edges/camera) lives in SQLite via `lib/board-store.ts` (SDK-free, versioned migrations v3–v7), never in session files. Task boards mirror task sessions (`boards.task_id`): opening a task auto-creates its board and reconciles cards on open + 10s poll.
 
 ---
 

@@ -40,6 +40,8 @@ boards/[id]/edges/...           edge CRUD（连线）
 boards/reorder/route.ts         POST 手动看板排序
 task-cards/route.ts              GET 任务卡列表(?boardId) | POST 建卡（带 node/依赖/连线）
 task-cards/[id]/route.ts         GET/PATCH/DELETE 任务卡（依赖替换同步边、级联删）
+task-card-questions/route.ts     GET 待回答问题列表 | POST 记录提问
+task-card-questions/[id]/answer/route.ts  POST 回答（写回会话并续 run）
 tasks/route.ts                  GET/POST 任务元数据（session_meta 旁路）
 tasks/[id]/route.ts             GET/PATCH/DELETE（改名同步看板名；删除级联删看板）
 tasks/[id]/board/route.ts       GET 任务看板（懒创建，看板 id = 任务 id）
@@ -51,8 +53,10 @@ worktrees/route.ts              GET/POST/DELETE git worktrees
 ```
 agent-client.ts      typed fetch helper for /api/agent commands
 board-store.ts       boards/nodes/edges/view CRUD（SDK-free，对照 task-store）
-task-card-store.ts   任务卡元数据 CRUD（task_cards/links，SDK-free）
+task-card-store.ts   任务卡元数据 CRUD（task_cards/links/questions，SDK-free）
 board-purge.ts       孤儿看板卡片清理（排除 taskcard kind）
+task-scheduler.ts    任务调度器（派发/审核冷却/巡检/问答队列，S2/S3）
+audit-session.ts     会话审核快照读取（调度器用）
 board-types.ts       看板类型定义 + SYSTEM_RUNNING_BOARD_ID = "__running__"
 board-events.ts      看板跨组件事件桥（window.dispatchEvent：open-file/forked/renamed/…）
 board-utils.ts       看板工具（shouldRemoveEndedCard 等）

@@ -84,16 +84,18 @@ export function buildTaskPrompt(card: TaskCard): string {
 
 /**
  * 确保拿到执行会话：卡已有 sessionId → 复用（重试场景）；否则新建。
- * 新建时 cwd 解析失败返回 null（无法派发）。
+ * 新建时 cwd 解析失败返回 null（无法派发）。created 标记是否真正新建
+ * （仅新建会话失败时需清理，复用会话归调用方/他处管理，不可销毁）。
  */
 async function ensureExecutionSession(
   card: TaskCard,
-): Promise<{ session: Awaited<ReturnType<typeof startRpcSession>>["session"]; realSessionId: string } | null> {
+): Promise<{ session: Awaited<ReturnType<typeof startRpcSession>>["session"]; realSessionId: string; created: boolean } | null> {
   if (card.sessionId) {
     try {
       const filePath = await resolveSessionPath(card.sessionId);
       if (filePath) {
-        return await startRpcSession(card.sessionId, filePath, undefined);
+        const reused = await startRpcSession(card.sessionId, filePath, undefined);
+        return { ...reused, created: false };
       }
     } catch {
       // 会话文件失效 → 走新建
@@ -101,17 +103,20 @@ async function ensureExecutionSession(
   }
   const cwd = resolveDispatchCwd(card);
   if (!cwd) return null;
-  return await startRpcSession("", "", cwd, { toolNames: PRESET_FULL });
+  const fresh = await startRpcSession("", "", cwd, { toolNames: PRESET_FULL });
+  return { ...fresh, created: true };
 }
 
 /** 派发单卡：建/复执行会话 → 命名 #N 标题 → 任务看板归属 → node 绑 session → 发 prompt → running。 */
 export async function dispatchCard(card: TaskCard): Promise<boolean> {
+  let ensured: { session: Awaited<ReturnType<typeof startRpcSession>>["session"]; realSessionId: string; created: boolean } | null = null;
   try {
-    const session = await ensureExecutionSession(card);
-    if (!session) {
+    ensured = await ensureExecutionSession(card);
+    if (!ensured) {
       console.warn(`[task-scheduler] #${card.number} ${card.name} 无可用 cwd，跳过派发`);
       return false;
     }
+    const session = ensured;
 
     await session.session.send({ type: "set_session_name", name: `#${card.number} ${card.name}` });
 
@@ -139,6 +144,14 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
     );
     return true;
   } catch (error) {
+    // 派发失败（命名/prompt 抛错等）：仅销毁本轮新建的会话，防反复失败泄漏；复用会话保留。
+    if (ensured?.created) {
+      try {
+        ensured.session.destroy();
+      } catch {
+        // 销毁失败不影响派发结果上报
+      }
+    }
     console.error(
       `[task-scheduler] 派发 #${card.number} ${card.name} 失败:`,
       error instanceof Error ? error.message : error,
@@ -431,8 +444,6 @@ export function startTaskScheduler(): void {
   globalThis.__piTaskScheduler = sched;
   console.log(`[pi-web] task scheduler started (interval ${TASK_SCHEDULER_INTERVAL_MS}ms, max ${TASK_SCHEDULER_MAX_CONCURRENCY})`);
 }
-
-// 测试用：手工触发一轮
 
 // ============================================================================
 // 调度状态（看板展示：调度器在执行什么）

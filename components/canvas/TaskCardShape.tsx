@@ -13,8 +13,8 @@ import { WorktreePicker } from "./WorktreePicker";
 
 /**
  * 任务卡（task-card）：看板上的工作项卡，独立实体（业务字段在 task_cards 表）。
- * - 常态（表单栏常驻）：左=编辑表单（空卡=建卡向导），宽 340；描述之下字段收进「高级」折叠区
- * - 展开：右侧追加执行会话工作台，宽 940（双击/按钮切换）
+ * - 常态（表单栏常驻）：左=编辑表单（空卡=建卡向导），宽 380；描述之下字段收进「高级」折叠区
+ * - 展开：右侧追加执行会话工作台，宽 980（双击/按钮切换）
  * - 布局走 board_nodes（kind=taskcard, ref_id=cardId），shape.id 去 "shape:" 前缀 = node id
  * - 依赖线由 task_card_links 派生（label=kind），禁删
  */
@@ -100,8 +100,8 @@ const FORM_H = 270;
 /** 工作台区域最小尺寸：对齐会话卡片展开态最小（600×500） */
 const WORKBENCH_MIN_W = 600;
 const WORKBENCH_MIN_H = 500;
-/** 展开态整卡宽 = 表单 340 + 工作台最小宽（对齐会话卡片展开态最小 600） */
-const EXPANDED_W = FORM_W + WORKBENCH_MIN_W; // 940
+/** 展开态整卡宽 = 表单 380 + 工作台最小宽（对齐会话卡片展开态最小 600） */
+const EXPANDED_W = FORM_W + WORKBENCH_MIN_W; // 980
 const EXPANDED_H = 600;
 /** 收起态最小高（表单：名称/描述 + 折叠的「高级」标题） */
 const COLLAPSED_MIN_H = 240;
@@ -144,7 +144,7 @@ export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
     return true;
   }
 
-  /** 双击切换右侧工作台展开（常态 340 表单栏 ↔ 展开 940 表单+工作台），两态手动尺寸各自保留。 */
+  /** 双击切换右侧工作台展开（常态 380 表单栏 ↔ 展开 980 表单+工作台），两态手动尺寸各自保留。 */
   override onDoubleClick(shape: TaskCardShape): TLShapePartial<TaskCardShape> | void {
     return { id: shape.id, type: "task-card", props: nextExpandState(shape) };
   }
@@ -229,7 +229,12 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   const editor = useEditor();
   const boardId = useBoardId();
   const defaultCwd = useBoardDefaultCwd();
-  const { detail, candidates, loading, error, reload, createCard, saveCard } = useTaskCard(cardId || null, boardId);
+  // 展开时 8s 轮询详情（拉调度器派发写入的 sessionId/执行状态），收合停止
+  const { detail, candidates, loading, error, reload, createCard, saveCard } = useTaskCard(
+    cardId || null,
+    boardId,
+    expanded ? 8000 : undefined,
+  );
 
   // 卡片激活判定（与 SessionWorkbench 同模式）：实时读 editor，不引 React 重渲染
   const isActive = useCallback(() => {
@@ -387,7 +392,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
       name: draft.name,
       description: draft.description,
       readyStatus: draft.readyStatus,
-      execStatus: draft.execStatus,
+      // execStatus 由调度器维护（用户只读），保存不提交——防编辑保存把 done/failed 等终态回写成旧值诱发重复审核
       priority: draft.priority,
       due: draft.due ?? null,
       attachments: draft.attachments,
@@ -399,14 +404,13 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     });
     setSaving(false);
     if (ok) {
-      // 同步收合态展示字段
+      // 同步收合态展示字段（execStatus 由画布层轮询镜像，不在保存时回写）
       editor.updateShape<TaskCardShape>({
         id: shape.id,
         type: "task-card",
         props: {
           name: draft.name,
           readyStatus: draft.readyStatus,
-          execStatus: draft.execStatus,
           priority: draft.priority,
           due: draft.due ?? undefined,
         },

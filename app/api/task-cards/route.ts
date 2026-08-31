@@ -91,11 +91,12 @@ export async function POST(req: Request) {
     }
 
     // 可选：复用已存在的空卡画布节点（nodeId 优先，绑定 refId=cardId，不新建）
+    // 仅允许空白 taskcard 节点复用：kind=taskcard 且 refId 为空，防止把 session/便笺节点误绑为任务卡
     let boundNodeId: string | null = null;
     if (typeof body.nodeId === "string" && body.nodeId) {
       const node = getNodeByGlobalId(body.nodeId);
-      if (!node || node.boardId !== board.id) {
-        return NextResponse.json({ error: "画布节点不存在或不属于该看板" }, { status: 400 });
+      if (!node || node.boardId !== board.id || node.kind !== "taskcard" || node.refId !== null) {
+        return NextResponse.json({ error: "画布节点不存在、不属于该看板或非空白任务卡" }, { status: 400 });
       }
       boundNodeId = body.nodeId;
     }

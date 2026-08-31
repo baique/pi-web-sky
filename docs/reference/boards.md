@@ -4,7 +4,7 @@
 
 ## 数据层铁律
 
-- **迁移**：`lib/sqlite-db.ts` `SCHEMA_VERSION = 5`（v3 建 boards/board_nodes/board_edges/board_view → v4 `sort_order` → v5 `task_id`）。看板是旁路元数据，会话 jsonl 原地不动。
+- **迁移**：`lib/sqlite-db.ts` `SCHEMA_VERSION = 7`（v3 建 boards/board_nodes/board_edges/board_view → v4 `sort_order` → v5 `task_id` → v6 task_id 唯一索引 → v7 任务卡三表）。看板是旁路元数据，会话 jsonl 原地不动。
 - **事务铁律**：SQLite 不支持嵌套 BEGIN。`deleteBoardCascade` / `renameTaskBoard` **必须无事务**，由调用方（`deleteBoard` / `deleteTask` / `updateTask`）在自身事务内调用。board-store 的 `deleteBoard` 保持"自开事务"行为。
 - **任务即看板**：看板 id = 任务 id（`boards.task_id` 非空即任务型看板）。`GET /api/tasks/[id]/board` 懒创建；`deleteTask` 事务内级联删看板；`updateTask` 改名同步 `renameTaskBoard`。
 - **系统「运行中」看板**：`SYSTEM_RUNNING_BOARD_ID = "__running__"`，只读、跨项目自动聚合运行中会话，不落 boards 表。

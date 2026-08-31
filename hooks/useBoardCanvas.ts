@@ -250,7 +250,10 @@ export function useBoardCanvas({
       const allowed = idArr.filter((id) => {
         const idStr = typeof id === "string" ? id : id.id;
         const shape = editor.getShape(idStr);
-        if (!shape || shape.type !== "session-card") return true;
+        if (!shape) return true;
+        // 依赖线（任务卡前置/关联自动边）禁删：由 task_card_links 派生，删了会被 syncCardEdges 补回
+        if (shape.type === "arrow" && (shape.meta as { taskLinkLabel?: string } | undefined)?.taskLinkLabel) return false;
+        if (shape.type !== "session-card") return true;
         const sid = (shape.props as SessionCardShapeProps).sessionId;
         // 仅有效会话（会话文件存在，在 sessionTitles 里）受任务删除保护；
         // 无效/僵尸会话（meta 残留、文件已删）放行——可删且不补回。

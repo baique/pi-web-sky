@@ -6,7 +6,7 @@
  * 交互（spec 2026-08-30-board-search）：
  * - 输入实时过滤：遍历画布 shape（会话卡标题 + 便笺正文），下拉显示命中列表
  * - Enter / ↓：定位下一个命中（循环）；↑：上一个；点击命中项：定位该项
- * - 定位 = zoomToBounds 动画 + 选中 + accent 描边渐隐（BoardSearchContext 驱动）
+ * - 定位 = centerOnPoint 居中（保持当前缩放）+ 选中 + accent 描边渐隐（BoardSearchContext 驱动）
  * - Esc：下拉开时先关下拉；再按清空并失焦（关闭搜索）
  * - 失焦不清空 query，仅收下拉；再聚焦恢复列表
  * - Ctrl+F 聚焦由 SessionCanvas 处理（通过 inputRef prop 传入本组件 input）
