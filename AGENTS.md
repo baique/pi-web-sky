@@ -69,6 +69,7 @@ Browser                Next.js Server              AgentSession (in-process)
 |---|---|---|
 | 会话生命周期 | [docs/reference/sessions.md](docs/reference/sessions.md) | 改会话加载 / 分支 / SSE / compaction / 运行状态轮询 / 会话文件读写 / 会话文件格式 |
 | 会话看板 | [docs/reference/boards.md](docs/reference/boards.md) | 改看板 / 画布 / 任务即看板 / 便笺 / scrim / tldraw 自定义 shape |
+| 看板交互与事件层 | [docs/reference/board-events.md](docs/reference/board-events.md) | 改卡片交互 / 滚轮 / 右键菜单 / 事件劫持 / 焦点 / 新增自定义 shape 卡片 |
 | 认证与模型 | [docs/reference/auth-models.md](docs/reference/auth-models.md) | 改 provider 列表 / 登录 / models.json / 模型选择 / enabledModels / 思考级别 |
 | Worktree 与文件白名单 | [docs/reference/worktrees-files.md](docs/reference/worktrees-files.md) | 改 worktree / 项目分组 / /api/files / 文件浏览权限 |
 | 插件与技能 | [docs/reference/plugins-skills.md](docs/reference/plugins-skills.md) | 改 /api/plugins / /api/skills / 技能开关 / 插件安装移除 |
