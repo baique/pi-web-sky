@@ -657,8 +657,10 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         </div>
         {/* 内容区：左表单 + 右工作台 */}
         <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        {/* 左：编辑表单 / 建卡向导（常驻）——收起态自适应卡片宽度（可拉更宽）；展开态固定 340 + 右侧工作台 */}
+        {/* 左：编辑表单 / 建卡向导（常驻）——收起态自适应卡片宽度（可拉更宽）；展开态固定 340 + 右侧工作台
+            隐藏滚动条（[scrollbar-width:none]，与 ChatWindow 同惯例） */}
         <div
+          className="[scrollbar-width:none]"
           style={{ flex: expanded ? "0 0 340px" : "1 1 auto", minWidth: 0, width: expanded ? 340 : undefined, borderRight: expanded ? "1px solid var(--bubble-hairline)" : "none", overflowY: "auto", padding: "10px 12px" }}
           onPointerDown={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
           onPointerUp={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
