@@ -34,7 +34,7 @@
 | 7 | 派发会话命名 `#N 标题`（`PATCH /api/sessions/[id]` 设置显示名）；任务看板内 `assignSessionToTask` 归属任务，否则落临时区 | 侧栏归属与「任务即看板」既有逻辑一致 |
 | 8 | 回复续会话走统一调度闸门（不立即发） | 与「调度优先级」一致，避免绕过并发控制 |
 
-## 2. 数据层（迁移 v6）
+## 2. 数据层（迁移 v7）
 
 ```sql
 CREATE TABLE IF NOT EXISTS task_cards (
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS task_card_questions (
 CREATE INDEX IF NOT EXISTS idx_task_questions_status ON task_card_questions(status);
 ```
 
-- `SCHEMA_VERSION 5 → 6`，MIGRATIONS 追加 v6（三张新表）。
+- `SCHEMA_VERSION 6 → 7`，MIGRATIONS 追加 v7（三张新表；v6 已被「任务即看板」占用为 boards.task_id unique）。
 - `lib/task-card-store.ts`（SDK-free，对照 task-store）：建卡（`number = MAX(number)+1` WHERE project_key 自增）、CRUD、依赖 CRUD（同看板校验）、问答 CRUD、状态流转、`listDispatchableCards` / `countRunningDispatched`。
 - 删卡：级联删 `task_card_links`/`task_card_questions`；执行会话保留（jsonl 不动，卡删了会话仍在侧栏），或按需解绑。
 
@@ -159,7 +159,7 @@ GET        /api/task-cards/[id]/context         （供审核用）执行会话�
 ## 7. 组件 / 文件改动清单
 
 ```
-lib/sqlite-db.ts                    Modify：SCHEMA_VERSION 5→6 + v6 迁移（三表）
+lib/sqlite-db.ts                    Modify：SCHEMA_VERSION 6→7 + v7 迁移（三表）
 lib/task-card-store.ts              Create：task_cards/links/questions CRUD + 派发查询 + 编号自增 + 级联删
 lib/board-types.ts                  Modify：BoardNodeKind + "taskcard"
 lib/board-store.ts                  Modify：syncCardEdges / 查询 taskcard node

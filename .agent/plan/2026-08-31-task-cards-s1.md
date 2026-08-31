@@ -24,7 +24,7 @@
 ## Task 1: 数据层 v6 迁移 + task-card-store 骨架
 
 **Files:**
-- Modify: `lib/sqlite-db.ts`（SCHEMA_VERSION 5→6 + MIGRATIONS 追加 v6 三表）
+- Modify: `lib/sqlite-db.ts`（SCHEMA_VERSION 6→7 + MIGRATIONS 追加 v7 三表）
 - Create: `lib/task-card-store.ts`
 - Test: `lib/task-card-store.test.mjs`
 
@@ -43,7 +43,7 @@
 
 - [ ] **Step 1: 写失败测试**（内存库建 schema）：`createCard` 编号项目内自增（同项目 1,2,3；异项目重新 1）；`listCards` 按编号序；`updateCard` 改字段；`getCard` 不存在 undefined；`deleteCard` 后 links/questions 消失且同板 node（kind=taskcard, refId=cardId）消失。
 - [ ] **Step 2: 运行确认失败**（`node --experimental-strip-types --test lib/task-card-store.test.mjs`）。
-- [ ] **Step 3: 实现**：sqlite-db.ts v6 迁移（三表 DDL 见 spec §2）；task-card-store.ts 按接口实现（SDK-free，`getDb()` 引用；deleteCard 事务内调用 board-store 的 node/edge 查询与删除——参照 task-store 先例；sqlite-db 的 v6 DDL 同时建 `task_card_questions` 表，其 store 函数留 S3）。
+- [ ] **Step 3: 实现**：sqlite-db.ts v7 迁移（三表 DDL 见 spec §2）；task-card-store.ts 按接口实现（SDK-free，`getDb()` 引用；deleteCard 事务内调用 board-store 的 node/edge 查询与删除——参照 task-store 先例；sqlite-db 的 v7 DDL 同时建 `task_card_questions` 表，其 store 函数留 S3）。
 - [ ] **Step 4: 测试通过 + commit** `feat(task-cards): v6 迁移 + task_card_store 建卡/查询/更新/级联删`
 
 ## Task 2: 依赖 CRUD + 派发查询 + 并发计数（数据层完整）
