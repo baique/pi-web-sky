@@ -435,13 +435,20 @@ export function useBoardCanvas({
         sessionShapes.set(sid, s.id);
       }
       const sessionIds = new Set(taskData.task?.sessionIds ?? []);
-      // 孤儿卡：任务会话里没有 → 删（任务看板会话卡都由任务驱动）
-      // 跳过新会话卡（cwd 非空 = 会话尚未创建，sessionId 不在任务列表是正常的）
+      // 孤儿卡：任务会话里没有 → 删画布 shape（CRDT 同步）。
+      // 这是后台 reconcile（自动化清理），不是用户删除：直接 store.remove 绕过
+      // deleteShapes 拦截器（拦截器会弹确认框 + 调删除 API 真删会话文件——
+      // 孤儿卡可能只是画布脏数据，会话文件本身可能是别的看板/任务在用的合法会话）。
+      // 跳过新会话卡（cwd 非空 = 会话尚未创建，sessionId 不在任务列表是正常的）。
+      const orphanIds: string[] = [];
       for (const [sid, shapeId] of existingSessions) {
         if (sessionIds.has(sid)) continue;
         const p = editor.getShape(shapeId as never);
         if (p && (p.props as SessionCardProps).cwd) continue;
-        editor.deleteShapes([shapeId as never]);
+        orphanIds.push(shapeId);
+      }
+      if (orphanIds.length > 0) {
+        editor.store.remove(orphanIds as never);
       }
       // 新会话卡占位：任务看板下 cwd 非空 且 taskId 匹配本任务的卡正在创建
       //（用户刚点 +、首条消息尚未发出/正在创建）→ 跳过补卡，避免与真实会话卡并存

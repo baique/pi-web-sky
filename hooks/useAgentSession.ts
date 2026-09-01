@@ -674,9 +674,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (!isNew || !newSessionCwd) return sessionIdRef.current;
     if (ensuringNewSessionRef.current) return ensuringNewSessionRef.current;
 
-    // 会话 ID 发起时即确定（客户端生成 UUID，服务端用指定 ID 创建）：
-    // 任务/看板绑定、路由、草稿 key 全部同步可用，不再等 ensure_session 返回。
-    const desiredId = crypto.randomUUID();
+    // 会话 ID 发起时即确定：复用已有 draft key（= 卡片 sessionId / AppShell 生成的 UUID），
+    // 确保「卡片/路由/草稿用的 ID」与「服务端创建的会话 ID」一致。
+    // 无 draft key 时（理论上不发生，兜底）才新生成。
+    const desiredId = newSessionDraftKey ?? crypto.randomUUID();
     sessionIdRef.current = desiredId;
 
     const promise = (async () => {
