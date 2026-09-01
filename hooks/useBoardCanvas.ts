@@ -42,6 +42,9 @@ const SUMMARY_POLL_MS = 10000;
 /** 收合卡默认尺寸 */
 export const CARD_W = 340;
 export const CARD_H = 160;
+/** 任务卡默认尺寸（与 TaskCardShape FORM_W / COLLAPSED_MIN_H 对齐，作补卡摆位锚点用） */
+const FORM_W = 380;
+const COLLAPSED_MIN_H = 240;
 /** 展开工作台默认尺寸 */
 export const WORKBENCH_W = 760;
 export const WORKBENCH_H = 600;
@@ -401,6 +404,40 @@ export function useBoardCanvas({
     return { x: 60 + Math.random() * 120, y: 60 + Math.random() * 120 };
   }, []);
 
+  /** 任务看板补卡落点：优先挨着任务卡右侧竖排（任务卡 → 执行会话卡成组），
+   *  右侧一列被占满则改放任务卡正下方横排；完全冲突才回退全局空位。
+   *  只影响新补的卡，不动用户已摆好的卡。 */
+  const findSpotNearTask = useCallback(
+    (editor: Editor, anchor: { id: string; x: number; y: number; w: number; h: number }): { x: number; y: number } | null => {
+      const GAP = 24;
+      const STEP_Y = CARD_H + GAP;
+      const STEP_X = CARD_W + GAP;
+      // 避让所有实体 shape（任务卡/会话卡/便笺…），线不挡卡。实时查询：
+      // 多张补卡时先前创建的卡能立刻被看见，依次往下排不重叠。
+      const occupied = editor
+        .getCurrentPageShapes()
+        .filter((s) => s.type !== "arrow" && s.id !== anchor.id)
+        .map((s) => ({ x: s.x, y: s.y, w: (s.props as { w?: number }).w ?? CARD_W, h: (s.props as { h?: number }).h ?? CARD_H }));
+      const overlaps = (x: number, y: number) =>
+        occupied.some((o) => x < o.x + o.w + GAP && x + CARD_W + GAP > o.x && y < o.y + o.h + GAP && y + CARD_H + GAP > o.y);
+      // 1) 右侧竖排：列 x 固定为任务卡右缘 + 间隔，y 从任务卡顶往下逐格找空
+      const rx = anchor.x + anchor.w + GAP;
+      for (let k = 0; k < 80; k += 1) {
+        const y = anchor.y + k * STEP_Y;
+        if (!overlaps(rx, y)) return { x: rx, y };
+      }
+      // 2) 右侧列被占满 → 任务卡正下方横排：y 固定，x 从任务卡左缘往右逐格找空
+      const dy = anchor.y + anchor.h + GAP;
+      for (let k = 0; k < 40; k += 1) {
+        const x = anchor.x + k * STEP_X;
+        if (!overlaps(x, dy)) return { x, y: dy };
+      }
+      // 3) 兜底：右下偏移（通常不可达）
+      return { x: anchor.x + anchor.w + GAP, y: anchor.y + anchor.h + GAP };
+    },
+    [],
+  );
+
   // ---- 派生边 reconcile（核心）：补卡 + exec 线 + 依赖线 + 孤儿清理 ----
   const reconcileInFlightRef = useRef(false);
   const reconcile = useCallback(async () => {
@@ -456,10 +493,21 @@ export function useBoardCanvas({
         (s) => s.type === "session-card" && (s.props as SessionCardProps).cwd && (s.props as SessionCardProps).taskId === tid,
       );
       if (!hasPendingNew) {
+        // 任务卡 shape：作新会话卡摆放的锚点（执行会话卡靠任务卡成组）
+        const taskAnchor = (() => {
+          for (const s of shapes) {
+            if (s.type === "task-card" && (s.props as { cardId?: string }).cardId) {
+              const p = s.props as { w?: number; h?: number };
+              return { id: s.id, x: s.x, y: s.y, w: p.w ?? FORM_W, h: p.h ?? COLLAPSED_MIN_H };
+            }
+          }
+          return null;
+        })();
         for (const sid of sessionIds) {
           if (existingSessions.has(sid)) continue;
           const summary = sessionTitlesRef.current[sid];
-          const p = findFreeSpot(editor);
+          // 新补的会话卡优先挨任务卡摆（右侧竖排 → 下方横排），无锚点回退全局空位
+          const p = taskAnchor ? findSpotNearTask(editor, taskAnchor) ?? findFreeSpot(editor) : findFreeSpot(editor);
           editor.createShape({
             id: createShapeId(`session-${sid}`),
             type: "session-card",
@@ -557,7 +605,7 @@ export function useBoardCanvas({
     } finally {
       reconcileInFlightRef.current = false;
     }
-  }, [findFreeSpot]);
+  }, [findFreeSpot, findSpotNearTask]);
 
   useEffect(() => {
     reconcileRef.current = reconcile;
