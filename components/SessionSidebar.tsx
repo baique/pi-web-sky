@@ -1071,6 +1071,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     return () => window.removeEventListener("pi-web:board-session-renamed", onBoardRenamed);
   }, [handleSessionRenamed]);
 
+  // 看板内删除会话（画布删卡）→ 走 onSessionDeleted（AppShell handleSessionDeleted：
+  // 刷新左侧树 + 当前选中会话清理），与侧栏删除同路径
+  useEffect(() => {
+    const onBoardDeleted = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId: string }>).detail;
+      if (!detail?.sessionId) return;
+      onSessionDeleted?.(detail.sessionId);
+    };
+    window.addEventListener("pi-web:board-session-deleted", onBoardDeleted);
+    return () => window.removeEventListener("pi-web:board-session-deleted", onBoardDeleted);
+  }, [onSessionDeleted]);
+
   const handleCreateTask = useCallback(async (name: string) => {
     const key = selectedProject?.key;
     if (!key) return;

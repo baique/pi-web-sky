@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { SessionWorkbench } from "./SessionWorkbench";
 import { confirm } from "./ConfirmDialog";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
-import { dispatchBoardBaseUpdated, dispatchBoardSessionRenamed } from "@/lib/board-events";
+import { useCardGlass } from "@/hooks/useCardGlass";
+import { dispatchBoardBaseUpdated, dispatchBoardSessionDeleted, dispatchBoardSessionRenamed } from "@/lib/board-events";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "./BoardSearchContext";
 
 /**
@@ -193,6 +194,8 @@ const phaseMeta: Record<string, { dot: string; label: string }> = {
 function SessionCardView({ shape }: { shape: SessionCardShape }) {
   const { w, h, title, projectName, messageCount, phase, runningMs, endedAt, lastActivityAt, stale, sessionId, expanded, lastReply, cwd, taskId } = shape.props;
   const editor = useEditor();
+  // 卡片玻璃（局部贴图）：内嵌视口对齐的模糊壁纸层，见 useCardGlass
+  const setGlassContainer = useCardGlass(editor, shape.id, "var(--board-card-glass)");
   // 搜索高亮：命中时 accent 描边 + 泛光渐隐（由 BoardSearchContext 驱动，不落库）
   const { highlightId } = useBoardSearch();
   const isHighlighted = highlightId === shape.id;
@@ -315,6 +318,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         // 删除 bump 了受影响看板的 updated：派发事件刷新乐观锁基线，防后续防抖保存 409
         const b = j?.updatedBoards;
         if (b) for (const [bid, u] of Object.entries(b)) dispatchBoardBaseUpdated(bid, u);
+        dispatchBoardSessionDeleted(sessionId); // 通知侧栏：左侧树移除该会话
       })
       .catch((e) => console.warn(`[board] 删除会话 ${sessionId} 异常`, e));
   };
@@ -324,6 +328,12 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
   // 工作台在卡片内部，resize 卡片时宽度天然跟随，不再有 overlay 遮挡问题。
   if (expanded) {
     return (
+      <div style={{ position: "relative", width: w, height: h, zIndex: 0 }}>
+      {/* 模糊壁纸层容器：只裁剪层（overflow hidden + 圆角），不裁剪内容（工作台需 visible） */}
+      <div
+        ref={setGlassContainer}
+        style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 18, pointerEvents: "none", zIndex: -1 }}
+      />
       <HTMLContainer
         data-testid={`session-card-${sessionId}`}
         data-node-id={shape.id.replace("shape:", "")}
@@ -334,8 +344,8 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           overflow: "visible",
           borderRadius: 18,
           border: isHighlighted ? "2px solid var(--accent)" : `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
-          // 纯半透明：透出画布 scrim 层的模糊壁纸（舞台层已铺视口对齐的模糊壁纸）
-          background: "var(--board-card-glass)",
+          // 透明：色层由内嵌模糊壁纸层提供（useCardGlass），避免双重叠加
+          background: "transparent",
           boxShadow: isHighlighted ? HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
           animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
           opacity: stale ? 0.55 : 1,
@@ -487,23 +497,30 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           <SessionWorkbench sessionId={sessionId} cwd={cwd} taskId={taskId} />
         </div>
       </HTMLContainer>
+      </div>
     );
   }
 
   const meta = phaseMeta[phase] ?? phaseMeta.idle;
 
   return (
+    <div style={{ position: "relative", width: w, height: h, zIndex: 0 }}>
+    {/* 模糊壁纸层容器：只裁剪层，不裁剪内容 */}
+    <div
+      ref={setGlassContainer}
+      style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 14, pointerEvents: "none", zIndex: -1 }}
+    />
     <HTMLContainer
       data-testid={`session-card-${sessionId}`}
       onPointerDown={bringToFront}
       style={{
         width: w,
         height: h,
-        overflow: "hidden",
+        overflow: "visible",
         borderRadius: 14,
         border: isHighlighted ? "2px solid var(--accent)" : `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
-        // 纯半透明：透出画布 scrim 层的模糊壁纸
-        background: "var(--board-card-glass)",
+        // 透明：色层由内嵌模糊壁纸层提供（useCardGlass），避免双重叠加
+        background: "transparent",
         boxShadow: isHighlighted ? HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
         animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
         opacity: stale ? 0.55 : 1,
@@ -672,6 +689,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         )}
       </div>
     </HTMLContainer>
+    </div>
   );
 }
 

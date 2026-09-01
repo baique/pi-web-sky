@@ -7,7 +7,7 @@ import { isPageId } from "@tldraw/editor";
 import type { BoardCanvas, BoardInfo, BoardNode, BoardEdge, BoardView, RunningSnapshot, RunningSessionState } from "@/lib/board-types";
 import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
 import { shouldRemoveEndedCard } from "@/lib/board-utils";
-import { dispatchBoardCanvasChanged } from "@/lib/board-events";
+import { dispatchBoardCanvasChanged, dispatchBoardSessionDeleted } from "@/lib/board-events";
 import { confirm } from "@/components/canvas/ConfirmDialog";
 
 /** 会话摘要（卡片展示用）：标题/消息数/项目/最后回复/最后活动时间 */
@@ -148,11 +148,14 @@ export function useBoardCanvas({
   const reloadingRef = useRef(false);
 
   // ---- 运行中快照轮询 ----
+  // running 拉取在途标记：慢响应时跳过下一轮（2.5s 周期 + 慢请求防叠加），防瞬时重复请求
+  const runningPollInFlightRef = useRef(false);
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
-      if (stopped || document.visibilityState !== "visible") return;
+      if (stopped || runningPollInFlightRef.current || document.visibilityState !== "visible") return;
+      runningPollInFlightRef.current = true;
       try {
         const res = await fetch("/api/agent/running", { cache: "no-store" });
         if (!res.ok) return;
@@ -191,6 +194,8 @@ export function useBoardCanvas({
         }
       } catch {
         // keep last
+      } finally {
+        runningPollInFlightRef.current = false;
       }
     };
     // loop 永远自续（不因 hidden 链断）：hidden 时仅跳过 poll，恢复可见自动继续。
@@ -219,7 +224,11 @@ export function useBoardCanvas({
   /** 会话摘要的实时 ref（供 onMount 删除保护等只挂载一次处读取最新值） */
   const sessionTitlesRef = useRef<Record<string, SessionSummary>>({});
   sessionTitlesRef.current = sessionTitles;
+  // 摘要拉取在途标记：主动调用（转正/删除后）与 10s 轮询撞上时合并，防瞬时重复请求
+  const summariesInFlightRef = useRef(false);
   const loadSessionSummaries = useCallback(async () => {
+    if (summariesInFlightRef.current) return;
+    summariesInFlightRef.current = true;
     try {
       const res = await fetch("/api/sessions", { cache: "no-store" });
       if (!res.ok) return;
@@ -237,6 +246,8 @@ export function useBoardCanvas({
       setSessionTitles(map);
     } catch {
       // keep last
+    } finally {
+      summariesInFlightRef.current = false;
     }
   }, []);
 
@@ -348,6 +359,7 @@ export function useBoardCanvas({
                   // 删除 API bump 了受影响看板的 updated：刷新当前看板乐观锁基线，防后续防抖保存 409
                   const u = j?.updatedBoards?.[boardIdRef.current];
                   if (typeof u === "number") baseUpdatedRef.current = u;
+                  dispatchBoardSessionDeleted(d.sid); // 通知侧栏：左侧树移除该会话
                 })
                 .catch((e) => console.warn(`[board] 删除会话 ${d.sid} 异常`, e)),
             ),
@@ -1154,7 +1166,10 @@ export function useBoardCanvas({
   // ---- 任务看板自动补卡（任务即看板）----
   // 拉取任务内会话 id（根会话集合）→ 与画布现有 session-card 差集 → 自动创建卡片。
   // 旧会话坐标已由 hydrate 从 board_nodes 恢复，这里只补“任务里有、画布上没有”的新会话。
+  // reconcile 在途标记：running 驱动即时补卡 + 10s 轮询撞上时合并，防瞬时重复请求
+  const reconcileInFlightRef = useRef(false);
   const reconcileTaskSessions = useCallback(async () => {
+    if (reconcileInFlightRef.current) return;
     const editor = editorRef.current;
     const tid = effectiveTaskIdRef.current;
     if (!editor || !tid) return;
@@ -1163,6 +1178,7 @@ export function useBoardCanvas({
     // 并保存覆盖服务器（用户自定义内容丢失）。物化完成（hydratedRef=true）后
     // 由下一轮轮询正常补“任务里有、画布上确实没有”的新会话。
     if (!hydratedRef.current) return;
+    reconcileInFlightRef.current = true;
     try {
       const res = await fetch(`/api/tasks/${encodeURIComponent(tid)}`, { cache: "no-store" });
       if (!res.ok) return;
@@ -1206,6 +1222,8 @@ export function useBoardCanvas({
       }
     } catch {
       // 网络/解析失败静默，下轮重试
+    } finally {
+      reconcileInFlightRef.current = false;
     }
   }, [addSessionNode, findFreeSpot, sessionTitles]);
   // running 快照驱动即时补卡用：指向最新 reconcileTaskSessions（running 轮询 useEffect 依赖 [] 闭包旧值）
@@ -1257,10 +1275,15 @@ export function useBoardCanvas({
   // board_nodes.ref_id（/api/agent/new 带 boardNodeId）。本卡在画布上仍是 draft
   // （sessionId=""），轮询发现 DB 里 ref_id 已有值 → 更新 shape 转正。
   // 适用手动看板 + 任务看板；与任务补卡互不冲突（补卡只看会话，转正只看 draft 卡）。
+  // draft 兜底轮询在途标记：1.5s 首跑 + 10s 周期撞上时合并，防瞬时重复请求
+  const pendingDraftsInFlightRef = useRef(false);
   const reconcilePendingDrafts = useCallback(async () => {
+    if (pendingDraftsInFlightRef.current) return;
     const editor = editorRef.current;
     const bid = boardIdRef.current;
     if (!editor || !bid || bid === SYSTEM_RUNNING_BOARD_ID) return;
+    pendingDraftsInFlightRef.current = true;
+    try {
     const drafts: string[] = [];
     for (const shape of editor.getCurrentPageShapes()) {
       if (shape.type !== "session-card") continue;
@@ -1303,6 +1326,9 @@ export function useBoardCanvas({
     }
     // 拉一次摘要，让标题/消息数立刻到位
     void loadSessionSummaries();
+    } finally {
+      pendingDraftsInFlightRef.current = false;
+    }
   }, [loadSessionSummaries]);
 
   // 未转正卡轮询：进入看板后先跑一次（避开 hydrate 窗口），之后与摘要同频 10s。

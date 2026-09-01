@@ -14,6 +14,9 @@ export const BOARD_SESSION_FORKED_EVENT = "pi-web:board-session-forked";
 /** 看板内新建会话（draft 卡转正）→ AppShell 刷新侧栏 + 卡片侧把 sessionId 写回转正 */
 export const BOARD_SESSION_CREATED_EVENT = "pi-web:board-session-created";
 
+/** 看板内删除会话（画布删卡）→ AppShell 刷新侧栏（左侧树移除该会话） */
+export const BOARD_SESSION_DELETED_EVENT = "pi-web:board-session-deleted";
+
 /** 看板内会话改名 → AppShell 刷新侧栏（左侧树名称同步） */
 export const BOARD_SESSION_RENAMED_EVENT = "pi-web:board-session-renamed";
 
@@ -34,6 +37,7 @@ declare global {
     "pi-web:board-open-file": CustomEvent<{ sessionId: string; filePath: string }>;
     "pi-web:board-session-forked": CustomEvent<{ sessionId: string; newSessionId: string }>;
     "pi-web:board-session-created": CustomEvent<{ sessionId: string; nodeId?: string }>;
+    "pi-web:board-session-deleted": CustomEvent<{ sessionId: string }>;
     "pi-web:board-session-renamed": CustomEvent<{ sessionId: string; name?: string }>;
     "pi-web:board-agent-end": CustomEvent<{ sessionId: string; sessionName?: string }>;
     "pi-web:board-attention-needed": CustomEvent<{ sessionId: string; title?: string; method: string }>;
@@ -52,6 +56,10 @@ export function dispatchBoardSessionForked(sessionId: string, newSessionId: stri
 
 export function dispatchBoardSessionCreated(sessionId: string, nodeId?: string): void {
   window.dispatchEvent(new CustomEvent(BOARD_SESSION_CREATED_EVENT, { detail: { sessionId, nodeId } }));
+}
+
+export function dispatchBoardSessionDeleted(sessionId: string): void {
+  window.dispatchEvent(new CustomEvent(BOARD_SESSION_DELETED_EVENT, { detail: { sessionId } }));
 }
 
 export function dispatchBoardSessionRenamed(sessionId: string, name?: string): void {
