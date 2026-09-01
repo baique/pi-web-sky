@@ -254,33 +254,19 @@ export function useBoardCanvas({
     hydratedRef.current = false;
     hydratingRef.current = false;
     setHydrated(false);
-    // 任务看板删除保护：任务自有会话卡（sessionId ∈ task.sessionIds）不可删。
-    // 卡片由任务数据源驱动（reconcileTaskSessions 自动补卡），删除会被补回，
-    // 且任务会话只能由外部移除。外部拉入的卡（sessionId ∉ task.sessionIds）不受限。
+    // 依赖线禁删：任务卡前置/关联自动边由 task_card_links 派生（syncCardEdges），
+    // 手动删除会被 reconcile 补回，这里直接拦截（等效禁删）。其余 shape 正常删。
+    // 任务会话卡删除保护已废除——删除改确认制 + 事务（见原子-链接 spec）。
     const origDeleteShapes = editor.deleteShapes.bind(editor);
     editor.deleteShapes = ((ids: Parameters<typeof origDeleteShapes>[0]) => {
       const idArr = Array.isArray(ids) ? ids : [ids];
-      const protectedSet = new Set(taskSessionIdsRef.current);
       const allowed = idArr.filter((id) => {
         const idStr = typeof id === "string" ? id : id.id;
         const shape = editor.getShape(idStr);
         if (!shape) return true;
-        // 依赖线（任务卡前置/关联自动边）禁删：由 task_card_links 派生，删了会被 syncCardEdges 补回
         if (shape.type === "arrow" && (shape.meta as { taskLinkLabel?: string } | undefined)?.taskLinkLabel) return false;
-        if (shape.type !== "session-card") return true;
-        const sid = (shape.props as SessionCardShapeProps).sessionId;
-        // 仅有效会话（会话文件存在，在 sessionTitles 里）受任务删除保护；
-        // 无效/僵尸会话（meta 残留、文件已删）放行——可删且不补回。
-        return !(protectedSet.has(sid) && effectiveTaskIdRef.current && sessionTitlesRef.current[sid]);
+        return true;
       });
-      // 有任务内置会话卡被删除拦截：给一次可见提示（节流，防连续 Delete 刷屏）
-      if (allowed.length < idArr.length) {
-        const now = Date.now();
-        if (now - deleteBlockedAtRef.current > 3000) {
-          deleteBlockedAtRef.current = now;
-          setDeleteBlockedCount((c) => c + 1);
-        }
-      }
       if (allowed.length === idArr.length) return origDeleteShapes(ids);
       if (allowed.length > 0) return origDeleteShapes(allowed);
       return editor;
@@ -407,9 +393,6 @@ export function useBoardCanvas({
 
   // 冲突计数 +1（供 UI 提示「已加载最新版本」）；409 自动重载与手动重载共用
   const [conflictCount, setConflictCount] = useState(0);
-  // 任务内置会话卡删除被拦截计数（供 UI 提示）+ 节流 ref（防连续 Delete 刷屏）
-  const [deleteBlockedCount, setDeleteBlockedCount] = useState(0);
-  const deleteBlockedAtRef = useRef(0);
   const reloadCanvasWrap = useCallback(async () => {
     await reloadCanvas();
     setConflictCount((c) => c + 1);
@@ -1061,7 +1044,6 @@ export function useBoardCanvas({
       if (!res.ok) return;
       const data = (await res.json()) as { task?: { sessionIds?: string[] } | null };
       const sessionIds = data.task?.sessionIds ?? [];
-      taskSessionIdsRef.current = sessionIds;
       const existing = new Set<string>();
       // draft 卡（taskId 匹配本任务）视为已占位：该卡正在转正（ensure_session
       // 已把会话挂到任务下、但卡片 sessionId 尚未写回），补卡会重复建卡。
@@ -1096,8 +1078,6 @@ export function useBoardCanvas({
   }, [addSessionNode, findFreeSpot, sessionTitles]);
   const taskIdRef = useRef(taskId);
   taskIdRef.current = taskId;
-  // 任务自有会话 id 集合（来自 reconcileTaskSessions 拉取）：删除拦截用。
-  const taskSessionIdsRef = useRef<string[]>([]);
   // 新建会话 cwd（来自左侧栏 activeCwd）：draft 卡工作台经 props 透传，
   // 无需经本 hook；存 ref 供将来可能需要时读取。
   const newSessionCwdRef = useRef(newSessionCwd);
@@ -1326,12 +1306,11 @@ export function useBoardCanvas({
     getNodeIdForSession,
     reloadCanvas: reloadCanvasWrap,
     conflictCount,
-    deleteBlockedCount,
     sessionTitles,
     loadSessionSummaries,
     hydrateShapes,
     reconcileTaskSessions,
-  }), [board, loading, hydrated, error, running, editorReady, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, clearBoard, getNodeIdForSession, reloadCanvasWrap, conflictCount, deleteBlockedCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
+  }), [board, loading, hydrated, error, running, editorReady, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, clearBoard, getNodeIdForSession, reloadCanvasWrap, conflictCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
 }
 
 export type UseBoardCanvasReturn = ReturnType<typeof useBoardCanvas>;
