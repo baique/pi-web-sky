@@ -350,7 +350,16 @@ export function useBoardCanvas({
           const del = [...sessionDelete.map((d) => d.shapeId), ...cardDelete.map((d) => d.shapeId), ...directDelete];
           // 乐观删除：直接 store.remove（绕过 tldraw deleteShapes 的 run/guard——在 confirm 异步窗口内
           // this.run 批处理不删，readonly/locked 检查也可能拦截）。按钮路径同此验证有效。
-          editor.store.remove(del as never);
+          // 注意：store.remove 不级联删绑定到被删卡片的 arrow（依赖线/exec 线/用户连线）——
+          // tldraw deleteShapes 会级联删 binding，这里手动收集一并删，防画布悬空箭头。
+          const entityIds = [...sessionDelete.map((d) => d.shapeId), ...cardDelete.map((d) => d.shapeId)];
+          const boundArrowIds = new Set<string>();
+          for (const sid of entityIds) {
+            for (const b of editor.getBindingsInvolvingShape(sid as never, "arrow")) {
+              boundArrowIds.add(b.fromId);
+            }
+          }
+          editor.store.remove([...entityIds, ...boundArrowIds, ...directDelete] as never);
           const apis = [
             ...sessionDelete.map((d) =>
               fetch(`/api/sessions/${encodeURIComponent(d.sid)}`, { method: "DELETE" })
