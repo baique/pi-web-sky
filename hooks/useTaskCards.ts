@@ -17,7 +17,7 @@ export interface TaskCardDetail {
   inbound: TaskCardLink[];
 }
 
-export function useTaskCard(cardId: string | null, boardId: string | null, pollMs?: number) {
+export function useTaskCard(cardId: string | null, boardId: string | null) {
   const [detail, setDetail] = useState<TaskCardDetail | null>(null);
   const [candidates, setCandidates] = useState<TaskCard[]>([]);
   const [loading, setLoading] = useState(false);
@@ -57,15 +57,6 @@ export function useTaskCard(cardId: string | null, boardId: string | null, pollM
   useEffect(() => {
     void reload();
   }, [reload]);
-
-  // 展开态轮询：拉取调度器写入的最新 sessionId/execStatus（S2 派发后工作台不再停在「未派发」空态）
-  useEffect(() => {
-    if (!cardId || !pollMs) return;
-    const timer = setInterval(() => {
-      void fetchDetail(true);
-    }, pollMs);
-    return () => clearInterval(timer);
-  }, [cardId, pollMs, fetchDetail]);
 
   // 同看板候选卡（依赖选择 + 编号显示用）
   useEffect(() => {

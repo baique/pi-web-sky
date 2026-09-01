@@ -5,7 +5,6 @@ import { BaseBoxShapeUtil, HTMLContainer, T, resizeBox, useEditor, useValue } fr
 import type { TLBaseShape, TLShapeId, TLShapePartial } from "tldraw";
 import type { ExecStatus, ReadyStatus, TaskCard } from "@/lib/task-card-store";
 import { linkTargetIds, useTaskCard } from "@/hooks/useTaskCards";
-import { SessionWorkbench } from "./SessionWorkbench";
 import { ThemedSelect } from "./ThemedSelect";
 import { TaskCardMultiSelect } from "./TaskCardMultiSelect";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
@@ -94,14 +93,11 @@ export const EXEC_BADGE: Record<ExecStatus, { color: string; label: string }> = 
   waiting_reply: { color: "#3184f8", label: "等回复" },
 };
 
-/** 常态 = 编辑表单栏（左侧常驻）；展开 = 右侧追加工作台 */
+/** 常态 = 编辑表单栏；展开 = 纯表单加宽（无内置工作台，原子-链接） */
 const FORM_W = 380;
 const FORM_H = 270;
-/** 工作台区域最小尺寸：对齐会话卡片展开态最小（600×500） */
-const WORKBENCH_MIN_W = 600;
-const WORKBENCH_MIN_H = 500;
-/** 展开态整卡宽 = 表单 380 + 工作台最小宽（对齐会话卡片展开态最小 600） */
-const EXPANDED_W = FORM_W + WORKBENCH_MIN_W; // 980
+/** 展开态默认宽 = 表单加宽（无右侧工作台） */
+const EXPANDED_W = 760;
 const EXPANDED_H = 600;
 /** 收起态最小高（表单：名称/描述 + 折叠的「高级」标题） */
 const COLLAPSED_MIN_H = 240;
@@ -153,10 +149,10 @@ export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
     shape: TaskCardShape,
     info: import("tldraw").TLResizeInfo<TaskCardShape>,
   ): Omit<TLShapePartial<TaskCardShape>, "id" | "type"> | undefined {
-    // 收起/展开两态分别限制最小尺寸：展开态工作台区 ≥ 会话卡片展开态最小（600×500）
+    // 收起/展开两态最小尺寸：展开态表单加宽，收合态紧凑表单
     const expanded = shape.props.expanded;
-    const minW = expanded ? FORM_W + WORKBENCH_MIN_W : FORM_W;
-    const minH = expanded ? WORKBENCH_MIN_H : COLLAPSED_MIN_H;
+    const minW = expanded ? 480 : FORM_W;
+    const minH = expanded ? 400 : COLLAPSED_MIN_H;
     return resizeBox(shape, info, { minWidth: minW, minHeight: minH });
   }
 
@@ -201,7 +197,8 @@ function TaskCardView({ shape }: { shape: TaskCardShape }) {
 }
 
 // ============================================================================
-// 任务卡本体：左=编辑表单（空卡=建卡向导）常驻；expanded 时右侧追加执行会话工作台
+// 任务卡本体：编辑表单（空卡=建卡向导）常驻；展开态表单加宽（无内置工作台，
+// 执行会话通过 exec 线引用画布独立会话卡——原子-链接，见 spec 2026-09-01-task-card-atomic-link.md）
 // ============================================================================
 
 const FIELD_STYLE: React.CSSProperties = {
@@ -229,11 +226,11 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   const editor = useEditor();
   const boardId = useBoardId();
   const defaultCwd = useBoardDefaultCwd();
-  // 展开时 8s 轮询详情（拉调度器派发写入的 sessionId/执行状态），收合停止
+  // 任务卡详情（表单真相源 + 执行会话 sessionId）：挂载/展开时拉取一次；
+  // 不再 8s 轮询——运行中状态由 2.5s running 快照驱动（原子-链接 spec §3.2）
   const { detail, candidates, loading, error, reload, createCard, saveCard } = useTaskCard(
     cardId || null,
     boardId,
-    expanded ? 8000 : undefined,
   );
 
   // 卡片激活判定（与 SessionWorkbench 同模式）：实时读 editor，不引 React 重渲染
@@ -247,7 +244,6 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   const rootRef = useRef<HTMLDivElement>(null);
 
   const isCreating = !cardId;
-  const sessionId = detail?.card.sessionId ?? null;
 
   // 轮询器状态同步：画布层 2.5s 轮询会把本 shape 的 execStatus props 更新为调度器最新状态，
   // 这里镜像进 draft——头部徽章（读 draft.execStatus）自动刷新，保存时也不会用旧值覆盖调度器状态。
@@ -723,11 +719,11 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         </div>
         {/* 内容区：左表单 + 右工作台 */}
         <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        {/* 左：编辑表单 / 建卡向导（常驻）——收起态自适应卡片宽度（可拉更宽）；展开态固定 FORM_W + 右侧工作台
+        {/* 编辑表单 / 建卡向导（常驻，占满卡片）——无右侧工作台（原子-链接）。
             隐藏滚动条（[scrollbar-width:none]，与 ChatWindow 同惯例） */}
         <div
           className="[scrollbar-width:none]"
-          style={{ flex: expanded ? `0 0 ${FORM_W}px` : "1 1 auto", minWidth: 0, width: expanded ? FORM_W : undefined, borderRight: expanded ? "1px solid var(--bubble-hairline)" : "none", overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column" }}
+          style={{ flex: "1 1 auto", minWidth: 0, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column" }}
           onPointerDown={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
           onPointerUp={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
           onClick={(e) => e.stopPropagation()}
@@ -735,64 +731,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         >
           {formBody}
         </div>
-        {/* 右：执行会话面板（expanded 才显示）——独立标题栏 + 工作台，与左表单互不干扰。
-            标题栏结构对齐会话卡片展开态（data-session-titlebar + data-session-navbar-slot）：
-            SessionWorkbench 会把 SessionNavBar（历史/统计/TODO）portal 到 slot，弹层定位也
-            以 data-session-titlebar 为锚（宽度 = 右面板宽）。 */}
-        {expanded && (
-        <div style={{ flex: 1, minWidth: 0, borderLeft: "1px solid var(--bubble-hairline)", display: "flex", flexDirection: "column", padding: 8 }}>
-          {/* 会话面板标题栏：pointerEvents none 让 tldraw 接管拖拽（与会话卡同模式）；
-              导航条 slot 独立接收点击（stopPropagation 隔离拖拽，与任务卡头部按钮区同模式） */}
-          <div
-            data-session-titlebar
-            style={{
-              flexShrink: 0,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "0 4px",
-              height: 36,
-              borderBottom: "1px solid var(--bubble-hairline)",
-              cursor: "grab",
-              pointerEvents: "none",
-              position: "relative",
-            }}
-          >
-            <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>
-              执行会话
-            </span>
-            <div style={{ flex: 1 }} />
-            {/* 导航条 portal 挂载点：SessionWorkbench 将 SessionNavBar 渲染到这里 */}
-            <div
-              data-session-navbar-slot
-              style={{ display: "flex", alignItems: "center", pointerEvents: "all" }}
-              onPointerDown={(e) => e.stopPropagation()}
-            />
-          </div>
-          {/* 工作台 / 空态：四周留 padding 对齐会话卡片展开态（胶囊化），拖拽/调整手柄可触 */}
-          <div style={{ flex: 1, minHeight: 0, position: "relative", padding: "0 4px 0" }}>
-            {sessionId ? (
-              <SessionWorkbench sessionId={sessionId} />
-            ) : (
-              <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--text-dim)", fontSize: 12 }}>
-                {isCreating ? (
-                  <>
-                    <div>填写左侧信息创建任务卡</div>
-                    <div style={{ fontSize: 10 }}>创建后调度器将自动派发执行（就绪=待办时）</div>
-                  </>
-                ) : (
-                  <>
-                    <div>尚未派发执行</div>
-                    <div style={{ fontSize: 10 }}>
-                      {detail?.card.execStatus === "not_started" ? "就绪=待办后调度器自动派发" : `执行状态：${EXEC_BADGE[detail?.card.execStatus ?? "not_started"].label}`}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-        )}
+        {/* 执行会话不在任务卡内展示：任务卡通过 exec 线引用画布独立会话卡（原子-链接）。
+            「定位执行会话」入口在 S2-4 加入（跳到连着的会话卡）。 */}
       </div>
       </div>
     </HTMLContainer>
