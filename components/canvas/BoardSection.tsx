@@ -3,7 +3,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { BoardInfo } from "@/lib/board-types";
-import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
 import { BOARD_CANVAS_CHANGED_EVENT } from "@/lib/board-events";
 
 /**
@@ -15,7 +14,6 @@ import { BOARD_CANVAS_CHANGED_EVENT } from "@/lib/board-events";
  */
 export function BoardSection({
   projectKey,
-  runningCount,
   activeBoardId,
   collapsed,
   onToggleCollapsed,
@@ -23,7 +21,6 @@ export function BoardSection({
   refreshKey,
 }: {
   projectKey: string | null;
-  runningCount: number;
   activeBoardId: string | null;
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -189,18 +186,7 @@ export function BoardSection({
     }).then((r) => { if (r.ok) return load(); return undefined; }).catch(() => {});
   }, [boards, dropIndicator, dragBoard, projectKey, load]);
 
-  const system = boards.find((b) => b.isSystem) ?? {
-    id: SYSTEM_RUNNING_BOARD_ID,
-    projectKey: "",
-    name: "running",
-    isSystem: true,
-    taskId: null,
-    sortOrder: 0,
-    created: 0,
-    updated: 0,
-    nodeCount: 0,
-  };
-  // 任务型看板不混进手动看板列表（任务行本身即入口）；仅展示手动看板。
+  // 任务型看板不混入手动看板列表（任务行本身即入口）；仅展示手动看板。
   const projectBoards = boards.filter((b) => !b.isSystem && b.taskId == null);
 
   return (
@@ -318,61 +304,6 @@ export function BoardSection({
                 </svg>
               </button>
             </div>
-          )}
-
-          {/* 系统「运行中」看板 —— 已隐藏（用户决定：仅隐藏，代码保留）。
-              与项目看板同高同行样式，仅图标不同。如需恢复，把 false 改回 true。 */}
-          {false && (
-          <div
-            key={system.id}
-            style={{ margin: "0 4px 2px", borderRadius: 6, opacity: 1 }}
-          >
-            <div
-              onClick={() => onOpenBoard(system.id)}
-              data-board-row={system.id}
-              title={t("boards.runningDesc")}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                minHeight: 38,
-                padding: "3px 8px 3px 5px",
-                borderRadius: 6,
-                background: activeBoardId === system.id ? "var(--side-active)" : "transparent",
-                cursor: "pointer",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => { if (activeBoardId !== system.id) e.currentTarget.style.background = "var(--side-hover)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = activeBoardId === system.id ? "var(--side-active)" : "transparent"; }}
-            >
-              {/* 图标槽：与任务 FolderIcon 同尺寸同起点 */}
-              <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: runningCount > 0 ? "var(--accent)" : "var(--text-dim)" }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: runningCount > 0 ? "var(--accent)" : "var(--text-dim)", opacity: runningCount > 0 ? 1 : 0.6 }} />
-              </span>
-              <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {t("boards.running")}
-              </span>
-              {runningCount > 0 && (
-                <span
-                  style={{
-                    flexShrink: 0,
-                    minWidth: 16,
-                    height: 16,
-                    padding: "0 4px",
-                    borderRadius: 999,
-                    background: "var(--accent)",
-                    color: "#fff",
-                    fontSize: 10,
-                    fontWeight: 700,
-                    lineHeight: "16px",
-                    textAlign: "center",
-                  }}
-                >
-                  {runningCount}
-                </span>
-              )}
-            </div>
-          </div>
           )}
 
           {/* 项目看板 */}

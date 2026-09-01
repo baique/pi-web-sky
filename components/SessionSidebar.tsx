@@ -1915,7 +1915,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {/* Boards section — sits above tasks, style matches task rows */}
               <BoardSection
                 projectKey={selectedProject?.key ?? null}
-                runningCount={runningBoardCount}
                 activeBoardId={activeBoardId ?? null}
                 collapsed={boardsCollapsed}
                 refreshKey={refreshKey}
