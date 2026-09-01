@@ -8,7 +8,8 @@ const jiti = createJiti(import.meta.url, {
   interopDefault: true,
   moduleCache: false,
 });
-const { setDbForTesting } = await jiti.import("@/lib/sqlite-db.ts");
+const { setDbForTesting, getDb } = await jiti.import("@/lib/sqlite-db.ts");
+const { createCard } = await jiti.import("@/lib/task-card-store.ts");
 const { GET: listBoards, POST: createBoard } = await jiti.import("./route.ts");
 const { GET: getBoard, PATCH: patchBoard, DELETE: deleteBoard } = await jiti.import("./[id]/route.ts");
 const { GET: getCanvas, PUT: putCanvas } = await jiti.import("./[id]/canvas/route.ts");
@@ -247,4 +248,31 @@ test("purge-orphans API: 删除指向已删会话的孤儿卡片", async () => {
   const canvasBody = await canvas.json();
   assert.equal(canvasBody.nodes.length, 1); // draft 保留
   assert.equal(canvasBody.nodes[0].refId, null);
+});
+
+test("purge-orphans API: 删除指向已删任务卡的 taskcard 孤儿节点，保留有效卡节点", async () => {
+  freshDb();
+  const created = await createBoard(jsonReq("http://localhost/api/boards", "POST", { projectKey: PROJECT, name: "purge-tc" }));
+  const { board } = await created.json();
+  // 有效任务卡（task_cards 存在）+ 其画布节点 → 保留
+  const card = createCard({ boardId: board.id, projectKey: PROJECT, name: "有效卡" });
+  const now = Date.now();
+  const insertNode = (id, refId, x) =>
+    getDb()
+      .prepare("INSERT INTO board_nodes (id, board_id, kind, ref_id, x, y, w, h, expanded, props, created, updated) VALUES (?, ?, 'taskcard', ?, ?, 0, 220, 120, 0, '{}', ?, ?)")
+      .run(id, board.id, refId, x, now, now);
+  insertNode("node-valid", card.id, 0);
+  insertNode("node-ghost", "ghost-card-" + Math.random().toString(36).slice(2), 200);
+
+  const purgeRes = await purgeOrphans(new Request("http://localhost/api/boards/purge-orphans", { method: "POST" }));
+  assert.equal(purgeRes.status, 200);
+  const body = await purgeRes.json();
+  assert.equal(body.deletedNodes, 1); // 只删 taskcard 孤儿，有效卡节点保留
+
+  const canvas = await getCanvas(new Request("http://localhost/api/boards/x/canvas"), {
+    params: Promise.resolve({ id: board.id }),
+  });
+  const canvasBody = await canvas.json();
+  assert.equal(canvasBody.nodes.length, 1);
+  assert.equal(canvasBody.nodes[0].refId, card.id);
 });

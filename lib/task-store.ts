@@ -197,6 +197,13 @@ export function deleteTask(id: string): void {
       id,
     );
     db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+    // 任务卡级联：该任务看板（board_id = 任务 id）下的任务卡 + 依赖线 + 待答问题清掉，
+    // 防孤儿任务卡（任务卡节点/边已由 deleteBoardCascade 删，这里清业务表）。
+    db.prepare(
+      "DELETE FROM task_card_links WHERE card_id IN (SELECT id FROM task_cards WHERE board_id = ?) OR target_card_id IN (SELECT id FROM task_cards WHERE board_id = ?)",
+    ).run(id, id);
+    db.prepare("DELETE FROM task_card_questions WHERE card_id IN (SELECT id FROM task_cards WHERE board_id = ?)").run(id);
+    db.prepare("DELETE FROM task_cards WHERE board_id = ?").run(id);
     // 任务即看板：删任务连带删其看板（含 nodes/edges/view）
     deleteBoardCascade(id);
     db.exec("COMMIT");

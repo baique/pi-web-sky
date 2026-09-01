@@ -23,29 +23,39 @@ export interface PurgeResult {
 
 /** 清理全部看板上的孤儿卡片（级联删连线）。无孤儿时返回全 0。 */
 export async function purgeOrphanBoardCards(): Promise<PurgeResult> {
-  // 1. 收集全部绑定节点（refId 非空），跳过系统看板（running 只读）与任务卡节点
-  //    （taskcard 的 refId = task_cards.id，不是会话 id，必须排除否则误删）
-  const nodes = getDb()
+  const db = getDb();
+  // 1a. 会话节点（kind != 'taskcard'）：孤儿判定基于会话文件 / session_meta 存在性
+  //     （防误删"创建中"会话：任务会话创建即写 meta，文件延迟落盘也安全）
+  const sessionNodes = db
     .prepare("SELECT id, board_id AS boardId, ref_id AS refId FROM board_nodes WHERE ref_id IS NOT NULL AND board_id != ? AND kind != 'taskcard'")
     .all(SYSTEM_RUNNING_BOARD_ID) as Array<{ id: string; boardId: string; refId: string }>;
-  if (nodes.length === 0) return { deletedNodes: 0, deletedEdges: 0, boards: [] };
+  // 1b. 任务卡节点（kind='taskcard'）：孤儿判定 = refId 不在 task_cards 表
+  //     （任务卡已删但画布节点残留，如 deleteTask 未级联清；refId 是 task_cards.id 非会话 id）
+  const taskCardNodes = db
+    .prepare(
+      "SELECT id, board_id AS boardId, ref_id AS refId FROM board_nodes n " +
+        "WHERE kind = 'taskcard' AND ref_id IS NOT NULL AND board_id != ? " +
+        "AND NOT EXISTS (SELECT 1 FROM task_cards c WHERE c.id = n.ref_id)",
+    )
+    .all(SYSTEM_RUNNING_BOARD_ID) as Array<{ id: string; boardId: string; refId: string }>;
 
-  // 2. 权威会话集合：listAllSessions（填路径缓存）+ session_meta（任务会话即写）
-  const sessions = await listAllSessions();
-  const aliveIds = new Set(sessions.map((s) => s.id));
-  const metaRows = getDb().prepare("SELECT session_id FROM session_meta").all() as Array<{ session_id: string }>;
-  const metaIds = new Set(metaRows.map((r) => r.session_id));
-
-  // 3. 逐个判定孤儿（resolveSessionPath 走路径缓存，接近内存查询）
-  const orphanIds: string[] = [];
-  for (const n of nodes) {
-    if (aliveIds.has(n.refId) || metaIds.has(n.refId)) continue;
-    const p = await resolveSessionPath(n.refId);
-    if (p === null) orphanIds.push(n.id);
+  // 2. 会话孤儿逐个判定（resolveSessionPath 走路径缓存）；taskcard 孤儿直接入列
+  const orphanIds: string[] = taskCardNodes.map((n) => n.id);
+  if (sessionNodes.length > 0) {
+    const sessions = await listAllSessions();
+    const aliveIds = new Set(sessions.map((s) => s.id));
+    const metaIds = new Set(
+      (db.prepare("SELECT session_id FROM session_meta").all() as Array<{ session_id: string }>).map((r) => r.session_id),
+    );
+    for (const n of sessionNodes) {
+      if (aliveIds.has(n.refId) || metaIds.has(n.refId)) continue;
+      const p = await resolveSessionPath(n.refId);
+      if (p === null) orphanIds.push(n.id);
+    }
   }
   if (orphanIds.length === 0) return { deletedNodes: 0, deletedEdges: 0, boards: [] };
 
-  // 4. 批量删除（级联删边 + bump 看板 updated，单事务）
+  // 3. 批量删除（级联删边 + bump 看板 updated，单事务）
   const result = deleteNodesByIds(orphanIds);
   return {
     deletedNodes: result.deletedNodes,
