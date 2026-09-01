@@ -676,7 +676,8 @@ export function syncExecEdge(cardId: string): void {
     if (e.toId !== wantedTo) deleteEdge(card.boardId, e.id);
   }
   if (wantedTo && !existing.some((e) => e.toId === wantedTo)) {
-    addEdge(card.boardId, { fromId: node.id, toId: wantedTo, label: "exec" });
+    // exec 线虚线（区别于依赖线/用户画的实线，见 task-cards.md）
+    addEdge(card.boardId, { fromId: node.id, toId: wantedTo, label: "exec", dashed: true });
   }
 }
 
@@ -713,6 +714,26 @@ export function removeSessionFromBoards(sessionId: string): number {
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
+  }
+}
+
+/** 该看板全部任务卡（供派生边兜底 reconcile） */
+function listBoardTaskCards(boardId: string): Array<{ id: string }> {
+  return getDb()
+    .prepare("SELECT id FROM task_cards WHERE board_id = ?")
+    .all(boardId) as Array<{ id: string }>;
+}
+
+/**
+ * 画布加载后兜底：对该看板所有任务卡 reconcile 派生边（依赖线 syncCardEdges + 执行会话线 syncExecEdge）。
+ * 幂等（只补缺失边）；供进入看板/重载后调一次，之后由真相源写入点（建卡/改依赖/绑 sessionId/删卡）各自触发。
+ * 不包事务，由调用方包。
+ */
+export function reconcileBoardTaskEdges(boardId: string): void {
+  const cards = listBoardTaskCards(boardId);
+  for (const card of cards) {
+    syncCardEdges(card.id);
+    syncExecEdge(card.id);
   }
 }
 

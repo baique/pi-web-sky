@@ -264,7 +264,10 @@ export function useBoardCanvas({
         const idStr = typeof id === "string" ? id : id.id;
         const shape = editor.getShape(idStr);
         if (!shape) return true;
-        if (shape.type === "arrow" && (shape.meta as { taskLinkLabel?: string } | undefined)?.taskLinkLabel) return false;
+        if (shape.type === "arrow") {
+          const am = shape.meta as { taskLinkLabel?: string; execLinkLabel?: string } | undefined;
+          if (am?.taskLinkLabel || am?.execLinkLabel) return false; // 派生边（依赖/exec）禁删
+        }
         return true;
       });
       if (allowed.length === idArr.length) return origDeleteShapes(ids);
@@ -570,10 +573,13 @@ export function useBoardCanvas({
         type: "arrow",
         x: 0,
         y: 0,
-        // 依赖线标记（task_card_links 派生）：前置/关联边供右键菜单禁删识别
+        // 派生边标记：依赖线（task_card_links）→ taskLinkLabel；执行会话线（exec）→ execLinkLabel。
+        // 供右键菜单禁删识别 + deleteShapes 拦截（见 onMount）。
         meta: edge.label === "prerequisite" || edge.label === "related"
           ? { taskLinkLabel: edge.label }
-          : undefined,
+          : edge.label === "exec"
+            ? { execLinkLabel: "exec" }
+            : undefined,
         props: {
           start: { x: from.x + from.w / 2, y: from.y + from.h / 2 },
           end: { x: to.x + to.w / 2, y: to.y + to.h / 2 },
@@ -633,6 +639,24 @@ export function useBoardCanvas({
     // 物化完成才放行自动保存：未完成前的空/部分画布绝不允许覆盖看板
     hydratedRef.current = true;
     setHydrated(true);
+    // 画布加载后兜底 reconcile 任务卡派生边（依赖线 + exec 线）：历史数据补线，幂等。
+    // reconcile 建边会 bump boards.updated → 用返回值刷新乐观锁基线，防后续防抖保存 409。
+    if (boardIdRef.current !== SYSTEM_RUNNING_BOARD_ID) {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/boards/${encodeURIComponent(boardIdRef.current)}/reconcile-task-edges`, {
+            method: "POST",
+            cache: "no-store",
+          });
+          if (res.ok) {
+            const d = (await res.json().catch(() => null)) as { updated?: number } | null;
+            if (d?.updated) baseUpdatedRef.current = d.updated;
+          }
+        } catch {
+          // 兜底静默：无派生边/网络失败不影响画布
+        }
+      })();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCanvas, sessionTitles, hydrateShapes, editorReady]);
 

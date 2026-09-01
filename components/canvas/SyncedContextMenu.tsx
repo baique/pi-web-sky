@@ -43,23 +43,23 @@ import type { ReactNode } from "react";
 const TASK_LINK_LABELS = new Set(["prerequisite", "related"]);
 
 /**
- * 右键菜单内容：选中对象含依赖线（meta.taskLinkLabel）时只显示只读提示，
- * 不提供删除等操作（依赖线由 task_card_links 派生，禁删）；否则默认菜单。
+ * 右键菜单内容：选中对象含派生连线（依赖线 meta.taskLinkLabel / 执行会话线 meta.execLinkLabel）
+ * 时只显示只读提示，不提供删除等操作（派生边禁删，由真相源 reconcile）；否则默认菜单。
  */
 function BoardContextMenuContent() {
   const editor = useEditor();
   const selected = useValue("ctx-selection", () => editor.getSelectedShapes(), [editor]);
-  const hasTaskLink = selected.some((s) => {
-    const meta = s.meta as { taskLinkLabel?: string } | undefined;
-    return meta?.taskLinkLabel !== undefined && TASK_LINK_LABELS.has(meta.taskLinkLabel);
-  });
-  if (!hasTaskLink) {
+  const derived = selected
+    .map((s) => s.meta as { taskLinkLabel?: string; execLinkLabel?: string } | undefined)
+    .find((meta) => (meta?.taskLinkLabel !== undefined && TASK_LINK_LABELS.has(meta.taskLinkLabel)) || meta?.execLinkLabel !== undefined);
+  if (!derived) {
     return <DefaultContextMenuContent />;
   }
+  const label = derived.execLinkLabel ? "执行会话连线（自动生成，不可删除）" : "依赖连线（自动生成，不可删除）";
   return (
     <TldrawUiMenuContextProvider type="menu" sourceId="context-menu">
       <TldrawUiMenuGroup id="task-link">
-        <TldrawUiMenuItem id="task-link-readonly" label="依赖连线（自动生成，不可删除）" disabled noClose onSelect={() => {}} />
+        <TldrawUiMenuItem id="task-link-readonly" label={label} disabled noClose onSelect={() => {}} />
       </TldrawUiMenuGroup>
     </TldrawUiMenuContextProvider>
   );
