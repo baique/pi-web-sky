@@ -21,7 +21,7 @@ npm run migrate-boards  # 一次性：旧 board_nodes/edges → sync.db（重迁
 # 可选：拆独立进程（端口 30144）→ npm run sync，前端需设 NEXT_PUBLIC_SYNC_WS=ws://127.0.0.1:30144
 ```
 
-前端连接地址 `NEXT_PUBLIC_SYNC_WS`（默认 `ws://127.0.0.1:30143` 同端口）。
+前端连接地址 `NEXT_PUBLIC_SYNC_WS`（默认不设 → 跟随当前页面 origin，`ws(s)://当前host:当前port`，与 dev(30143)/npx 生产(30141)/自定义 `--port`/局域网 IP 全自动匹配；只拆独立进程时才设）。
 
 ## 数据层铁律（sync 版）
 

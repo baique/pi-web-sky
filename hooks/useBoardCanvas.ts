@@ -52,8 +52,17 @@ export const WORKBENCH_H = 600;
 const NEW_SESSION_CARD_W = 840;
 const NEW_SESSION_CARD_H = 600;
 
-/** sync 地址：默认同端口（server.mjs 内嵌，独立进程场景可用 NEXT_PUBLIC_SYNC_WS 覆盖） */
-const SYNC_BASE = process.env.NEXT_PUBLIC_SYNC_WS ?? "ws://127.0.0.1:30143";
+/**
+ * sync 地址：默认跟随当前页面 origin（server.mjs 内嵌在同一端口）。
+ * 用 window.location 动态拼 → dev(30143) / npx 生产(30141) / 自定义 --port / --lan 局域网 IP / https(wss) 全自动正确。
+ * 不用相对路径：new URL('/connect/..') 单参数依赖隐式 base，部分环境（如 headless）解析失败。
+ * 独立 sync 进程场景（scripts/sync-server.mjs，端口 30144）仍用 NEXT_PUBLIC_SYNC_WS 覆盖。
+ */
+const SYNC_BASE =
+  process.env.NEXT_PUBLIC_SYNC_WS ??
+  (typeof window !== "undefined"
+    ? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`
+    : "");
 
 export type CanvasPhase = "waiting_model" | "running_tools" | "running_command" | "waiting_input" | "idle" | "just-ended";
 
