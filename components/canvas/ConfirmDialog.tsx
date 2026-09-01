@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { createPortal } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 
 /**
@@ -41,17 +40,19 @@ export function confirm(opts: ConfirmOptions): Promise<boolean> {
     // 若已有打开中的弹窗（连续触发），先关闭旧的
     if (resolver) closeDialog(false);
     resolver = resolve;
-    if (!host) {
-      host = document.createElement("div");
-      document.body.appendChild(host);
-      root = createRoot(host);
+    let el = host;
+    if (!el) {
+      el = document.createElement("div");
+      document.body.appendChild(el);
+      host = el;
     }
-    root.render(
-      createPortal(
-        <DialogView opts={opts} onClose={closeDialog} />,
-        host,
-      ),
-    );
+    let r = root;
+    if (!r) {
+      r = createRoot(el);
+      root = r;
+    }
+    // root 已挂在 body 的容器元素上，直接 render（无需再嵌套 portal）
+    r.render(<DialogView opts={opts} onClose={closeDialog} />);
   });
 }
 
