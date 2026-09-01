@@ -23,19 +23,10 @@ const { wireChildProcessLifecycle } = require("./process-lifecycle");
 const pkgDir = path.join(__dirname, "..");
 const nextDir = path.join(pkgDir, ".next");
 
-// Resolve next's CLI entry directly to avoid relying on .bin symlinks (which
-// may not exist when installed via npx).
-let nextBin;
-try {
-  nextBin = require.resolve("next/dist/bin/next", { paths: [pkgDir] });
-} catch {
-  // Fallback: locate next package root and derive the bin path manually.
-  try {
-    const nextPkg = require.resolve("next/package.json", { paths: [pkgDir] });
-    nextBin = path.join(path.dirname(nextPkg), "dist", "bin", "next");
-  } catch {
-    nextBin = path.join(pkgDir, "node_modules", "next", "dist", "bin", "next");
-  }
+const serverEntry = path.join(pkgDir, "server.mjs");
+if (!fs.existsSync(serverEntry)) {
+  console.error("Server entry not found. Please report this issue.");
+  process.exit(1);
 }
 
 const { port, hostname, openBrowser } = parseLaunchOptions();
@@ -59,15 +50,19 @@ if (!loopbackHostnames.has(hostname)) {
   }
 }
 
-const nextArgs = ["start", "-p", port];
-nextArgs.push("-H", hostname);
-
-// Always run next's JS entry with node directly — avoids .bin symlink issues
-// and path-with-spaces problems on Windows when shell: true is used.
-const child = spawn(process.execPath, [nextBin, ...nextArgs], {
+// 直接跑自定义 server（server.mjs）：HTTP 交 Next，WebSocket upgrade 分流到 tldraw
+// sync 房间（/connect/:boardId）。不能只跑 `next start`——那样 WS 后台不启动，
+// 看板永远 loading（0.1.35 生产 bug 根因）。
+const child = spawn(process.execPath, [serverEntry], {
   cwd: pkgDir,
   stdio: ["inherit", "pipe", "inherit"],
-  env: { ...process.env, PI_WEB_HOSTNAME: hostname },
+  env: {
+    ...process.env,
+    NODE_ENV: "production",
+    PORT: String(port),
+    HOSTNAME: hostname,
+    PI_WEB_HOSTNAME: hostname,
+  },
 });
 wireChildProcessLifecycle(child);
 

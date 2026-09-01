@@ -25,6 +25,8 @@
     "!.next/**/*.js.map",
     "public",
     "next.config.ts",
+    "server.mjs",
+    "lib",
     "package.json"
   ],
   "scripts": {
