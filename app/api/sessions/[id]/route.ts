@@ -130,12 +130,15 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
+    // 画布引用清理（断 exec 线/清任务卡/删节点，幂等）：无论文件状态都先执行——
+    // 保证会话文件已丢失/未落盘时，看板卡片也能删除，不留孤儿。
+    removeSessionFromBoards(id);
+
     const filePath = await resolveSessionPath(id);
-    if (!filePath) {
+    if (!filePath || !existsSync(filePath)) {
       // 会话文件未落盘（Pi 延迟首次 JSONL flush）或已丢失：仍停止运行实例并
-      // 清理归属元数据（幂等删除）。否则“文件不存在 → 404”会让 session_meta
+      // 清理归属元数据（幂等删除）。否则“文件不存在”会让 session_meta
       // 残留成僵尸记录（任务会话列表/看板补卡还会引用它）。
-      removeSessionFromBoards(id); // 画布引用清理（断 exec 线/清任务卡/删节点，幂等）
       await getRpcSession(id)?.shutdown();
       invalidateSessionPathCache(id);
       invalidateSessionListCache();
@@ -143,40 +146,49 @@ export async function DELETE(
       return NextResponse.json({ ok: true });
     }
 
-    // Read only the bounded header before deleting.
-    const parentSessionPath = readSessionHeader(filePath)?.parentSession;
+    // Read only the bounded header before deleting. header 读取失败（并发删除/损坏）
+    // 时跳过子树重挂，直接删除（子会话保留其父指针，不级联误改）。
+    let parentSessionPath: string | undefined;
+    try {
+      parentSessionPath = readSessionHeader(filePath)?.parentSession;
+    } catch {
+      parentSessionPath = undefined;
+    }
 
     // Re-attach all direct children to this session's parent (cascade re-parent)
     // Scan sibling files in the same directory
-    const targetPathKey = sessionPathKey(filePath);
-    const dir = dirname(filePath);
-    try {
-      const files = readdirSync(dir).filter(
-        (file) => file.endsWith(".jsonl") && sessionPathKey(join(dir, file)) !== targetPathKey,
-      );
-      for (const file of files) {
-        const childPath = join(dir, file);
-        try {
-          const content = readFileSync(childPath, "utf8");
-          const lines = content.split("\n");
-          const header = JSON.parse(lines[0]) as { type?: string; parentSession?: string };
-          if (
-            header.type === "session" &&
-            header.parentSession &&
-            sessionPathKey(header.parentSession) === targetPathKey
-          ) {
-            // Rewrite header with new parentSession
-            header.parentSession = parentSessionPath;
-            lines[0] = JSON.stringify(header);
-            writeFileSync(childPath, lines.join("\n"));
-          }
-        } catch { /* skip malformed */ }
-      }
-    } catch { /* skip if dir unreadable */ }
+    if (parentSessionPath !== undefined) {
+      const targetPathKey = sessionPathKey(filePath);
+      const dir = dirname(filePath);
+      try {
+        const files = readdirSync(dir).filter(
+          (file) => file.endsWith(".jsonl") && sessionPathKey(join(dir, file)) !== targetPathKey,
+        );
+        for (const file of files) {
+          const childPath = join(dir, file);
+          try {
+            const content = readFileSync(childPath, "utf8");
+            const lines = content.split("\n");
+            const header = JSON.parse(lines[0]) as { type?: string; parentSession?: string };
+            if (
+              header.type === "session" &&
+              header.parentSession &&
+              sessionPathKey(header.parentSession) === targetPathKey
+            ) {
+              // Rewrite header with new parentSession
+              header.parentSession = parentSessionPath;
+              lines[0] = JSON.stringify(header);
+              writeFileSync(childPath, lines.join("\n"));
+            }
+          } catch { /* skip malformed */ }
+        }
+      } catch { /* skip if dir unreadable */ }
+    }
 
-    removeSessionFromBoards(id); // 画布引用清理（断 exec 线/清任务卡/删节点，幂等）
     await getRpcSession(id)?.shutdown();
-    unlinkSync(filePath);
+    try {
+      unlinkSync(filePath); // 文件已被并发删除时忽略（健壮删除）
+    } catch { /* ignore */ }
     invalidateSessionPathCache(id);
     invalidateSessionListCache();
     unassignSession(id);

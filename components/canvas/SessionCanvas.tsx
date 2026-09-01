@@ -9,6 +9,7 @@ import type { WallpaperSettings } from "@/lib/wallpaper-settings";
 import type { SessionInfo } from "@/lib/types";
 import { BoardSearchProvider } from "./BoardSearchContext";
 import { BoardIdContext } from "./TaskCardShape";
+import { confirm } from "./ConfirmDialog";
 import { BoardSearch } from "./BoardSearch";
 
 // ssr:false — tldraw 依赖浏览器环境，仅进入看板模式时下载（~1MB）。
@@ -347,7 +348,12 @@ export function SessionCanvas({
           <button
             type="button"
             onClick={() => {
-              if (window.confirm(isTaskBoard ? t("boards.clearTaskConfirm") : t("boards.clearConfirm"))) void board.clearBoard();
+              void confirm({
+                message: isTaskBoard ? t("boards.clearTaskConfirm") : t("boards.clearConfirm"),
+                confirmText: t("boards.clear"),
+              }).then((ok) => {
+                if (ok) void board.clearBoard();
+              });
             }}
             title={isTaskBoard ? t("boards.clearTaskBoardDesc") : t("boards.clearDesc")}
             style={floatingIconBtn}

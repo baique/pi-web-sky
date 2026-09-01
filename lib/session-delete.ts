@@ -56,7 +56,9 @@ export async function deleteSessionFile(id: string): Promise<void> {
   const filePath = await resolveSessionPath(id);
   if (!filePath) return;
   await getRpcSession(id)?.shutdown();
-  unlinkSync(filePath);
+  try {
+    unlinkSync(filePath); // 文件已被并发删除/缓存残留时忽略（健壮删除）
+  } catch { /* ignore */ }
   invalidateSessionPathCache(id);
   invalidateSessionListCache();
   unassignSession(id);

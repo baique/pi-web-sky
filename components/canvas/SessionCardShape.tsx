@@ -2,6 +2,7 @@ import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, resizeBox } from "tldraw
 import type { TLBaseShape, TLShapePartial } from "tldraw";
 import { useState, useRef, useEffect } from "react";
 import { SessionWorkbench } from "./SessionWorkbench";
+import { confirm } from "./ConfirmDialog";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 import { dispatchBoardSessionRenamed } from "@/lib/board-events";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "./BoardSearchContext";
@@ -305,7 +306,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
   const handleDeleteSession = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!sessionId) return;
-    if (!window.confirm("删除该会话？将同时删除画布卡片，并断开任务卡的关联（如被引用）。此操作不可撤销。")) return;
+    if (!(await confirm({ message: "删除该会话？\n将同时删除画布卡片，并断开任务卡的关联（如被引用）。此操作不可撤销。" }))) return;
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
       // store.remove 绕过 deleteShapes 包装（避免二次确认）：API 已删会话，直接移除画布卡

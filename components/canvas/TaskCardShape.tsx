@@ -9,6 +9,7 @@ import { ThemedSelect } from "./ThemedSelect";
 import { TaskCardMultiSelect } from "./TaskCardMultiSelect";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
 import { WorktreePicker } from "./WorktreePicker";
+import { confirm } from "./ConfirmDialog";
 
 /**
  * 任务卡（task-card）：看板上的工作项卡，独立实体（业务字段在 task_cards 表）。
@@ -269,7 +270,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   // 删除任务卡：确认后调 DELETE /api/task-cards/[id]（服务端 deleteCard 级联删依赖/问答/taskcard 节点/exec 边；执行会话保留），成功删 shape。
   const handleDeleteCard = async () => {
     if (isCreating || !cardId) return;
-    if (!window.confirm("删除该任务卡？将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。")) return;
+    if (!(await confirm({ message: "删除该任务卡？\n将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。" }))) return;
     try {
       const res = await fetch(`/api/task-cards/${encodeURIComponent(cardId)}`, { method: "DELETE" });
       // store.remove 绕过 deleteShapes 包装（避免二次确认）：API 已删任务卡，直接移除画布卡

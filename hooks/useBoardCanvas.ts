@@ -8,6 +8,7 @@ import type { BoardCanvas, BoardInfo, BoardNode, BoardEdge, BoardView, RunningSn
 import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
 import { shouldRemoveEndedCard } from "@/lib/board-utils";
 import { dispatchBoardCanvasChanged } from "@/lib/board-events";
+import { confirm } from "@/components/canvas/ConfirmDialog";
 
 /** 会话摘要（卡片展示用）：标题/消息数/项目/最后回复/最后活动时间 */
 export type SessionSummary = {
@@ -307,10 +308,11 @@ export function useBoardCanvas({
       }
       // 会话删除：确认（合并一次）→ 逐个调删除 API（服务端事务清理）→ 成功删 shape
       if (sessionDelete.length > 0) {
-        const msg = sessionDelete.length > 1
-          ? `删除 ${sessionDelete.length} 个会话？将同时删除画布卡片并断开任务卡关联。此操作不可撤销。`
-          : "删除该会话？将同时删除画布卡片并断开任务卡关联。此操作不可撤销。";
-        if (window.confirm(msg)) {
+        const message = sessionDelete.length > 1
+          ? `删除 ${sessionDelete.length} 个会话？\n将同时删除画布卡片并断开任务卡关联。此操作不可撤销。`
+          : "删除该会话？\n将同时删除画布卡片并断开任务卡关联。此操作不可撤销。";
+        void confirm({ message }).then((ok) => {
+          if (!ok) return;
           for (const d of sessionDelete) {
             void (async () => {
               try {
@@ -319,14 +321,15 @@ export function useBoardCanvas({
               } catch { /* 删除失败静默，卡保留 */ }
             })();
           }
-        }
+        });
       }
       // 任务卡删除：确认 → 逐个调删除 API → 成功删 shape
       if (cardDelete.length > 0) {
-        const msg = cardDelete.length > 1
-          ? `删除 ${cardDelete.length} 张任务卡？将删除卡/依赖线/执行会话连线；关联的执行会话保留。`
-          : "删除该任务卡？将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。";
-        if (window.confirm(msg)) {
+        const message = cardDelete.length > 1
+          ? `删除 ${cardDelete.length} 张任务卡？\n将删除卡/依赖线/执行会话连线；关联的执行会话保留。`
+          : "删除该任务卡？\n将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。";
+        void confirm({ message }).then((ok) => {
+          if (!ok) return;
           for (const d of cardDelete) {
             void (async () => {
               try {
@@ -335,7 +338,7 @@ export function useBoardCanvas({
               } catch { /* 静默 */ }
             })();
           }
-        }
+        });
       }
       // 其余直接删
       if (directDelete.length > 0) origDeleteShapes(directDelete as never);
