@@ -300,7 +300,7 @@ export function SessionCanvas({
             borderRadius: 999,
             background: "color-mix(in srgb, var(--board-card-glass) 85%, transparent)",
             border: "1px solid color-mix(in srgb, var(--border) 45%, transparent)",
-            color: "var(--text-dim)",
+            color: "var(--text-muted)",
             fontSize: 10.5,
             lineHeight: 1.4,
             whiteSpace: "nowrap",
