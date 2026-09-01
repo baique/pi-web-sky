@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
@@ -124,6 +124,21 @@ export function SessionCanvas({
     const timer = setInterval(load, 5000);
     return () => { cancelled = true; clearInterval(timer); };
   }, []);
+  // 手动重载按钮：转圈反馈 + 防重复点击。
+  // 同时刷新会话摘要（标题/最后回复）与画布数据——reloadCanvas 内部重拉服务器数据、
+  // 清空现有 shapes 并复用物化 effect 重新 hydrate（含复位视角），即「彻底刷新重载」。
+  const [reloading, setReloading] = useState(false);
+  const reloadBoard = useCallback(async () => {
+    if (reloading) return;
+    setReloading(true);
+    try {
+      void board.loadSessionSummaries();
+      await board.reloadCanvas();
+    } finally {
+      // 重物化在 effect 中异步完成，给转圈留一点稳定时间再复位（避免闪烁）
+      setTimeout(() => setReloading(false), 800);
+    }
+  }, [board, reloading]);
   // 乐观锁冲突提示：409 自动重载后短暂显示，说明改动被丢弃（防数据丢失的可见反馈）
   const [conflictNotice, setConflictNotice] = useState(false);
   const prevConflictCount = useRef(0);
@@ -207,9 +222,9 @@ export function SessionCanvas({
             display: "flex",
             alignItems: "center",
             gap: 6,
-            maxWidth: 260,
+            maxWidth: 300,
             height: 34,
-            padding: "0 12px",
+            padding: "0 8px 0 12px",
             borderRadius: 999,
             background: "var(--board-card-glass)",
             backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
@@ -229,6 +244,43 @@ export function SessionCanvas({
           <span style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {board.board.name}
           </span>
+          <button
+            type="button"
+            onClick={() => void reloadBoard()}
+            title={t("boards.reloadCanvas")}
+            aria-label={t("boards.reloadCanvas")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 22,
+              height: 22,
+              padding: 0,
+              flexShrink: 0,
+              border: "none",
+              background: "transparent",
+              color: "var(--text-muted)",
+              cursor: reloading ? "default" : "pointer",
+              borderRadius: 999,
+              transition: "background 0.12s, color 0.12s",
+            }}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              style={{ animation: reloading ? "spin 0.8s linear infinite" : undefined }}
+            >
+              <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+              <path d="M21 3v5h-5" />
+            </svg>
+          </button>
         </div>
       )}
       {/* 调度器状态：有运行中的调度任务时，看板名下方淡一档小字提示“正在运行 xxx任务” */}

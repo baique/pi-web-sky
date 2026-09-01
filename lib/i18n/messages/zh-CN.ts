@@ -196,6 +196,7 @@ export const zhCNLocale: LocalePlugin = {
     "boards.clearTaskBoardDesc": "清空画布（仅清连线/便笺/文本，会话卡片保留）",
     "boards.clearTaskConfirm": "确定清空画布？连线/便笺/文本将被删除，会话卡片会保留（会话数据不受影响）。",
     "boards.conflictReload": "画布已被其他窗口/设备修改，已自动加载最新版本（未保存的改动已丢弃）",
+    "boards.reloadCanvas": "重新加载画布（从服务器刷新所有内容）",
     "boards.scrimTitle": "调节画布磨砂",
     "boards.scrimAlpha": "透明度",
     "boards.scrimBlur": "磨砂强度",

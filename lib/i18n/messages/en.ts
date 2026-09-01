@@ -195,6 +195,7 @@ export const enLocale: LocalePlugin = {
     "boards.clearTaskBoardDesc": "Clear the canvas (non-session elements only; session cards stay)",
     "boards.clearTaskConfirm": "Clear the canvas? Notes/edges/text will be removed; session cards stay (session data untouched).",
     "boards.conflictReload": "Canvas was modified by another window/device — loaded the latest version (your unsaved changes were dropped)",
+    "boards.reloadCanvas": "Reload canvas (refresh everything from the server)",
     "boards.scrimTitle": "Adjust canvas frost",
     "boards.scrimAlpha": "Opacity",
     "boards.scrimBlur": "Frost strength",

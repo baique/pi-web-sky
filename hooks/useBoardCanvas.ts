@@ -1474,13 +1474,14 @@ export function useBoardCanvas({
     connectNodes,
     clearBoard,
     getNodeIdForSession,
-    reloadCanvas: reloadCanvasWrap,
+    /** 手动重载（不 bump 冲突计数——冲突 toast 是 409 自动恢复专用语义） */
+    reloadCanvas,
     conflictCount,
     sessionTitles,
     loadSessionSummaries,
     hydrateShapes,
     reconcileTaskSessions,
-  }), [board, loading, hydrated, error, running, editorReady, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, clearBoard, getNodeIdForSession, reloadCanvasWrap, conflictCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
+  }), [board, loading, hydrated, error, running, editorReady, onMount, addSessionNode, addDraftCard, bindDraftSession, connectNodes, clearBoard, getNodeIdForSession, reloadCanvas, conflictCount, sessionTitles, loadSessionSummaries, hydrateShapes, reconcileTaskSessions]);
 }
 
 export type UseBoardCanvasReturn = ReturnType<typeof useBoardCanvas>;
