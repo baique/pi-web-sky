@@ -355,7 +355,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     return () => el.removeEventListener("wheel", stop);
   });
 
-  // 建卡向导提交（空卡）
+  // 建卡向导提交（空卡）→ 派发：建卡即转待办（可调度）
   const handleCreate = async () => {
     if (!boardId) {
       setSaveError("缺少看板上下文，无法创建");
@@ -368,15 +368,13 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     setSaving(true);
     setSaveError(null);
     setSaveError(null);
-    // 复用本空卡的画布 node（data-node-id = shape.id 去 shape: 前缀），服务端绑定 refId=cardId
-    const container = rootRef.current?.closest(".tl-html-container");
-    const nodeId = container?.getAttribute("data-node-id") ?? undefined;
+    // 画布节点已迁 tldraw sync（shape 自带 cardId prop 持久化），不再传 nodeId 绑定旧 board_nodes。
+    // 建卡即派发：readyStatus=todo（可调度）。
     const created = await createCard({
       boardId,
-      nodeId,
       name: draft.name,
       description: draft.description,
-      readyStatus: draft.readyStatus,
+      readyStatus: "todo",
       priority: draft.priority,
       due: draft.due ?? null,
       cwd: draft.cwd ?? undefined,
@@ -388,7 +386,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     });
     setSaving(false);
     if (created) {
-      // 更新 shape props：转正为空卡为已建卡（cardId 落 shape，store 变更自动持久化）
+      // 更新 shape props：空卡转正为已建卡（cardId 落 shape，store 变更自动持久化到 sync.db）
       editor.updateShape<TaskCardShape>({
         id: shape.id,
         type: "task-card",
@@ -402,8 +400,6 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
           due: created.due ?? undefined,
         },
       });
-      // 立即把 cardId 写库（不依赖防抖全量保存）：服务端 refId 已绑，但 shape props 里的
-      // cardId 需持久化，否则刷新后 hydrate 用 refId 恢复也够；这里再补一发节点 PATCH 保底
       setDraft((d) => (d ? { ...d, ...created, sessionId: created.sessionId } : d));
       void reload();
     }
@@ -451,6 +447,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   };
 
   // 就绪状态即时生效：编辑态 change 即保存（PATCH 部分字段）；建卡态仅记草稿，创建时提交
+  // 已改：派发语义。draft→todo 转待办（可调度）；todo→draft 回退草稿。
+  // 空卡（isCreating）不落库，点「派发」走 handleCreate（建卡即 todo）。
   const handleReadyChange = (v: string) => {
     set("readyStatus", v as ReadyStatus);
     if (!isCreating && cardId) void saveCard({ readyStatus: v as ReadyStatus });
@@ -623,7 +621,6 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
 
   return (
     <HTMLContainer
-      data-node-id={shape.id.replace("shape:", "")}
       data-testid={`task-card-${shape.id}`}
       // 点卡片置顶（与会话卡同模式）：两卡重叠时点哪个哪个到最上层；
       // 表单区已选中时 stopPropagation，不会重复触发
@@ -678,56 +675,64 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
             {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
           </span>
           {draft?.number ? <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text)", marginLeft: 4 }}>#{draft.number}</span> : null}
-          {/* 右上角：就绪状态下拉（在操作按钮之前）+ 操作按钮（对齐便笺小 ghost 样式） */}
+          {/* 右上角：派发/状态区（在操作按钮之前）+ 操作按钮（对齐便笺小 ghost 样式） */}
           <div
             style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}
             onPointerDown={(e) => e.stopPropagation()}
           >
-            {/* 就绪状态复选框：勾选=激活（待办）→ 文案「就绪」；未勾=草稿，默认不激活。无任何装饰，仅文字+勾选小方块 */}
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={draft?.readyStatus === "todo"}
-              onClick={() => handleReadyChange(draft?.readyStatus === "todo" ? "draft" : "todo")}
-              title={draft?.readyStatus === "todo" ? "已激活（待办），点击改为草稿" : "点击激活（待办）"}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                padding: 0,
-                background: "transparent",
-                border: "none",
-                borderRadius: 0,
-                color: draft?.readyStatus === "todo" ? "var(--text)" : "var(--text-muted)",
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-              }}
-            >
+            {/* 派发语义：画布上的卡 = 草稿占位，点「派发」→ 转待办（可调度）。
+                空卡（cardId 空）点派发 = 建卡并转待办（handleCreate）；
+                已建卡 draft 态点派发 = 转 todo（handleReadyChange）；
+                已建卡 todo 态显示执行状态徽章（running/待审核等），不再可回退草稿。 */}
+            {isCreating ? (
+              <button
+                type="button"
+                style={footerBtnStyle}
+                disabled={saving || !boardId}
+                onClick={() => void handleCreate()}
+                title="创建任务并派发（转待办，调度器可执行）"
+              >
+                {saving ? "创建中…" : "派发"}
+              </button>
+            ) : draft?.readyStatus === "draft" ? (
+              <button
+                type="button"
+                style={footerBtnStyle}
+                disabled={saving}
+                onClick={() => handleReadyChange("todo")}
+                title="派发（转待办，调度器可执行）"
+              >
+                {saving ? "派发中…" : "派发"}
+              </button>
+            ) : draft?.readyStatus === "todo" ? (
               <span
-                aria-hidden
+                title={`执行状态：${(EXEC_BADGE[draft?.execStatus ?? "not_started"] ?? EXEC_BADGE.not_started).label}`}
                 style={{
-                  width: 11,
-                  height: 11,
-                  flexShrink: 0,
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  borderRadius: 2,
-                  border: "1px solid var(--border)",
-                  background: "transparent",
-                  color: "var(--accent)",
+                  gap: 4,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: (EXEC_BADGE[draft?.execStatus ?? "not_started"] ?? EXEC_BADGE.not_started).color,
+                  whiteSpace: "nowrap",
                 }}
               >
-                {draft?.readyStatus === "todo" && (
-                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M20 6L9 17l-5-5" />
-                  </svg>
-                )}
+                {/* 状态圆点：与标题栏左侧类型徽记一致（运行中呼吸动画） */}
+                <span
+                  aria-hidden
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: (EXEC_BADGE[draft?.execStatus ?? "not_started"] ?? EXEC_BADGE.not_started).color,
+                    ...(draft?.execStatus === "running"
+                      ? { animation: "pulse-dot 1.6s ease-in-out infinite" }
+                      : {}),
+                  }}
+                />
+                {(EXEC_BADGE[draft?.execStatus ?? "not_started"] ?? EXEC_BADGE.not_started).label}
               </span>
-              {draft?.readyStatus === "todo" ? "就绪" : "草稿"}
-            </button>
+            ) : null}
             {sessionId && (
               <button
                 type="button"
@@ -738,17 +743,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
                 会话
               </button>
             )}
-            {isCreating ? (
-              <button
-                type="button"
-                style={footerBtnStyle}
-                disabled={saving || !boardId}
-                onClick={() => void handleCreate()}
-                title="创建任务卡"
-              >
-                {saving ? "创建中…" : "创建"}
-              </button>
-            ) : isDirty ? (
+            {isCreating ? null : isDirty ? (
               <>
                 <button
                   type="button"

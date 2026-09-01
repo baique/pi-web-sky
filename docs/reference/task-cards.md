@@ -4,7 +4,7 @@
 
 ## 概念
 
-任务卡 = 看板上的工作项卡（独立实体，与 sidebar「任务/会话分组」解耦）。业务字段在 `task_cards` 表，画布布局走 `board_nodes`（`kind="taskcard"`，`ref_id = card_id`）。**任务以看板为界**：前置/关联只能引用同看板任务卡。
+任务卡 = 看板上的工作项卡（独立实体，与 sidebar「任务/会话分组」解耦）。业务字段在 `task_cards` 表；**画布布局在 tldraw sync**（shape 自带 `cardId` prop，持久化到 `sync.db`），不再写 `board_nodes`。**任务以看板为界**：前置/关联只能引用同看板任务卡。
 
 **形态**：任务卡 = 纯工作项卡，**无内置执行会话工作台**。常态 = 编辑表单栏（340px，左侧常驻，直接可输入）；展开 = 表单全宽（900px）。任务卡通过 **exec 线**引用画布上独立存在的执行会话卡（原子-链接，见「执行会话线」），提供「定位执行会话」动作跳到那张卡。从工具栏**拖出创建**（像便笺，`ToolbarItem tool="task-card"`）。
 
@@ -28,19 +28,18 @@ task_card_questions  待回答队列（S3 用）
 - 编号：`MAX(number)+1` WHERE project_key，**UNIQUE(project_key, number)** 兜底防并发撞号。
 - 状态枚举 store 层白名单校验（`assertReadyStatus`/`assertExecStatus`）。
 - 执行状态**由调度器维护**，用户只读（表单显示徽章，无下拉）。
+- **派发语义**：画布上的卡 = 草稿占位（未建卡/未入任务表）；点右上角「派发」→ 建卡（`ready_status=todo`）或 draft→todo，调度器才可派发。todo 态显示执行状态徽章，不再可回退草稿。
 
 ## 画布集成
 
-- serialize：`type="task-card"` → `kind="taskcard"`，`refId=cardId`，props 全量存 `shapeProps`。
-- hydrate：`kind="taskcard"` → 恢复 task-card shape，`cardId` 以 `node.refId` 为准（服务端绑定兜底）。
-- **purge-orphans 必须排除 `kind='taskcard'`**（refId 是 task_cards.id 非会话 id，否则误删——血泪教训，见 `lib/board-purge.ts`）。
-- 建卡：POST 支持 `nodeId`（复用空卡 node，`upsertTaskCardNode` 存在则绑 refId+写 shapeProps，不存在则按 nodeId 新建）；无 nodeId 走 `addNode`（也带 shapeProps）。**都带完整 shapeProps**（hydrate 依赖）。
+- **画布节点在 tldraw sync**（shape 自带 cardId prop，CRDT 持久化到 `sync.db`）；`board_nodes` 废弃保留（不再写）。
+- 建卡/保存**不依赖 nodeId 绑定**：`POST/PATCH /api/task-cards` 直接写 `task_cards` 表；shape 的 `cardId` 由前端 `editor.updateShape` 写回（建卡成功后）。
 - BoardIdContext（SessionCanvas 提供）：`{ boardId, defaultCwd }`——`useBoardId()` / `useBoardDefaultCwd()`（建卡 cwd 默认 = 左侧栏当前目录）。
 
 ## 依赖线
 
-- 真相源 `task_card_links`；`syncCardEdges(cardId)` 按它 reconcile `board_edges`（label=kind，只 reconcile 出边，缺补多删）。
-- 触发：建卡/改依赖（API 内）；删除依赖线会被 reconcile 补回（等效禁删）。
+- 真相源 `task_card_links`；**画布依赖线由前端 reconcile 渲染**（`useBoardCanvas.ts`）：读任务卡 links → diff 画布 → `createLinkEdge`（arrow + binding，`meta.taskLinkLabel`，缺补多删、确定性 id 幂等）。后端只写 links，不直接建线。
+- 触发：任务看板打开 + 10s 轮询 + running 快照发现新 running 卡时跑。
 - 画布 arrow 带 `meta.taskLinkLabel`（prerequisite/related）→ 右键菜单选中依赖线时只显示「依赖连线（自动生成，不可删除）」只读项（`SyncedContextMenu`），无删除。
 
 ## 执行会话线（exec）
@@ -54,13 +53,13 @@ task_card_questions  待回答队列（S3 用）
 
 - 删除拦截 toast 已废除（无 `boards.deleteBlocked`）；删除走**确认弹窗**（提示关联关系）→ 事务删除。
 - **删会话**（单事务）：断 exec 线 → 清任务卡 `session_id` → 删画布 session 节点 + 关联边 → 删 `session_meta` → 删会话文件。先断引用再删实体，任一步失败回滚。
-- **删任务卡**（单事务）：删依赖线 → 删 exec 线（会话保留，回到无关联）→ 删 taskcard 节点 + 关联边 → 删卡行。
+- **删任务卡**（单事务）：删依赖/问答 → 删卡行（画布 shape 由前端删，sync.db 持久化）。
 
 ## API
 
 ```
-GET/POST   /api/task-cards                     ?boardId 列表/建卡（nodeId 复用空卡 node）
-GET/PATCH/DELETE /api/task-cards/[id]          详情(links+inbound)/改字段(依赖替换同步边)/级联删
+GET/POST   /api/task-cards                     ?boardId 列表/建卡（建卡即派发，readyStatus 默认 todo）
+GET/PATCH/DELETE /api/task-cards/[id]          详情(links+inbound)/改字段(依赖替换)/级联删
 ```
 
 - POST/PATCH 依赖预校验：目标存在 + 同看板 + 非自环（400）。
@@ -68,7 +67,7 @@ GET/PATCH/DELETE /api/task-cards/[id]          详情(links+inbound)/改字段(�
 
 ## 表单控件（TaskCardShape）
 
-- 就绪/优先级/日期：自研 `ThemedSelect`（`components/canvas/ThemedSelect.tsx`，复用 `AnimatedDropdown` + `--side-*` token，主题自适应）。
+- 右上角「派发」按钮：空卡 = 建卡向导（派发即建卡 todo）；已建卡 draft = 转 todo（可调度）；已建卡 todo = 执行状态徽章（只读，不再可回退草稿）。
 - 预计截止：`DuePicker`（年/月/日三 ThemedSelect 联动，ms epoch）。
 - 执行状态：只读徽章。
 - 工作目录：`DirectoryPicker` 弹窗（「选择目录」按钮）+ 只读展示；默认 = `useBoardDefaultCwd()`。

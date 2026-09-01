@@ -7,7 +7,7 @@ import {
   replaceLinks,
   updateCard,
 } from "@/lib/task-card-store";
-import { getBoard, getNodeByRefId, syncCardEdges } from "@/lib/board-store";
+import { getBoard } from "@/lib/board-store";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +22,8 @@ const EXEC_STATUSES = new Set([
   "waiting_reply",
 ]);
 
-// GET /api/task-cards/[id] → { card, nodeId, links, inbound }
+// GET /api/task-cards/[id] → { card, links, inbound }
+// 画布节点在 sync.db（shape 自带 cardId prop），nodeId 概念废弃。
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -35,7 +36,6 @@ export async function GET(
     }
     return NextResponse.json({
       card,
-      nodeId: getNodeByRefId(card.boardId, id, "taskcard")?.id ?? null,
       links: listLinks(id),
       inbound: listInboundLinks(id),
     }, { headers: { "Cache-Control": "no-store" } });
@@ -51,7 +51,7 @@ function parseStringArray(value: unknown): string[] | null {
 
 // PATCH /api/task-cards/[id]  body: { name?, description?, readyStatus?, execStatus?,
 //   priority?, due?, attachments?, cwd?, useWorktree?, maxRetries?, prerequisites?, related? }
-// 依赖变更 → replaceLinks + syncCardEdges（依赖目标先做同看板校验，避免半更新）。
+// 依赖变更 → replaceLinks（目标先做同看板校验，避免半更新）。依赖线由前端 reconcile 渲染。
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -147,10 +147,8 @@ export async function PATCH(
     }
     if (depsProvided) {
       replaceLinks(id, prerequisites ?? [], related ?? []);
-      syncCardEdges(id);
     }
-    // syncCardEdges（依赖变更时）会 bump boards.updated —— 响应带最新 updated，
-    // 客户端刷新乐观锁基线，避免后续防抖全量保存携带过期基线被 409 拒绝。
+    // 依赖线由前端 reconcile 渲染（确定性 id 幂等），不再 syncCardEdges 写 board_edges。
     return NextResponse.json({ card: getCard(id), updated: getBoard(card.boardId)?.updated ?? null });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

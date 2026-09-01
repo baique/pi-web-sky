@@ -168,7 +168,7 @@ export function createCard(input: {
       number,
       name,
       input.description ?? "",
-      input.readyStatus ?? "draft",
+      input.readyStatus ?? "todo",
       "not_started",
       input.priority ?? 0,
       input.due ?? null,

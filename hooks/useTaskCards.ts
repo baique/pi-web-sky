@@ -12,7 +12,6 @@ import { dispatchBoardBaseUpdated } from "@/lib/board-events";
 
 export interface TaskCardDetail {
   card: TaskCard;
-  nodeId: string | null;
   links: TaskCardLink[];
   inbound: TaskCardLink[];
 }
@@ -75,10 +74,9 @@ export function useTaskCard(cardId: string | null, boardId: string | null) {
     return () => { cancelled = true; };
   }, [boardId]);
 
-  /** 建卡（空卡向导提交）：成功后返回 card，供调用方更新 shape props。 */
+  /** 建卡（空卡向导提交 → 派发）：成功后返回 card，供调用方更新 shape props。 */
   const createCard = useCallback(async (input: {
     boardId: string;
-    nodeId?: string;
     name: string;
     description?: string;
     readyStatus?: ReadyStatus;

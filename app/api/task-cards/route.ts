@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { createCard, deleteCard, getCard, listCards, listLinks, replaceLinks } from "@/lib/task-card-store";
-import { addNode, getBoard, getNodeByGlobalId, getNodeByRefId, syncCardEdges, upsertTaskCardNode } from "@/lib/board-store";
+import { getBoard } from "@/lib/board-store";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/task-cards?boardId=xxx → { cards }（每卡附 nodeId + links，reconcile 依赖线用）
+// GET /api/task-cards?boardId=xxx → { cards }（每卡附 links，reconcile 依赖线用；
+// 画布节点已在 sync.db，nodeId 概念废弃）
 export async function GET(req: Request) {
   try {
     const boardId = new URL(req.url).searchParams.get("boardId") ?? "";
     const cards = listCards(boardId).map((card) => ({
       ...card,
-      nodeId: getNodeByRefId(boardId, card.id, "taskcard")?.id ?? null,
       links: listLinks(card.id).map((l) => ({ targetCardId: l.targetCardId, kind: l.kind })),
     }));
     return NextResponse.json({ cards }, { headers: { "Cache-Control": "no-store" } });
@@ -30,9 +30,9 @@ function parseStringArray(value: unknown): string[] | null {
 }
 
 // POST /api/task-cards  body: { boardId?, name, description?, readyStatus?, priority?,
-//   due?, attachments?, cwd?, useWorktree?, maxRetries?, prerequisites?, related?, x?, y?, nodeId? }
-// 建卡 + 画布节点。nodeId 提供时复用该空卡 node（绑定 refId=cardId，不新建），
-// 否则新建 taskcard node。失败回滚。
+//   due?, attachments?, cwd?, useWorktree?, maxRetries?, prerequisites?, related? }
+// 建卡 + 画布节点。画布节点已迁 tldraw sync（shape 自带 cardId prop 持久化），
+// 不再写 board_nodes——派发即建卡，readyStatus 默认 todo（可调度）。
 export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => ({}))) as {
@@ -48,9 +48,6 @@ export async function POST(req: Request) {
       maxRetries?: unknown;
       prerequisites?: unknown;
       related?: unknown;
-      x?: unknown;
-      y?: unknown;
-      nodeId?: unknown;
     };
 
     if (typeof body.boardId !== "string" || !body.boardId) {
@@ -91,17 +88,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "任务卡不能建在系统看板" }, { status: 400 });
     }
 
-    // 可选：复用已存在的空卡画布节点（nodeId 优先，绑定 refId=cardId，不新建）
-    // 仅允许空白 taskcard 节点复用：kind=taskcard 且 refId 为空，防止把 session/便笺节点误绑为任务卡
-    let boundNodeId: string | null = null;
-    if (typeof body.nodeId === "string" && body.nodeId) {
-      const node = getNodeByGlobalId(body.nodeId);
-      if (!node || node.boardId !== board.id || node.kind !== "taskcard" || node.refId !== null) {
-        return NextResponse.json({ error: "画布节点不存在、不属于该看板或非空白任务卡" }, { status: 400 });
-      }
-      boundNodeId = body.nodeId;
-    }
-
     // 依赖预校验（目标存在 + 同看板），避免 replaceLinks 抛错导致 500
     for (const targetId of [...prerequisites, ...related]) {
       const target = getCard(targetId);
@@ -127,55 +113,17 @@ export async function POST(req: Request) {
       maxRetries: typeof body.maxRetries === "number" ? body.maxRetries : undefined,
     });
 
-    let node;
     try {
-      if (boundNodeId) {
-        // 复用空卡 node：存在则绑定 refId + 写全 shapeProps，不存在则按 nodeId 新建（upsert）
-        node = upsertTaskCardNode(boundNodeId, board.id, {
-          id: card.id,
-          number: card.number,
-          name: card.name,
-          readyStatus: card.readyStatus,
-          execStatus: card.execStatus,
-          priority: card.priority,
-          due: card.due,
-        }, typeof body.x === "number" ? body.x : 60, typeof body.y === "number" ? body.y : 60);
-      } else {
-        node = addNode(board.id, {
-          kind: "taskcard",
-          refId: card.id,
-          x: typeof body.x === "number" ? body.x : 60,
-          y: typeof body.y === "number" ? body.y : 60,
-          w: 220,
-          h: 120,
-          props: {
-            parentId: null,
-            shapeProps: {
-              cardId: card.id,
-              number: card.number,
-              name: card.name,
-              readyStatus: card.readyStatus,
-              execStatus: card.execStatus,
-              priority: card.priority,
-              due: card.due ?? undefined,
-              expanded: false,
-              w: 220,
-              h: 120,
-            },
-          },
-        });
-      }
       if (prerequisites.length > 0 || related.length > 0) {
         replaceLinks(card.id, prerequisites, related);
       }
-      syncCardEdges(card.id);
     } catch (error) {
-      // 依赖校验/建节点失败 → 回滚已建卡与节点，避免残留
+      // 依赖校验失败 → 回滚已建卡，避免残留
       deleteCard(card.id);
       throw error;
     }
 
-    return NextResponse.json({ card, nodeId: node?.id ?? null, updated: getBoard(board.id)?.updated ?? null }, { status: 201 });
+    return NextResponse.json({ card, updated: getBoard(board.id)?.updated ?? null }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }

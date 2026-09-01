@@ -11,7 +11,8 @@ const jiti = createJiti(import.meta.url, {
 const { setDbForTesting } = await jiti.import("@/lib/sqlite-db.ts");
 const { GET: listTaskCards, POST: createTaskCard } = await jiti.import("./route.ts");
 const { GET: getTaskCard, PATCH: patchTaskCard, DELETE: deleteTaskCard } = await jiti.import("./[id]/route.ts");
-const { createBoard, getBoardCanvas } = await jiti.import("@/lib/board-store.ts");
+const { createBoard } = await jiti.import("@/lib/board-store.ts");
+const { listCards, listLinks } = await jiti.import("@/lib/task-card-store.ts");
 
 const PROJECT = "proj-api";
 
@@ -27,39 +28,27 @@ function jsonReq(url, method, body) {
   });
 }
 
-test("POST 建卡：card + node 落库（kind=taskcard, refId），编号自增", async () => {
+test("POST 建卡：card 落库（画布节点在 sync.db，不写 board_nodes），编号自增", async () => {
   freshDb();
   const b = createBoard(PROJECT, "看板A");
-  const r1 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b.id, name: "任务一", x: 10, y: 20 }));
+  const r1 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b.id, name: "任务一" }));
   assert.equal(r1.status, 201);
   const j1 = await r1.json();
-  assert.ok(j1.nodeId);
   assert.equal(j1.card.number, 1);
   assert.equal(j1.card.name, "任务一");
+  assert.equal(j1.card.readyStatus, "todo"); // 建卡即派发（默认 todo，可调度）
 
-  const r2 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b.id, name: "任务二" }));
+  const r2 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b.id, name: "任务二", readyStatus: "todo" }));
   const j2 = await r2.json();
   assert.equal(j2.card.number, 2);
+  assert.equal(j2.card.readyStatus, "todo");
 
-  const canvas = getBoardCanvas(b.id);
-  const node = canvas.nodes.find((n) => n.id === j1.nodeId);
-  assert.ok(node);
-  assert.equal(node.kind, "taskcard");
-  assert.equal(node.refId, j1.card.id);
-  assert.equal(node.x, 10);
+  // 不再写 board_nodes：task_cards 表才是真相源
+  const cards = listCards(b.id);
+  assert.equal(cards.length, 2);
 });
 
-test("POST 建卡：nodeId 复用仅允许空白 taskcard 节点，session 节点 400", async () => {
-  freshDb();
-  const b = createBoard(PROJECT, "看板B");
-  const { addNode } = await jiti.import("@/lib/board-store.ts");
-  const sessionNode = addNode(b.id, { kind: "session", x: 10, y: 10, w: 300, h: 200 });
-  assert.ok(sessionNode);
-  const r = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b.id, name: "X", nodeId: sessionNode.id }));
-  assert.equal(r.status, 400);
-});
-
-test("GET 列表：每卡带 nodeId；GET 单卡：links + inbound 两向", async () => {
+test("GET 列表：不带 nodeId；GET 单卡：links + inbound 两向", async () => {
   freshDb();
   const b = createBoard(PROJECT, "看板A");
   const r1 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b.id, name: "A" }));
@@ -70,7 +59,7 @@ test("GET 列表：每卡带 nodeId；GET 单卡：links + inbound 两向", asyn
   const listRes = await listTaskCards(new Request("http://localhost/api/task-cards?boardId=" + b.id));
   const { cards } = await listRes.json();
   assert.equal(cards.length, 2);
-  assert.ok(cards[0].nodeId);
+  assert.equal(cards[0].nodeId, undefined); // nodeId 概念废弃
 
   // PATCH 加依赖
   await patchTaskCard(jsonReq(`http://localhost/api/task-cards/${c1.id}`, "PATCH", { prerequisites: [c2.id] }), { params: Promise.resolve({ id: c1.id }) });
@@ -84,13 +73,12 @@ test("GET 列表：每卡带 nodeId；GET 单卡：links + inbound 两向", asyn
   const single2 = await getTaskCard(new Request(`http://localhost/api/task-cards/${c2.id}`), { params: Promise.resolve({ id: c2.id }) });
   const j2 = await single2.json();
   assert.deepEqual(j2.inbound.map((l) => l.cardId), [c1.id]);
-  // board_edges 有自动连线
-  const edges = getBoardCanvas(b.id).edges;
-  assert.equal(edges.length, 1);
-  assert.equal(edges[0].label, "prerequisite");
+  // 依赖线由前端 reconcile 渲染（不再写 board_edges）
+  const { listLinks: ll } = await jiti.import("@/lib/task-card-store.ts");
+  assert.equal(ll(c1.id).length, 1);
 });
 
-test("PATCH 字段更新 + 依赖替换同步边；DELETE 级联清空", async () => {
+test("PATCH 字段更新 + 依赖替换；DELETE 级联清空（含 links）", async () => {
   freshDb();
   const b = createBoard(PROJECT, "看板A");
   const r1 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b.id, name: "A" }));
@@ -101,31 +89,29 @@ test("PATCH 字段更新 + 依赖替换同步边；DELETE 级联清空", async (
   const { card: c3 } = await r3.json();
 
   await patchTaskCard(jsonReq(`http://localhost/api/task-cards/${c1.id}`, "PATCH", {
-    name: "改名", priority: 1, prerequisites: [c2.id], related: [c3.id],
+    name: "改名", priority: 1, readyStatus: "todo", prerequisites: [c2.id], related: [c3.id],
   }), { params: Promise.resolve({ id: c1.id }) });
   const after = await getTaskCard(new Request(`http://localhost/api/task-cards/${c1.id}`), { params: Promise.resolve({ id: c1.id }) });
   const j = await after.json();
   assert.equal(j.card.name, "改名");
   assert.equal(j.card.priority, 1);
+  assert.equal(j.card.readyStatus, "todo");
   assert.equal(j.links.length, 2);
 
-  // 依赖改 target → 旧 prerequisite 边换 target
+  // 依赖改 target → 旧 prerequisite 替换
   await patchTaskCard(jsonReq(`http://localhost/api/task-cards/${c1.id}`, "PATCH", { prerequisites: [c3.id], related: [] }), { params: Promise.resolve({ id: c1.id }) });
-  const canvas1 = getBoardCanvas(b.id);
-  const preEdges = canvas1.edges.filter((e) => e.label === "prerequisite");
-  assert.equal(preEdges.length, 1);
-  assert.equal(preEdges[0].toId, canvas1.nodes.find((n) => n.refId === c3.id).id);
-  assert.equal(canvas1.edges.filter((e) => e.label === "related").length, 0);
+  const j1 = await (await getTaskCard(new Request(`http://localhost/api/task-cards/${c1.id}`), { params: Promise.resolve({ id: c1.id }) })).json();
+  assert.equal(j1.links.filter((l) => l.kind === "prerequisite").length, 1);
+  assert.equal(j1.links.find((l) => l.kind === "prerequisite").targetCardId, c3.id);
+  assert.equal(j1.links.filter((l) => l.kind === "related").length, 0);
 
-  // DELETE 级联：card/links/node/边全消失
+  // DELETE 级联：card + links 全消失
   const del = await deleteTaskCard(new Request(`http://localhost/api/task-cards/${c1.id}`, { method: "DELETE" }), { params: Promise.resolve({ id: c1.id }) });
   assert.equal(del.status, 200);
   const gone = await getTaskCard(new Request(`http://localhost/api/task-cards/${c1.id}`), { params: Promise.resolve({ id: c1.id }) });
   assert.equal(gone.status, 404);
-  const canvas2 = getBoardCanvas(b.id);
-  assert.equal(canvas2.nodes.filter((n) => n.refId === c1.id).length, 0);
-  assert.equal(canvas2.edges.filter((e) => e.fromId === canvas1.nodes.find((n) => n.refId === c1.id)?.id).length, 0);
-  assert.equal(canvas2.nodes.length, 2); // c2/c3 卡节点保留
+  assert.equal(listCards(b.id).length, 2); // c2/c3 保留
+  assert.equal(listLinks(c1.id).length, 0);
 });
 
 test("校验：name 空 400、跨看板依赖 400、board 不存在 404", async () => {
@@ -156,7 +142,7 @@ test("POST 校验增强：跨看板依赖/目标不存在 400 且无残留、rea
   const { card: c2 } = await r2.json();
 
   const cross = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b1.id, name: "X", prerequisites: [c2.id] }));
-  assert.equal(cross.status, 400); // 跨看板依赖 → 400（不再是 500）
+  assert.equal(cross.status, 400); // 跨看板依赖 → 400
   const missing = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b1.id, name: "X", prerequisites: ["nope"] }));
   assert.equal(missing.status, 400); // 目标不存在 → 400
   const badStatus = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b1.id, name: "X", readyStatus: "bogus" }));
@@ -176,16 +162,8 @@ test("POST 校验增强：跨看板依赖/目标不存在 400 且无残留、rea
   assert.equal(sys.status, 400); // 系统看板不能建卡
 });
 
-test("POST 默认 x/y=60；GET 单卡 404；DELETE 不存在幂等", async () => {
+test("GET 单卡 404；DELETE 不存在幂等", async () => {
   freshDb();
-  const b = createBoard(PROJECT, "看板A");
-  const r1 = await createTaskCard(jsonReq("http://localhost/api/task-cards", "POST", { boardId: b.id, name: "A" }));
-  const { card: c1, nodeId } = await r1.json();
-  const canvas = getBoardCanvas(b.id);
-  const node = canvas.nodes.find((n) => n.id === nodeId);
-  assert.equal(node.x, 60);
-  assert.equal(node.y, 60);
-
   const missing = await getTaskCard(new Request("http://localhost/api/task-cards/nope"), { params: Promise.resolve({ id: "nope" }) });
   assert.equal(missing.status, 404);
 
