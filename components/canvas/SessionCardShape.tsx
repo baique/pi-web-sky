@@ -6,6 +6,7 @@ import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { dispatchBoardSessionRenamed } from "@/lib/board-events";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "./BoardSearchContext";
+import { CardKindBadge } from "./CardKindBadge";
 
 /**
  * 会话卡 shape。props 含 w/h 满足 BaseBoxShapeUtil（可拉伸）；
@@ -360,7 +361,8 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
             position: "relative",
           }}
         >
-          <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", background: phaseMeta[phase]?.dot ?? "var(--text-dim)", flexShrink: 0 }} />
+          {/* 类别徽记：状态点 = phase 状态色 + 类型「会话」（11px 浅色） */}
+          <CardKindBadge kind="session" color={phaseMeta[phase]?.dot ?? "var(--text-dim)"} />
           {renaming ? (
             <input
               ref={renameInputRef}
@@ -483,12 +485,10 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         cursor: "grab",
       }}
     >
-      {/* 状态行：状态圆点 + 状态文字 + 标题（紧跟状态）+ 展开按钮 */}
+      {/* 状态行：类别徽记（圆点=phase 状态色 + 文字「会话」）+ 标题 + 展开按钮 */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 20, flexShrink: 0 }}>
-        <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", background: meta.dot, flexShrink: 0 }} />
-        <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", flexShrink: 0, whiteSpace: "nowrap" }}>
-          {meta.label}
-        </span>
+        {/* 类别徽记：状态点 = phase 状态色 + 类型「会话」（11px 浅色），标题紧随其后（12.5px 深色） */}
+        <CardKindBadge kind="session" color={meta.dot} />
         {renaming ? (
           <input
             ref={renameInputRef}

@@ -5,6 +5,7 @@ import { BaseBoxShapeUtil, HTMLContainer, T, resizeBox, useEditor, useValue } fr
 import type { TLBaseShape, TLShapePartial } from "tldraw";
 import ReactMarkdown from "react-markdown";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "./BoardSearchContext";
+import { CardKindBadge } from "./CardKindBadge";
 
 /**
  * 自研 markdown 便笺（sticky-note）。
@@ -297,18 +298,23 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
     return (
       <HTMLContainer data-testid={`sticky-note-${shape.id}`} style={{ width: w, height: h, pointerEvents: "none" }}>
         <div style={bubbleStyle}>
-          {/* 顶部：徽记选择 + 取消/完成（按钮区置顶） */}
+          {/* 顶部：类别徽记 + 徽记选择 + 取消/完成（按钮区置顶）。
+              高度与预览态 header 固定一致（32px），避免编辑/预览切换时卡片顶部跳动 */}
           <div
             onPointerDown={(e) => e.stopPropagation()}
             style={{
               flexShrink: 0,
+              height: 32,
               display: "flex",
               alignItems: "center",
               gap: 8,
-              padding: "6px 10px",
+              padding: "0 10px",
               borderBottom: "1px solid var(--bubble-hairline)",
+              boxSizing: "border-box",
             }}
           >
+            {/* 类别徽记：状态点 = 当前徽记草稿色 + 类型「便笺」（11px 浅色） */}
+            <CardKindBadge kind="note" color={BADGE_COLORS[draftBadge] ?? BADGE_COLORS.blue} />
             {/* 徽记选择：5 色，默认蓝 */}
             <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
               {Object.entries(BADGE_COLORS).map(([key, color]) => (
@@ -398,23 +404,22 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
         <div
           style={{
             flexShrink: 0,
+            height: 32,
             display: "flex",
             alignItems: "center",
             gap: 6,
-            padding: "6px var(--bubble-pad-x, 12px) 0",
+            padding: "0 var(--bubble-pad-x, 12px)",
             fontSize: 10,
             color: "var(--text-muted)",
             cursor: "grab",
+            boxSizing: "border-box",
           }}
         >
-          <span
-            aria-hidden
-            title={`徽记·${BADGE_NAMES[badge] ?? badge}`}
-            style={{ width: 8, height: 8, borderRadius: "50%", background: BADGE_COLORS[badge] ?? BADGE_COLORS.blue, flexShrink: 0 }}
-          />
-          <span style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{formatNoteTime(createdAt)}</span>
-          {/* 右上角快捷复制：独立接收点击（不参与拖拽把手） */}
+          {/* 类别徽记：状态点 = 用户徽记色 + 类型「便笺」（11px 浅色），时间戳右侧两端对齐 */}
+          <CardKindBadge kind="note" color={BADGE_COLORS[badge] ?? BADGE_COLORS.blue} />
+          {/* 右上角：时间戳 + 快捷复制（两端对齐，时间戳放最右；复制独立接收点击不参与拖拽把手） */}
           <div style={{ flex: 1 }} />
+          <span style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{formatNoteTime(createdAt)}</span>
           <button
             type="button"
             title={copied ? "已复制" : "复制内容"}

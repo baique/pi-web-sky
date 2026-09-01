@@ -8,6 +8,7 @@ import { linkTargetIds, useTaskCard } from "@/hooks/useTaskCards";
 import { ThemedSelect } from "./ThemedSelect";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { TaskCardMultiSelect } from "./TaskCardMultiSelect";
+import { CardKindBadge } from "./CardKindBadge";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
 import { WorktreePicker } from "./WorktreePicker";
 
@@ -647,20 +648,18 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
             color: "var(--text-muted)",
           }}
         >
-          {/* 执行状态徽章：从表单挪出，放名称前 */}
+          {/* 类别徽记：圆点 = exec 状态色 + 类别文字「任务」（状态文字由类别取代，状态靠圆点颜色，hover 见 title） */}
           <span
             title={`执行状态：${(EXEC_BADGE[draft?.execStatus ?? "not_started"] ?? EXEC_BADGE.not_started).label}`}
             style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}
           >
-            <span aria-hidden style={{ width: 8, height: 8, borderRadius: "50%", background: (EXEC_BADGE[draft?.execStatus ?? "not_started"] ?? EXEC_BADGE.not_started).color }} />
-            <span style={{ fontSize: 10, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
-              {(EXEC_BADGE[draft?.execStatus ?? "not_started"] ?? EXEC_BADGE.not_started).label}
-            </span>
+            <CardKindBadge kind="task" color={(EXEC_BADGE[draft?.execStatus ?? "not_started"] ?? EXEC_BADGE.not_started).color} />
           </span>
-          {draft?.number ? <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-dim)", flexShrink: 0 }}>#{draft.number}</span> : null}
-          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {/* 标题：名称 + 编号（编号算入标题一部分，同深色样式）；与左侧类型浅色字区分 */}
+          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>
             {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
           </span>
+          {draft?.number ? <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text)", marginLeft: 4 }}>#{draft.number}</span> : null}
           {/* 右上角：就绪状态下拉（在操作按钮之前）+ 操作按钮（对齐便笺小 ghost 样式） */}
           <div
             style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}
