@@ -88,7 +88,7 @@ export function initSchema(db: DatabaseSync): void {
  * 老库打开时自动按序补齐缺失的迁移（每个迁移一个事务，成功后推进版本号），
  * 新库建表后从 v0 一路迁到 SCHEMA_VERSION。重复打开不再执行已完成的迁移。
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 interface Migration {
   version: number;
@@ -164,6 +164,15 @@ const MIGRATIONS: Migration[] = [
       "CREATE INDEX IF NOT EXISTS idx_task_links_card ON task_card_links(card_id);",
       "CREATE TABLE IF NOT EXISTS task_card_questions (\n  id         TEXT PRIMARY KEY,\n  card_id    TEXT NOT NULL,\n  session_id TEXT NOT NULL,\n  question   TEXT NOT NULL,\n  status     TEXT NOT NULL DEFAULT 'pending',\n  answer     TEXT,\n  created    INTEGER NOT NULL,\n  answered   INTEGER\n);",
       "CREATE INDEX IF NOT EXISTS idx_task_questions_status ON task_card_questions(status);",
+    ],
+  },
+  {
+    version: 8,
+    name: "task_cards.dispatch_token (跨进程派发互斥锁)",
+    statements: [
+      // 多实例（dev + 全局 CLI + 残留服务）共库时，同一张卡可能被多个调度器
+      // 同时捞到并发派发 → 双会话。派发前条件 UPDATE 原子抢 token，谁抢到谁执行。
+      "ALTER TABLE task_cards ADD COLUMN dispatch_token TEXT NULL;",
     ],
   },
 ];

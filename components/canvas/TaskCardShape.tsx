@@ -334,6 +334,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
           maxRetries: 3,
           retryCount: 0,
           sessionId: null,
+          dispatchToken: null,
           created: 0,
           updated: 0,
         }

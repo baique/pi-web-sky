@@ -41,6 +41,8 @@ export interface TaskCard {
   retryCount: number;
   /** 专属执行会话 id（调度器派发后写入） */
   sessionId: string | null;
+  /** 跨进程派发互斥 token：谁抢到谁执行（多实例共库防双会话） */
+  dispatchToken: string | null;
   created: number;
   updated: number;
 }
@@ -70,6 +72,7 @@ interface TaskCardRow {
   maxRetries: number;
   retryCount: number;
   sessionId: string | null;
+  dispatchToken: string | null;
   created: number;
   updated: number;
 }
@@ -103,7 +106,7 @@ function rowToCard(row: TaskCardRow): TaskCard {
 }
 
 const CARD_COLUMNS =
-  "id, board_id AS boardId, project_key AS projectKey, number, name, description, ready_status AS readyStatus, exec_status AS execStatus, priority, due, attachments, cwd, use_worktree AS useWorktree, max_retries AS maxRetries, retry_count AS retryCount, session_id AS sessionId, created, updated";
+  "id, board_id AS boardId, project_key AS projectKey, number, name, description, ready_status AS readyStatus, exec_status AS execStatus, priority, due, attachments, cwd, use_worktree AS useWorktree, max_retries AS maxRetries, retry_count AS retryCount, session_id AS sessionId, dispatch_token AS dispatchToken, created, updated";
 
 function getCardRow(id: string): TaskCardRow | undefined {
   return getDb()
@@ -385,16 +388,44 @@ function prerequisitesDone(card: TaskCard): boolean {
 /**
  * 可派发卡：就绪=todo & (未开始 | 失败且重试未超上限) & 无前置或前置均 done。
  * 按优先级降序、编号升序（高优先级先调度）。
+ * 排除 dispatch_token 非空的卡（另一实例正在派发中，等它完成/释放）。
  */
 export function listDispatchableCards(): TaskCard[] {
   const rows = getDb()
     .prepare(
       `SELECT ${CARD_COLUMNS} FROM task_cards
        WHERE ready_status = 'todo' AND (exec_status = 'not_started' OR (exec_status = 'failed' AND retry_count < max_retries))
+         AND dispatch_token IS NULL
        ORDER BY priority DESC, number`,
     )
     .all() as unknown as TaskCardRow[];
   return rows.map(rowToCard).filter(prerequisitesDone);
+}
+
+/**
+ * 原子抢派发锁：条件 UPDATE 把卡从「可派发」翻转为「本实例持有 token 的派发中”。
+ * SQLite 单写者保证并发（多实例共库）下只有一条 UPDATE 成功（changes=1），
+ * 其余实例 changes=0 → 抢锁失败。返回 true = 抢到（本实例负责派发）。
+ * token 在派发完成后由 clearDispatchToken 释放（成功写 sessionId / 失败重试均释放）。
+ */
+export function acquireDispatchToken(cardId: string, token: string): boolean {
+  const res = getDb()
+    .prepare(
+      `UPDATE task_cards SET dispatch_token = ?1, updated = ?2
+       WHERE id = ?3
+         AND ready_status = 'todo'
+         AND (exec_status = 'not_started' OR (exec_status = 'failed' AND retry_count < max_retries))
+         AND dispatch_token IS NULL`,
+    )
+    .run(token, now(), cardId);
+  return Number(res.changes) > 0;
+}
+
+/** 释放派发锁：token 匹配才清（防误清他人新抢到的锁）。 */
+export function clearDispatchToken(cardId: string, token: string): void {
+  getDb()
+    .prepare(`UPDATE task_cards SET dispatch_token = NULL, updated = ?2 WHERE id = ?1 AND dispatch_token = ?3`)
+    .run(cardId, now(), token);
 }
 
 /** 调度器已派发且正在运行的任务卡数（全局并发闸门用）。 */

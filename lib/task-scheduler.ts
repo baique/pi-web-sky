@@ -14,6 +14,8 @@ import {
   createQuestion,
   getCard,
   updateCard,
+  acquireDispatchToken,
+  clearDispatchToken,
   type TaskCard,
   type TaskCardQuestion,
 } from "./task-card-store";
@@ -109,13 +111,21 @@ async function ensureExecutionSession(
   return { ...fresh, created: true };
 }
 
-/** 派发单卡：建/复执行会话 → 命名 #N 标题 → 任务看板归属 → node 绑 session → 发 prompt → running。 */
+/** 派发单卡：建/复执行会话 → 命名 #N 标题 → 任务看板归属 → node 绑 session → 发 prompt → running。
+ *  跨进程互斥：派发前先原子抢 dispatch_token（谁抢到谁执行），防多实例共库双会话。 */
 export async function dispatchCard(card: TaskCard): Promise<boolean> {
+  // 抢派发锁：同卡并发（另一调度器实例）时只有一个能抢到；抢不到直接放弃。
+  const token = randomUUID();
+  if (!acquireDispatchToken(card.id, token)) {
+    console.log(`[task-scheduler] #${card.number} ${card.name} 派发锁被占用，跳过`);
+    return false;
+  }
   let ensured: { session: Awaited<ReturnType<typeof startRpcSession>>["session"]; realSessionId: string; created: boolean } | null = null;
   try {
     ensured = await ensureExecutionSession(card);
     if (!ensured) {
       console.warn(`[task-scheduler] #${card.number} ${card.name} 无可用 cwd，跳过派发`);
+      clearDispatchToken(card.id, token);
       return false;
     }
     const session = ensured;
@@ -131,6 +141,7 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
     if (session.session.isRunning()) {
       updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
       watchForAgentEnd(card, session.session);
+      clearDispatchToken(card.id, token);
       console.log(`[task-scheduler] #${card.number} ${card.name} 会话忙（复用中），标 running 不重发`);
       return true;
     }
@@ -139,6 +150,7 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
 
     updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
     watchForAgentEnd(card, session.session);
+    clearDispatchToken(card.id, token);
     console.log(
       `[task-scheduler] 派发 #${card.number} ${card.name} → session ${session.realSessionId.slice(0, 8)}`,
     );
@@ -152,6 +164,7 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
         // 销毁失败不影响派发结果上报
       }
     }
+    clearDispatchToken(card.id, token);
     console.error(
       `[task-scheduler] 派发 #${card.number} ${card.name} 失败:`,
       error instanceof Error ? error.message : error,
