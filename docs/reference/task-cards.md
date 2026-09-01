@@ -45,10 +45,10 @@ task_card_questions  待回答队列（S3 用）
 
 ## 执行会话线（exec）
 
-- 真相源 `task_cards.session_id`；`syncExecEdge(cardId)` 按它 reconcile `board_edges`（`label='exec'`，from=taskcard 节点 → to=session 节点，缺补多删）。
-- 触发：`session_id` 写入/清空（绑定/解绑/重派发）、删任务卡（API/调度器内统一调）。
+- 真相源 `task_cards.session_id`；**画布上的 exec 线由前端 reconcile 渲染**（`useBoardCanvas.ts` 的 `reconcile`）：读任务卡 sessionId + 画布节点 diff → `createExecEdge`（arrow + binding，`meta.execLinkLabel`，缺补多删、确定性 id 幂等）。后端只写 `session_id`，不直接建线。
+- 触发：reconcile 在任务看板打开 + 10s 轮询 + running 快照发现新 running 卡时跑——任务卡绑定执行会话后 **exec 线秒级/10s 内自动出现**。
 - 派生禁删：手动删 exec 线会被 reconcile 补回；真正的删除 = 清 `session_id` 或删任务卡。
-- **执行会话卡必然存在**：先有会话才有关联，reconcile 补所有任务会话（含执行会话），exec 线总有落点；若任务卡已显示 sessionId 而画布暂无卡，属刷新时序 bug（修时序，不兜底）。
+- **执行会话卡必然存在**：先有会话才有关联，reconcile 补所有任务会话（含执行会话），exec 线总有落点。
 
 ## 删除（确认制 + 事务）
 

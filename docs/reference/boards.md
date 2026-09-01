@@ -1,46 +1,61 @@
-# 会话看板（boards / 任务即看板）
+# 会话看板（boards / 任务即看板）— tldraw sync 版
 
-> 改看板 / 画布 / 任务即看板 / 便笺 / scrim 前阅读。tldraw 5.x + 自定义 shape 的坑都在这里。
+> 改看板 / 画布 / 任务即看板 / 便笺 / 派生边前阅读。tldraw 5.x + 自定义 shape + sync 协作的坑都在这里。
 
-## 数据层铁律
+## ⚠️ 架构迁移（2026-09 已完成）
 
-- **迁移**：`lib/sqlite-db.ts` `SCHEMA_VERSION = 7`（v3 建 boards/board_nodes/board_edges/board_view → v4 `sort_order` → v5 `task_id` → v6 task_id 唯一索引 → v7 任务卡三表）。看板是旁路元数据，会话 jsonl 原地不动。
-- **事务铁律**：SQLite 不支持嵌套 BEGIN。`deleteBoardCascade` / `renameTaskBoard` **必须无事务**，由调用方（`deleteBoard` / `deleteTask` / `updateTask`）在自身事务内调用。board-store 的 `deleteBoard` 保持"自开事务"行为。
-- **任务即看板**：看板 id = 任务 id（`boards.task_id` 非空即任务型看板）。`GET /api/tasks/[id]/board` 懒创建；`deleteTask` 事务内级联删看板；`updateTask` 改名同步 `renameTaskBoard`。
-- **系统「运行中」看板**：`SYSTEM_RUNNING_BOARD_ID = "__running__"`，只读、跨项目自动聚合运行中会话，不落 boards 表。
+看板画布数据层已从「前端全量保存 SQLite」迁移到 **tldraw sync**（CRDT 协作 + SQLite 持久化）：
 
-## 空画布保护（防看板被清空）
+- **画布即文档**：每看板一个 `TLSocketRoom`（独立进程 `scripts/sync-server.mjs`，端口 30144），文档（shape/binding/camera）由 sync 管理，SQLite 持久化到 `~/.pi/agent/sync.db`（`tablePrefix=board_<id>_` 隔离）。
+- **前端 `useSync`** 连接文档：任何编辑（拖拽/增删/缩放）经 CRDT 自动同步到所有客户端并持久化。**无防抖全量保存 / 乐观锁 / 409 冲突 / 重灌**。
+- **业务派生边（exec 线 / 依赖线）由前端 reconcile 渲染**：读业务数据（`/api/tasks/[id]` 任务会话、`/api/task-cards?boardId=` 任务卡 sessionId + links）→ diff 画布 → `editor.createShape`（确定性 id 幂等，CRDT 合并）。后端只写业务表，不写画布。
+- **删除**：确认制 → `editor.store.remove`（CRDT 同步）+ 调业务 API（清 `task_cards.session_id` / `session_meta` / 会话文件）；侧栏删会话的孤儿卡由 reconcile 清理。
+- 旧 `board_nodes` / `board_edges` / `board_view` 表**废弃**（不再写，保留作回滚）。
+- **`__running__` 系统看板已废弃**（2026-09-02 用户决定移除）。
 
-- `PUT /api/boards/[id]/canvas` **默认拒绝用空 nodes 覆盖已有内容的看板**（返回 `empty-overwrite` → 409）——客户端状态未加载完成时全量保存会把看板清空，这是血泪教训。
-- 用户显式「清空画布」才传 `allowEmpty: true` 放行；客户端物化完成前禁止自动保存。
-- 乐观锁：客户端必须带读取快照时的 `boards.updated`（`baseUpdated`），期间被他人保存过则拒绝写入。
+### 启动
 
-## 任务即看板自动补卡
+```bash
+npm run sync          # 启动 sync-server（独立进程，端口 30144；dev 前先起它）
+npm run migrate-boards  # 一次性：旧 board_nodes/edges → sync.db（重迁移需先删 sync.db）
+npm run dev           # 30143
+```
 
-- `reconcileTaskSessions`：打开时 diff + 复用 10s 摘要轮询周期 diff，差集（任务会话中无卡片者）→ `addSessionNode`。**补所有任务会话（含任务卡的执行会话）**——occupied 概念已废除（见 `2026-09-01-task-card-atomic-link.md`），执行会话在画布上就是普通会话卡，任务卡通过 exec 线引用它。
-- `findFreeSpot(editor)`：收集现有 session-card 矩形，从 (60,60) 按行扫描（y 增 x 增），找与所有卡片**不重叠且间隙 ≥ 24** 的第一个空位——右下方向找空位，天然不遮挡。
-- 任务看板**不提供"从看板移除任务会话卡片"**（要移除即移出任务），否则被 diff 补回造成语义冲突；删除走确认制 + 事务（见 [task-cards.md](task-cards.md) 删除段）。
-- `BoardSection` 列表**过滤 `taskId == null`**：任务看板不混入手动看板列表（任务行本身即入口）。
-- **exec 线**：任务卡 ↔ 执行会话用 `board_edges` `label='exec'` 的派生边表达（`syncExecEdge` 管理、禁删），详见 [task-cards.md](task-cards.md)。
+前端连接地址 `NEXT_PUBLIC_SYNC_WS`（默认 `ws://127.0.0.1:30144`）。
+
+## 数据层铁律（sync 版）
+
+- **画布文档在 sync.db**（SQLiteSyncStorage），业务表（boards/task_cards/task_card_links/session_meta）仍在 `pi-web.db`。两库独立，业务进程不写画布。
+- **reconcile 触发**：任务看板打开 + 10s 轮询 + running 快照发现新 running 任务卡（2.5s）→ 补会话卡 / 补 exec 线 / 补依赖线 / 删孤儿卡。
+- **派生边**：exec 线（任务卡 ↔ 执行会话，`meta.execLinkLabel`）、依赖线（任务卡 ↔ 任务卡，`meta.taskLinkLabel`）→ **禁删**（deleteShapes 拦截跳过，reconcile 补回）。
+- **孤儿卡删除**：任务看板下，会话卡 sessionId 不在任务会话集合 → 删（任务看板会话卡由任务驱动）。普通看板不清理（用户手动管理）。
+- **摘要/运行状态**：轮询更新 shape props（标题/phase/runningMs），同步到文档，多端一致。
 
 ## 卡片即工作台（tldraw）
 
-- tldraw 5.x，`next/dynamic` ssr:false 按需加载（体积 ~1MB，仅进看板时下载）。自定义 shape 用 `BaseBoxShapeUtil`。
-- 卡片两态：收合卡（340×160）↔ **展开即工作台**（同一卡片放大，默认 760×600，非弹窗）。展开态工作台 = portal 浮层 + `1/zoom` 反补偿，`zoom < 60%` 降级骨架态。
+- tldraw 5.x，`next/dynamic` ssr:false 按需加载。自定义 shape 用 `BaseBoxShapeUtil`。
+- 卡片两态：收合卡（340×160）↔ **展开即工作台**（同一卡片放大，默认 760×600）。展开态工作台 = portal 浮层 + `1/zoom` 反补偿，`zoom < 60%` 降级骨架态。
 - **draft 卡**：`sessionId` 为空的卡（新建会话），输入消息绑定真实会话后转正（`bindDraftSession`）。
-- 卡片内改名：内联输入 → `PATCH /api/sessions/[id]` → `dispatchBoardSessionRenamed` 事件桥刷左侧树 + 摘要轮询刷新标题。
+- 卡片内改名：内联输入 → `PATCH /api/sessions/[id]` → 事件桥刷左侧树 + 摘要轮询刷新标题。
 
 ## 看板内搜索（Ctrl+F）
 
-- 常驻搜索框（画布顶部居中玻璃胶囊），匹配会话卡标题 + 便笺正文，命中后 `centerOnPoint` 居中定位（保持当前缩放，不做 zoom 自适应）+ accent 描边渐隐。纯前端：不写 tldraw store、不落库、刷新即消失。
-- 设计详见 `.agent/spec/2026-08-30-board-search.md`；实现 `lib/board-search.ts`（纯函数）+ `components/canvas/BoardSearchContext.tsx`（高亮 state）+ `components/canvas/BoardSearch.tsx`（搜索框 UI，集成在 `SessionCanvas`）。
-- 高亮状态走 React context（shape 组件读 context 渲染描边），不触发防抖保存；Ctrl+F 仅看板模式生效（`SessionCanvas` 挂载期间 window keydown 捕获）。
+- 常驻搜索框（画布顶部居中玻璃胶囊），匹配会话卡标题 + 便笺正文，命中后 `centerOnPoint` 居中定位 + accent 描边渐隐。纯前端：不写 store、不落库、刷新即消失。
+- 高亮状态走 React context；Ctrl+F 仅看板模式生效。
 
 ## tldraw 集成陷阱
 
 - tldraw 全局 `user-select:none` 会禁用画布内文本选中——工作台消息区与便笺 markdown 必须显式恢复选中（根因同源）。
-- 便笺是**自研 markdown 便笺**（`StickyNoteShape`），不要用 tldraw 内置 Note（拖拽会出两个控件）。
-- 看板卡片内的 `position:fixed` 弹层（如 BranchNavigator 下拉）会被 `backdrop-filter` 容器劫持导致漂移 → portal 到 body；卡片内展开时用 `[data-session-titlebar]` 定位对齐标题栏。
+- 便笺是**自研 markdown 便笺**（`StickyNoteShape`），不要用 tldraw 内置 Note。
+- 看板卡片内的 `position:fixed` 弹层（如 BranchNavigator 下拉）会被 `backdrop-filter` 容器劫持导致漂移 → portal 到 body。
 - 便笺 `createdAt` 用 `useState` 惰性初始化，禁止 render 期 `Date.now()`（lint purity）。
 - 卡片状态以展开卡内 `useAgentSession` 的 SSE 为准，看板聚合态以 `/api/agent/running` 轮询为准——双源不打架。
 - 看板 URL `?board=` 持久化；退出看板 / 点会话 / 新建即回聊天。
+- **useSync 连接稳定性**：`useSync` 的 shapeUtils 必须是模块级常量（引用稳定），否则每次渲染重建连接 → session 堆积 + push_result 死循环（血泪教训，见踩坑）。
+- **sync-server 接线**：`handleSocketConnect` 会自动给 ws 挂 message/close/error 监听（ws 支持 EventTarget）——**绝不手动再 `ws.on("message")`**，否则每条消息处理两次 → push_result 双发 → 重连死循环。sessionId 必须复用客户端 TAB_ID（不能每次随机生成）。
+
+## 派生边 reconcile 细节（useBoardCanvas）
+
+- `reconcile`：读任务会话 + 任务卡（含 links）→ ① 补/清会话卡（孤儿删除）② 补 exec 线（`createExecEdge`，端点匹配去重）③ 补/删依赖线（`createLinkEdge`）。
+- 确定性 id：会话卡 `session-<sid>`、exec 线 `exec-<cardId>`、依赖线 `link-<from>-<to>-<kind>` → 幂等。
+- exec/依赖线创建 = `editor.createShape(arrow)` + `editor.createBindings`（arrow→两端 shape，随卡片移动）。

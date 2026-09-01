@@ -418,22 +418,29 @@ export function useBoardCanvas({
         if (sessionIds.has(sid)) continue;
         editor.deleteShapes([shapeId as never]);
       }
-      for (const sid of sessionIds) {
-        if (existingSessions.has(sid)) continue;
-        const summary = sessionTitlesRef.current[sid];
-        const p = findFreeSpot(editor);
-        editor.createShape({
-          id: createShapeId(`session-${sid}`),
-          type: "session-card",
-          x: p.x,
-          y: p.y,
-          props: {
-            sessionId: sid, title: summary?.title ?? "Untitled", projectName: summary?.projectName ?? "",
-            messageCount: summary?.messageCount ?? 0, lastReply: summary?.lastReply ?? "",
-            lastActivityAt: summary?.lastActivityAt ?? 0, phase: "idle", runningMs: 0, endedAt: 0,
-            stale: false, expanded: false, w: CARD_W, h: CARD_H,
-          } as never,
-        });
+      // draft 卡占位：任务看板下 sessionId 空 且 taskId 匹配本任务的卡正在转正
+      //（用户刚发首条消息、ensure_session 尚未返回）→ 跳过补卡，避免 draft + 新卡并存
+      const hasPendingDraft = shapes.some(
+        (s) => s.type === "session-card" && !(s.props as SessionCardProps).sessionId && (s.props as SessionCardProps).taskId === tid,
+      );
+      if (!hasPendingDraft) {
+        for (const sid of sessionIds) {
+          if (existingSessions.has(sid)) continue;
+          const summary = sessionTitlesRef.current[sid];
+          const p = findFreeSpot(editor);
+          editor.createShape({
+            id: createShapeId(`session-${sid}`),
+            type: "session-card",
+            x: p.x,
+            y: p.y,
+            props: {
+              sessionId: sid, title: summary?.title ?? "Untitled", projectName: summary?.projectName ?? "",
+              messageCount: summary?.messageCount ?? 0, lastReply: summary?.lastReply ?? "",
+              lastActivityAt: summary?.lastActivityAt ?? 0, phase: "idle", runningMs: 0, endedAt: 0,
+              stale: false, expanded: false, w: CARD_W, h: CARD_H,
+            } as never,
+          });
+        }
       }
       // 2) 补/同步 exec 线：任务卡 sessionId → 卡节点 + 会话节点都存在 → 建线；
       //    卡已绑定但线指向旧会话（重绑定）→ 删旧线换新线。
@@ -549,6 +556,29 @@ export function useBoardCanvas({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveTaskId, editorReady, reconcile]);
+
+  // ---- draft 卡转正：SessionWorkbench 内 ChatWindow 拿到 realId 后派发
+  // board-session-created，本 hook 监听并把对应卡片 sessionId 写回（CRDT 同步到文档）----
+  useEffect(() => {
+    const onCreated = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId: string; nodeId?: string }>).detail;
+      if (!detail?.sessionId || !detail?.nodeId) return;
+      const editor = editorRef.current;
+      if (!editor) return;
+      const shapeId = createShapeId(detail.nodeId);
+      const shape = editor.getShape(shapeId);
+      if (!shape || shape.type !== "session-card") return;
+      editor.updateShapes([{
+        id: shapeId,
+        type: "session-card",
+        props: { sessionId: detail.sessionId, cwd: "", taskId: "" },
+      } as never]);
+      // 转正后立即拉一次摘要，让标题/消息数立刻到位
+      void loadSessionSummaries();
+    };
+    window.addEventListener("pi-web:board-session-created", onCreated);
+    return () => window.removeEventListener("pi-web:board-session-created", onCreated);
+  }, [loadSessionSummaries]);
 
   // ---- draft 卡（看板新建会话）----
   const draftCascadeRef = useRef(0);
