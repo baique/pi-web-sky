@@ -28,11 +28,11 @@
     "package.json"
   ],
   "scripts": {
-    "dev": "next dev -H 127.0.0.1 -p 30143",
-    "dev:lan": "next dev -H 0.0.0.0 -p 30143",
+    "dev": "node server.mjs",
+    "dev:lan": "HOSTNAME=0.0.0.0 node server.mjs",
     "build": "next build --webpack",
-    "start": "next start -H 127.0.0.1 -p 30143",
-    "start:lan": "next start -H 0.0.0.0 -p 30143",
+    "start": "NODE_ENV=production node server.mjs",
+    "start:lan": "NODE_ENV=production HOSTNAME=0.0.0.0 node server.mjs",
     "lint": "eslint .",
     "test": "node --experimental-strip-types --test \"app/**/*.test.mjs\" \"components/**/*.test.mjs\" \"hooks/**/*.test.mjs\" \"lib/**/*.test.mjs\" \"public/**/*.test.mjs\"",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",

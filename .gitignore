@@ -51,6 +51,3 @@ next-env.d.ts
 
 # 本地调试工具与运行日志（不入库）
 /.agent/script/
-
-# tldraw sync 试点临时 DB
-/.sync-demo/

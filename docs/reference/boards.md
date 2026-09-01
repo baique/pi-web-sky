@@ -6,7 +6,7 @@
 
 看板画布数据层已从「前端全量保存 SQLite」迁移到 **tldraw sync**（CRDT 协作 + SQLite 持久化）：
 
-- **画布即文档**：每看板一个 `TLSocketRoom`（独立进程 `scripts/sync-server.mjs`，端口 30144），文档（shape/binding/camera）由 sync 管理，SQLite 持久化到 `~/.pi/agent/sync.db`（`tablePrefix=board_<id>_` 隔离）。
+- **画布即文档**：每看板一个 `TLSocketRoom`（内嵌 Next.js server，`lib/sync-room-server.mjs`，同端口 30143），文档（shape/binding/camera）由 sync 管理，SQLite 持久化到 `~/.pi/agent/sync.db`（`tablePrefix=board_<id>_` 隔离）。
 - **前端 `useSync`** 连接文档：任何编辑（拖拽/增删/缩放）经 CRDT 自动同步到所有客户端并持久化。**无防抖全量保存 / 乐观锁 / 409 冲突 / 重灌**。
 - **业务派生边（exec 线 / 依赖线）由前端 reconcile 渲染**：读业务数据（`/api/tasks/[id]` 任务会话、`/api/task-cards?boardId=` 任务卡 sessionId + links）→ diff 画布 → `editor.createShape`（确定性 id 幂等，CRDT 合并）。后端只写业务表，不写画布。
 - **删除**：确认制 → `editor.store.remove`（CRDT 同步）+ 调业务 API（清 `task_cards.session_id` / `session_meta` / 会话文件）；侧栏删会话的孤儿卡由 reconcile 清理。
@@ -16,12 +16,12 @@
 ### 启动
 
 ```bash
-npm run sync          # 启动 sync-server（独立进程，端口 30144；dev 前先起它）
+npm run dev          # 单进程：HTTP + WS 同端口 30143（sync 房间内嵌，无需另起）
 npm run migrate-boards  # 一次性：旧 board_nodes/edges → sync.db（重迁移需先删 sync.db）
-npm run dev           # 30143
+# 可选：拆独立进程（端口 30144）→ npm run sync，前端需设 NEXT_PUBLIC_SYNC_WS=ws://127.0.0.1:30144
 ```
 
-前端连接地址 `NEXT_PUBLIC_SYNC_WS`（默认 `ws://127.0.0.1:30144`）。
+前端连接地址 `NEXT_PUBLIC_SYNC_WS`（默认 `ws://127.0.0.1:30143` 同端口）。
 
 ## 数据层铁律（sync 版）
 
@@ -35,7 +35,7 @@ npm run dev           # 30143
 
 - tldraw 5.x，`next/dynamic` ssr:false 按需加载。自定义 shape 用 `BaseBoxShapeUtil`。
 - 卡片两态：收合卡（340×160）↔ **展开即工作台**（同一卡片放大，默认 760×600）。展开态工作台 = portal 浮层 + `1/zoom` 反补偿，`zoom < 60%` 降级骨架态。
-- **draft 卡**：`sessionId` 为空的卡（新建会话），输入消息绑定真实会话后转正（`bindDraftSession`）。
+- **新会话卡**：看板新建会话 = `sessionId` 为发起时生成的 UUID + `cwd` 非空的卡（不再有 `sessionId` 为空的 draft 占位）。用户在卡内发首条消息时 `ensure_session` 携带该 UUID 创建会话（`POST /api/agent/new` 的 `id` 字段），创建成功（文件落盘）后清 `cwd` 字段转正为普通卡（CRDT 同步）。
 - 卡片内改名：内联输入 → `PATCH /api/sessions/[id]` → 事件桥刷左侧树 + 摘要轮询刷新标题。
 
 ## 看板内搜索（Ctrl+F）
@@ -53,6 +53,7 @@ npm run dev           # 30143
 - 看板 URL `?board=` 持久化；退出看板 / 点会话 / 新建即回聊天。
 - **useSync 连接稳定性**：`useSync` 的 shapeUtils 必须是模块级常量（引用稳定），否则每次渲染重建连接 → session 堆积 + push_result 死循环（血泪教训，见踩坑）。
 - **sync-server 接线**：`handleSocketConnect` 会自动给 ws 挂 message/close/error 监听（ws 支持 EventTarget）——**绝不手动再 `ws.on("message")`**，否则每条消息处理两次 → push_result 双发 → 重连死循环。sessionId 必须复用客户端 TAB_ID（不能每次随机生成）。
+- **内嵌架构**：`server.mjs`（自定义 Next server）把 HTTP 交 `next.getRequestHandler()`，upgrade 分流——`/connect/:boardId` 交 `handleSyncUpgrade`（`lib/sync-room-server.mjs`），其余（HMR）交 `next.getUpgradeHandler()`。`npm run dev` / `npm start` 均走此文件，单进程同端口。
 
 ## 派生边 reconcile 细节（useBoardCanvas）
 
