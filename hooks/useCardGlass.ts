@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { Editor, TLShapeId } from "tldraw";
+import { Mat, type Editor, type TLShapeId } from "tldraw";
 
 /**
  * 卡片玻璃（局部贴图版）：每张卡片内嵌一个「视口对齐的模糊壁纸层」。
@@ -24,11 +24,43 @@ import type { Editor, TLShapeId } from "tldraw";
 export function useCardGlass(editor: Editor | null | undefined, shapeId: TLShapeId, bgToken: string) {
   const layerRef = useRef<HTMLDivElement | null>(null);
 
-  // 回调 ref：挂到卡片内容容器，创建模糊壁纸层（只创建一次）
+  // 同步层到视口对齐（核心数学，见文件头注释）
+  const syncLayer = () => {
+    const layer = layerRef.current;
+    if (!layer) return;
+    const shape = editor?.getShape(shapeId);
+    if (!shape || !editor) return;
+    const zoom = editor.getZoomLevel();
+    // 用页变换（pageTransform）取 shape 的真实页位置：组合后 shape.x/y 是
+    // 相对 group 的坐标，但 .tl-shape 的 transform 是含 group 偏移的页变换，
+    // 两者基准不同 → 层会错位（组合后透明的根因）。
+    const pageTransform = editor.getShapePageTransform(shapeId);
+    if (!pageTransform) return;
+    // Mat.Point 取变换的平移分量（shape 真实页位置，含 group 偏移）
+    const pagePos = Mat.Point(pageTransform);
+    const pos = editor.pageToScreen({ x: pagePos.x, y: pagePos.y });
+    // 层图是视口快照（useGlassWallpaper 按视口绘制），层图原点必须对齐
+    // 屏幕原点 (0,0)：层 transform = -pos/zoom。pos 用 pageTransform（含
+    // group 偏移）→ 组合后不透明错位；组合前 pagePos=shape.x 与原行为一致。
+    layer.style.width = `${window.innerWidth / zoom}px`;
+    layer.style.height = `${window.innerHeight / zoom}px`;
+    layer.style.transform = `translate(${-pos.x / zoom}px, ${-pos.y / zoom}px)`;
+  };
+
+  // 回调 ref：挂到卡片内容容器，创建模糊壁纸层。
+  // 不用一次性标记（dataset.glassReady）守卫：tldraw 组合/取消组合会重建
+  // shape 容器 DOM——节点可能被复用但 prepend 的层已被清掉，标记守卫会
+  // 跳过重建 → 卡片透明。改为检查层是否真的还在 DOM 里。
   const setContainer = (node: HTMLDivElement | null) => {
-    if (!node || node.dataset.glassReady) return;
-    node.dataset.glassReady = "1";
+    if (!node) return;
+    const existing = node.querySelector<HTMLDivElement>("[data-glass-layer]");
+    if (existing) {
+      layerRef.current = existing;
+      syncLayer();
+      return;
+    }
     const layer = document.createElement("div");
+    layer.dataset.glassLayer = "1";
     layer.style.cssText =
       `position:absolute;left:0;top:0;pointer-events:none;z-index:-1;` +
       // 合成层提升：每帧改 transform 只走合成，不触发重排/重绘
@@ -39,30 +71,18 @@ export function useCardGlass(editor: Editor | null | undefined, shapeId: TLShape
       `background-size:100% 100%,100% 100%;`;
     node.prepend(layer);
     layerRef.current = layer;
+    // 立即同步：层重建后不等下一次 change（组合可能不触发后续 change）
+    syncLayer();
   };
 
   useEffect(() => {
     if (!editor) return;
     let raf = 0;
-    const sync = () => {
-      const layer = layerRef.current;
-      if (!layer) return;
-      const shape = editor.getShape(shapeId);
-      if (!shape) return;
-      const zoom = editor.getZoomLevel();
-      const pos = editor.pageToScreen({ x: shape.x as number, y: shape.y as number });
-      // 页坐标偏移 = -屏幕位置 / zoom；图页尺寸 = 视口 / zoom
-      layer.style.width = `${window.innerWidth / zoom}px`;
-      layer.style.height = `${window.innerHeight / zoom}px`;
-      layer.style.transform = `translate(${-pos.x / zoom}px, ${-pos.y / zoom}px)`;
-    };
-    // rAF 合并：拖拽/平移高频触发 change 时每帧最多同步一次（跟手），
-    // rAF 本身就是帧率上限，不会超过显示刷新率。
     const schedule = () => {
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        sync();
+        syncLayer();
       });
     };
     const onChange = () => schedule();

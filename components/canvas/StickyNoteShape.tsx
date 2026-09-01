@@ -6,6 +6,7 @@ import type { TLBaseShape, TLShapePartial } from "tldraw";
 import ReactMarkdown from "react-markdown";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "./BoardSearchContext";
 import { CardKindBadge } from "./CardKindBadge";
+import { useCardGlass } from "@/hooks/useCardGlass";
 
 /**
  * 自研 markdown 便笺（sticky-note）。
@@ -108,6 +109,8 @@ export class StickyNoteUtil extends BaseBoxShapeUtil<StickyNoteShape> {
 function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
   const { w, h, text } = shape.props;
   const editor = useEditor();
+  // 卡片玻璃（局部贴图）：与任务卡/会话卡同方案，统一磨砂观感
+  const setGlassContainer = useCardGlass(editor, shape.id, "var(--assistant-card-glass)");
   // 搜索高亮：命中时 accent 描边 + 泛光渐隐（由 BoardSearchContext 驱动，不落库）
   const { highlightId } = useBoardSearch();
   const isHighlighted = highlightId === shape.id;
@@ -272,15 +275,14 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
     editor.setEditingShape(null);
   }, [editor]);
 
-  // 消息气泡同款毛玻璃
+  // 消息气泡同款毛玻璃（局部贴图版：色层由 useCardGlass 内嵌层提供）
   const bubbleStyle: React.CSSProperties = {
+    position: "relative",
     width: w,
     height: h,
     borderRadius: "var(--bubble-radius, 12px)",
     border: isHighlighted ? "2px solid var(--accent)" : "1px solid var(--bubble-border)",
-    background: "var(--assistant-card-glass)",
-    backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-    WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+    background: "transparent",
     boxShadow: isHighlighted ? HIGHLIGHT_SHADOW : "0 2px 10px -6px rgba(0,0,0,0.2)",
     animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
     color: "var(--text)",
@@ -297,7 +299,7 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
   if (isEditing) {
     return (
       <HTMLContainer data-testid={`sticky-note-${shape.id}`} style={{ width: w, height: h, pointerEvents: "none" }}>
-        <div style={bubbleStyle}>
+        <div ref={setGlassContainer} style={bubbleStyle}>
           {/* 顶部：类别徽记 + 徽记选择 + 取消/完成（按钮区置顶）。
               高度与预览态 header 固定一致（32px），避免编辑/预览切换时卡片顶部跳动 */}
           <div
@@ -398,7 +400,7 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
       onPointerDown={() => editor.bringToFront([shape.id])}
       style={{ width: w, height: h, pointerEvents: "none" }}
     >
-      <div style={bubbleStyle}>
+      <div ref={setGlassContainer} style={bubbleStyle}>
         {/* 顶部拖拽把手：徽记 + 时间（新建自动记录）。整条是拖拽区（不拦截 pointer），
             让 tldraw 接管——便笺可拖拽面积太小的问题主要就是内容区占满、拦事件 */}
         <div
