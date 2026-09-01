@@ -270,24 +270,75 @@ export function useBoardCanvas({
     hydratedRef.current = false;
     hydratingRef.current = false;
     setHydrated(false);
-    // 依赖线禁删：任务卡前置/关联自动边由 task_card_links 派生（syncCardEdges），
-    // 手动删除会被 reconcile 补回，这里直接拦截（等效禁删）。其余 shape 正常删。
-    // 任务会话卡删除保护已废除——删除改确认制 + 事务（见原子-链接 spec）。
+    // 删除语义（原子-链接，确认制）：
+    // - 派生边（依赖 taskLinkLabel / 执行会话 execLinkLabel）：禁删（由真相源 reconcile）
+    // - 会话卡（sessionId 非空）：确认 → DELETE /api/sessions/[id]（服务端事务清理画布卡/exec 线/任务卡引用/会话文件）→ 删 shape
+    // - 任务卡（cardId 非空）：确认 → DELETE /api/task-cards/[id]（级联删依赖/exec 线）→ 删 shape
+    // - 其余（便笺/普通线/草稿卡）：直接删
     const origDeleteShapes = editor.deleteShapes.bind(editor);
     editor.deleteShapes = ((ids: Parameters<typeof origDeleteShapes>[0]) => {
       const idArr = Array.isArray(ids) ? ids : [ids];
-      const allowed = idArr.filter((id) => {
+      const directDelete: string[] = [];
+      const sessionDelete: Array<{ sid: string; shapeId: string }> = [];
+      const cardDelete: Array<{ cid: string; shapeId: string }> = [];
+      for (const id of idArr) {
         const idStr = typeof id === "string" ? id : id.id;
         const shape = editor.getShape(idStr);
-        if (!shape) return true;
+        if (!shape) { directDelete.push(idStr); continue; }
         if (shape.type === "arrow") {
           const am = shape.meta as { taskLinkLabel?: string; execLinkLabel?: string } | undefined;
-          if (am?.taskLinkLabel || am?.execLinkLabel) return false; // 派生边（依赖/exec）禁删
+          if (am?.taskLinkLabel || am?.execLinkLabel) continue; // 派生边禁删（跳过）
+          directDelete.push(idStr);
+          continue;
         }
-        return true;
-      });
-      if (allowed.length === idArr.length) return origDeleteShapes(ids);
-      if (allowed.length > 0) return origDeleteShapes(allowed);
+        if (shape.type === "session-card") {
+          const sid = (shape.props as { sessionId?: string }).sessionId;
+          if (sid) sessionDelete.push({ sid, shapeId: idStr });
+          else directDelete.push(idStr); // draft 卡（未绑定）直接删
+          continue;
+        }
+        if (shape.type === "task-card") {
+          const cid = (shape.props as { cardId?: string }).cardId;
+          if (cid) cardDelete.push({ cid, shapeId: idStr });
+          else directDelete.push(idStr); // 空卡（未建）直接删
+          continue;
+        }
+        directDelete.push(idStr);
+      }
+      // 会话删除：确认（合并一次）→ 逐个调删除 API（服务端事务清理）→ 成功删 shape
+      if (sessionDelete.length > 0) {
+        const msg = sessionDelete.length > 1
+          ? `删除 ${sessionDelete.length} 个会话？将同时删除画布卡片并断开任务卡关联。此操作不可撤销。`
+          : "删除该会话？将同时删除画布卡片并断开任务卡关联。此操作不可撤销。";
+        if (window.confirm(msg)) {
+          for (const d of sessionDelete) {
+            void (async () => {
+              try {
+                const res = await fetch(`/api/sessions/${encodeURIComponent(d.sid)}`, { method: "DELETE" });
+                if (res.ok) origDeleteShapes([d.shapeId as never]);
+              } catch { /* 删除失败静默，卡保留 */ }
+            })();
+          }
+        }
+      }
+      // 任务卡删除：确认 → 逐个调删除 API → 成功删 shape
+      if (cardDelete.length > 0) {
+        const msg = cardDelete.length > 1
+          ? `删除 ${cardDelete.length} 张任务卡？将删除卡/依赖线/执行会话连线；关联的执行会话保留。`
+          : "删除该任务卡？将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。";
+        if (window.confirm(msg)) {
+          for (const d of cardDelete) {
+            void (async () => {
+              try {
+                const res = await fetch(`/api/task-cards/${encodeURIComponent(d.cid)}`, { method: "DELETE" });
+                if (res.ok) origDeleteShapes([d.shapeId as never]);
+              } catch { /* 静默 */ }
+            })();
+          }
+        }
+      }
+      // 其余直接删
+      if (directDelete.length > 0) origDeleteShapes(directDelete as never);
       return editor;
     }) as typeof origDeleteShapes;
     // 监听 shape 变更 → 防抖保存（仅普通看板）

@@ -308,7 +308,8 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     if (!window.confirm("删除该会话？将同时删除画布卡片，并断开任务卡的关联（如被引用）。此操作不可撤销。")) return;
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
-      if (res.ok) editor?.deleteShapes([shape.id]);
+      // store.remove 绕过 deleteShapes 包装（避免二次确认）：API 已删会话，直接移除画布卡
+      if (res.ok) editor?.store.remove([shape.id as never]);
     } catch {
       // 删除失败静默（会话仍在）
     }

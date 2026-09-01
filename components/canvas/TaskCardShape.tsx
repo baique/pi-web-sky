@@ -272,7 +272,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     if (!window.confirm("删除该任务卡？将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。")) return;
     try {
       const res = await fetch(`/api/task-cards/${encodeURIComponent(cardId)}`, { method: "DELETE" });
-      if (res.ok) editor.deleteShapes([shape.id]);
+      // store.remove 绕过 deleteShapes 包装（避免二次确认）：API 已删任务卡，直接移除画布卡
+      if (res.ok) editor.store.remove([shape.id as never]);
     } catch {
       // 删除失败静默（任务卡仍在）
     }
