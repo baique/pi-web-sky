@@ -1112,6 +1112,14 @@ export function useBoardCanvas({
         const spot = findFreeSpot(editor);
         addSessionNode(sid, spot.x, spot.y);
       }
+      // 补卡后重建任务卡派生边（exec 线指向新节点，幂等）：
+      // 画布删卡被 diff 补回（新 node id）后，原 exec 边指向旧节点会悬空，这里对齐。
+      if (validMissing.length > 0) {
+        void fetch(`/api/boards/${encodeURIComponent(boardIdRef.current)}/reconcile-task-edges`, {
+          method: "POST",
+          cache: "no-store",
+        }).catch(() => {});
+      }
     } catch {
       // 网络/解析失败静默，下轮重试
     }

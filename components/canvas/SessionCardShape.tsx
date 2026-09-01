@@ -300,6 +300,20 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     }]);
   };
 
+  // 删除会话：确认后调 DELETE /api/sessions/[id]（服务端 removeSessionFromBoards 清理画布卡/exec 线/任务卡引用/会话文件），成功删 shape。
+  // 原子-链接：会话卡是会话的唯一画布实体，删卡 = 删会话（确认制）。
+  const handleDeleteSession = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!sessionId) return;
+    if (!window.confirm("删除该会话？将同时删除画布卡片，并断开任务卡的关联（如被引用）。此操作不可撤销。")) return;
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+      if (res.ok) editor?.deleteShapes([shape.id]);
+    } catch {
+      // 删除失败静默（会话仍在）
+    }
+  };
+
   // 展开态：上半部标题栏（pointerEvents none → tldraw 原生拖拽/选中），
   // 下半部嵌工作台（pointerEvents all → 消息/输入可交互）。
   // 工作台在卡片内部，resize 卡片时宽度天然跟随，不再有 overlay 遮挡问题。
@@ -397,6 +411,38 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           <div style={{ flex: 1 }} />
           {/* 导航条 portal 挂载点：SessionWorkbench 将 SessionNavBar 渲染到这里（展开按钮之前） */}
           <div data-session-navbar-slot style={{ display: "flex", alignItems: "center", pointerEvents: "all" }} />
+          {!isDraft && (
+            <button
+              type="button"
+              onClick={(e) => void handleDeleteSession(e)}
+              onPointerDown={(e) => e.stopPropagation()}
+              title="删除会话"
+              aria-label="删除会话"
+              style={{
+                flexShrink: 0,
+                pointerEvents: "all",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 20,
+                height: 20,
+                padding: 0,
+                border: "none",
+                borderRadius: 5,
+                background: "transparent",
+                color: "var(--text-dim)",
+                cursor: "pointer",
+              }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 6h18" />
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+              </svg>
+            </button>
+          )}
           <button
             type="button"
             onClick={toggleExpand}
