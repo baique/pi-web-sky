@@ -1500,7 +1500,6 @@ export function AppShell() {
         onOpenBoard={handleOpenBoard}
         onOpenTaskBoard={handleOpenTaskBoard}
         activeBoardId={activeBoardId}
-        runningBoardCount={runningSessionIds.size}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
