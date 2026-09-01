@@ -366,6 +366,24 @@ body {
   box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10);
 }
 
+/* ── 动态毛玻璃降级（useDynamicGlass）───────────────
+   消息滚动 / 看板卡片拖拽期间，背后像素每帧变化导致 backdrop-filter
+   每帧重采样+高斯模糊（成本 ∝ 半径²）。滚动/拖拽中临时把各 blur 档降到
+   2-3px、saturate 置 100%，静止（停 120ms）后完整恢复，显示效果不变。
+   组件零改动：所有 backdrop-filter 都引用 --glass-blur-* / --board-blur /
+   --glass-saturate / --board-scrim-filter 变量，覆盖变量即全量生效。
+   选择器特异性与 html.dark 相同(0,1,1)且定义在其后，dark 主题下也能覆盖。 */
+html.glass-dynamic {
+  --glass-blur: 2px;
+  --glass-blur-heavy: 3px;
+  --glass-blur-panel: 3px;
+  --glass-blur-popover: 3px;
+  --glass-blur-bubble: 2px !important;  /* JS 内联写入(applyWallpaperCss)，须 !important 压过内联 */
+  --board-blur: 3px;
+  --board-scrim-filter: none !important;  /* JS 内联写入，须 !important 压过内联 */
+  --glass-saturate: 100%;
+}
+
 .extension-status-shelf {
   display: flex;
   position: relative;
