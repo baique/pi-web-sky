@@ -71,7 +71,8 @@ export const taskCardProps = {
   readyStatus: T.string,
   execStatus: T.string,
   priority: T.number,
-  due: T.number.optional(),
+  /** ms epoch；undefined = 无截止。允许 null（业务层语义），shape 可能带 null */
+  due: T.number.nullable().optional(),
   expanded: T.boolean,
   w: T.number,
   h: T.number,
@@ -280,6 +281,38 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shapeExecStatus]);
 
+  // 远程同步：对方编辑 name/description 通过 CRDT 更新 shape props → 镜像进本端 draft。
+  // 自己打字时 set() 已同步写 shape，shape 值 == draft 值，不会误覆盖；
+  // 只有远程变化（shape 值 != draft 值）才同步，避免正在输入被覆盖。
+  const remoteName = useValue("remoteName", () => {
+    const s = editor.getShape(shape.id);
+    const p = s?.props as TaskCardProps | undefined;
+    const n = p?.name;
+    return n && n !== "新建任务" ? n : "";
+  }, [editor, shape.id]);
+  const remoteDescription = useValue("remoteDescription", () => {
+    const s = editor.getShape(shape.id);
+    return (s?.props as TaskCardProps | undefined)?.description ?? "";
+  }, [editor, shape.id]);
+  // 聚焦中不覆盖（正在输入），失焦/空闲时远程变化才同步
+  const editingRef = useRef(false);
+  useEffect(() => {
+    if (!draft) return;
+    if (editingRef.current) return; // 本端正在输入，不覆盖
+    if (remoteName !== undefined && remoteName !== draft.name) {
+      setDraft((d) => (d ? { ...d, name: remoteName } : d));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteName]);
+  useEffect(() => {
+    if (!draft) return;
+    if (editingRef.current) return;
+    if (remoteDescription !== undefined && remoteDescription !== draft.description) {
+      setDraft((d) => (d ? { ...d, description: remoteDescription } : d));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteDescription]);
+
   // 表单草稿（受控）。空卡=默认草稿（建卡向导）：从 shape props 恢复已填内容（name/description
   // 由 set() 实时写回 shape → sync.db 持久化，刷新不丢）；已建卡=detail 加载后初始化一次。
   const [draft, setDraft] = useState<TaskCard | null>(() =>
@@ -325,6 +358,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   }, [detail]);
 
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   // 必填校验错误（任务名称）：显示在输入框正下方，不混入底部 saveError
   const [nameError, setNameError] = useState<string | null>(null);
@@ -342,15 +376,14 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
 
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // 空卡编辑实时写回 shape props → sync.db 持久化（刷新不丢草稿）。
-  // name/description 是空卡唯一可编辑的持久化字段（其余字段点派发才落库）。
-  const isCreatingRef = useRef(isCreating);
-  isCreatingRef.current = isCreating;
+  // 编辑实时写回 shape props → CRDT 广播到其他端（多浏览器实时一致）+ sync.db 持久化（刷新不丢）。
+  // name/description 是 shape 展示字段：空卡草稿与已建卡编辑都写回。
+  // 其余字段（cwd/priority/依赖等）已建卡保存时走 API 落库，不实时广播。
   const set = <K extends keyof TaskCard>(key: K, value: TaskCard[K]) => {
     setDraft((d) => {
       const next = d ? { ...d, [key]: value } : d;
-      // 空卡：name/description 同步到 shape（持久化），其余字段不落 shape
-      if (next && isCreatingRef.current && (key === "name" || key === "description")) {
+      // name/description 同步到 shape（CRDT 广播 + 持久化）
+      if (next && (key === "name" || key === "description")) {
         editor.updateShape<TaskCardShape>({
           id: shape.id,
           type: "task-card",
@@ -390,7 +423,9 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     }
     setSaving(true);
     setSaveError(null);
-    setSaveError(null);
+    // 防重复提交（双击/连点）
+    if (savingRef.current) return;
+    savingRef.current = true;
     // 画布节点已迁 tldraw sync（shape 自带 cardId prop 持久化），不再传 nodeId 绑定旧 board_nodes。
     // 建卡即派发：readyStatus=todo（可调度）。
     const created = await createCard({
@@ -407,6 +442,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
       prerequisites: draftPrereq,
       related: draftRelated,
     });
+    savingRef.current = false;
     setSaving(false);
     if (created) {
       // 更新 shape props：空卡转正为已建卡（cardId 落 shape，store 变更自动持久化到 sync.db）
@@ -434,8 +470,9 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
       setNameError("请填写任务名称");
       return;
     }
+    if (savingRef.current) return; // 防重复提交
     setSaving(true);
-    setSaveError(null);
+    savingRef.current = true;
     setSaveError(null);
     const ok = await saveCard({
       name: draft.name,
@@ -451,6 +488,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
       prerequisites: draftPrereq,
       related: draftRelated,
     });
+    savingRef.current = false;
     setSaving(false);
     if (ok) {
       // 同步收合态展示字段（execStatus 由画布层轮询镜像，不在保存时回写）
@@ -459,6 +497,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         type: "task-card",
         props: {
           name: draft.name,
+          description: draft.description ?? "",
           readyStatus: draft.readyStatus,
           priority: draft.priority,
           due: draft.due ?? undefined,
@@ -533,6 +572,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         }}
         value={draft.name}
         onChange={(e) => { set("name", e.target.value); if (nameError) setNameError(null); }}
+        onFocus={() => { editingRef.current = true; }}
+        onBlur={() => { editingRef.current = false; }}
         placeholder="任务名称"
       />
       {/* 必填提示：紧贴输入框下方（不沉到表单底部） */}
@@ -546,6 +587,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         style={{ ...FIELD_STYLE, flex: 1, minHeight: 70, resize: "none", fontFamily: "var(--font-mono)", fontSize: 11 }}
         value={draft.description}
         onChange={(e) => set("description", e.target.value)}
+        onFocus={() => { editingRef.current = true; }}
+        onBlur={() => { editingRef.current = false; }}
         placeholder="任务描述"
         spellCheck={false}
       />

@@ -339,9 +339,36 @@ export function CanvasStage({
             {board.error}
           </div>
         ) : board.loading || !board.syncStore || board.syncStore.status !== "synced-remote" ? (
-          /* 数据加载中：不挂 Tldraw（文档未同步），显示加载覆盖层 */
-          <div style={{ position: "absolute", inset: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
-            {t("boards.loadingCanvas")}
+          /* 数据加载中：不挂 Tldraw（文档未同步），显示加载覆盖层。
+             样式与加载段 2（SessionCanvas dynamic）完全一致：
+             深色半透明 + 白字 + spinner */
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 30,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "rgba(8, 14, 30, 0.85)",
+              color: "rgba(255, 255, 255, 0.85)",
+              fontSize: 13,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span
+                aria-hidden
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: "50%",
+                  border: "2px solid rgba(255, 255, 255, 0.18)",
+                  borderTopColor: "rgba(255, 255, 255, 0.9)",
+                  animation: "spin 0.8s linear infinite",
+                }}
+              />
+              {t("boards.loadingCanvas")}
+            </div>
           </div>
         ) : (
           <Tldraw

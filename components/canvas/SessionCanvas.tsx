@@ -36,8 +36,8 @@ const CanvasStage = dynamic(() => import("./CanvasStage").then((m) => m.CanvasSt
             width: 14,
             height: 14,
             borderRadius: "50%",
-            border: "2px solid color-mix(in srgb, var(--text) 15%, transparent)",
-            borderTopColor: "var(--accent)",
+            border: "2px solid rgba(255, 255, 255, 0.18)",
+            borderTopColor: "rgba(255, 255, 255, 0.9)",
             animation: "spin 0.8s linear infinite",
           }}
         />

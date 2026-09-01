@@ -45,7 +45,9 @@ const DEFAULTS: WallpaperSettings = {
   bubbleOpacity: 44,
   bubbleBlur: 8,
   scrimAlpha: 0,
-  scrimBlur: 2,
+  // 默认无磨砂（0）。打开画布时先按默认渲染，再从存储恢复——
+  // 若默认非 0，首帧会先闪一下 2px 再跳变成存储值（见 useWallpaperSettings 惰性初始化注释）
+  scrimBlur: 0,
 };
 
 const LS_KEY = "wallpaper-settings";
@@ -165,11 +167,11 @@ export function loadMediaDims(
 
 /** Load, persist and live-apply wallpaper display settings. */
 export function useWallpaperSettings(hasImage: boolean) {
-  const [settings, setSettings] = useState<WallpaperSettings>(DEFAULTS);
-
-  useEffect(() => {
-    setSettings(loadWallpaperSettings());
-  }, []);
+  // 惰性初始化直接读 localStorage：首帧即存储值（无存储时为默认）。
+  // 不要用 DEFAULTS 起步再挂载后 setSettings 恢复——那会让首帧先应用默认值
+  // （如 scrimBlur 2px）再跳变到存储值，打开画布时磨砂强度闪烁一下。
+  // SSR 阶段 localStorage 不存在，loadWallpaperSettings 内部 try/catch 返回默认，安全。
+  const [settings, setSettings] = useState<WallpaperSettings>(() => loadWallpaperSettings());
 
   useEffect(() => {
     applyWallpaperCss(settings, hasImage);
