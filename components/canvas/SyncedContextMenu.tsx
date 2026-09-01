@@ -110,8 +110,11 @@ function BoardContextMenuContent() {
     return <DefaultContextMenuContent />;
   }
   const label = derived?.execLinkLabel ? "执行会话连线（自动生成，不可删除）" : "依赖连线（自动生成，不可删除）";
+  // 注意：不要在这里包 TldrawUiMenuContextProvider type="menu"——MenuItem 会按 menuType
+  // 渲染 DropdownMenuItem（需 DropdownMenu 父级，我们没有）。直接继承 SyncedContextMenu
+  // 外层 type="context-menu" 的 Radix ContextMenu 上下文，MenuItem 渲染 Radix ContextMenu.Item。
   return (
-    <TldrawUiMenuContextProvider type="menu" sourceId="context-menu">
+    <>
       {derived && (
         <TldrawUiMenuGroup id="task-link">
           <TldrawUiMenuItem id="task-link-readonly" label={label} disabled noClose onSelect={() => {}} />
@@ -135,7 +138,7 @@ function BoardContextMenuContent() {
           />
         </TldrawUiMenuGroup>
       )}
-    </TldrawUiMenuContextProvider>
+    </>
   );
 }
 
