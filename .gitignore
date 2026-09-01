@@ -48,3 +48,6 @@ next-env.d.ts
 !docs/**/*.png
 .worktrees/
 .superpowers/
+
+# tldraw sync 试点临时 DB
+/.sync-demo/
