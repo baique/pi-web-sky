@@ -347,19 +347,28 @@ function TaskCard({
         }}
       >
         {renaming ? (
-          <input
-            ref={renameRef}
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commitRename();
-              if (e.key === "Escape") setRenaming(false);
-            }}
-            onBlur={commitRename}
+          <span
+            onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
-            autoFocus
-            style={{ flex: 1, minWidth: 0, fontSize: 12, padding: "5px 8px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--side-input)", color: "var(--text)", height: 30 }}
-          />
+            style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, padding: "3px 0 3px 5px" }}
+          >
+            {/* 图标槽：与任务行 FolderIcon 同尺寸同起点，保持文字对齐 */}
+            <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>
+              <FolderIcon size={13} open={!collapsed} />
+            </span>
+            <input
+              ref={renameRef}
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename();
+                if (e.key === "Escape") setRenaming(false);
+              }}
+              onBlur={commitRename}
+              autoFocus
+              style={{ flex: 1, minWidth: 0, fontSize: 12, padding: "5px 8px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--side-input)", color: "var(--text)", height: 30 }}
+            />
+          </span>
         ) : (
           <>
             <span
@@ -705,10 +714,12 @@ export function TaskArea({
     <div style={{ paddingBottom: 4 }}>
       {newTaskOpen && (
         <div
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
           style={{
             display: "flex", alignItems: "center", gap: 4,
             margin: "0 4px 4px",
-            padding: "0 8px",
+            padding: "0 8px 0 5px",
             height: 32,
             boxSizing: "border-box",
             background: "var(--side-input)",
@@ -716,6 +727,10 @@ export function TaskArea({
             borderRadius: 6,
           }}
         >
+          {/* 图标槽：与任务行 FolderIcon 同尺寸同起点，保持文字对齐 */}
+          <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>
+            <FolderIcon size={13} open={false} />
+          </span>
           <input
             ref={newTaskRef}
             value={newTaskName}
@@ -724,7 +739,14 @@ export function TaskArea({
               if (e.key === "Enter") commitNewTask();
               if (e.key === "Escape") { onNewTaskOpenChange(false); setNewTaskName(""); }
             }}
-            onBlur={() => { onNewTaskOpenChange(false); setNewTaskName(""); }}
+            onBlur={() => {
+              const name = newTaskName.trim();
+              if (name) {
+                onNewTask(name);
+                setNewTaskName("");
+              }
+              onNewTaskOpenChange(false);
+            }}
             placeholder={t("sidebar.taskName")}
             style={{
               flex: 1, minWidth: 0,

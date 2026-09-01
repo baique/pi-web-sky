@@ -103,8 +103,13 @@ export function BoardSection({
   };
 
   const rename = async (id: string) => {
+    if (busy) return;
     const name = renamingName.trim();
-    if (!name || busy) return;
+    if (!name) {
+      // 空名/纯空格：丢弃改名，直接退出重命名态
+      setRenamingId(null);
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch(`/api/boards/${encodeURIComponent(id)}`, {
@@ -234,10 +239,12 @@ export function BoardSection({
           {/* 新建看板（样式同新建任务） */}
           {newOpen && (
             <div
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
               style={{
                 display: "flex", alignItems: "center", gap: 4,
                 margin: "0 4px 4px",
-                padding: "0 8px",
+                padding: "0 8px 0 5px",
                 height: 32,
                 boxSizing: "border-box",
                 background: "var(--side-input)",
@@ -245,6 +252,14 @@ export function BoardSection({
                 borderRadius: 6,
               }}
             >
+              {/* 图标槽：与看板行图标同尺寸同起点，保持文字对齐 */}
+              <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <path d="M3 9h18" />
+                  <path d="M9 21V9" />
+                </svg>
+              </span>
               <input
                 ref={newInputRef}
                 value={newName}
@@ -253,7 +268,11 @@ export function BoardSection({
                   if (e.key === "Enter") void create();
                   if (e.key === "Escape") { setNewOpen(false); setNewName(""); }
                 }}
-                onBlur={() => { setNewOpen(false); setNewName(""); }}
+                onBlur={() => {
+                  if (newName.trim()) void create();
+                  setNewOpen(false);
+                  setNewName("");
+                }}
                 placeholder={t("boards.namePlaceholder")}
                 style={{
                   flex: 1, minWidth: 0,
@@ -477,6 +496,14 @@ function BoardRow({
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
 
+  const boardIcon = (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 9h18" />
+      <path d="M9 21V9" />
+    </svg>
+  );
+
   const boardIconStyle: React.CSSProperties = {
     flexShrink: 0,
     display: "flex",
@@ -506,20 +533,29 @@ function BoardRow({
       }}
     >
       {renaming ? (
-        <input
-          ref={renameInputRef}
-          value={renameValue}
-          onChange={(e) => onRenameValueChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onCommitRename();
-            if (e.key === "Escape") onCancelRename();
-          }}
-          onBlur={onCommitRename}
+        <span
           onMouseDown={(e) => e.stopPropagation()}
-          autoFocus
-          placeholder={t("boards.namePlaceholder")}
-          style={{ flex: 1, minWidth: 0, fontSize: 12, padding: "5px 8px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--side-input)", color: "var(--text)", height: 30, margin: "3px 6px", width: "calc(100% - 12px)" }}
-        />
+          onClick={(e) => e.stopPropagation()}
+          style={{ display: "flex", alignItems: "center", gap: 4, margin: "3px 6px", padding: "0 0 0 5px", width: "calc(100% - 12px)", boxSizing: "border-box" }}
+        >
+          {/* 图标槽：与看板行图标同尺寸同起点，保持文字对齐 */}
+          <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>
+            {boardIcon}
+          </span>
+          <input
+            ref={renameInputRef}
+            value={renameValue}
+            onChange={(e) => onRenameValueChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onCommitRename();
+              if (e.key === "Escape") onCancelRename();
+            }}
+            onBlur={onCommitRename}
+            autoFocus
+            placeholder={t("boards.namePlaceholder")}
+            style={{ flex: 1, minWidth: 0, fontSize: 12, padding: "5px 8px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--side-input)", color: "var(--text)", height: 30 }}
+          />
+        </span>
       ) : (
         <div
           draggable
@@ -544,11 +580,7 @@ function BoardRow({
         >
           {/* 图标槽：与任务 FolderIcon 同尺寸同起点（20px 槽 + 13px 图标） */}
           <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <path d="M3 9h18" />
-              <path d="M9 21V9" />
-            </svg>
+            {boardIcon}
           </span>
           <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {board.name}
