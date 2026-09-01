@@ -336,7 +336,10 @@ export function useBoardCanvas({
         void confirm({ message }).then((ok) => {
           if (!ok) { deleteConfirmingRef.current = false; return; } // 整体取消：会话/任务卡 + 一起选中的普通元素都不删
           // 乐观删除：确认即删 shape（即时反馈），API 失败由 reconcile/日志兜底
-          origDeleteShapes([...sessionDelete.map((d) => d.shapeId), ...cardDelete.map((d) => d.shapeId), ...directDelete] as never);
+          const del = [...sessionDelete.map((d) => d.shapeId), ...cardDelete.map((d) => d.shapeId), ...directDelete];
+          // 乐观删除：直接 store.remove（绕过 tldraw deleteShapes 的 run/guard——在 confirm 异步窗口内
+          // this.run 批处理不删，readonly/locked 检查也可能拦截）。按钮路径同此验证有效。
+          editor.store.remove(del as never);
           const apis = [
             ...sessionDelete.map((d) =>
               fetch(`/api/sessions/${encodeURIComponent(d.sid)}`, { method: "DELETE" })
