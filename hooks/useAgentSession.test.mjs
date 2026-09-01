@@ -112,7 +112,7 @@ test("new-session promotion rekeys drafts before publishing the real session", (
       < promoteSource.indexOf("onSessionCreated?.({"),
   );
   assert.match(promoteSource, /}, provisionalDraftKey\)/);
-  assert.match(chatWindowSource, /draftKey=\{session\?\.id \?\? newSessionDraftKey \?\? undefined\}/);
+  assert.match(chatWindowSource, /draftKey=\{session\?\.id \?\? \(sessionIdRef\.current \?\? newSessionDraftKey\) \?\? undefined\}/);
 });
 
 test("fresh sessions restore the preferred tool preset without overriding existing sessions", () => {
