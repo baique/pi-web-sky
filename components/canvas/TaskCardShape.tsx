@@ -6,11 +6,10 @@ import type { TLBaseShape, TLShapeId, TLShapePartial } from "tldraw";
 import type { ExecStatus, ReadyStatus, TaskCard } from "@/lib/task-card-store";
 import { linkTargetIds, useTaskCard } from "@/hooks/useTaskCards";
 import { ThemedSelect } from "./ThemedSelect";
+import { useCardGlass } from "@/hooks/useCardGlass";
 import { TaskCardMultiSelect } from "./TaskCardMultiSelect";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
 import { WorktreePicker } from "./WorktreePicker";
-import { confirm } from "./ConfirmDialog";
-import { dispatchBoardBaseUpdated } from "@/lib/board-events";
 
 /**
  * 任务卡（task-card）：看板上的工作项卡，独立实体（业务字段在 task_cards 表）。
@@ -244,6 +243,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   }, [editor]);
 
   const rootRef = useRef<HTMLDivElement>(null);
+  // 卡片玻璃（局部贴图）：内嵌视口对齐的模糊壁纸层，见 useCardGlass
+  const setGlassContainer = useCardGlass(editor, shape.id, "var(--assistant-card-glass)");
 
   const isCreating = !cardId;
   // 执行会话 id（exec 线真相源）：用于「定位执行会话」跳到画布上对应的会话卡
@@ -268,20 +269,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     }
   }, [editor, sessionId]);
 
-  // 删除任务卡：确认后调 DELETE /api/task-cards/[id]（服务端 deleteCard 级联删依赖/问答/taskcard 节点/exec 边；执行会话保留），成功删 shape。
-  const handleDeleteCard = async () => {
-    if (isCreating || !cardId) return;
-    if (!(await confirm({ message: "删除该任务卡？\n将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。" }))) return;
-    // 乐观删除：确认即移除画布卡（即时反馈），API 失败由日志兜底（服务端卡仍在，可重新打开）
-    editor.store.remove([shape.id as never]);
-    void fetch(`/api/task-cards/${encodeURIComponent(cardId)}`, { method: "DELETE" })
-      .then((r) => r.json().catch(() => null))
-      .then((j: { updated?: number | null } | null) => {
-        // 删除 bump 了看板 updated：派发事件刷新乐观锁基线，防后续防抖保存 409
-        if (typeof j?.updated === "number" && boardId) dispatchBoardBaseUpdated(boardId, j.updated);
-      })
-      .catch((e) => console.warn(`[board] 删除任务卡 ${cardId} 异常`, e));
-  };
+  // 删除任务卡入口在右键菜单（SyncedContextMenu）：确认 → DELETE /api/task-cards/[id]（级联删）→ 删 shape
 
   // 轮询器状态同步：画布层 2.5s 轮询会把本 shape 的 execStatus props 更新为调度器最新状态，
   // 这里镜像进 draft——头部徽章（读 draft.execStatus）自动刷新，保存时也不会用旧值覆盖调度器状态。
@@ -729,16 +717,6 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
                 title="定位到该任务的执行会话卡"
               >
                 会话
-              </button>
-            )}
-            {!isCreating && (
-              <button
-                type="button"
-                style={footerBtnStyle}
-                onClick={() => void handleDeleteCard()}
-                title="删除任务卡"
-              >
-                删除
               </button>
             )}
             {isCreating ? (

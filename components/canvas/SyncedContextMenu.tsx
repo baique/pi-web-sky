@@ -19,6 +19,9 @@ import {
 } from "tldraw";
 import { memo, useCallback, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
+import { useBoardId } from "./TaskCardShape";
+import { confirm } from "./ConfirmDialog";
+import { dispatchBoardBaseUpdated } from "@/lib/board-events";
 
 /**
  * 受控化的 ContextMenu（替代 tldraw 默认 DefaultContextMenu）。
@@ -48,19 +51,55 @@ const TASK_LINK_LABELS = new Set(["prerequisite", "related"]);
  */
 function BoardContextMenuContent() {
   const editor = useEditor();
+  const boardId = useBoardId();
   const selected = useValue("ctx-selection", () => editor.getSelectedShapes(), [editor]);
   const derived = selected
     .map((s) => s.meta as { taskLinkLabel?: string; execLinkLabel?: string } | undefined)
     .find((meta) => (meta?.taskLinkLabel !== undefined && TASK_LINK_LABELS.has(meta.taskLinkLabel)) || meta?.execLinkLabel !== undefined);
-  if (!derived) {
+  // 选中的已建任务卡（cardId 非空）：右键菜单提供「删除任务卡」（确认制）
+  const taskCardTargets = selected
+    .filter((s) => s.type === "task-card")
+    .map((s) => ({ shapeId: s.id as string, cardId: (s.props as { cardId?: string }).cardId }))
+    .filter((t): t is { shapeId: string; cardId: string } => Boolean(t.cardId));
+
+  const handleDeleteTaskCards = async (targets: Array<{ shapeId: string; cardId: string }>) => {
+    const message = targets.length > 1
+      ? `删除 ${targets.length} 张任务卡？\n将删除卡/依赖线/执行会话连线；关联的执行会话保留。`
+      : "删除该任务卡？\n将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。";
+    if (!(await confirm({ message }))) return;
+    for (const t of targets) {
+      // 乐观删除：直接 store.remove（绕过 deleteShapes 的 run/guard，确认即删）
+      editor.store.remove([t.shapeId as never]);
+      void fetch(`/api/task-cards/${encodeURIComponent(t.cardId)}`, { method: "DELETE" })
+        .then((r) => r.json().catch(() => null))
+        .then((j: { updated?: number | null } | null) => {
+          // 删除 bump 了看板 updated：派发事件刷新乐观锁基线，防后续防抖保存 409
+          if (typeof j?.updated === "number" && boardId) dispatchBoardBaseUpdated(boardId, j.updated);
+        })
+        .catch((e) => console.warn(`[board] 删除任务卡 ${t.cardId} 异常`, e));
+    }
+  };
+
+  if (!derived && taskCardTargets.length === 0) {
     return <DefaultContextMenuContent />;
   }
-  const label = derived.execLinkLabel ? "执行会话连线（自动生成，不可删除）" : "依赖连线（自动生成，不可删除）";
+  const label = derived?.execLinkLabel ? "执行会话连线（自动生成，不可删除）" : "依赖连线（自动生成，不可删除）";
   return (
     <TldrawUiMenuContextProvider type="menu" sourceId="context-menu">
-      <TldrawUiMenuGroup id="task-link">
-        <TldrawUiMenuItem id="task-link-readonly" label={label} disabled noClose onSelect={() => {}} />
-      </TldrawUiMenuGroup>
+      {derived && (
+        <TldrawUiMenuGroup id="task-link">
+          <TldrawUiMenuItem id="task-link-readonly" label={label} disabled noClose onSelect={() => {}} />
+        </TldrawUiMenuGroup>
+      )}
+      {taskCardTargets.length > 0 && (
+        <TldrawUiMenuGroup id="task-card-delete">
+          <TldrawUiMenuItem
+            id="delete-task-card"
+            label={taskCardTargets.length > 1 ? `删除 ${taskCardTargets.length} 张任务卡` : "删除任务卡"}
+            onSelect={() => void handleDeleteTaskCards(taskCardTargets)}
+          />
+        </TldrawUiMenuGroup>
+      )}
     </TldrawUiMenuContextProvider>
   );
 }
