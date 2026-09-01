@@ -8,6 +8,8 @@ export type SidebarTab = "sessions" | "files";
 interface Props {
   active: SidebarTab;
   onChange: (tab: SidebarTab) => void;
+  /** 当前正在运行的会话数：>0 时在「会话」tab 显示 会话（N），0 不显示 */
+  runningCount?: number;
 }
 
 /**
@@ -16,13 +18,14 @@ interface Props {
  * paints its own 2px accent line over it. Hover is React-state driven (no
  * manual style writes — those survive re-renders and leak stale colors).
  */
-export function SessionTabs({ active, onChange }: Props) {
+export function SessionTabs({ active, onChange, runningCount = 0 }: Props) {
   const { t } = useI18n();
   const [hoveredTab, setHoveredTab] = useState<SidebarTab | null>(null);
+  const sessionsLabel = runningCount > 0 ? `${t("sidebar.sessionTab")}（${runningCount}）` : t("sidebar.sessionTab");
   const tabs: { key: SidebarTab; label: string; icon: React.ReactNode }[] = [
     {
       key: "sessions",
-      label: t("sidebar.sessionTab"),
+      label: sessionsLabel,
       icon: (
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />

@@ -1461,8 +1461,9 @@ export function AppShell() {
   }, [projectTrustBusy, projectTrustCwd]);
 
   const activeFileTab = fileTabs.find((tab) => tab.id === activeFileTabId) ?? null;
-  const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
-  const windowTitle = activeCwdName ? `${activeCwdName} - Pi Web` : "Pi Web";
+  // 网站标题固定为 "Pi Web"，不再跟随当前工作目录（S1-4 修复：title 一直在变）。
+  // 下方 MutationObserver 继续兜底：agent 侧 setTitle 扩展若覆盖 title，立即拉回固定值。
+  const windowTitle = "Pi Web";
 
   useEffect(() => {
     const syncWindowTitle = () => {

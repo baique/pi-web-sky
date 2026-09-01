@@ -1893,6 +1893,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
       <SessionTabs
         active={sidebarTab}
+        runningCount={runningSessionIds.size}
         onChange={(tab) => {
           setSidebarTab(tab);
           saveSidebarTab(tab);
