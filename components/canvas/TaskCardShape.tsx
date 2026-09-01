@@ -36,6 +36,8 @@ export interface TaskCardProps {
   /** 项目内编号 #N */
   number: number;
   name: string;
+  /** 空卡草稿/已建卡描述（持久化到 sync.db，刷新不丢） */
+  description: string;
   readyStatus: ReadyStatus;
   execStatus: ExecStatus;
   /** 高1 / 中0 / 低-1 */
@@ -65,6 +67,7 @@ export const taskCardProps = {
   cardId: T.string,
   number: T.number,
   name: T.string,
+  description: T.string.optional(),
   readyStatus: T.string,
   execStatus: T.string,
   priority: T.number,
@@ -113,6 +116,7 @@ export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
       cardId: "",
       number: 0,
       name: "新建任务",
+      description: "",
       readyStatus: "draft",
       execStatus: "not_started",
       priority: 0,
@@ -276,7 +280,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shapeExecStatus]);
 
-  // 表单草稿（受控）。空卡=默认草稿（建卡向导）；已建卡=detail 加载后初始化一次。
+  // 表单草稿（受控）。空卡=默认草稿（建卡向导）：从 shape props 恢复已填内容（name/description
+  // 由 set() 实时写回 shape → sync.db 持久化，刷新不丢）；已建卡=detail 加载后初始化一次。
   const [draft, setDraft] = useState<TaskCard | null>(() =>
     isCreating
       ? {
@@ -284,8 +289,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
           boardId: "",
           projectKey: "",
           number: 0,
-          name: "",
-          description: "",
+          name: shape.props.name === "新建任务" ? "" : shape.props.name,
+          description: shape.props.description ?? "",
           readyStatus: "draft",
           execStatus: "not_started",
           priority: 0,
@@ -337,8 +342,26 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
 
   const rootRef = useRef<HTMLDivElement>(null);
 
+  // 空卡编辑实时写回 shape props → sync.db 持久化（刷新不丢草稿）。
+  // name/description 是空卡唯一可编辑的持久化字段（其余字段点派发才落库）。
+  const isCreatingRef = useRef(isCreating);
+  isCreatingRef.current = isCreating;
   const set = <K extends keyof TaskCard>(key: K, value: TaskCard[K]) => {
-    setDraft((d) => (d ? { ...d, [key]: value } : d));
+    setDraft((d) => {
+      const next = d ? { ...d, [key]: value } : d;
+      // 空卡：name/description 同步到 shape（持久化），其余字段不落 shape
+      if (next && isCreatingRef.current && (key === "name" || key === "description")) {
+        editor.updateShape<TaskCardShape>({
+          id: shape.id,
+          type: "task-card",
+          props: {
+            name: key === "name" ? (value as string) : next.name,
+            description: key === "description" ? (value as string) : next.description ?? "",
+          },
+        });
+      }
+      return next;
+    });
   };
 
   // wheel 拦截（表单区可滚动）：原生监听，内容溢出即拦（实验性去激活态条件）

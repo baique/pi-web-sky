@@ -105,8 +105,14 @@ export function useBoardCanvas({
   newSessionCwdRef.current = newSessionCwd;
 
   // ---- useSync：连接看板文档（CRDT 同步 + SQLite 持久化）----
+  // uri 必须稳定引用：useSync 的 effect 依赖 uri，模板字符串每次渲染都是新值 →
+  // 每次渲染重建连接 → 重连死循环 + 点派发后 loading（血泪）。boardId 不变则不重建。
+  const syncUri = useMemo(
+    () => `${SYNC_BASE}/connect/${encodeURIComponent(boardId)}`,
+    [boardId],
+  );
   const syncStore = useSync({
-    uri: `${SYNC_BASE}/connect/${encodeURIComponent(boardId)}`,
+    uri: syncUri,
     assets: inlineBase64AssetStore,
     shapeUtils: BOARD_SHAPE_UTILS,
   });
