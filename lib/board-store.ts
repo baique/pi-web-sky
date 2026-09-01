@@ -689,14 +689,22 @@ export function syncExecEdge(cardId: string): void {
  * 返回清理的节点数；无引用返回 0，幂等。
  * 供删会话流程调用（会话文件删除在事务外，由调用方负责）。
  */
-export function removeSessionFromBoards(sessionId: string): number {
+export interface RemoveSessionFromBoardsResult {
+  /** 清理的画布节点数 */
+  removedNodes: number;
+  /** 受影响看板及其最新 updated（前端刷新乐观锁基线，防删除后防抖保存 409） */
+  boards: Array<{ boardId: string; updated: number }>;
+}
+
+export function removeSessionFromBoards(sessionId: string): RemoveSessionFromBoardsResult {
   const db = getDb();
   const sessionNodes = db
     .prepare("SELECT id, board_id AS boardId FROM board_nodes WHERE kind = 'session' AND ref_id = ?")
     .all(sessionId) as Array<{ id: string; boardId: string }>;
-  if (sessionNodes.length === 0) return 0;
+  if (sessionNodes.length === 0) return { removedNodes: 0, boards: [] };
 
   const ts = now();
+  const touched = new Map<string, number>();
   db.exec("BEGIN");
   try {
     // 1. 任务卡解绑：所有 session_id 引用该会话的卡置空
@@ -708,9 +716,13 @@ export function removeSessionFromBoards(sessionId: string): number {
       db.prepare("DELETE FROM board_edges WHERE board_id = ? AND (from_id = ? OR to_id = ?)").run(n.boardId, n.id, n.id);
       db.prepare("DELETE FROM board_nodes WHERE board_id = ? AND id = ?").run(n.boardId, n.id);
       db.prepare("UPDATE boards SET updated = ? WHERE id = ?").run(ts, n.boardId);
+      touched.set(n.boardId, ts);
     }
     db.exec("COMMIT");
-    return sessionNodes.length;
+    return {
+      removedNodes: sessionNodes.length,
+      boards: [...touched.entries()].map(([boardId, updated]) => ({ boardId, updated })),
+    };
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;

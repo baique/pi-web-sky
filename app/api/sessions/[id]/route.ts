@@ -132,7 +132,7 @@ export async function DELETE(
   try {
     // 画布引用清理（断 exec 线/清任务卡/删节点，幂等）：无论文件状态都先执行——
     // 保证会话文件已丢失/未落盘时，看板卡片也能删除，不留孤儿。
-    removeSessionFromBoards(id);
+    const boardClean = removeSessionFromBoards(id);
 
     const filePath = await resolveSessionPath(id);
     if (!filePath || !existsSync(filePath)) {
@@ -143,7 +143,7 @@ export async function DELETE(
       invalidateSessionPathCache(id);
       invalidateSessionListCache();
       unassignSession(id);
-      return NextResponse.json({ ok: true });
+      return NextResponse.json({ ok: true, updatedBoards: toUpdatedBoards(boardClean.boards) });
     }
 
     // Read only the bounded header before deleting. header 读取失败（并发删除/损坏）
@@ -192,8 +192,13 @@ export async function DELETE(
     invalidateSessionPathCache(id);
     invalidateSessionListCache();
     unassignSession(id);
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, updatedBoards: toUpdatedBoards(boardClean.boards) });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
+}
+
+/** { boardId: updated } 映射（前端刷新乐观锁基线用） */
+function toUpdatedBoards(boards: Array<{ boardId: string; updated: number }>): Record<string, number> {
+  return Object.fromEntries(boards.map((b) => [b.boardId, b.updated]));
 }

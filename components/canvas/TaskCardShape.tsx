@@ -10,6 +10,7 @@ import { TaskCardMultiSelect } from "./TaskCardMultiSelect";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
 import { WorktreePicker } from "./WorktreePicker";
 import { confirm } from "./ConfirmDialog";
+import { dispatchBoardBaseUpdated } from "@/lib/board-events";
 
 /**
  * 任务卡（task-card）：看板上的工作项卡，独立实体（业务字段在 task_cards 表）。
@@ -274,7 +275,11 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     // 乐观删除：确认即移除画布卡（即时反馈），API 失败由日志兜底（服务端卡仍在，可重新打开）
     editor.store.remove([shape.id as never]);
     void fetch(`/api/task-cards/${encodeURIComponent(cardId)}`, { method: "DELETE" })
-      .then((r) => { if (!r.ok) console.warn(`[board] 删除任务卡 ${cardId} 失败`, r.status); })
+      .then((r) => r.json().catch(() => null))
+      .then((j: { updated?: number | null } | null) => {
+        // 删除 bump 了看板 updated：派发事件刷新乐观锁基线，防后续防抖保存 409
+        if (typeof j?.updated === "number" && boardId) dispatchBoardBaseUpdated(boardId, j.updated);
+      })
       .catch((e) => console.warn(`[board] 删除任务卡 ${cardId} 异常`, e));
   };
 
@@ -625,9 +630,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
           height: h,
           borderRadius: "var(--bubble-radius, 12px)",
           border: "1px solid var(--bubble-border)",
+          // 纯半透明色：透出舞台层的模糊壁纸（画布 scrim 已铺视口对齐的模糊壁纸）
           background: "var(--assistant-card-glass)",
-          backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
           boxShadow: "0 2px 10px -6px rgba(0,0,0,0.2)",
           color: "var(--text)",
           display: "flex",

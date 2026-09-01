@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { SessionWorkbench } from "./SessionWorkbench";
 import { confirm } from "./ConfirmDialog";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
-import { dispatchBoardSessionRenamed } from "@/lib/board-events";
+import { dispatchBoardBaseUpdated, dispatchBoardSessionRenamed } from "@/lib/board-events";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "./BoardSearchContext";
 
 /**
@@ -310,7 +310,12 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     // 乐观删除：确认即移除画布卡（即时反馈），API 失败由日志兜底（服务端数据仍在，可侧栏重删）
     editor?.store.remove([shape.id as never]);
     void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
-      .then((r) => { if (!r.ok) console.warn(`[board] 删除会话 ${sessionId} 失败`, r.status); })
+      .then((r) => r.json().catch(() => null))
+      .then((j: { updatedBoards?: Record<string, number> } | null) => {
+        // 删除 bump 了受影响看板的 updated：派发事件刷新乐观锁基线，防后续防抖保存 409
+        const b = j?.updatedBoards;
+        if (b) for (const [bid, u] of Object.entries(b)) dispatchBoardBaseUpdated(bid, u);
+      })
       .catch((e) => console.warn(`[board] 删除会话 ${sessionId} 异常`, e));
   };
 
@@ -329,10 +334,8 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           overflow: "visible",
           borderRadius: 18,
           border: isHighlighted ? "2px solid var(--accent)" : `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
-          // 卡片磨砂玻璃：略低于消息气泡（alpha 0.55 vs 气泡 0.44，blur 12px vs 气泡 18px）
+          // 纯半透明：透出画布 scrim 层的模糊壁纸（舞台层已铺视口对齐的模糊壁纸）
           background: "var(--board-card-glass)",
-          backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
           boxShadow: isHighlighted ? HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
           animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
           opacity: stale ? 0.55 : 1,
@@ -499,10 +502,8 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
         overflow: "hidden",
         borderRadius: 14,
         border: isHighlighted ? "2px solid var(--accent)" : `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
-        // 卡片磨砂玻璃：略低于消息气泡（alpha 0.55 vs 气泡 0.44，blur 12px vs 气泡 18px）
+        // 纯半透明：透出画布 scrim 层的模糊壁纸
         background: "var(--board-card-glass)",
-        backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-        WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
         boxShadow: isHighlighted ? HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
         animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
         opacity: stale ? 0.55 : 1,

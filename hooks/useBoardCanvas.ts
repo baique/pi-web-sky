@@ -144,6 +144,8 @@ export function useBoardCanvas({
   const runningTaskCardIdsRef = useRef<Set<string>>(new Set());
   // 删除确认 + API 在途标志：防止异步确认窗口内 deleteShapes 被重复触发（批量误删高危）
   const deleteConfirmingRef = useRef(false);
+  // reloadCanvas 程序化清空标志：清空是内部重载，不走删除确认（防止 409 重载触发二次 confirm）
+  const reloadingRef = useRef(false);
 
   // ---- 运行中快照轮询 ----
   useEffect(() => {
@@ -281,6 +283,11 @@ export function useBoardCanvas({
     // 防止 Delete 键/框选在异步确认窗口内重复触发二次 confirm / 批量误删（高危）。
     const origDeleteShapes = editor.deleteShapes.bind(editor);
     editor.deleteShapes = ((ids: Parameters<typeof origDeleteShapes>[0]) => {
+      // reloadCanvas 程序化清空：内部重载，不弹删除确认（直接全删）
+      if (reloadingRef.current) {
+        const a = Array.isArray(ids) ? ids : [ids];
+        return origDeleteShapes(a as never);
+      }
       if (deleteConfirmingRef.current) return editor;
       const idArr = Array.isArray(ids) ? ids : [ids];
       const directDelete: string[] = [];
@@ -333,12 +340,20 @@ export function useBoardCanvas({
           const apis = [
             ...sessionDelete.map((d) =>
               fetch(`/api/sessions/${encodeURIComponent(d.sid)}`, { method: "DELETE" })
-                .then((r) => { if (!r.ok) console.warn(`[board] 删除会话 ${d.sid} 失败`, r.status); })
+                .then((r) => r.json().catch(() => null))
+                .then((j: { updatedBoards?: Record<string, number> } | null) => {
+                  // 删除 API bump 了受影响看板的 updated：刷新当前看板乐观锁基线，防后续防抖保存 409
+                  const u = j?.updatedBoards?.[boardIdRef.current];
+                  if (typeof u === "number") baseUpdatedRef.current = u;
+                })
                 .catch((e) => console.warn(`[board] 删除会话 ${d.sid} 异常`, e)),
             ),
             ...cardDelete.map((d) =>
               fetch(`/api/task-cards/${encodeURIComponent(d.cid)}`, { method: "DELETE" })
-                .then((r) => { if (!r.ok) console.warn(`[board] 删除任务卡 ${d.cid} 失败`, r.status); })
+                .then((r) => r.json().catch(() => null))
+                .then((j: { updated?: number | null } | null) => {
+                  if (typeof j?.updated === "number") baseUpdatedRef.current = j.updated;
+                })
                 .catch((e) => console.warn(`[board] 删除任务卡 ${d.cid} 异常`, e)),
             ),
           ];
@@ -464,7 +479,12 @@ export function useBoardCanvas({
       hydratingRef.current = true;
       hydratedRef.current = false;
       setHydrated(false);
-      editor.deleteShapes(editor.getCurrentPageShapes().map((s) => s.id));
+      reloadingRef.current = true; // 程序化清空：不走删除确认（防止重载触发二次 confirm）
+      try {
+        editor.deleteShapes(editor.getCurrentPageShapes().map((s) => s.id));
+      } finally {
+        reloadingRef.current = false;
+      }
       setInitialCanvas(c); // 复用物化 effect 重新 hydrate
     } catch (e) {
       console.error("[board] reload failed", e);
