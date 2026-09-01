@@ -1503,7 +1503,20 @@ export function AppShell() {
         activeBoardId={activeBoardId}
         runningBoardCount={runningSessionIds.size}
       />
-      <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
+      <div
+        style={{
+          // 绝对定位于侧边栏底部，不再参与 flex 流式布局（否则被 SessionSidebar 的 height:100% 挤出容器）
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          padding: "8px",
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 4,
+          zIndex: 5,
+        }}
+      >
         {([
           {
              label: translate("common.models"),
@@ -2664,7 +2677,8 @@ export function AppShell() {
           flexDirection: "column",
           flexShrink: 0,
           paddingTop: "env(safe-area-inset-top)",
-          paddingBottom: "env(safe-area-inset-bottom)",
+          // 底部 48px 预留给配置区（模型/技能/插件），避免 SessionSidebar height:100% 把它挤出容器
+          paddingBottom: "calc(48px + env(safe-area-inset-bottom))",
           zIndex: 200,
         } as React.CSSProperties}
       >
