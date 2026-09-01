@@ -119,8 +119,6 @@ interface Props {
   onOpenTaskBoard?: (taskId: string) => void;
   /** 当前激活看板 id（看板模式下高亮） */
   activeBoardId?: string | null;
-  /** 全局运行中会话数（系统看板徽标） */
-  runningBoardCount?: number;
 }
 
 interface WorktreeEntry {
@@ -351,7 +349,7 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId, runningBoardCount = 0 }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1916,7 +1914,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {/* Boards section — sits above tasks, style matches task rows */}
               <BoardSection
                 projectKey={selectedProject?.key ?? null}
-                runningCount={runningBoardCount}
                 activeBoardId={activeBoardId ?? null}
                 collapsed={boardsCollapsed}
                 refreshKey={refreshKey}

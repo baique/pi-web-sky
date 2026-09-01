@@ -1501,7 +1501,6 @@ export function AppShell() {
         onOpenBoard={handleOpenBoard}
         onOpenTaskBoard={handleOpenTaskBoard}
         activeBoardId={activeBoardId}
-        runningBoardCount={runningSessionIds.size}
       />
       <div
         style={{
@@ -3236,10 +3235,8 @@ export function AppShell() {
               key={activeBoardId}
               boardId={activeBoardId}
               taskId={activeTaskId ?? undefined}
-              projectKey={selectedSession ? (selectedSession.projectKey ?? workspaceKeyOf(selectedSession)) : undefined}
               newSessionCwd={activeCwd ?? undefined}
               onExit={() => setActiveBoardId(null)}
-              onOpenSession={handleSelectSession}
               onRunningSessionIdsChange={handleRunningSessionIdsChange}
               wallSettings={wallSettings}
               updateWallSettings={updateWallSettings}
