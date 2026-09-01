@@ -17,6 +17,7 @@ import { getRpcSession } from "@/lib/rpc-manager";
 import { projectTreeForResponse } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
 import { setSessionPinned, taskNameForSession, unassignSession } from "@/lib/task-store";
+import { removeSessionFromBoards } from "@/lib/board-store";
 
 export async function GET(
   req: Request,
@@ -134,6 +135,7 @@ export async function DELETE(
       // 会话文件未落盘（Pi 延迟首次 JSONL flush）或已丢失：仍停止运行实例并
       // 清理归属元数据（幂等删除）。否则“文件不存在 → 404”会让 session_meta
       // 残留成僵尸记录（任务会话列表/看板补卡还会引用它）。
+      removeSessionFromBoards(id); // 画布引用清理（断 exec 线/清任务卡/删节点，幂等）
       await getRpcSession(id)?.shutdown();
       invalidateSessionPathCache(id);
       invalidateSessionListCache();
@@ -172,6 +174,7 @@ export async function DELETE(
       }
     } catch { /* skip if dir unreadable */ }
 
+    removeSessionFromBoards(id); // 画布引用清理（断 exec 线/清任务卡/删节点，幂等）
     await getRpcSession(id)?.shutdown();
     unlinkSync(filePath);
     invalidateSessionPathCache(id);

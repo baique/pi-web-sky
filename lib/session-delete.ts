@@ -14,6 +14,7 @@ import {
 import { sessionPathKey } from "./session-path";
 import { getRpcSession } from "./rpc-manager";
 import { unassignSession } from "./task-store";
+import { removeSessionFromBoards } from "./board-store";
 
 /** 递归收集一个会话的全部 fork 后代 id（含自身）。 */
 export async function collectSessionDescendants(rootId: string): Promise<string[]> {
@@ -47,8 +48,11 @@ export async function collectSessionDescendants(rootId: string): Promise<string[
   return ids;
 }
 
-/** 删除单个会话文件（含 RPC/路径缓存/列表缓存/任务元数据），不重挂子树。 */
+/** 删除单个会话文件（含 RPC/路径缓存/列表缓存/任务元数据/画布引用），不重挂子树。 */
 export async function deleteSessionFile(id: string): Promise<void> {
+  // 画布引用清理（断 exec 线/清任务卡/删节点）：无文件也执行，幂等；
+  // 任务整树删除时任务看板已由 deleteBoardCascade 清，此处对手动看板残留兜底。
+  removeSessionFromBoards(id);
   const filePath = await resolveSessionPath(id);
   if (!filePath) return;
   await getRpcSession(id)?.shutdown();

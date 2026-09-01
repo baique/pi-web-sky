@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import { deleteTask, getTask, listTaskSessionIds, updateTask } from "@/lib/task-store";
 import { deleteSessionTrees } from "@/lib/session-delete";
-import { listCards } from "@/lib/task-card-store";
 
-// GET /api/tasks/[id] → { task: { id, name, ... } | null, occupiedSessionIds?: string[] }
-// 会话输入框 placeholder / 详情面板用：按任务 id 取单个任务（含名称）。
-// occupiedSessionIds：该任务看板任务卡占用的执行会话（前端补卡时排除，避免同一会话既在任务卡里又单独成卡）。
+// GET /api/tasks/[id] → { task: { id, name, ... } | null }
+// 会话输入框 placeholder / 详情面板用：按任务 id 取单个任务（含名称与任务下会话）。
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -16,11 +14,7 @@ export async function GET(
     if (!task) {
       return NextResponse.json({ task: null }, { status: 404 });
     }
-    // 任务看板 boardId = 任务 id；卡占用会话 = task_cards.session_id 非空集合
-    const occupiedSessionIds = listCards(id)
-      .map((c) => c.sessionId)
-      .filter((sid): sid is string => Boolean(sid));
-    return NextResponse.json({ task, occupiedSessionIds }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ task }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }

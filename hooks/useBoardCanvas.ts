@@ -1059,11 +1059,9 @@ export function useBoardCanvas({
     try {
       const res = await fetch(`/api/tasks/${encodeURIComponent(tid)}`, { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { task?: { sessionIds?: string[] } | null; occupiedSessionIds?: string[] };
+      const data = (await res.json()) as { task?: { sessionIds?: string[] } | null };
       const sessionIds = data.task?.sessionIds ?? [];
       taskSessionIdsRef.current = sessionIds;
-      // 任务卡占用的执行会话不单独成卡（已在任务卡工作台展示）——补卡时排除
-      const occupied = new Set(data.occupiedSessionIds ?? []);
       const existing = new Set<string>();
       // draft 卡（taskId 匹配本任务）视为已占位：该卡正在转正（ensure_session
       // 已把会话挂到任务下、但卡片 sessionId 尚未写回），补卡会重复建卡。
@@ -1079,15 +1077,9 @@ export function useBoardCanvas({
       }
       // 有待转正 draft 卡时跳过本轮补卡（下轮轮询再校验，避免重复卡）
       if (hasPendingDraft) return;
-      // 已被任务卡占用的会话不再单独展示（任务卡工作台已承载）：移除画布上对应的 session-card
-      const toRemove: TLShape[] = [];
-      for (const shape of editor.getCurrentPageShapes()) {
-        if (shape.type !== "session-card") continue;
-        const sid = (shape.props as SessionCardShapeProps).sessionId;
-        if (sid && occupied.has(sid)) toRemove.push(shape);
-      }
-      if (toRemove.length > 0) editor.deleteShapes(toRemove.map((s) => s.id));
-      const missing = sessionIds.filter((sid) => !existing.has(sid) && !occupied.has(sid));
+      // 原子-链接：补所有任务会话（含任务卡的执行会话，occupied 已废除）——
+      // 执行会话在画布上就是普通会话卡，任务卡通过 exec 线引用它，不在这里删卡。
+      const missing = sessionIds.filter((sid) => !existing.has(sid));
       if (missing.length === 0) return;
       // 只补有效会话：会话文件必须真实存在（在 sessionTitles 里）。
       // 僵尸会话（meta 残留、文件已删）不补卡——补了只会灰化且删不掉。

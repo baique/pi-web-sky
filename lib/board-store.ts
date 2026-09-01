@@ -647,6 +647,76 @@ export function syncCardEdges(cardId: string): void {
 }
 
 /**
+ * 任务卡执行会话线 reconcile：真相源 task_cards.session_id。
+ * 期望 = 一条 label='exec' 的边（from=本卡 taskcard 节点 → to=session 节点），
+ * 原子-链接语义：任务卡通过这条边引用画布上独立存在的执行会话卡。
+ * 任一端节点缺失 → 不建线、清掉残留 exec 边（节点后补由 reconcile 兜底）。
+ * 禁删语义：手动删 exec 边会被本函数补回；真正的删除 = 清 session_id 或删任务卡。
+ * 本函数不包事务（内部多次 addEdge/deleteEdge 无事务），由调用方包事务。
+ */
+export function syncExecEdge(cardId: string): void {
+  const card = getCard(cardId);
+  if (!card) return;
+  const db = getDb();
+  const node = getNodeByRefId(card.boardId, cardId, "taskcard");
+  if (!node) return;
+
+  const existing = db
+    .prepare("SELECT id, to_id AS toId FROM board_edges WHERE board_id = ? AND from_id = ? AND label = 'exec'")
+    .all(card.boardId, node.id) as Array<{ id: string; toId: string }>;
+
+  // 期望目标：有 sessionId 且会话节点存在 → 该节点
+  let wantedTo: string | null = null;
+  if (card.sessionId) {
+    const sessionNode = getNodeByRefId(card.boardId, card.sessionId, "session");
+    if (sessionNode) wantedTo = sessionNode.id;
+  }
+
+  for (const e of existing) {
+    if (e.toId !== wantedTo) deleteEdge(card.boardId, e.id);
+  }
+  if (wantedTo && !existing.some((e) => e.toId === wantedTo)) {
+    addEdge(card.boardId, { fromId: node.id, toId: wantedTo, label: "exec" });
+  }
+}
+
+/**
+ * 删会话前清理所有看板上的引用（单事务，不留孤儿）：
+ * 1. 清掉引用该会话的任务卡 `session_id`（原子-链接：会话被删，任务卡回到无关联）；
+ * 2. 删除指向该会话节点的 exec 线；
+ * 3. 删除画布上该会话的全部 session 节点（级联删边）并 bump 受影响看板 updated。
+ * 返回清理的节点数；无引用返回 0，幂等。
+ * 供删会话流程调用（会话文件删除在事务外，由调用方负责）。
+ */
+export function removeSessionFromBoards(sessionId: string): number {
+  const db = getDb();
+  const sessionNodes = db
+    .prepare("SELECT id, board_id AS boardId FROM board_nodes WHERE kind = 'session' AND ref_id = ?")
+    .all(sessionId) as Array<{ id: string; boardId: string }>;
+  if (sessionNodes.length === 0) return 0;
+
+  const ts = now();
+  db.exec("BEGIN");
+  try {
+    // 1. 任务卡解绑：所有 session_id 引用该会话的卡置空
+    db.prepare("UPDATE task_cards SET session_id = NULL, updated = ? WHERE session_id = ?").run(ts, sessionId);
+    for (const n of sessionNodes) {
+      // 2. 删指向该会话节点的 exec 线（from=taskcard node → to=会话节点）
+      db.prepare("DELETE FROM board_edges WHERE board_id = ? AND to_id = ? AND label = 'exec'").run(n.boardId, n.id);
+      // 3. 删会话节点 + 关联边
+      db.prepare("DELETE FROM board_edges WHERE board_id = ? AND (from_id = ? OR to_id = ?)").run(n.boardId, n.id, n.id);
+      db.prepare("DELETE FROM board_nodes WHERE board_id = ? AND id = ?").run(n.boardId, n.id);
+      db.prepare("UPDATE boards SET updated = ? WHERE id = ?").run(ts, n.boardId);
+    }
+    db.exec("COMMIT");
+    return sessionNodes.length;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/**
  * 任务卡画布节点 upsert：nodeId 存在 → 绑定 ref_id=cardId（转正）；
  * 不存在 → 新建 taskcard node（id=nodeId，与 tldraw shape.id 对齐，后续全量保存覆盖不重复）。
  * 无事务（单语句 + bump），由调用方包事务。

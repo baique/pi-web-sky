@@ -1,5 +1,5 @@
 import { existsSync } from "fs";
-import { getBoard } from "./board-store";
+import { getBoard, syncExecEdge } from "./board-store";
 import { startRpcSession, getRunningRpcSessionIds } from "./rpc-manager";
 import { resolveSessionPath } from "./session-reader";
 import { assignSessionToTask } from "./task-store";
@@ -130,6 +130,7 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
     // 会话正忙（已在流式/处理中）：说明上一轮已发过 prompt，直接标 running，不重复发
     if (session.session.isRunning()) {
       updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
+      syncExecEdge(card.id);
       watchForAgentEnd(card, session.session);
       console.log(`[task-scheduler] #${card.number} ${card.name} 会话忙（复用中），标 running 不重发`);
       return true;
@@ -138,6 +139,7 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
     await session.session.send({ type: "prompt", message: buildTaskPrompt(card) });
 
     updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
+    syncExecEdge(card.id);
     watchForAgentEnd(card, session.session);
     console.log(
       `[task-scheduler] 派发 #${card.number} ${card.name} → session ${session.realSessionId.slice(0, 8)}`,
