@@ -2,10 +2,9 @@ import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, resizeBox } from "tldraw
 import type { TLBaseShape, TLShapePartial } from "tldraw";
 import { useState, useRef, useEffect } from "react";
 import { SessionWorkbench } from "./SessionWorkbench";
-import { confirm } from "./ConfirmDialog";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 import { useCardGlass } from "@/hooks/useCardGlass";
-import { dispatchBoardBaseUpdated, dispatchBoardSessionDeleted, dispatchBoardSessionRenamed } from "@/lib/board-events";
+import { dispatchBoardSessionRenamed } from "@/lib/board-events";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "./BoardSearchContext";
 
 /**
@@ -304,24 +303,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     }]);
   };
 
-  // 删除会话：确认后调 DELETE /api/sessions/[id]（服务端 removeSessionFromBoards 清理画布卡/exec 线/任务卡引用/会话文件），成功删 shape。
-  // 原子-链接：会话卡是会话的唯一画布实体，删卡 = 删会话（确认制）。
-  const handleDeleteSession = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!sessionId) return;
-    if (!(await confirm({ message: "删除该会话？\n将同时删除画布卡片，并断开任务卡的关联（如被引用）。此操作不可撤销。" }))) return;
-    // 乐观删除：确认即移除画布卡（即时反馈），API 失败由日志兜底（服务端数据仍在，可侧栏重删）
-    editor?.store.remove([shape.id as never]);
-    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
-      .then((r) => r.json().catch(() => null))
-      .then((j: { updatedBoards?: Record<string, number> } | null) => {
-        // 删除 bump 了受影响看板的 updated：派发事件刷新乐观锁基线，防后续防抖保存 409
-        const b = j?.updatedBoards;
-        if (b) for (const [bid, u] of Object.entries(b)) dispatchBoardBaseUpdated(bid, u);
-        dispatchBoardSessionDeleted(sessionId); // 通知侧栏：左侧树移除该会话
-      })
-      .catch((e) => console.warn(`[board] 删除会话 ${sessionId} 异常`, e));
-  };
+  // 删除会话入口在右键菜单（SyncedContextMenu）：确认 → DELETE /api/sessions/[id]（事务清理）→ 删 shape
 
   // 展开态：上半部标题栏（pointerEvents none → tldraw 原生拖拽/选中），
   // 下半部嵌工作台（pointerEvents all → 消息/输入可交互）。
@@ -424,38 +406,6 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
           <div style={{ flex: 1 }} />
           {/* 导航条 portal 挂载点：SessionWorkbench 将 SessionNavBar 渲染到这里（展开按钮之前） */}
           <div data-session-navbar-slot style={{ display: "flex", alignItems: "center", pointerEvents: "all" }} />
-          {!isDraft && (
-            <button
-              type="button"
-              onClick={(e) => void handleDeleteSession(e)}
-              onPointerDown={(e) => e.stopPropagation()}
-              title="删除会话"
-              aria-label="删除会话"
-              style={{
-                flexShrink: 0,
-                pointerEvents: "all",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 20,
-                height: 20,
-                padding: 0,
-                border: "none",
-                borderRadius: 5,
-                background: "transparent",
-                color: "var(--text-dim)",
-                cursor: "pointer",
-              }}
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M3 6h18" />
-                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                <path d="M10 11v6" />
-                <path d="M14 11v6" />
-              </svg>
-            </button>
-          )}
           <button
             type="button"
             onClick={toggleExpand}
