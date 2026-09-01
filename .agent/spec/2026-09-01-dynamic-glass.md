@@ -47,10 +47,9 @@ html.glass-dynamic {
 
 ## 2. 检测策略（useDynamicGlass）
 
-- **滚动**：`window.addEventListener('scroll', fn, { capture: true, passive: true })` 捕获所有内部容器滚动（scroll 不冒泡，但 capture 阶段可在 window 收到）。
-- **拖拽**：`pointerdown` 记录起点，`pointermove` 位移 > 3px 判定为拖拽（覆盖看板卡片拖拽、画布平移、滚动条拖拽）；点击按钮（无位移）不触发。
-- **停止**：最后一次 scroll 后 120ms 超时 / `pointerup` 后 120ms，移除 class。滚动中持续触发会不断重置超时。
-- 卸载时清理监听并移除 class。
+- **拖拽**：`pointerdown` 记录起点，`pointermove` 位移 > 8px 判定为拖拽（覆盖看板卡片拖拽、画布平移、滚动条拖拽）。**持续降级，`pointerup` 才放行**——不用稳定超时，拖拽中停顿不会闪烁。8px 阈值抑制点击抖动误判。
+- **滚动**：监听 `wheel`（滚轮/触摸板物理滚动），最后一次 wheel 后 180ms 恢复（滚动没有抬起事件，只能靠停顿判定）。程序化滚动（输入框聚焦 scrollIntoView、消息自动滚底）是 `scroll` 事件不是 wheel，不算用户交互，不误触发。
+- 拖拽期间不被滚动停顿超时打断。卸载时清理监听并移除 class。
 
 ## 3. 改动清单
 
