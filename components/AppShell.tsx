@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
-import { useDynamicGlass } from "@/hooks/useDynamicGlass";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
@@ -125,8 +124,6 @@ function boardAwareUrl(query: string): string {
 }
 
 export function AppShell() {
-  // 滚动/拖拽期间降级毛玻璃 blur（消息滚动、看板拖拽的高 GPU 消耗场景）
-  useDynamicGlass();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
