@@ -213,8 +213,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     if (!el) return;
     const stop = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) return; // 缩放交画布
-      const selected = editor.getSelectedShapeIds();
-      if (!selected.includes(shape.id)) return; // 未激活放行
+      // 实验性去除激活态条件：内容溢出即拦（内部滚动），不再区分卡片是否选中
       if (el.scrollHeight > el.clientHeight) e.stopPropagation(); // 内容溢出才拦
     };
     el.addEventListener("wheel", stop);

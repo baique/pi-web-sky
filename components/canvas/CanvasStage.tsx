@@ -224,6 +224,18 @@ export function CanvasStage({
   const [dragOver, setDragOver] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
 
+  // 主题切换：tldraw 把 colorScheme prop 放进 editor 重建依赖（源码写死），
+  // prop 跟随 isDark 变化会导致 editor 整体 dispose 重建 → board.onMount 复位
+  // hydrated=false，但 initialCanvas 已被消费置 null，物化 effect 不再重跑 →
+  // 「正在加载画布」覆盖层永久显示。修复：colorScheme prop 用 ref 锁初始值
+  // （永不参与重建），主题切换改走 editor.setColorMode() 动态更新容器 class。
+  const initialColorSchemeRef = useRef<"light" | "dark">(isDark ? "dark" : "light");
+  useEffect(() => {
+    const editor = board.editor;
+    if (!editor) return;
+    editor.setColorMode(isDark ? "dark" : "light");
+  }, [board.editor, isDark]);
+
   // 会话拖入画布：tldraw 内部会 stopPropagation drop，React 合成 onDrop 收不到。
   // 改用原生事件监听（挂在外层容器，捕获阶段提前拦截）。
   useEffect(() => {
@@ -366,7 +378,7 @@ export function CanvasStage({
               }}
               components={components}
               autoFocus={false}
-              colorScheme={isDark ? "dark" : "light"}
+              colorScheme={initialColorSchemeRef.current}
             />
             {/* 物化完成前：加载覆盖层盖在画布上（不阻挡 Tldraw 挂载/物化，只遮住空画布窗口） */}
             {!board.hydrated && (

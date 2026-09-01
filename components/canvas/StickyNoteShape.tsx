@@ -65,8 +65,9 @@ export class StickyNoteUtil extends BaseBoxShapeUtil<StickyNoteShape> {
   static override props = stickyNoteProps;
 
   override getDefaultProps(): StickyNoteShape["props"] {
-    // 新建自动记录时间（badge 默认蓝）
-    return { text: "", w: 260, h: 200, badge: "blue", createdAt: Date.now() };
+    // 新建自动记录时间（badge 默认蓝）。w/h 相对原 260×200 提高 30%/15%，
+    // 给编辑态「取消/完成」按钮留足空间（否则窄便笺下按钮区超宽挤压）。
+    return { text: "", w: 338, h: 230, badge: "blue", createdAt: Date.now() };
   }
 
   override canEdit(): boolean {
@@ -91,7 +92,7 @@ export class StickyNoteUtil extends BaseBoxShapeUtil<StickyNoteShape> {
     shape: StickyNoteShape,
     info: import("tldraw").TLResizeInfo<StickyNoteShape>,
   ): Omit<TLShapePartial<StickyNoteShape>, "id" | "type"> | undefined {
-    return resizeBox(shape, info, { minWidth: 140, minHeight: 100 });
+    return resizeBox(shape, info, { minWidth: 182, minHeight: 115 });
   }
 
   override getIndicatorPath(shape: StickyNoteShape) {
@@ -309,9 +310,10 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
               height: 32,
               display: "flex",
               alignItems: "center",
-              gap: 8,
-              padding: "0 10px",
-              borderBottom: "1px solid var(--bubble-hairline)",
+              gap: 6,
+              padding: "0 var(--bubble-pad-x, 12px)",
+              fontSize: 10,
+              color: "var(--text-muted)",
               boxSizing: "border-box",
             }}
           >
@@ -383,8 +385,9 @@ function StickyNoteView({ shape }: { shape: StickyNoteShape }) {
               background: "transparent",
               color: "var(--text)",
               fontFamily: "var(--font-mono)",
-              fontSize: 12.5,
-              lineHeight: 1.5,
+              // 与渲染态 markdown-body 一致（14px / 1.7），所见即所得不跳变
+              fontSize: 14,
+              lineHeight: 1.7,
               padding: "var(--bubble-pad-y, 8px) var(--bubble-pad-x, 12px)",
             }}
           />

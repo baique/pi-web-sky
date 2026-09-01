@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { BaseBoxShapeUtil, HTMLContainer, T, resizeBox, useEditor, useValue } from "tldraw";
-import type { TLBaseShape, TLShapeId, TLShapePartial } from "tldraw";
+import type { TLBaseShape, TLShapePartial } from "tldraw";
 import type { ExecStatus, ReadyStatus, TaskCard } from "@/lib/task-card-store";
 import { linkTargetIds, useTaskCard } from "@/hooks/useTaskCards";
 import { ThemedSelect } from "./ThemedSelect";
@@ -218,7 +218,7 @@ const FIELD_STYLE: React.CSSProperties = {
 const LABEL_STYLE: React.CSSProperties = {
   display: "block",
   fontSize: 10,
-  color: "var(--text-muted)",
+  color: "var(--text)",
   fontWeight: 600,
   margin: "8px 0 3px",
 };
@@ -235,15 +235,6 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     boardId,
   );
 
-  // 卡片激活判定（与 SessionWorkbench 同模式）：实时读 editor，不引 React 重渲染
-  const isActive = useCallback(() => {
-    const card = rootRef.current?.closest(".tl-html-container");
-    const nodeId = card?.getAttribute("data-node-id");
-    if (!nodeId) return false;
-    return editor.getSelectedShapeIds().includes(`shape:${nodeId}` as TLShapeId);
-  }, [editor]);
-
-  const rootRef = useRef<HTMLDivElement>(null);
   // 卡片玻璃（局部贴图）：内嵌视口对齐的模糊壁纸层，见 useCardGlass
   const setGlassContainer = useCardGlass(editor, shape.id, "var(--assistant-card-glass)");
 
@@ -330,6 +321,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 必填校验错误（任务名称）：显示在输入框正下方，不混入底部 saveError
+  const [nameError, setNameError] = useState<string | null>(null);
   // 「高级」折叠区：默认收起
   const [advancedOpen, setAdvancedOpen] = useState(false);
   // 展开态自动展开「高级」折叠区；收起时自动收起
@@ -342,17 +335,19 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   // 当前选中 worktree 路径（null = 用 cwd 本身，可能是主 checkout 或非 git）；WorktreePicker 接管列表/新建
   const [wtPath, setWtPath] = useState<string | null>(null);
 
+  const rootRef = useRef<HTMLDivElement>(null);
+
   const set = <K extends keyof TaskCard>(key: K, value: TaskCard[K]) => {
     setDraft((d) => (d ? { ...d, [key]: value } : d));
   };
 
-  // wheel 拦截（表单区可滚动）：原生监听，激活态 + 内容溢出才拦
+  // wheel 拦截（表单区可滚动）：原生监听，内容溢出即拦（实验性去激活态条件）
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
     const stop = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) return;
-      if (!isActive()) return;
+      // 实验性去除激活态条件：内容溢出即拦（内部滚动），不再区分卡片是否激活
       const t = e.target;
       if (t instanceof Node && el.contains(t) && hasScrollableAncestor(t, el)) e.stopPropagation();
     };
@@ -362,8 +357,16 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
 
   // 建卡向导提交（空卡）
   const handleCreate = async () => {
-    if (!boardId || !draft?.name.trim()) return;
+    if (!boardId) {
+      setSaveError("缺少看板上下文，无法创建");
+      return;
+    }
+    if (!draft?.name.trim()) {
+      setNameError("请填写任务名称");
+      return;
+    }
     setSaving(true);
+    setSaveError(null);
     setSaveError(null);
     // 复用本空卡的画布 node（data-node-id = shape.id 去 shape: 前缀），服务端绑定 refId=cardId
     const container = rootRef.current?.closest(".tl-html-container");
@@ -408,8 +411,12 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
 
   // 编辑保存（已建卡）
   const handleSave = async () => {
-    if (!draft?.name.trim()) return;
+    if (!draft?.name.trim()) {
+      setNameError("请填写任务名称");
+      return;
+    }
     setSaving(true);
+    setSaveError(null);
     setSaveError(null);
     const ok = await saveCard({
       name: draft.name,
@@ -491,17 +498,28 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
     setDraftRelated(linkTargetIds(detail.links, "related"));
     setWtPath(null);
     setSaveError(null);
+    setNameError(null);
   };
 
   const formBody = draft ? (
     <>
       <label style={LABEL_STYLE}>任务名称 *</label>
       <input
-        style={FIELD_STYLE}
+        style={{
+          ...FIELD_STYLE,
+          // 必填校验：提交过且名称为空时红色描边提示
+          ...(nameError ? { borderColor: "#f87171", boxShadow: "0 0 0 1px #f87171" } : {}),
+        }}
         value={draft.name}
-        onChange={(e) => set("name", e.target.value)}
+        onChange={(e) => { set("name", e.target.value); if (nameError) setNameError(null); }}
         placeholder="任务名称"
       />
+      {/* 必填提示：紧贴输入框下方（不沉到表单底部） */}
+      {nameError && (
+        <div style={{ color: "#f87171", fontSize: 11, marginTop: 3 }}>
+          {nameError}
+        </div>
+      )}
       <label style={LABEL_STYLE}>需求说明</label>
       <textarea
         style={{ ...FIELD_STYLE, flex: 1, minHeight: 70, resize: "none", fontFamily: "var(--font-mono)", fontSize: 11 }}
@@ -724,7 +742,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
               <button
                 type="button"
                 style={footerBtnStyle}
-                disabled={saving || !draft?.name.trim() || !boardId}
+                disabled={saving || !boardId}
                 onClick={() => void handleCreate()}
                 title="创建任务卡"
               >
@@ -743,7 +761,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
                 <button
                   type="button"
                   style={footerBtnStyle}
-                  disabled={saving || !draft?.name.trim()}
+                  disabled={saving}
                   onClick={() => void handleSave()}
                   title="完成（保存）"
                 >
@@ -760,8 +778,8 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
         <div
           className="[scrollbar-width:none]"
           style={{ flex: "1 1 auto", minWidth: 0, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column" }}
-          onPointerDown={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
-          onPointerUp={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
+          onPointerDown={(e) => { if (e.button === 0) e.stopPropagation(); }}
+          onPointerUp={(e) => { if (e.button === 0) e.stopPropagation(); }}
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
         >

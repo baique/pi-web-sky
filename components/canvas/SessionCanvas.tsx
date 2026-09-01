@@ -39,7 +39,7 @@ const CanvasStage = dynamic(() => import("./CanvasStage").then((m) => m.CanvasSt
             animation: "spin 0.8s linear infinite",
           }}
         />
-        Loading canvas…
+        正在加载画布…
       </div>
     </div>
   ),

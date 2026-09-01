@@ -44,7 +44,7 @@ const SessionCanvas = dynamic(() => import("./canvas/SessionCanvas").then((m) =>
             animation: "spin 0.8s linear infinite",
           }}
         />
-        Loading canvas…
+        正在加载画布…
       </div>
     </div>
   ),

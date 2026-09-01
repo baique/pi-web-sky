@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useEditor, type TLShapeId } from "tldraw";
 import { ChatWindow } from "@/components/ChatWindow";
 import type { ChatInputHandle } from "@/components/ChatInput";
 import { SessionNavBar, type SessionNavBarHandle } from "./SessionNavBar";
@@ -41,17 +40,7 @@ export function SessionWorkbench({
 }) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
-  const editor = useEditor();
 
-  // 卡片激活判定（激活 = tldraw 选中本卡）：事件发生时实时读 editor，
-  // 不引入 React 状态/重渲染，避免打断画布平移拖拽。
-  // 卡片 shape id：展开态 HTMLContainer 的 data-node-id（shape.id 去 "shape:" 前缀）。
-  const isActive = () => {
-    const card = rootRef.current?.closest(".tl-html-container");
-    const nodeId = card?.getAttribute("data-node-id");
-    if (!nodeId) return false;
-    return editor.getSelectedShapeIds().includes(`shape:${nodeId}` as TLShapeId);
-  };
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatKey, setChatKey] = useState(0);
@@ -179,8 +168,7 @@ export function SessionWorkbench({
     const stop = (e: WheelEvent) => {
       // ctrl/meta+wheel 是缩放手势：放行给画布（tldraw 缩放），不吞
       if (e.ctrlKey || e.metaKey) return;
-      // 未激活（未选中）：滚轮放行给画布，即使光标在消息区上（背景卡不吞滚轮）
-      if (!isActive()) return;
+      // 实验性去除激活态条件：内容溢出即拦（内部滚动），不再区分卡片是否激活
       const t = e.target;
       if (t instanceof Node && el.contains(t) && hasScrollableAncestor(t, el)) {
         e.stopPropagation();
@@ -286,8 +274,11 @@ export function SessionWorkbench({
       // preventDefault（会吞掉后续 click），导致终端/模型选择器/session/通知等无法弹出。
       // 冒泡阶段拦截：事件先正常到达目标（内部按钮可点击），再阻止冒泡到画布。
       // 仅左键（button 0）拦截；右键(2)/中键(1)放行 —— 右键必须冒泡到 tldraw 打开菜单。
-      onPointerDown={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
-      onPointerUp={(e) => { if (e.button === 0 && isActive()) e.stopPropagation(); }}
+      // 实验性去除激活态条件：未激活的卡片点击内容区也直接拦截左键（与便笺同模式），
+      // 修复「点按钮以为点上了、实际只是激活了还要再点一下」；tldraw 的选中/双击判定
+      // 走 capture 阶段不受影响。右键(2)/中键(1)仍放行 —— 右键必须冒泡到 tldraw 打开菜单。
+      onPointerDown={(e) => { if (e.button === 0) e.stopPropagation(); }}
+      onPointerUp={(e) => { if (e.button === 0) e.stopPropagation(); }}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
