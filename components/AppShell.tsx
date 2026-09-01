@@ -1491,6 +1491,7 @@ export function AppShell() {
         onOpenFile={handleOpenFile}
         explorerRefreshKey={explorerRefreshKey}
         onExplorerRefresh={handleExplorerRefresh}
+        onRefresh={() => setRefreshKey((k) => k + 1)}
         onAtMention={handleAtMention}
         onAtMentions={handleAtMentions}
         onBackgroundTaskDone={handleBackgroundTaskDone}

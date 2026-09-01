@@ -20,6 +20,7 @@ export function BoardSection({
   collapsed,
   onToggleCollapsed,
   onOpenBoard,
+  refreshKey,
 }: {
   projectKey: string | null;
   runningCount: number;
@@ -27,6 +28,8 @@ export function BoardSection({
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onOpenBoard: (boardId: string) => void;
+  /** 外部刷新信号（与任务/会话同源）：变化时重新拉取看板列表 */
+  refreshKey?: number;
 }) {
   const { t } = useI18n();
   const [boards, setBoards] = useState<BoardInfo[]>([]);
@@ -60,7 +63,7 @@ export function BoardSection({
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   // 画布结构变化（清空/清理失效）→ 刷新节点计数
   useEffect(() => {

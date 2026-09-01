@@ -100,6 +100,8 @@ interface Props {
   onOpenFile?: (filePath: string, fileName: string, options?: { sourceSessionId?: string | null; modeHint?: "diff" }) => void;
   explorerRefreshKey?: number;
   onExplorerRefresh?: () => void;
+  /** 左上角「刷新」按钮：触发父级全量刷新（会话/任务/看板同源信号 refreshKey） */
+  onRefresh?: () => void;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onAtMentions?: (relativePaths: string[]) => void;
   /** Fired when a session that is not currently selected finishes running.
@@ -349,7 +351,7 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId, runningBoardCount = 0 }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId, runningBoardCount = 0 }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1624,7 +1626,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {t("sidebar.tempSessions")}
             </button>
             <button
-              onClick={() => loadSessions(false, true)}
+              onClick={() => { if (onRefresh) onRefresh(); else loadSessions(false, true); }}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
                 background: sessionRefreshDone ? "rgba(74,222,128,0.12)" : "transparent",
@@ -1916,6 +1918,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 runningCount={runningBoardCount}
                 activeBoardId={activeBoardId ?? null}
                 collapsed={boardsCollapsed}
+                refreshKey={refreshKey}
                 onToggleCollapsed={() => { const next = !boardsCollapsed; setBoardsCollapsed(next); saveCollapsedFlag(BOARDS_COLLAPSED_KEY, next); }}
                 onOpenBoard={(id) => onOpenBoard?.(id)}
               />
