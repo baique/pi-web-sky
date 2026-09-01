@@ -1,5 +1,7 @@
 # 任务卡 S1（数据模型 + 看板组件）实施计划
 
+> **⚠️ 已废弃（部分）**：本计划已完成的部分（数据模型/API/依赖线）保留有效；未完成部分与 `2026-09-01-task-card-atomic-link.md`（原子-链接重构）冲突的（Task 6 展开态右工作台、任务卡工作台）按新 spec 调整。执行以 `2026-09-01-task-card-atomic-link.md` 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: 本 session inline 执行（executing-plans 风格，app 上下文庞大不派子代理）。Steps 用 checkbox 跟踪。
 > Spec: `.agent/spec/2026-08-31-task-card-scheduler.md`
 

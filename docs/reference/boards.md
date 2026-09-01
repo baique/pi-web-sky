@@ -17,10 +17,11 @@
 
 ## 任务即看板自动补卡
 
-- `reconcileTaskSessions`：打开时 diff + 复用 10s 摘要轮询周期 diff，差集（任务会话中无卡片者）→ `addSessionNode`。
+- `reconcileTaskSessions`：打开时 diff + 复用 10s 摘要轮询周期 diff，差集（任务会话中无卡片者）→ `addSessionNode`。**补所有任务会话（含任务卡的执行会话）**——occupied 概念已废除（见 `2026-09-01-task-card-atomic-link.md`），执行会话在画布上就是普通会话卡，任务卡通过 exec 线引用它。
 - `findFreeSpot(editor)`：收集现有 session-card 矩形，从 (60,60) 按行扫描（y 增 x 增），找与所有卡片**不重叠且间隙 ≥ 24** 的第一个空位——右下方向找空位，天然不遮挡。
-- 任务看板**不提供"从看板移除任务会话卡片"**（要移除即移出任务），否则被 diff 补回造成语义冲突。
+- 任务看板**不提供"从看板移除任务会话卡片"**（要移除即移出任务），否则被 diff 补回造成语义冲突；删除走确认制 + 事务（见 [task-cards.md](task-cards.md) 删除段）。
 - `BoardSection` 列表**过滤 `taskId == null`**：任务看板不混入手动看板列表（任务行本身即入口）。
+- **exec 线**：任务卡 ↔ 执行会话用 `board_edges` `label='exec'` 的派生边表达（`syncExecEdge` 管理、禁删），详见 [task-cards.md](task-cards.md)。
 
 ## 卡片即工作台（tldraw）
 
