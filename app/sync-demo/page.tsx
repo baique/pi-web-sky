@@ -16,7 +16,12 @@ import { SessionCardUtil } from "@/components/canvas/SessionCardShape";
 import { StickyNoteUtil } from "@/components/canvas/StickyNoteShape";
 import { TaskCardUtil } from "@/components/canvas/TaskCardShape";
 
-const WS = "ws://127.0.0.1:30144/connect/demo";
+// roomId 从 URL 参数读（?room=<boardId>），默认 demo
+const roomId =
+  typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("room") ?? "demo"
+    : "demo";
+const WS = `ws://127.0.0.1:30144/connect/${roomId}`;
 
 export default function SyncDemoPage() {
   const store = useSync({
@@ -51,7 +56,6 @@ export default function SyncDemoPage() {
       .then(() => setLastEvent(`POST /inject ${shape} @ ${new Date().toLocaleTimeString()}`))
       .catch((e) => setLastEvent(`inject failed: ${String(e)}`));
   };
-
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui" }}>
       <div style={{ display: "flex", gap: 16, alignItems: "center", padding: "8px 16px", borderBottom: "1px solid #ddd", fontSize: 13 }}>
