@@ -395,21 +395,29 @@ export function useBoardCanvas({
       ]);
       if (!taskRes?.ok || !cardsRes?.ok) return;
       const taskData = (await taskRes.json()) as { task?: { sessionIds?: string[] } | null };
-      const cardsData = (await cardsRes.json()) as { cards: Array<{ id: string; sessionId: string | null; name: string; number: number }> };
+      const cardsData = (await cardsRes.json()) as { cards: Array<{
+        id: string; sessionId: string | null; name: string; number: number;
+        links?: Array<{ targetCardId: string; kind: string }>;
+      }> };
 
       const shapes = editor.getCurrentPageShapes();
-      // 1) 补会话卡：任务会话缺卡 → createShape（确定性 id：session-<sid>）
-      const existingSessions = new Set<string>();
+      // 1) 补/清会话卡：任务会话缺卡 → createShape；孤儿卡（非任务会话且非 draft）→ 删
+      //    确定性 id（session-<sid>）→ 幂等。
+      const existingSessions = new Map<string, { shapeId: string; isDraft: boolean }>(); // sid -> 卡
       const sessionShapes = new Map<string, string>(); // sid -> shapeId
       for (const s of shapes) {
         if (s.type !== "session-card") continue;
         const sid = (s.props as SessionCardProps).sessionId;
-        if (sid) {
-          existingSessions.add(sid);
-          sessionShapes.set(sid, s.id);
-        }
+        if (!sid) continue; // draft 卡（未绑定）跳过
+        existingSessions.set(sid, { shapeId: s.id, isDraft: false });
+        sessionShapes.set(sid, s.id);
       }
-      const sessionIds = taskData.task?.sessionIds ?? [];
+      const sessionIds = new Set(taskData.task?.sessionIds ?? []);
+      // 孤儿卡：任务会话里没有、且非 draft → 删（任务看板会话卡都由任务驱动）
+      for (const [sid, { shapeId }] of existingSessions) {
+        if (sessionIds.has(sid)) continue;
+        editor.deleteShapes([shapeId as never]);
+      }
       for (const sid of sessionIds) {
         if (existingSessions.has(sid)) continue;
         const summary = sessionTitlesRef.current[sid];
@@ -427,9 +435,9 @@ export function useBoardCanvas({
           } as never,
         });
       }
-      // 2) 补 exec 线：任务卡 sessionId → 卡节点 + 会话节点都存在 → 缺线补线
-      //    确定性 id（exec-<cardId>）→ 幂等；meta.execLinkLabel 标记禁删。
-      //    检测以 meta + 端点匹配（兼容迁移线的任意 id），避免重复建线。
+      // 2) 补/同步 exec 线：任务卡 sessionId → 卡节点 + 会话节点都存在 → 建线；
+      //    卡已绑定但线指向旧会话（重绑定）→ 删旧线换新线。
+      //    meta.execLinkLabel 标记禁删；确定性 id（exec-<cardId>-<sessionId>）→ 幂等。
       const cardShapes = new Map<string, string>(); // cardId -> shapeId
       for (const s of shapes) {
         if (s.type === "task-card") {
@@ -437,8 +445,8 @@ export function useBoardCanvas({
           if (cid) cardShapes.set(cid, s.id);
         }
       }
-      // 已有 exec 线（meta.execLinkLabel）端点对：from=taskcard node, to=session node
-      const existingExec = new Set<string>(); // "<fromShapeId>-><toShapeId>"
+      // 按卡分组的现有 exec 线：fromShapeId -> [{ toShapeId, arrowId }]
+      const execByCard = new Map<string, Array<{ to: string; arrowId: string }>>();
       for (const s of shapes) {
         if (s.type !== "arrow") continue;
         const m = s.meta as { execLinkLabel?: string } | undefined;
@@ -450,15 +458,60 @@ export function useBoardCanvas({
           if (t === "start") from = b.toId;
           if (t === "end") to = b.toId;
         }
-        if (from && to) existingExec.add(`${from}->${to}`);
+        if (from) {
+          const list = execByCard.get(from) ?? [];
+          list.push({ to, arrowId: s.id });
+          execByCard.set(from, list);
+        }
       }
       for (const card of cardsData.cards) {
         const cardShapeId = cardShapes.get(card.id);
-        if (!cardShapeId || !card.sessionId) continue;
-        const sessionShapeId = sessionShapes.get(card.sessionId);
-        if (!sessionShapeId) continue;
-        if (existingExec.has(`${cardShapeId}->${sessionShapeId}`)) continue;
-        createExecEdge(editor, cardShapeId, sessionShapeId, card.id);
+        if (!cardShapeId) continue;
+        const wanted = card.sessionId ? sessionShapes.get(card.sessionId) : null;
+        const existing = execByCard.get(cardShapeId) ?? [];
+        // 删端点不匹配的旧线（cardId 相同但 sessionId 变了 / sessionId 已清空）
+        for (const e of existing) {
+          if (e.to !== wanted) {
+            editor.deleteShapes([e.arrowId as never]);
+          }
+        }
+        if (!wanted || existing.some((e) => e.to === wanted)) continue;
+        createExecEdge(editor, cardShapeId, wanted, card.id, card.sessionId!);
+      }
+      // 3) 依赖线（prerequisite/related）：业务 links → 画布 arrow（taskLinkLabel）；
+      //    缺补多删（派生边禁删语义由 reconcile 保证）。
+      const existingLinks = new Map<string, string>(); // "<from>-><to>:<kind>" -> arrowShapeId
+      for (const s of shapes) {
+        if (s.type !== "arrow") continue;
+        const m = s.meta as { taskLinkLabel?: string } | undefined;
+        if (!m?.taskLinkLabel) continue;
+        const bindings = editor.getBindingsInvolvingShape(s.id, "arrow");
+        let from = "", to = "";
+        for (const b of bindings) {
+          const t = (b.props as { terminal?: string }).terminal;
+          if (t === "start") from = b.toId;
+          if (t === "end") to = b.toId;
+        }
+        if (from && to) existingLinks.set(`${from}->${to}:${m.taskLinkLabel}`, s.id);
+      }
+      const wantLinks = new Set<string>();
+      for (const card of cardsData.cards) {
+        const fromShape = cardShapes.get(card.id);
+        if (!fromShape) continue;
+        for (const link of card.links ?? []) {
+          const toShape = cardShapes.get(link.targetCardId);
+          if (!toShape) continue;
+          const key = `${fromShape}->${toShape}:${link.kind}`;
+          wantLinks.add(key);
+          if (!existingLinks.has(key)) {
+            createLinkEdge(editor, fromShape, toShape, link.kind);
+          }
+        }
+      }
+      for (const [key, arrowId] of existingLinks) {
+        if (!wantLinks.has(key)) {
+          editor.deleteShapes([arrowId as never]);
+        }
       }
     } catch {
       // 网络失败静默，下轮重试
@@ -608,19 +661,37 @@ export function useBoardCanvas({
 export type UseBoardCanvasReturn = ReturnType<typeof useBoardCanvas>;
 
 /** 建 exec 线（派生边）：arrow shape（dashed + meta.execLinkLabel 标记禁删）+ binding 随卡片移动 */
-function createExecEdge(editor: Editor, fromShapeId: string, toShapeId: string, cardId: string): void {
-  const id = createShapeId(`exec-${cardId}`);
+function createExecEdge(editor: Editor, fromShapeId: string, toShapeId: string, cardId: string, sessionId: string): void {
+  // id 含 sessionId：卡重绑定（换执行会话）时新 id，配合 reconcile 删旧线
+  createDerivedEdge(editor, fromShapeId, toShapeId, `exec-${cardId}-${sessionId}`, { execLinkLabel: "exec" }, true);
+}
+
+/** 建依赖线（派生边）：arrow shape（实线 + meta.taskLinkLabel 标记禁删）+ binding */
+function createLinkEdge(editor: Editor, fromShapeId: string, toShapeId: string, kind: string): void {
+  createDerivedEdge(editor, fromShapeId, toShapeId, `link-${fromShapeId}-${toShapeId}-${kind}`, { taskLinkLabel: kind }, false);
+}
+
+function createDerivedEdge(
+  editor: Editor,
+  fromShapeId: string,
+  toShapeId: string,
+  idKey: string,
+  meta: Record<string, string>,
+  dashed: boolean,
+): void {
+  const id = createShapeId(idKey);
   editor.createShape({
     id,
     type: "arrow",
     x: 0,
     y: 0,
-    meta: { execLinkLabel: "exec" } as never,
+    meta: meta as never,
     props: {
       start: { x: 0, y: 0 },
       end: { x: 0, y: 0 },
       color: "blue",
-      dash: "dashed",
+      fill: "none",
+      dash: dashed ? "dashed" : "solid",
       arrowheadStart: "none",
       arrowheadEnd: "arrow",
       labelColor: "black",

@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
-import { createCard, deleteCard, getCard, listCards, replaceLinks } from "@/lib/task-card-store";
+import { createCard, deleteCard, getCard, listCards, listLinks, replaceLinks } from "@/lib/task-card-store";
 import { addNode, getBoard, getNodeByGlobalId, getNodeByRefId, syncCardEdges, upsertTaskCardNode } from "@/lib/board-store";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/task-cards?boardId=xxx → { cards }（每卡附 nodeId）
+// GET /api/task-cards?boardId=xxx → { cards }（每卡附 nodeId + links，reconcile 依赖线用）
 export async function GET(req: Request) {
   try {
     const boardId = new URL(req.url).searchParams.get("boardId") ?? "";
     const cards = listCards(boardId).map((card) => ({
       ...card,
       nodeId: getNodeByRefId(boardId, card.id, "taskcard")?.id ?? null,
+      links: listLinks(card.id).map((l) => ({ targetCardId: l.targetCardId, kind: l.kind })),
     }));
     return NextResponse.json({ cards }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
