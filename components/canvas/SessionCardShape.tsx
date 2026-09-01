@@ -307,13 +307,11 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
     e.stopPropagation();
     if (!sessionId) return;
     if (!(await confirm({ message: "删除该会话？\n将同时删除画布卡片，并断开任务卡的关联（如被引用）。此操作不可撤销。" }))) return;
-    try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
-      // store.remove 绕过 deleteShapes 包装（避免二次确认）：API 已删会话，直接移除画布卡
-      if (res.ok) editor?.store.remove([shape.id as never]);
-    } catch {
-      // 删除失败静默（会话仍在）
-    }
+    // 乐观删除：确认即移除画布卡（即时反馈），API 失败由日志兜底（服务端数据仍在，可侧栏重删）
+    editor?.store.remove([shape.id as never]);
+    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
+      .then((r) => { if (!r.ok) console.warn(`[board] 删除会话 ${sessionId} 失败`, r.status); })
+      .catch((e) => console.warn(`[board] 删除会话 ${sessionId} 异常`, e));
   };
 
   // 展开态：上半部标题栏（pointerEvents none → tldraw 原生拖拽/选中），

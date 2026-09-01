@@ -142,6 +142,8 @@ export function useBoardCanvas({
   const runningReconcileAtRef = useRef(0);
   // 已见过的 running 任务卡 id 集合（增量检测：新进入 running 的卡才触发补卡）
   const runningTaskCardIdsRef = useRef<Set<string>>(new Set());
+  // 删除确认 + API 在途标志：防止异步确认窗口内 deleteShapes 被重复触发（批量误删高危）
+  const deleteConfirmingRef = useRef(false);
 
   // ---- 运行中快照轮询 ----
   useEffect(() => {
@@ -273,11 +275,13 @@ export function useBoardCanvas({
     setHydrated(false);
     // 删除语义（原子-链接，确认制）：
     // - 派生边（依赖 taskLinkLabel / 执行会话 execLinkLabel）：禁删（由真相源 reconcile）
-    // - 会话卡（sessionId 非空）：确认 → DELETE /api/sessions/[id]（服务端事务清理画布卡/exec 线/任务卡引用/会话文件）→ 删 shape
-    // - 任务卡（cardId 非空）：确认 → DELETE /api/task-cards/[id]（级联删依赖/exec 线）→ 删 shape
+    // - 会话卡（sessionId 非空）/ 任务卡（cardId 非空）：合并一次确认 → 乐观删 shape → 调删除 API（服务端事务清理）
     // - 其余（便笺/普通线/草稿卡）：直接删
+    // 防重入：确认 + API 在途期间（deleteConfirmingRef=true）忽略后续 deleteShapes 调用——
+    // 防止 Delete 键/框选在异步确认窗口内重复触发二次 confirm / 批量误删（高危）。
     const origDeleteShapes = editor.deleteShapes.bind(editor);
     editor.deleteShapes = ((ids: Parameters<typeof origDeleteShapes>[0]) => {
+      if (deleteConfirmingRef.current) return editor;
       const idArr = Array.isArray(ids) ? ids : [ids];
       const directDelete: string[] = [];
       const sessionDelete: Array<{ sid: string; shapeId: string }> = [];
@@ -306,41 +310,44 @@ export function useBoardCanvas({
         }
         directDelete.push(idStr);
       }
-      // 会话删除：确认（合并一次）→ 逐个调删除 API（服务端事务清理）→ 成功删 shape
-      if (sessionDelete.length > 0) {
-        const message = sessionDelete.length > 1
-          ? `删除 ${sessionDelete.length} 个会话？\n将同时删除画布卡片并断开任务卡关联。此操作不可撤销。`
-          : "删除该会话？\n将同时删除画布卡片并断开任务卡关联。此操作不可撤销。";
+      const hasEntityDelete = sessionDelete.length > 0 || cardDelete.length > 0;
+      if (hasEntityDelete) {
+        deleteConfirmingRef.current = true;
+        // 合并一次确认（会话卡 + 任务卡混合也只弹一个），避免多个 confirm 顺序弹出
+        let message: string;
+        if (sessionDelete.length > 0 && cardDelete.length > 0) {
+          message = `删除 ${sessionDelete.length} 个会话和 ${cardDelete.length} 张任务卡？\n将同时清理画布卡片与关联关系。此操作不可撤销。`;
+        } else if (sessionDelete.length > 1) {
+          message = `删除 ${sessionDelete.length} 个会话？\n将同时删除画布卡片并断开任务卡关联。此操作不可撤销。`;
+        } else if (sessionDelete.length === 1) {
+          message = "删除该会话？\n将同时删除画布卡片并断开任务卡关联。此操作不可撤销。";
+        } else if (cardDelete.length > 1) {
+          message = `删除 ${cardDelete.length} 张任务卡？\n将删除卡/依赖线/执行会话连线；关联的执行会话保留。`;
+        } else {
+          message = "删除该任务卡？\n将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。";
+        }
         void confirm({ message }).then((ok) => {
-          if (!ok) return;
-          for (const d of sessionDelete) {
-            void (async () => {
-              try {
-                const res = await fetch(`/api/sessions/${encodeURIComponent(d.sid)}`, { method: "DELETE" });
-                if (res.ok) origDeleteShapes([d.shapeId as never]);
-              } catch { /* 删除失败静默，卡保留 */ }
-            })();
-          }
+          if (!ok) { deleteConfirmingRef.current = false; return; } // 整体取消：会话/任务卡 + 一起选中的普通元素都不删
+          // 乐观删除：确认即删 shape（即时反馈），API 失败由 reconcile/日志兜底
+          origDeleteShapes([...sessionDelete.map((d) => d.shapeId), ...cardDelete.map((d) => d.shapeId), ...directDelete] as never);
+          const apis = [
+            ...sessionDelete.map((d) =>
+              fetch(`/api/sessions/${encodeURIComponent(d.sid)}`, { method: "DELETE" })
+                .then((r) => { if (!r.ok) console.warn(`[board] 删除会话 ${d.sid} 失败`, r.status); })
+                .catch((e) => console.warn(`[board] 删除会话 ${d.sid} 异常`, e)),
+            ),
+            ...cardDelete.map((d) =>
+              fetch(`/api/task-cards/${encodeURIComponent(d.cid)}`, { method: "DELETE" })
+                .then((r) => { if (!r.ok) console.warn(`[board] 删除任务卡 ${d.cid} 失败`, r.status); })
+                .catch((e) => console.warn(`[board] 删除任务卡 ${d.cid} 异常`, e)),
+            ),
+          ];
+          // 全部 API 完成才解除防重入（窗口内任何二次删除被忽略）
+          void Promise.allSettled(apis).finally(() => { deleteConfirmingRef.current = false; });
         });
+        return editor;
       }
-      // 任务卡删除：确认 → 逐个调删除 API → 成功删 shape
-      if (cardDelete.length > 0) {
-        const message = cardDelete.length > 1
-          ? `删除 ${cardDelete.length} 张任务卡？\n将删除卡/依赖线/执行会话连线；关联的执行会话保留。`
-          : "删除该任务卡？\n将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。";
-        void confirm({ message }).then((ok) => {
-          if (!ok) return;
-          for (const d of cardDelete) {
-            void (async () => {
-              try {
-                const res = await fetch(`/api/task-cards/${encodeURIComponent(d.cid)}`, { method: "DELETE" });
-                if (res.ok) origDeleteShapes([d.shapeId as never]);
-              } catch { /* 静默 */ }
-            })();
-          }
-        });
-      }
-      // 其余直接删
+      // 无会话/任务卡：直接删
       if (directDelete.length > 0) origDeleteShapes(directDelete as never);
       return editor;
     }) as typeof origDeleteShapes;
