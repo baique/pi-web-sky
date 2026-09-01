@@ -346,11 +346,38 @@ body {
   -webkit-backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate));
   transform: translateZ(0);
 }
+/* 预模糊壁纸切片（chrome 四大件：顶栏/左右栏/底部）：背景图 = 视口对齐的
+   heavy 档模糊壁纸（--glass-bg-image-heavy，由 useGlassWallpaper 生成），
+   fixed 定位所以天然对齐视口。无 backdrop-filter：有壁纸图时是固定模糊壁纸
+   （零实时 blur），无壁纸图时纯色跟随主题（--frame-glass）。
+   使用方：把内联 background 简写改为 backgroundColor，再挂本 class。 */
+.glass-canvas {
+  background-color: var(--frame-glass);
+  background-image:
+    linear-gradient(var(--frame-glass), var(--frame-glass)),
+    var(--glass-bg-image-heavy, none);
+  background-attachment: fixed;
+  background-size: 100% 100%, 100% 100%;
+  background-position: 0 0, 0 0;
+  background-repeat: no-repeat, no-repeat;
+  /* 无 backdrop-filter：有壁纸图时背景是固定模糊壁纸（零实时 blur）；
+     无壁纸图时 --glass-bg-image-heavy 为 none，只剩背景色（--frame-glass
+     跟随主题）——纯色玻璃感，与纯色背景 + blur 的视觉效果等价，
+     且避开了 Lightning CSS 把 backdrop-filter 转 -webkit 前缀的坑。 */
+}
 .glass-popover {
   background: color-mix(in srgb, var(--glass-bg-strong) 60%, transparent);
   backdrop-filter: blur(var(--glass-blur-popover)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur-popover)) saturate(var(--glass-saturate));
   transform: translateZ(0);
+}
+/* 看板画布内：tldraw transform 容器中 background-attachment: fixed 失效，
+   .glass-canvas / .extension-status-shelf 会把壁纸按自身盒铺满，变成
+   「每个元素一块独立壁纸」；统一禁用壁纸图，只留 --frame-glass 色层，
+   透出卡片自身的局部模糊壁纸层（观感与气泡一致，零额外成本）。 */
+[data-glass-scope="board"] .glass-canvas,
+[data-glass-scope="board"] .extension-status-shelf {
+  background-image: none;
 }
 /* 贴顶栏向下展开面板的标准外壳：L-panel 玻璃 + 三边边框(顶贴栏) +
    底部圆角 + 统一阴影。顶部所有“点开向下展开”的弹层一律套此类。
@@ -374,9 +401,15 @@ body {
   align-items: stretch;
   min-width: 0;
   border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-  background: var(--frame-glass);
-  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  background-color: var(--frame-glass);
+  background-image:
+    linear-gradient(var(--frame-glass), var(--frame-glass)),
+    var(--glass-bg-image-heavy, none);
+  background-attachment: fixed;
+  background-size: 100% 100%, 100% 100%;
+  background-position: 0 0, 0 0;
+  background-repeat: no-repeat, no-repeat;
+  /* 同 .glass-canvas：无 backdrop-filter，无壁纸图时纯色跟随主题。 */
 }
 
 /* Left: the TUI extension shelf (widget triggers + status line). Fills all

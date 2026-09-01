@@ -8,6 +8,7 @@ import { useBoardCanvas } from "@/hooks/useBoardCanvas";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
 import type { SessionInfo } from "@/lib/types";
 import { BoardSearchProvider } from "./BoardSearchContext";
+import { GlassScopeProvider } from "./GlassScopeContext";
 import { BoardIdContext } from "./TaskCardShape";
 import { confirm } from "./ConfirmDialog";
 import { BoardSearch } from "./BoardSearch";
@@ -144,6 +145,7 @@ export function SessionCanvas({
     // 看板模式容器：完全透明，壁纸/页面背景直接透出。玻璃只挂在卡片上（--board-card-glass），
     // 不整块涂气泡白玻璃——看板底与壁纸不冲突。
     <div
+      data-glass-scope="board"
       style={{
         height: "100%",
         display: "flex",
@@ -154,6 +156,7 @@ export function SessionCanvas({
     >
       {/* 搜索高亮 context：shape 组件（会话卡/便笺）读它渲染 accent 描边。
           必须包住 CanvasStage（tldraw），让自定义 shape 能读到 context。 */}
+      <GlassScopeProvider value="board">
       <BoardIdContext.Provider value={{ boardId: board.board?.id ?? null, defaultCwd: newSessionCwd ?? null }}>
       <BoardSearchProvider>
       {/* 乐观锁冲突提示 toast：数据未丢失但本地未保存改动被丢弃（服务器权威） */}
@@ -426,6 +429,7 @@ export function SessionCanvas({
       />
       </BoardSearchProvider>
       </BoardIdContext.Provider>
+      </GlassScopeProvider>
     </div>
   );
 }

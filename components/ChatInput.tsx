@@ -1881,12 +1881,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         {/* 压缩状态条：点击压缩后，在输入框上方以毛玻璃呼吸提示正在压缩，并提供停止压缩 */}
         {/* ── Composer：草稿 + 输入 + 底部工具，一块整体玻璃面板 ── */}
         <div
+          className="glass-canvas"
           style={{
             position: "relative",
             borderRadius: isMobile ? 14 : 16,
-            background: "var(--frame-glass)",
-            backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-            WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+            backgroundColor: "var(--frame-glass)",
             border: `1px solid ${
               bashMode
                 ? "color-mix(in srgb, var(--accent) 45%, transparent)"

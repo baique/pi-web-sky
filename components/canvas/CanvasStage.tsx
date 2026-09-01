@@ -301,7 +301,7 @@ export function CanvasStage({
             - 背景用 --board-scrim-bg（rgba(0,0,0,alpha)，透明度滑块驱动）
             - 磨砂用 --board-scrim-filter：由 wallpaper-settings 计算，
               磨砂为 0 时置 none（避免 saturate 残留仍去饱和背景）
-            玻璃只挂这一层，卡片/工具条各自玻璃不在此重复叠 backdrop-filter。 */}
+            卡片玻璃走局部贴图（useCardGlass 内嵌模糊壁纸层），不依赖本层。 */}
         <div
           style={{
             position: "absolute",

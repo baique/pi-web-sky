@@ -612,14 +612,16 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
       style={{ width: w, height: h, pointerEvents: "none" }}
     >
       <div
-        ref={rootRef}
+        ref={(node) => { rootRef.current = node; setGlassContainer(node); }}
         style={{
+          position: "relative",
           width: w,
           height: h,
           borderRadius: "var(--bubble-radius, 12px)",
           border: "1px solid var(--bubble-border)",
-          // 纯半透明色：透出舞台层的模糊壁纸（画布 scrim 已铺视口对齐的模糊壁纸）
-          background: "var(--assistant-card-glass)",
+          // 透明：色层已由内嵌层提供（useCardGlass 的 linear-gradient 单层 0.44），
+          // 容器再叠背景色会双重叠加更不透
+          background: "transparent",
           boxShadow: "0 2px 10px -6px rgba(0,0,0,0.2)",
           color: "var(--text)",
           display: "flex",

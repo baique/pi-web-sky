@@ -6,6 +6,7 @@ import { ImagePreview } from "./ImagePreview";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
+import { useGlassActive } from "@/hooks/useGlassWallpaper";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { getAssistantErrorMessage, isEmptyThinkingBlock } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
@@ -27,6 +28,31 @@ import type {
   ToolCallContent,
   ThinkingContent,
 } from "@/lib/types";
+
+/**
+ * 预模糊壁纸切片（消息列表玻璃）：有玻璃壁纸图时气泡背景用固定模糊壁纸
+ * （background-attachment: fixed 显示自己视口位置那块，零实时 blur），
+ * 否则回退原有 backdrop-filter（无壁纸/视频壁纸/图生成中）。
+ */
+function bubbleSurface(bg: string, hasGlass: boolean): React.CSSProperties {
+  return hasGlass
+    ? {
+        // 色层叠在模糊壁纸上：bg token 本身半透明（含 --bubble-alpha），
+        // 透明度滑块才能生效；模糊壁纸透出保留玻璃感。
+        backgroundImage: `linear-gradient(${bg}, ${bg}), var(--glass-bg-image, none)`,
+        backgroundAttachment: "fixed",
+        backgroundSize: "100% 100%, 100% 100%",
+        backgroundPosition: "0 0, 0 0",
+        backgroundRepeat: "no-repeat, no-repeat",
+        backgroundColor: bg,
+        backdropFilter: "none",
+        WebkitBackdropFilter: "none",
+      }
+    : {
+        // 无壁纸图：纯色跟随主题（背景 token 本身半透明），不写 backdrop-filter
+        background: bg,
+      };
+}
 
 // CJK chars ~1 token each (GLM/DeepSeek/GPT-o200k); other chars ~4 chars/token.
 const CJK_PATTERN = /[\u3000-\u30ff\u3400-\u9fff\uf900-\ufaff\u{20000}-\u{2fa1f}\uac00-\ud7af]/u;
@@ -319,6 +345,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   bare?: boolean;
 }) {
   const { t } = useI18n();
+  const hasGlassImage = useGlassActive();
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -413,9 +440,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
           style={{
             flex: bare ? undefined : 1,
             minWidth: 0,
-            background: "var(--user-bg-glass)",
-            backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-            WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+            ...bubbleSurface("var(--user-bg-glass)", hasGlassImage),
             border: bare ? "none" : "1px solid var(--user-border-glass)",
             borderRadius: 12,
             padding: "8px 12px",
@@ -671,6 +696,7 @@ function AssistantMessageView({
   bare?: boolean;
 }) {
   const { t } = useI18n();
+  const hasGlassImage = useGlassActive();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
   const blockItems = useMemo(() => (message.content ?? [])
     .map((block, originalIndex) => ({ block, originalIndex }))
@@ -809,9 +835,7 @@ function AssistantMessageView({
           gap: "var(--bubble-gap)",
           padding: "var(--bubble-pad-y) var(--bubble-pad-x) var(--bubble-pad-end)",
           borderRadius: "var(--bubble-radius)",
-          background: "var(--assistant-card-glass)",
-          backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+          ...bubbleSurface("var(--assistant-card-glass)", hasGlassImage),
           border: bare ? "none" : "1px solid var(--bubble-border)",
           boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
         }}
@@ -1541,6 +1565,7 @@ function PairedResult({ text, isEmpty, isError }: {
 
 function CompactionMessageView({ message }: { message: CustomMessage }) {
   const { t } = useI18n();
+  const hasGlassImage = useGlassActive();
   const summary = getMessageText(message.content);
   const parsedSummary = useMemo(() => parseCompactionSummary(summary), [summary]);
   const time = formatTime(message.timestamp);
@@ -1551,9 +1576,7 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
         style={{
           borderRadius: 12,
           overflow: "hidden",
-          background: "var(--assistant-card-glass)",
-          backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+          ...bubbleSurface("var(--assistant-card-glass)", hasGlassImage),
           border: "1px solid var(--bubble-border)",
           boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
         }}
@@ -1626,6 +1649,7 @@ function CompactionFileList({ title, files }: { title: string; files: string[] }
 
 function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessage; cwd?: string; onOpenFile?: (filePath: string) => void }) {
   const { t } = useI18n();
+  const hasGlassImage = useGlassActive();
   const isHiddenDisplay = message.display === false;
   const [contentExpanded, setContentExpanded] = useState(!isHiddenDisplay);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
@@ -1653,8 +1677,10 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
           background: isHiddenDisplay
             ? "color-mix(in srgb, var(--assistant-card-glass) 62%, transparent)"
             : "var(--assistant-card-glass)",
-          backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+          ...bubbleSurface(
+            isHiddenDisplay ? "color-mix(in srgb, var(--assistant-card-glass) 62%, transparent)" : "var(--assistant-card-glass)",
+            hasGlassImage,
+          ),
           border: "1px solid var(--bubble-border)",
           boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
           opacity: isHiddenDisplay && !contentExpanded ? 0.82 : 1,
@@ -1914,6 +1940,7 @@ function formatUsage(usage: {
 }
 
 function BashExecutionView({ message, sessionId }: { message: BashExecutionMessage; sessionId?: string }) {
+  const hasGlassImage = useGlassActive();
   const [fullOutput, setFullOutput] = useState<string | null>(null);
   const [loadingFull, setLoadingFull] = useState(false);
   const [fullError, setFullError] = useState<string | null>(null);
@@ -1975,9 +2002,7 @@ function BashExecutionView({ message, sessionId }: { message: BashExecutionMessa
         margin: "6px 0",
         padding: "4px",
         borderRadius: "var(--bubble-radius)",
-        background: "var(--assistant-card-glass)",
-        backdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
-        WebkitBackdropFilter: "blur(var(--glass-blur-bubble)) saturate(var(--glass-saturate))",
+        ...bubbleSurface("var(--assistant-card-glass)", hasGlassImage),
         border: "1px solid var(--bubble-border)",
         boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
       }}

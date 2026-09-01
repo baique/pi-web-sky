@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useGlassWallpaper, useGlassResizeTrigger, previewBubbleBlur } from "@/hooks/useGlassWallpaper";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
@@ -123,6 +124,62 @@ function boardAwareUrl(query: string): string {
   return `?${params.toString()}`;
 }
 
+function GlassSlider({ label, icon, value, min, max, unit, onCommit, preview }: {
+  label: string;
+  icon: string;
+  value: number;
+  min: number;
+  max: number;
+  unit: string;
+  /** 松手/键盘提交：同步全局（触发一次 AppShell 重渲染 + 模糊图重生成） */
+  onCommit: (v: number) => void;
+  /** 拖动中轻量预览（直接改 CSS 变量，不触发 React 全局状态） */
+  preview?: (v: number) => void;
+}) {
+  const [local, setLocal] = useState(value);
+  // 全局值变化（重置按钮等）时同步本地显示
+  useEffect(() => setLocal(value), [value]);
+  const commit = () => onCommit(local);
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: 8, width: "100%",
+        padding: "7px 10px",
+        color: "var(--text)", border: "1px solid var(--border)", borderRadius: 8,
+        fontSize: 12.5,
+      }}
+    >
+      <span style={{ width: 14, flexShrink: 0, textAlign: "center", fontSize: 12 }}>{icon}</span>
+      <span style={{ flexShrink: 0 }}>{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        value={local}
+        onChange={(e) => {
+          // 拖动中只更新本地 + 轻量预览：AppShell 不重渲染，避免每格 20ms 阻塞
+          const v = Number(e.target.value);
+          setLocal(v);
+          preview?.(v);
+        }}
+        onMouseUp={commit}
+        onTouchEnd={commit}
+        onKeyUp={(e) => { if (e.key.startsWith("Arrow")) commit(); }}
+        style={{ flex: 1, minWidth: 0, accentColor: "var(--accent)", cursor: "pointer" }}
+        aria-label={label}
+      />
+      <span style={{ width: 30, flexShrink: 0, textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>
+        {local}{unit}
+      </span>
+    </div>
+  );
+}
+
+function bubbleOpacityPreview(v: number) {
+  // 拖动中直接写 --bubble-alpha：气泡色层实时变（轻量，不经过 React）
+  document.documentElement.style.setProperty("--bubble-alpha", String(v / 100));
+}
+
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -130,6 +187,15 @@ export function AppShell() {
   const { preference, toggleTheme } = useTheme();
   const { hasBg, ready: bgReady, pick: pickBg, remove: removeBg, kind: bgKind, url: bgUrl } = useAppBackground();
  const { settings: wallSettings, update: updateWallSettings } = useWallpaperSettings(hasBg && bgKind === "image");
+ // 消息列表预模糊壁纸切片：图片壁纸时生成视口对齐模糊图（零实时 blur），
+ // 气泡经 --glass-bg-image 引用；无图/视频时清除，气泡回退 backdrop-filter。
+ const glassTick = useGlassResizeTrigger(hasBg && bgKind === "image");
+ useGlassWallpaper(
+   bgUrl,
+   bgKind === "image",
+   { offsetX: wallSettings.offsetX, repeat: wallSettings.repeat, fill: wallSettings.fill, bubbleBlur: wallSettings.bubbleBlur },
+   glassTick,
+ );
  const [bgAdjusting, setBgAdjusting] = useState(false);
  const bgVideoRef = useRef<HTMLVideoElement>(null);
  const bgCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -2434,52 +2500,26 @@ export function AppShell() {
                 <span style={{ width: 14, flexShrink: 0, textAlign: "center" }}>↺</span>
                 {translate("bg.reset")}
               </button>
-              <div
-                style={{
-                  display: "flex", alignItems: "center", gap: 8, width: "100%",
-                  padding: "7px 10px",
-                  color: "var(--text)", border: "1px solid var(--border)", borderRadius: 8,
-                  fontSize: 12.5,
-                }}
-              >
-                <span style={{ width: 14, flexShrink: 0, textAlign: "center", fontSize: 12 }}>◐</span>
-                <span style={{ flexShrink: 0 }}>{translate("bg.bubbleOpacity")}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={wallSettings.bubbleOpacity}
-                  onChange={(e) => updateWallSettings({ bubbleOpacity: Number(e.target.value) })}
-                  style={{ flex: 1, minWidth: 0, accentColor: "var(--accent)", cursor: "pointer" }}
-                  aria-label={translate("bg.bubbleOpacity")}
-                />
-                <span style={{ width: 30, flexShrink: 0, textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>
-                  {wallSettings.bubbleOpacity}%
-                </span>
-              </div>
-              <div
-                style={{
-                  display: "flex", alignItems: "center", gap: 8, width: "100%",
-                  padding: "7px 10px",
-                  color: "var(--text)", border: "1px solid var(--border)", borderRadius: 8,
-                  fontSize: 12.5,
-                }}
-              >
-                <span style={{ width: 14, flexShrink: 0, textAlign: "center", fontSize: 12 }}>❄</span>
-                <span style={{ flexShrink: 0 }}>{translate("bg.bubbleBlur")}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={30}
-                  value={wallSettings.bubbleBlur}
-                  onChange={(e) => updateWallSettings({ bubbleBlur: Number(e.target.value) })}
-                  style={{ flex: 1, minWidth: 0, accentColor: "var(--accent)", cursor: "pointer" }}
-                  aria-label={translate("bg.bubbleBlur")}
-                />
-                <span style={{ width: 30, flexShrink: 0, textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>
-                  {wallSettings.bubbleBlur}px
-                </span>
-              </div>
+              <GlassSlider
+                label={translate("bg.bubbleOpacity")}
+                icon="◐"
+                value={wallSettings.bubbleOpacity}
+                min={0}
+                max={100}
+                unit="%"
+                preview={bubbleOpacityPreview}
+                onCommit={(v) => updateWallSettings({ bubbleOpacity: v })}
+              />
+              <GlassSlider
+                label={translate("bg.bubbleBlur")}
+                icon="❄"
+                value={wallSettings.bubbleBlur}
+                min={0}
+                max={30}
+                unit="px"
+                preview={(v) => previewBubbleBlur(v)}
+                onCommit={(v) => updateWallSettings({ bubbleBlur: v })}
+              />
               <button
                 type="button"
                 onClick={() => updateWallSettings({ bubbleOpacity: 44, bubbleBlur: DEFAULT_BUBBLE_BLUR })}
@@ -2615,14 +2655,10 @@ export function AppShell() {
       <div
         ref={sidebarResizer.panelRef}
         id="session-sidebar"
-        className={`sidebar-container${sidebarOpen ? " sidebar-open" : " sidebar-closed"}${mobileSidebarReady ? "" : " sidebar-mobile-pending"}${sidebarResizer.isResizing ? " sidebar-resizing" : ""}`}
+        className={`sidebar-container glass-canvas${sidebarOpen ? " sidebar-open" : " sidebar-closed"}${mobileSidebarReady ? "" : " sidebar-mobile-pending"}${sidebarResizer.isResizing ? " sidebar-resizing" : ""}`}
         style={{
           "--sidebar-width": `${sidebarResizer.width}px`,
-          background: "var(--side-panel)",
-          backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-          borderRight: "1px solid color-mix(in srgb, var(--border) 80%, transparent)",
-          display: "flex",
+          backgroundColor: "var(--side-panel)",
           flexDirection: "column",
           flexShrink: 0,
           paddingTop: "env(safe-area-inset-top)",
@@ -2645,7 +2681,7 @@ export function AppShell() {
       {/* Center: chat */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Top bar with sidebar toggle */}
-        <div ref={topBarRef} style={{ position: "relative", zIndex: 300, flexShrink: 0, background: "var(--frame-glass)", backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))", WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))" }}>
+        <div ref={topBarRef} className="glass-canvas" style={{ position: "relative", zIndex: 300, flexShrink: 0, backgroundColor: "var(--frame-glass)" }}>
         <div style={{ display: "flex", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
           <button
             onClick={handleSidebarToggle}
@@ -3284,7 +3320,7 @@ export function AppShell() {
       <div
         ref={rightPanelResizer.panelRef}
         id="file-panel"
-        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}`}
+        className={`right-panel-container glass-canvas${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}`}
         style={{
           "--right-panel-width": `${rightPanelResizer.width}px`,
           display: "flex",
@@ -3293,9 +3329,7 @@ export function AppShell() {
              滤镜只挂这里，FileViewer / TabBar 内层一律用 --file-panel-* 透明加深色，
              不得再挂 backdrop-filter（嵌套只会重复模糊、不柔化壁纸）。 */
           borderLeft: "1px solid color-mix(in srgb, var(--border) 80%, transparent)",
-          background: "var(--file-panel)",
-          backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
+          backgroundColor: "var(--file-panel)",
         } as React.CSSProperties}
       >
         {/* Right panel tab bar */}
