@@ -137,6 +137,11 @@ export function useBoardCanvas({
   // 初次物化数据（editor 挂载后再用）
   const [initialCanvas, setInitialCanvas] = useState<BoardCanvas | null>(null);
 
+  // running 轮询触发即时补卡的节流（距上次 ≥2s；reconcile 幂等，补上后不再缺）
+  const runningReconcileAtRef = useRef(0);
+  // 已见过的 running 任务卡 id 集合（增量检测：新进入 running 的卡才触发补卡）
+  const runningTaskCardIdsRef = useRef<Set<string>>(new Set());
+
   // ---- 运行中快照轮询 ----
   useEffect(() => {
     let stopped = false;
@@ -166,6 +171,17 @@ export function useBoardCanvas({
               }
             }
             if (updates.length > 0) editor.updateShapes(updates);
+          }
+          // 任务卡派发即时补卡：running 快照发现「新进入执行中的任务卡」→ 立即触发
+          // reconcile 补它的执行会话卡（"挂到任务可见"从 reconcile 10s 压到 running 2.5s；
+          // 原子-链接：执行会话在画布上就是普通会话卡）。reconcile 幂等，补上后不再缺。
+          const knownIds = runningTaskCardIdsRef.current;
+          const newlyRunning = mine.some((c) => c.execStatus === "running" && !knownIds.has(c.cardId));
+          for (const c of mine) knownIds.add(c.cardId);
+          const nowTs = Date.now();
+          if (newlyRunning && nowTs - runningReconcileAtRef.current > 2000) {
+            runningReconcileAtRef.current = nowTs;
+            void reconcileTaskSessionsRef.current();
           }
         }
       } catch {
@@ -1100,6 +1116,9 @@ export function useBoardCanvas({
       // 网络/解析失败静默，下轮重试
     }
   }, [addSessionNode, findFreeSpot, sessionTitles]);
+  // running 快照驱动即时补卡用：指向最新 reconcileTaskSessions（running 轮询 useEffect 依赖 [] 闭包旧值）
+  const reconcileTaskSessionsRef = useRef(reconcileTaskSessions);
+  reconcileTaskSessionsRef.current = reconcileTaskSessions;
   const taskIdRef = useRef(taskId);
   taskIdRef.current = taskId;
   // 新建会话 cwd（来自左侧栏 activeCwd）：draft 卡工作台经 props 透传，

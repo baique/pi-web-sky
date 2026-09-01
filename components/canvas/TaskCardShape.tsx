@@ -247,6 +247,11 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   // 执行会话 id（exec 线真相源）：用于「定位执行会话」跳到画布上对应的会话卡
   const sessionId = detail?.card.sessionId ?? null;
 
+  // 展开即时：展开时重新拉详情（拿调度器最新派发的 sessionId/执行状态，不依赖轮询）
+  useEffect(() => {
+    if (expanded && !isCreating) void reload();
+  }, [expanded, isCreating, reload]);
+
   // 定位执行会话：跳到画布上该会话的独立会话卡并选中（工作台已移除，原子-链接）
   const focusExecSession = useCallback(() => {
     if (!sessionId) return;
