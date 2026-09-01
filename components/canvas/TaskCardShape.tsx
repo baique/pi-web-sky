@@ -12,10 +12,10 @@ import { WorktreePicker } from "./WorktreePicker";
 
 /**
  * 任务卡（task-card）：看板上的工作项卡，独立实体（业务字段在 task_cards 表）。
- * - 常态（表单栏常驻）：左=编辑表单（空卡=建卡向导），宽 380；描述之下字段收进「高级」折叠区
- * - 展开：右侧追加执行会话工作台，宽 980（双击/按钮切换）
+ * - 常态（表单栏常驻）：编辑表单（空卡=建卡向导），宽 380；描述之下字段收进「高级」折叠区
+ * - 展开：纯表单加宽，宽 760（双击切换）；无内置工作台（原子-链接）
  * - 布局走 board_nodes（kind=taskcard, ref_id=cardId），shape.id 去 "shape:" 前缀 = node id
- * - 依赖线由 task_card_links 派生（label=kind），禁删
+ * - 依赖线由 task_card_links 派生（label=kind）、exec 线由 task_cards.session_id 派生（label=exec），禁删
  */
 
 /** 当前看板上下文（SessionCanvas 提供）：boardId + 左侧栏当前选中目录（建卡 cwd 默认值）。 */
@@ -140,7 +140,7 @@ export class TaskCardUtil extends BaseBoxShapeUtil<TaskCardShape> {
     return true;
   }
 
-  /** 双击切换右侧工作台展开（常态 380 表单栏 ↔ 展开 980 表单+工作台），两态手动尺寸各自保留。 */
+  /** 双击切换展开/收合（常态 380 表单栏 ↔ 展开 760 纯表单加宽），两态手动尺寸各自保留。 */
   override onDoubleClick(shape: TaskCardShape): TLShapePartial<TaskCardShape> | void {
     return { id: shape.id, type: "task-card", props: nextExpandState(shape) };
   }
@@ -244,6 +244,22 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   const rootRef = useRef<HTMLDivElement>(null);
 
   const isCreating = !cardId;
+  // 执行会话 id（exec 线真相源）：用于「定位执行会话」跳到画布上对应的会话卡
+  const sessionId = detail?.card.sessionId ?? null;
+
+  // 定位执行会话：跳到画布上该会话的独立会话卡并选中（工作台已移除，原子-链接）
+  const focusExecSession = useCallback(() => {
+    if (!sessionId) return;
+    for (const shape of editor.getCurrentPageShapes()) {
+      if (shape.type !== "session-card") continue;
+      const p = shape.props as { sessionId?: string; w?: number; h?: number };
+      if (p.sessionId !== sessionId) continue;
+      const center = { x: shape.x + (p.w ?? 0) / 2, y: shape.y + (p.h ?? 0) / 2 };
+      editor.centerOnPoint(center);
+      editor.select(shape.id);
+      return;
+    }
+  }, [editor, sessionId]);
 
   // 轮询器状态同步：画布层 2.5s 轮询会把本 shape 的 execStatus props 更新为调度器最新状态，
   // 这里镜像进 draft——头部徽章（读 draft.execStatus）自动刷新，保存时也不会用旧值覆盖调度器状态。
@@ -305,7 +321,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   // 「高级」折叠区：默认收起
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  // 展开工作台时自动展开「高级」折叠区；收起时自动收起（与展开态保持一致）
+  // 展开态自动展开「高级」折叠区；收起时自动收起
   useEffect(() => {
     setAdvancedOpen(expanded);
   }, [expanded]);
@@ -684,6 +700,16 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
               </span>
               {draft?.readyStatus === "todo" ? "就绪" : "草稿"}
             </button>
+            {sessionId && (
+              <button
+                type="button"
+                style={footerBtnStyle}
+                onClick={focusExecSession}
+                title="定位到该任务的执行会话卡"
+              >
+                会话
+              </button>
+            )}
             {isCreating ? (
               <button
                 type="button"
@@ -717,7 +743,7 @@ function TaskCardBody({ shape }: { shape: TaskCardShape }) {
             ) : null}
           </div>
         </div>
-        {/* 内容区：左表单 + 右工作台 */}
+        {/* 内容区：编辑表单（无右侧工作台，原子-链接） */}
         <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
         {/* 编辑表单 / 建卡向导（常驻，占满卡片）——无右侧工作台（原子-链接）。
             隐藏滚动条（[scrollbar-width:none]，与 ChatWindow 同惯例） */}
