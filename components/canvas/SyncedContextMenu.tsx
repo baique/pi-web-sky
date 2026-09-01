@@ -19,9 +19,6 @@ import {
 } from "tldraw";
 import { memo, useCallback, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
-import { useBoardId } from "./TaskCardShape";
-import { confirm } from "./ConfirmDialog";
-import { dispatchBoardBaseUpdated, dispatchBoardSessionDeleted } from "@/lib/board-events";
 
 /**
  * 受控化的 ContextMenu（替代 tldraw 默认 DefaultContextMenu）。
@@ -51,93 +48,21 @@ const TASK_LINK_LABELS = new Set(["prerequisite", "related"]);
  */
 function BoardContextMenuContent() {
   const editor = useEditor();
-  const boardId = useBoardId();
   const selected = useValue("ctx-selection", () => editor.getSelectedShapes(), [editor]);
   const derived = selected
     .map((s) => s.meta as { taskLinkLabel?: string; execLinkLabel?: string } | undefined)
     .find((meta) => (meta?.taskLinkLabel !== undefined && TASK_LINK_LABELS.has(meta.taskLinkLabel)) || meta?.execLinkLabel !== undefined);
-  // 选中的会话卡（sessionId 非空）：右键菜单提供「删除会话」（确认制，原子-链接：删卡=删会话）
-  const sessionTargets = selected
-    .filter((s) => s.type === "session-card")
-    .map((s) => ({ shapeId: s.id as string, sid: (s.props as { sessionId?: string }).sessionId }))
-    .filter((t): t is { shapeId: string; sid: string } => Boolean(t.sid));
-
-  const handleDeleteSessions = async (targets: Array<{ shapeId: string; sid: string }>) => {
-    const message = targets.length > 1
-      ? `删除 ${targets.length} 个会话？\n将同时删除画布卡片并断开任务卡关联。此操作不可撤销。`
-      : "删除该会话？\n将同时删除画布卡片并断开任务卡关联。此操作不可撤销。";
-    if (!(await confirm({ message }))) return;
-    for (const t of targets) {
-      // 乐观删除：直接 store.remove（绕过 deleteShapes 的 run/guard，确认即删）
-      editor.store.remove([t.shapeId as never]);
-      void fetch(`/api/sessions/${encodeURIComponent(t.sid)}`, { method: "DELETE" })
-        .then((r) => r.json().catch(() => null))
-        .then((j: { updatedBoards?: Record<string, number> } | null) => {
-          // 删除 bump 了受影响看板 updated：派发事件刷新乐观锁基线，防后续防抖保存 409
-          const b = j?.updatedBoards;
-          if (b) for (const [bid, u] of Object.entries(b)) dispatchBoardBaseUpdated(bid, u);
-          dispatchBoardSessionDeleted(t.sid); // 通知侧栏：左侧树移除该会话
-        })
-        .catch((e) => console.warn(`[board] 删除会话 ${t.sid} 异常`, e));
-    }
-  };
-
-  // 选中的已建任务卡（cardId 非空）：右键菜单提供「删除任务卡」（确认制）
-  const taskCardTargets = selected
-    .filter((s) => s.type === "task-card")
-    .map((s) => ({ shapeId: s.id as string, cardId: (s.props as { cardId?: string }).cardId }))
-    .filter((t): t is { shapeId: string; cardId: string } => Boolean(t.cardId));
-
-  const handleDeleteTaskCards = async (targets: Array<{ shapeId: string; cardId: string }>) => {
-    const message = targets.length > 1
-      ? `删除 ${targets.length} 张任务卡？\n将删除卡/依赖线/执行会话连线；关联的执行会话保留。`
-      : "删除该任务卡？\n将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。";
-    if (!(await confirm({ message }))) return;
-    for (const t of targets) {
-      // 乐观删除：直接 store.remove（绕过 deleteShapes 的 run/guard，确认即删）
-      editor.store.remove([t.shapeId as never]);
-      void fetch(`/api/task-cards/${encodeURIComponent(t.cardId)}`, { method: "DELETE" })
-        .then((r) => r.json().catch(() => null))
-        .then((j: { updated?: number | null } | null) => {
-          // 删除 bump 了看板 updated：派发事件刷新乐观锁基线，防后续防抖保存 409
-          if (typeof j?.updated === "number" && boardId) dispatchBoardBaseUpdated(boardId, j.updated);
-        })
-        .catch((e) => console.warn(`[board] 删除任务卡 ${t.cardId} 异常`, e));
-    }
-  };
-
-  if (!derived && taskCardTargets.length === 0 && sessionTargets.length === 0) {
+  if (!derived) {
     return <DefaultContextMenuContent />;
   }
-  const label = derived?.execLinkLabel ? "执行会话连线（自动生成，不可删除）" : "依赖连线（自动生成，不可删除）";
-  // 注意：不要在这里包 TldrawUiMenuContextProvider type="menu"——MenuItem 会按 menuType
-  // 渲染 DropdownMenuItem（需 DropdownMenu 父级，我们没有）。直接继承 SyncedContextMenu
-  // 外层 type="context-menu" 的 Radix ContextMenu 上下文，MenuItem 渲染 Radix ContextMenu.Item。
+  const label = derived.execLinkLabel ? "执行会话连线（自动生成，不可删除）" : "依赖连线（自动生成，不可删除）";
+  // 注意：不要包 TldrawUiMenuContextProvider type="menu"——MenuItem 会按 menuType 渲染
+  // DropdownMenuItem（需 DropdownMenu 父级）。继承外层 type="context-menu"（Radix ContextMenu）。
   return (
     <>
-      {derived && (
-        <TldrawUiMenuGroup id="task-link">
-          <TldrawUiMenuItem id="task-link-readonly" label={label} disabled noClose onSelect={() => {}} />
-        </TldrawUiMenuGroup>
-      )}
-      {sessionTargets.length > 0 && (
-        <TldrawUiMenuGroup id="session-delete">
-          <TldrawUiMenuItem
-            id="delete-session"
-            label={sessionTargets.length > 1 ? `删除 ${sessionTargets.length} 个会话` : "删除会话"}
-            onSelect={() => void handleDeleteSessions(sessionTargets)}
-          />
-        </TldrawUiMenuGroup>
-      )}
-      {taskCardTargets.length > 0 && (
-        <TldrawUiMenuGroup id="task-card-delete">
-          <TldrawUiMenuItem
-            id="delete-task-card"
-            label={taskCardTargets.length > 1 ? `删除 ${taskCardTargets.length} 张任务卡` : "删除任务卡"}
-            onSelect={() => void handleDeleteTaskCards(taskCardTargets)}
-          />
-        </TldrawUiMenuGroup>
-      )}
+      <TldrawUiMenuGroup id="task-link">
+        <TldrawUiMenuItem id="task-link-readonly" label={label} disabled noClose onSelect={() => {}} />
+      </TldrawUiMenuGroup>
     </>
   );
 }
