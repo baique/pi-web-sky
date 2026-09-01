@@ -11,7 +11,7 @@ export const BOARD_OPEN_FILE_EVENT = "pi-web:board-open-file";
 /** 工作台内 fork 出新会话 → AppShell 刷新侧栏（不切换当前会话/退出看板） */
 export const BOARD_SESSION_FORKED_EVENT = "pi-web:board-session-forked";
 
-/** 看板内新建会话（draft 卡转正）→ AppShell 刷新侧栏 + 卡片侧把 sessionId 写回转正 */
+/** 看板内新建会话（新会话卡转正）→ AppShell 刷新侧栏，新会话出现在左侧树 */
 export const BOARD_SESSION_CREATED_EVENT = "pi-web:board-session-created";
 
 /** 看板内删除会话（画布删卡）→ AppShell 刷新侧栏（左侧树移除该会话） */

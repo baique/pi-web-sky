@@ -421,7 +421,7 @@ function getNode(boardId: string, nodeId: string): BoardNode | undefined {
 }
 
 /**
- * 按全局 nodeId 绑定会话（draft 卡服务端转正用）。
+ * 按全局 nodeId 绑定会话（board_nodes.ref_id 写回；看板已迁 tldraw sync 后废弃保留）。
  * nodeId 是 board_nodes.id（randomUUID，全局唯一），无需 boardId。
  * 绑定成功 bump 所属看板 updated（乐观锁基线），返回更新后的节点；
  * 节点不存在 / 属于系统看板返回 null。

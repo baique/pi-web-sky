@@ -1058,7 +1058,9 @@ export function AppShell() {
 
   const handleNewSession = useCallback((sessionId: string, cwd: string) => {
     invalidateWorkspaceRestore();
-    const draftKey = `new:${sessionId}:${cwd}`;
+    // 新建会话的 ID 发起时即确定（UUID）：draft key 直接用会话 ID，
+    // 任务/看板绑定、草稿持久化、路由全部同步可用，无需占位后转正。
+    const draftKey = sessionId;
     activeNewSessionDraftKeyRef.current = draftKey;
     setNewSessionDraftId(sessionId);
     setSelectedSession(null);
@@ -1082,7 +1084,7 @@ export function AppShell() {
     const cwd = selectedSession?.cwd ?? newSessionCwd ?? activeCwd;
     if (!cwd) return;
     pendingNewSessionTaskRef.current = { taskId, projectKey };
-    handleNewSession(`task-${Date.now()}`, cwd);
+    handleNewSession(crypto.randomUUID(), cwd);
   }, [selectedSession?.cwd, newSessionCwd, activeCwd, handleNewSession]);
 
   // 点任务行 → 打开该任务的看板：懒创建任务型看板后复用 handleOpenBoard。
@@ -1317,7 +1319,7 @@ export function AppShell() {
       setRefreshKey((k) => k + 1);
       setExplorerRefreshKey((k) => k + 1);
     };
-    // 看板内新建会话（draft 卡转正）→ 刷新侧栏，新会话出现在左侧树
+    // 看板内新建会话（新会话卡转正）→ 刷新侧栏，新会话出现在左侧树
     const onBoardSessionCreated = (e: Event) => {
       const detail = (e as CustomEvent<{ sessionId: string }>).detail;
       if (!detail?.sessionId) return;
@@ -1404,8 +1406,10 @@ export function AppShell() {
 
   // Show chat area if a session is selected, or if we have a cwd to start a new session in
   const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
+  // draft key = 会话 UUID（handleNewSession 传入）：新建会话草稿从出生起就用真实会话 ID
+  // 作为持久化 key，转正后无需 rekey。
   const newSessionDraftKey = selectedSession === null && effectiveNewSessionCwd
-    ? `new:${newSessionDraftId}:${effectiveNewSessionCwd}`
+    ? newSessionDraftId
     : null;
   useLayoutEffect(() => {
     activeNewSessionDraftKeyRef.current = newSessionDraftKey;

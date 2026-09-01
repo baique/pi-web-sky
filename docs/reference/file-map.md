@@ -123,7 +123,7 @@ TurnWrittenFiles.tsx    files written this turn (buttons opening each in the vie
 ```
 useAgentSession.ts  messages + streaming + SSE + fork/navigate/reconciliation logic
 useAudio.ts         completion sound + browser AudioContext unlock
-useBoardCanvas.ts   board canvas: load/save(防抖单飞)/running snapshot/reconcile/findFreeSpot/addDraftCard
+useBoardCanvas.ts   board canvas: tldraw sync/reconcile/findFreeSpot/addNewSessionCard
 useTaskCards.ts     task card 数据 hook（详情/候选卡/建卡/保存）
 useBroadcast.ts     composer broadcast slots (left phase / right notices, P0-P3 priority)
 useDragDrop.ts      shared drag/drop state

@@ -1,5 +1,6 @@
 import { existsSync } from "fs";
-import { getBoard, syncExecEdge } from "./board-store";
+import { randomUUID } from "crypto";
+import { getBoard } from "./board-store";
 import { startRpcSession, getRunningRpcSessionIds } from "./rpc-manager";
 import { resolveSessionPath } from "./session-reader";
 import { assignSessionToTask } from "./task-store";
@@ -103,7 +104,8 @@ async function ensureExecutionSession(
   }
   const cwd = resolveDispatchCwd(card);
   if (!cwd) return null;
-  const fresh = await startRpcSession("", "", cwd, { toolNames: PRESET_FULL });
+  // 指定会话 ID：调度器创建的执行会话 ID 在发起时即确定，绑定无需等待 realSessionId。
+  const fresh = await startRpcSession(randomUUID(), "", cwd, { toolNames: PRESET_FULL });
   return { ...fresh, created: true };
 }
 
@@ -124,13 +126,10 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
     if (board?.taskId) {
       assignSessionToTask(session.realSessionId, board.taskId);
     }
-    // 注意：不 bind 执行会话到 taskcard node —— bindNodeToSession 会覆盖 node.ref_id（=cardId），
-    // 导致 getNodeByRefId/水合拿不到卡、刷新后卡从画布消失。会话绑定已在卡上行存（sessionId）。
 
     // 会话正忙（已在流式/处理中）：说明上一轮已发过 prompt，直接标 running，不重复发
     if (session.session.isRunning()) {
       updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
-      syncExecEdge(card.id);
       watchForAgentEnd(card, session.session);
       console.log(`[task-scheduler] #${card.number} ${card.name} 会话忙（复用中），标 running 不重发`);
       return true;
@@ -139,7 +138,6 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
     await session.session.send({ type: "prompt", message: buildTaskPrompt(card) });
 
     updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
-    syncExecEdge(card.id);
     watchForAgentEnd(card, session.session);
     console.log(
       `[task-scheduler] 派发 #${card.number} ${card.name} → session ${session.realSessionId.slice(0, 8)}`,

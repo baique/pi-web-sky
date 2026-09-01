@@ -15,7 +15,7 @@ import type {
 import { isBlockingExtensionUiRequest } from "@/lib/browser-notifications";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
-import { clearDraft, rekeyDraft, restoreDraftSubmission } from "@/lib/draft-store";
+import { clearDraft, restoreDraftSubmission } from "@/lib/draft-store";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
 import { getToolNamesForPreset, type ToolEntry, type ToolPreset } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -166,8 +166,9 @@ export interface UseAgentSessionOptions {
   onSystemPromptLoaderChange?: (loader: (() => Promise<void>) | null) => void;
   onSessionStatsPanelOpen?: () => void;
   setToolPreset?: (preset: ToolPreset) => void;
-  /** 从任务行/看板 draft 卡发起时携带的关联信息（创建请求附带，服务端原子归属任务 + 绑定看板卡片）。
-   *  taskId：服务端把会话挂到任务；nodeId：服务端把会话绑定到看板卡片（ref_id 后台转正）。 */
+  /** 从任务行/看板新会话卡发起时携带的关联信息（创建请求附带，服务端原子归属任务）。
+   *  taskId：服务端把会话挂到任务。看板卡片 sessionId 发起时即确定（前端生成 UUID，
+   *  在 CRDT 文档里），无需服务端写回 ref_id。 */
   pendingNewSessionTaskRef?: React.MutableRefObject<{ taskId?: string; projectKey?: string; nodeId?: string } | null>;
 }
 
@@ -430,7 +431,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const promptRunIdRef = useRef(0);
   const optimisticUserMessageKeyRef = useRef<string | null>(null);
   const modelSwitchPendingRef = useRef(false);
-  const draftKeyAliasesRef = useRef(new Map<string, string>());
   const sessionHookMountedRef = useRef(true);
 
   sessionPropIdRef.current = session?.id ?? null;
@@ -472,20 +472,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const currentModel = currentModelOverride ?? data?.context.model ?? pendingModel ?? null;
   const displayModel = isNew ? (newSessionModel ?? newSessionDefaultModel) : currentModel;
+  // draft key = 会话 UUID（新建会话发起时生成），与 sessionId 恒等，无需别名映射。
   const composerDraftKey = session?.id ?? newSessionDraftKey ?? undefined;
-
-  const resolveComposerDraftKey = useCallback((key: string | undefined) => {
-    if (!key) return undefined;
-    let resolved = key;
-    const visited = new Set<string>();
-    while (!visited.has(resolved)) {
-      visited.add(resolved);
-      const next = draftKeyAliasesRef.current.get(resolved);
-      if (!next) break;
-      resolved = next;
-    }
-    return resolved;
-  }, []);
 
   const restoreSubmission = useCallback((
     text: string,
@@ -493,7 +481,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     targetDraftKey: string | undefined,
   ) => {
     const draftImages = images?.map(({ data, mimeType }) => ({ data, mimeType }));
-    const destinationDraftKey = resolveComposerDraftKey(targetDraftKey);
+    const destinationDraftKey = targetDraftKey;
     if (
       !sessionHookMountedRef.current
       && !newSessionPromotedRef.current
@@ -505,7 +493,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } else if (destinationDraftKey) {
       restoreDraftSubmission(destinationDraftKey, text, draftImages);
     }
-  }, [newSessionDraftKey, opts.chatInputRef, resolveComposerDraftKey]);
+  }, [newSessionDraftKey, opts.chatInputRef]);
 
   const sessionStats = useMemo(() => {
     if (sessionStatsOverride) {
@@ -665,14 +653,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const sid = sessionIdRef.current;
     if (!isNew || !newSessionCwd || !sid || newSessionPromotedRef.current) return;
     newSessionPromotedRef.current = true;
-    const provisionalDraftKey = newSessionDraftKey;
-    if (!provisionalDraftKey) return;
-    if (provisionalDraftKey !== sid) {
-      draftKeyAliasesRef.current.set(provisionalDraftKey, sid);
-      const input = opts.chatInputRef?.current;
-      if (input) input.rekeyDraft(provisionalDraftKey, sid);
-      else rekeyDraft(provisionalDraftKey, sid);
-    }
+    // draft key 即会话 UUID（AppShell/看板在进入新建会话时生成）：
+    // 与 sid 恒等，无需 rekey 映射。草稿持久化从一开始就用真实会话 ID。
+    const provisionalDraftKey = newSessionDraftKey ?? sid;
     onSessionCreated?.({
       id: sid,
       path: "",
@@ -684,12 +667,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       firstMessage,
       transient: true,
     }, provisionalDraftKey);
-  }, [isNew, newSessionCwd, newSessionDraftKey, onSessionCreated, opts.chatInputRef]);
+  }, [isNew, newSessionCwd, newSessionDraftKey, onSessionCreated]);
 
   const ensureNewSession = useCallback(async () => {
     if (sessionIdRef.current) return sessionIdRef.current;
     if (!isNew || !newSessionCwd) return sessionIdRef.current;
     if (ensuringNewSessionRef.current) return ensuringNewSessionRef.current;
+
+    // 会话 ID 发起时即确定（客户端生成 UUID，服务端用指定 ID 创建）：
+    // 任务/看板绑定、路由、草稿 key 全部同步可用，不再等 ensure_session 返回。
+    const desiredId = crypto.randomUUID();
+    sessionIdRef.current = desiredId;
 
     const promise = (async () => {
       // Only send explicit user overrides. The server resolves the current
@@ -705,10 +693,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         body: JSON.stringify({
           cwd: newSessionCwd,
           type: "ensure_session",
+          id: desiredId,
           toolNames,
           ...(pendingTask ? { taskId: pendingTask.taskId } : {}),
-          // 看板 draft 卡：服务端创建会话后直接把卡片转正（写 board_nodes.ref_id）
-          ...(pendingTask?.nodeId ? { boardNodeId: pendingTask.nodeId } : {}),
           ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
           ...(selectedThinkingLevel
             ? { thinkingLevel: selectedThinkingLevel }
@@ -742,7 +729,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       ensuringNewSessionRef.current = null;
     }
-  }, [isNew, newSessionCwd, toolPreset]);
+  }, [isNew, newSessionCwd, toolPreset, opts.pendingNewSessionTaskRef]);
 
   // Opening the System panel is also allowed to initialize an otherwise dormant
   // session. This is deliberately a non-prompt command: it creates no message

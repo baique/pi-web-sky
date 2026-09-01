@@ -6,9 +6,16 @@ import { allowFileRoot } from "@/lib/file-access";
 import { invalidateSessionListCache } from "@/lib/session-reader";
 import { startRpcSession } from "@/lib/rpc-manager";
 import { assignSessionToTask } from "@/lib/task-store";
-import { bindNodeToSession } from "@/lib/board-store";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+// 与 SDK 的 assertValidSessionId 同规则：非空、仅字母数字 + `-_.`、首尾字母数字。
+// SDK 未从主包导出该函数，这里本地校验以提前返回友好错误。
+const SESSION_ID_RE = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
+
+function isValidSessionId(id: string): boolean {
+  return SESSION_ID_RE.test(id);
+}
 
 function parseThinkingLevel(value: unknown): ThinkingLevel | undefined {
   if (value === undefined) return undefined;
@@ -46,17 +53,23 @@ export async function POST(req: Request) {
       }, { status: 400 });
     }
 
-    // Use a one-time key so startRpcSession's lock doesn't conflict with real session ids
-    const { provider, modelId, toolNames, thinkingLevel, taskId, boardNodeId, ...promptCommand } = command as { provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: unknown; taskId?: unknown; boardNodeId?: unknown; [key: string]: unknown };
+    // 客户端可指定会话 ID（新建会话发起时即可知，任务/看板绑定同步完成）。
+    // 无 id 时走 tempKey 路径（向后兼容，由 pi 生成 ID）。
+    const { provider, modelId, toolNames, thinkingLevel, taskId, id, ...promptCommand } = command as { provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: unknown; taskId?: unknown; id?: unknown; [key: string]: unknown };
     if ((provider && !modelId) || (!provider && modelId)) {
       throw new Error("provider and modelId must be provided together");
     }
     const explicitThinkingLevel = parseThinkingLevel(thinkingLevel);
+    const desiredId = typeof id === "string" && id.trim() ? id.trim() : undefined;
+    if (desiredId && !isValidSessionId(desiredId)) {
+      throw new Error(`Invalid session id: ${desiredId}`);
+    }
 
     // Must be unique per request: startRpcSession coalesces concurrent callers
     // that share a key onto one session. Date.now() (ms resolution) collides for
     // requests in the same millisecond, merging two new sessions into one.
-    const tempKey = `__new__${randomUUID()}`;
+    // 指定 id 时直接用 id 作锁 key（唯一）；否则用随机 tempKey。
+    const tempKey = desiredId ?? `__new__${randomUUID()}`;
     const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, {
       ...(toolNames ? { toolNames } : {}),
       ...(provider && modelId ? { initialModel: { provider, modelId } } : {}),
@@ -75,14 +88,6 @@ export async function POST(req: Request) {
       if (!assignSessionToTask(realSessionId, taskId)) {
         throw new Error(`Task not found: ${taskId}`);
       }
-    }
-
-    // 看板卡片服务端转正：创建会话的请求带着卡片 nodeId（K1）时，
-    // 会话出生即绑定到卡片（写 board_nodes.ref_id）。这是后台动作，
-    // 与前端组件生命周期完全解耦——用户切走看板/刷新页面都不影响，
-    // 任何时刻重新进入看板 hydrate 都能读到 ref_id 转正。
-    if (typeof boardNodeId === "string" && boardNodeId) {
-      bindNodeToSession(boardNodeId, realSessionId);
     }
 
     const state = await session.send({ type: "get_state" }) as {

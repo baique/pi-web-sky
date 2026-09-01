@@ -28,9 +28,9 @@ export interface SessionCardProps {
   lastActivityAt: number;
   stale: boolean;
   expanded: boolean;
-  /** draft 卡（新建会话）绑定目录；转正后置空 */
+  /** 新会话卡（看板新建会话）绑定目录；会话创建成功后置空（转正） */
   cwd?: string;
-  /** draft 卡（任务看板）目标任务 id；转正后置空 */
+  /** 新会话卡（任务看板）目标任务 id；转正后置空 */
   taskId?: string;
   w: number;
   h: number;
@@ -200,8 +200,8 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
   const { highlightId } = useBoardSearch();
   const isHighlighted = highlightId === shape.id;
 
-  // draft 卡（新建会话）：sessionId 为空，尚未绑定真实会话
-  const isDraft = !sessionId;
+  // 新会话卡（看板新建会话）：cwd 非空 = 会话尚未创建（sessionId 是发起时生成的 UUID）
+  const isNewSession = Boolean(cwd);
   // 收合态中间区滚动容器 ref：内容溢出时支持滚轮内部滚动（激活态才拦截）。
   // 放组件顶部：Hooks 必须在所有条件 return 之前调用（展开态分支提前 return）。
   const replyScrollRef = useRef<HTMLDivElement | null>(null);
@@ -289,10 +289,10 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
 
   // 独立展开/收起：切换 expanded + 尺寸（nextExpandState 保留两态手动尺寸）。
   // 收合态点展开按钮：pointerEvents all 会拦截 tldraw 拖拽，按钮独立接收点击。
-  // draft 卡不可收合：收起按钮改为删除（尚未绑定会话，收合无意义）。
+  // 新会话卡不可收合：收起按钮改为删除（会话尚未创建，收合无意义）。
   const toggleExpand = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isDraft) {
+    if (isNewSession) {
       editor?.deleteShapes([shape.id]);
       return;
     }
@@ -381,10 +381,10 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
             />
           ) : (
             <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>
-              {isDraft ? "New session" : (title || "Untitled")}
+              {isNewSession ? "New session" : (title || "Untitled")}
             </span>
           )}
-          {!isDraft && !renaming && (
+          {!isNewSession && !renaming && (
             <button
               type="button"
               onClick={startRename}
@@ -411,7 +411,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
             type="button"
             onClick={toggleExpand}
             onPointerDown={(e) => e.stopPropagation()}
-            title={isDraft ? "Discard" : "Collapse"}
+            title={isNewSession ? "Discard" : "Collapse"}
             style={{
               flexShrink: 0,
               pointerEvents: "all",
@@ -428,7 +428,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
               cursor: "pointer",
             }}
           >
-            {isDraft ? (
+            {isNewSession ? (
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <polyline points="3 6 5 6 21 6" />
                 <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
@@ -521,7 +521,7 @@ function SessionCardView({ shape }: { shape: SessionCardShape }) {
             {title || "Untitled"}
           </span>
         )}
-        {!isDraft && !renaming && (
+        {!isNewSession && !renaming && (
           <button
             type="button"
             onClick={startRename}

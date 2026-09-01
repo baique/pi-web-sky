@@ -99,18 +99,15 @@ test("opening System lazily starts a dormant session without sending a prompt", 
   );
 });
 
-test("new-session promotion rekeys drafts before publishing the real session", () => {
+test("new-session promotion publishes the real session without draft rekeying", () => {
   const promoteSource = source.slice(
     source.indexOf("  const promoteNewSession = useCallback"),
     source.indexOf("  const ensureNewSession = useCallback"),
   );
 
-  assert.match(promoteSource, /draftKeyAliasesRef\.current\.set\(provisionalDraftKey, sid\)/);
-  assert.match(promoteSource, /input\.rekeyDraft\(provisionalDraftKey, sid\)/);
-  assert.ok(
-    promoteSource.indexOf("input.rekeyDraft(provisionalDraftKey, sid)")
-      < promoteSource.indexOf("onSessionCreated?.({"),
-  );
+  // draft key = 会话 UUID（发起时即确定），与 sid 恒等：不再需要 rekey 映射。
+  assert.doesNotMatch(promoteSource, /draftKeyAliasesRef/);
+  assert.doesNotMatch(promoteSource, /rekeyDraft/);
   assert.match(promoteSource, /}, provisionalDraftKey\)/);
   assert.match(chatWindowSource, /draftKey=\{session\?\.id \?\? \(sessionIdRef\.current \?\? newSessionDraftKey\) \?\? undefined\}/);
 });
@@ -168,7 +165,8 @@ test("stale fresh-session completion cannot replace the active composer", () => 
     appShellSource.indexOf("  const handleAgentEnd = useCallback"),
   );
 
-  assert.match(newSessionSource, /const draftKey = `new:\$\{sessionId\}:\$\{cwd\}`/);
+  assert.match(newSessionSource, /const draftKey = sessionId;/);
+  assert.match(newSessionSource, /\/\/ 新建会话的 ID 发起时即确定（UUID）/);
   assert.match(newSessionSource, /activeNewSessionDraftKeyRef\.current = draftKey/);
   assert.match(createdSource, /activeNewSessionDraftKeyRef\.current !== sourceDraftKey/);
   assert.match(cwdChangeSource, /const currentFreshCwd = newSessionCwd \?\? activeCwd/);

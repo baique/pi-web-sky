@@ -31,6 +31,12 @@ Pi stores toolCall blocks as `{type:"toolCall", id, name, arguments}` but `ToolC
 
 Tool names are passed at session creation (`POST /api/agent/new` → `toolNames[]`). For existing sessions, the active preset is inferred on mount via `get_tools` → `getPresetFromTools()`. When tools are fully disabled (`toolNames = []`), `rpc-manager.ts` passes an empty tool allow-list and forces `agent.state.systemPrompt = ""` after startup/reload/resource discovery.
 
+## Specified session id + create-on-persist
+
+New sessions can carry a client-chosen id: `POST /api/agent/new` accepts an `id` field (validated against the SDK's `assertValidSessionId` rule: alphanumerics plus `-_.`, must start/end alphanumeric). `startRpcSession` passes it to `SessionManager.create(cwd, dir, { id })`, so the real session id equals the client-supplied one — the caller knows the id **before** the session is ready, which is what task/board bindings rely on (no draft-card waiting, no polling to "promote").
+
+Pi delays the first JSONL flush until an assistant message exists. Pi Web overrides this with `persistNewSessionFile()` in `startRpcSession`: the empty header is written immediately and the manager is marked `flushed`, so a session exists on disk from birth and survives page reloads. This also makes the old `persistBashOnlySession` fallback unnecessary (removed).
+
 The last preset explicitly selected by the user is stored in browser `localStorage` and initializes fresh-session composers only. Existing sessions never trust that preference; they use their live `get_tools` state or pi's default when no wrapper exists.
 
 ## SSE reconnect on page refresh mid-stream

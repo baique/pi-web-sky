@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useEditor } from "tldraw";
 import { ChatWindow } from "@/components/ChatWindow";
 import type { ChatInputHandle } from "@/components/ChatInput";
 import { SessionNavBar, type SessionNavBarHandle } from "./SessionNavBar";
@@ -22,10 +23,10 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
  * 嵌入会话卡片下半部（见 SessionCardShape 展开态）：随卡片 resize 天然跟随宽高。
  *
  * 两种形态：
- * - 普通卡（sessionId 非空）：会话内部化，顶部工具条 + 数据经 ChatWindow 回调捕获
- * - draft 卡（sessionId 空 + cwd）：看板新建会话，直接以 isNew 模式挂 ChatWindow，
- *   用户在卡内发消息 → ensure_session 拿 realId → onSessionCreated 回调
- *   （board-session-created 事件桥）由卡片侧转正。
+ * - 普通卡（sessionId 非空 + cwd 空）：会话内部化，顶部工具条 + 数据经 ChatWindow 回调捕获
+ * - 新会话卡（sessionId = 发起时生成的 UUID + cwd 非空）：看板新建会话，直接以 isNew 模式
+ *   挂 ChatWindow，用户在卡内发消息 → ensure_session 携带该 UUID 创建会话 → onSessionCreated
+ *   回调清 cwd 字段转正（卡片 sessionId 本就一致，无需事件桥写回）。
  */
 export function SessionWorkbench({
   sessionId,
@@ -33,13 +34,14 @@ export function SessionWorkbench({
   taskId,
 }: {
   sessionId: string;
-  /** draft 卡（新建会话）绑定目录 */
+  /** 新会话卡（看板新建会话）绑定目录；cwd 非空 = 会话尚未创建 */
   cwd?: string;
-  /** draft 卡（任务看板）目标任务 id */
+  /** 新会话卡（任务看板）目标任务 id */
   taskId?: string;
 }) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
+  const editor = useEditor();
 
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,44 +49,42 @@ export function SessionWorkbench({
   const rootRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const navbarRef = useRef<SessionNavBarHandle | null>(null);
-  // draft 卡（新建会话）：无 sessionId，ChatWindow 以 isNew 模式工作
-  const isDraft = !sessionId;
-  // 卡片 nodeId（shape.id 去 "shape:" 前缀，即 board_nodes.id）：
-  // 服务端创建会话时随 ensure_session 携带，会话出生即绑定到本卡（后台转正，
-  // 与组件生命周期解耦）。存 ref 不依赖 DOM——切走后 DOM 销毁，ref 仍保留。
-  const nodeIdRef = useRef<string | undefined>(undefined);
-  // draft 卡目标任务 + nodeId ref（服务端创建会话时原子归属任务 + 绑定卡片，消费一次后清空）
-  const pendingTaskRef = useRef<{ taskId?: string; projectKey?: string; nodeId?: string } | null>(null);
-  // draft 卡必带 nodeId（服务端转正锚点）；任务看板额外带 taskId（原子归属）
-  pendingTaskRef.current = isDraft ? { ...(taskId ? { taskId } : {}), ...(nodeIdRef.current ? { nodeId: nodeIdRef.current } : {}) } : null;
-  // draft 卡草稿 key：稳定标识（卡内输入框草稿持久化用）
-  const draftKeyRef = useRef(`board-new:${Math.random().toString(36).slice(2, 8)}`);
-  // draft 卡初始 cwd：转正后卡片侧会把 cwd 字段清空（props.cwd 变 ""），但 isNew 实例
+  // 新会话卡（看板新建会话）：sessionId 是发起时生成的 UUID（卡片出生即有），
+  // cwd 非空标记“会话尚未创建”——ChatWindow 以 isNew 模式工作，首条消息
+  // 携带该 UUID 创建会话。会话创建成功（cwd 清空）后转正为普通卡。
+  const isNewSession = Boolean(cwd);
+  // 新会话卡目标任务 ref（服务端创建会话时原子归属任务，消费一次后清空）。
+  // 不需要 nodeId：卡片 sessionId 发起时即确定（在 CRDT 文档里），无需服务端写回。
+  const pendingTaskRef = useRef<{ taskId?: string; projectKey?: string } | null>(null);
+  pendingTaskRef.current = isNewSession ? (taskId ? { taskId } : null) : null;
+  // 新会话卡草稿 key = 会话 UUID（卡片 sessionId）：与 ensureNewSession 生成的
+  // 指定 id 恒等，草稿持久化从出生起就用真实会话 ID。
+  const draftKeyRef = useRef(sessionId);
+  // 新会话卡初始 cwd：转正后卡片侧会把 cwd 字段清空（props.cwd 变 ""），但 isNew 实例
   // 仍需 cwd 作 newSessionCwd（第二条消息 ensure_session 用），这里缓存首帧值。
   const cwdRef = useRef(cwd ?? null);
-  // 转正标记：draft 卡发出首条消息后 sessionId 从空变为 realId。此时 prompt 正在跑，
-  // 卸载/重挂 ChatWindow 会断开 SSE 丢失事件 —— 本实例生命周期内保持 isNew 模式继续，
-  // 不重挂。组件重建（收合再展开 / 刷新 / 重新打开）时 wasDraftRef 重新按 isDraft 初始化，
-  // 转正后的卡片走回普通会话模式正常加载历史。
-  const wasDraftRef = useRef(isDraft);
+  // 转正标记：本实例内发过消息（prompt 正在跑，卸载/重挂 ChatWindow 会断开 SSE）。
+  // 本实例生命周期内保持 isNew 模式继续，不重挂。组件重建（收合再展开 / 刷新 / 重新打开）
+  // 时 wasNewSessionRef 重新按 isNewSession 初始化，转正后的卡片走回普通会话模式加载历史。
+  const wasNewSessionRef = useRef(isNewSession);
   // 本实例内是否发过消息并转正（onSessionCreated 触发过）：为 true 说明 prompt 正在跑，
-  // 保持 isNew 不断 SSE；为 false 且 sessionId 从空变非空 = 外部转正（服务端后台绑定 +
-  // 轮询补写，本实例从未发消息），可安全切换到会话模式。
+  // 保持 isNew 不断 SSE；为 false 且 cwd 从非空变空 = 外部转正（其他客户端清 cwd），
+  // 可安全切换到会话模式。
   const localPromotedRef = useRef(false);
-  // 监听 sessionId 从空变非空：外部转正时复位 wasDraftRef 并重挂 ChatWindow 加载会话。
+  // 监听 cwd 从非空变空：外部转正时复位 wasNewSessionRef 并重挂 ChatWindow 加载会话。
   // 本实例内转正（localPromotedRef=true）保持 isNew（prompt 在跑不断 SSE）。
-  const prevSessionIdRef = useRef(sessionId);
+  const prevCwdRef = useRef(cwd);
   useEffect(() => {
-    const prev = prevSessionIdRef.current;
-    prevSessionIdRef.current = sessionId;
-    if (prev) return; // 非「空 → 非空」变化
-    if (!sessionId) return;
-    if (wasDraftRef.current && !localPromotedRef.current) {
+    const prev = prevCwdRef.current;
+    prevCwdRef.current = cwd;
+    if (!prev) return; // 非「非空 → 空」变化
+    if (cwd) return;
+    if (wasNewSessionRef.current && !localPromotedRef.current) {
       // 外部转正：本实例从未发消息，重挂 ChatWindow 走普通会话模式
-      wasDraftRef.current = false;
+      wasNewSessionRef.current = false;
       setChatKey((k) => k + 1);
     }
-  }, [sessionId]);
+  }, [cwd]);
 
   // 导航条 portal 目标：卡片标题栏内的 slot（展开按钮之前）
   const [navbarSlot, setNavbarSlot] = useState<HTMLElement | null>(null);
@@ -92,16 +92,9 @@ export function SessionWorkbench({
   // 结构：卡片(.tl-html-container) > 标题栏 + 工作台；slot 在标题栏内。
   useEffect(() => {
     const card = rootRef.current?.closest(".tl-html-container");
-    // 同步 nodeId 到 ref（稳定值，切走/卸载后仍可用，服务端转正依赖它）
-    const nid = card?.getAttribute("data-node-id") ?? undefined;
-    if (nid && nid !== nodeIdRef.current) nodeIdRef.current = nid;
-    // nodeId 随 pendingTaskRef 带给 ensure_session（服务端绑定卡片）
-    if (nid && isDraft && pendingTaskRef.current) pendingTaskRef.current = { ...pendingTaskRef.current, nodeId: nid };
-    else if (nid && isDraft && !pendingTaskRef.current) pendingTaskRef.current = { nodeId: nid };
     const slot = card?.querySelector("[data-session-navbar-slot]") as HTMLElement | null ?? null;
     setNavbarSlot((prev) => (prev === slot ? prev : slot));
-    // 无依赖：tldraw 重渲染会替换 DOM，必须每次渲染后重挂监听/同步（与 wheel 拦截同风格）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 无依赖数组：tldraw 重渲染会替换 DOM，必须每次渲染后重挂监听/同步（与 wheel 拦截同风格）
   });
 
   // 会话统计 + Context 用量 + TODO（经 ChatWindow 回调捕获，卡片内自渲染）
@@ -128,13 +121,26 @@ export function SessionWorkbench({
     setTodos(nextTodos);
   }, []);
 
-  // draft 卡转正：ChatWindow 拿到 realId 后回调 → 事件桥让卡片侧把 sessionId 写回转正
+  // 新会话卡转正：ChatWindow 拿到 realId 后回调。会话创建成功（文件已落盘），
+  // 卡片 sessionId 本就是发起时生成的 UUID（= created.id），这里只清 cwd 字段
+  // 标记“会话已创建”转正为普通卡（CRDT 同步到文档），并派发事件让侧栏刷新。
   const handleSessionCreated = useCallback((created: SessionInfo) => {
     if (!created?.id) return;
     // 本实例内发过消息（prompt 在跑）：转正保持 isNew 不断 SSE
     localPromotedRef.current = true;
-    dispatchBoardSessionCreated(created.id, nodeIdRef.current);
-  }, []);
+    // 清 cwd 字段（shape props 更新经 CRDT 同步持久化，无需服务端写回）
+    const card = rootRef.current?.closest(".tl-html-container");
+    const nodeId = card?.getAttribute("data-node-id");
+    if (nodeId) {
+      editor.updateShapes([{
+        id: `shape:${nodeId}` as never,
+        type: "session-card",
+        props: { cwd: "" },
+      } as never]);
+    }
+    // 事件桥：侧栏刷新（会话已挂到任务/出现在左侧树）
+    dispatchBoardSessionCreated(created.id);
+  }, [editor]);
 
   // 事件桥转发：工作台内无法直接拿 AppShell handler，走全局事件（携带 sessionId）
   const handleOpenFile = useCallback((filePath: string) => {
@@ -197,16 +203,16 @@ export function SessionWorkbench({
     return () => el.removeEventListener("copy", onCopy);
   });
 
-  // 拉取会话数据（cwd/projectKey 等 ChatWindow 需要）。draft 卡跳过：
-  // 无真实会话，ChatWindow 以 isNew 模式新建。
+  // 拉取会话数据（cwd/projectKey 等 ChatWindow 需要）。新会话卡跳过：
+  // 会话尚未创建，ChatWindow 以 isNew 模式新建。
   useEffect(() => {
-    if (isDraft) return;
+    if (isNewSession) return;
     let cancelled = false;
-    // draft 转正：ChatWindow 保持 isNew 实例继续（不卸载、不重挂，避免断 SSE），
+    // 新会话转正：ChatWindow 保持 isNew 实例继续（不卸载、不重挂，避免断 SSE），
     // 仅拉 session 元数据供导航条渲染；不 setSession(null)，以免工作台闪 loading。
-    // 首条 prompt 落盘前 /api/sessions 可能查不到（pi 延迟 flush），此时不置错，
+    // 首条 prompt 落盘前 /api/sessions 可能查不到（会话创建即落盘，窗口极短），此时不置错，
     // 收合再展开/刷新会走普通卡路径补上。
-    if (wasDraftRef.current) {
+    if (wasNewSessionRef.current) {
       setError(null);
       void (async () => {
         try {
@@ -217,7 +223,7 @@ export function SessionWorkbench({
           if (cancelled) return;
           if (found) setSession(found);
         } catch (e) {
-          console.warn("draft session metadata load failed:", e);
+          console.warn("new session metadata load failed:", e);
         }
       })();
       return () => { cancelled = true; };
@@ -243,7 +249,7 @@ export function SessionWorkbench({
       }
     })();
     return () => { cancelled = true; };
-  }, [sessionId, t, isDraft]);
+  }, [sessionId, t, isNewSession]);
 
   if (error) {
     return (
@@ -255,7 +261,7 @@ export function SessionWorkbench({
     );
   }
 
-  if (!session && !isDraft && !wasDraftRef.current) {
+  if (!session && !isNewSession && !wasNewSessionRef.current) {
     return (
       <div style={containerStyle}>
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
@@ -283,7 +289,7 @@ export function SessionWorkbench({
       onDoubleClick={(e) => e.stopPropagation()}
     >
       {/* 会话导航条：portal 到卡片标题栏右侧（展开按钮之前），融入标题栏而非独立一行。
-          仅已转正会话显示（draft 卡标题栏是新会话占位，无导航条） */}
+          仅已转正会话显示（新会话卡标题栏是新建占位，无导航条） */}
       {navbarSlot && session && createPortal(
         <SessionNavBar
           ref={navbarRef}
@@ -299,10 +305,10 @@ export function SessionWorkbench({
         key={chatKey}
         // 转正后保持 isNew 实例（首条 prompt 正在跑，重挂会断 SSE）；
         // 后续刷新/展开由摘要轮询 + 卡片标题接管，本实例不再切换
-        session={isDraft || wasDraftRef.current ? null : session}
-        newSessionCwd={isDraft || wasDraftRef.current ? (cwdRef.current ?? null) : null}
-        newSessionDraftKey={isDraft || wasDraftRef.current ? draftKeyRef.current : null}
-        pendingNewSessionTaskRef={isDraft || wasDraftRef.current ? pendingTaskRef : undefined}
+        session={isNewSession || wasNewSessionRef.current ? null : session}
+        newSessionCwd={isNewSession || wasNewSessionRef.current ? (cwdRef.current ?? null) : null}
+        newSessionDraftKey={isNewSession || wasNewSessionRef.current ? draftKeyRef.current : null}
+        pendingNewSessionTaskRef={isNewSession || wasNewSessionRef.current ? pendingTaskRef : undefined}
         chatInputRef={chatInputRef}
         inWorkbench
         onSessionStatsChange={handleSessionStatsChange}
@@ -310,7 +316,7 @@ export function SessionWorkbench({
         onSessionStatsPanelOpen={handleSessionStatsPanelOpen}
         onTodosChange={handleTodosChange}
         onOpenFile={handleOpenFile}
-        onSessionCreated={isDraft ? (created) => handleSessionCreated(created) : undefined}
+        onSessionCreated={isNewSession ? (created) => handleSessionCreated(created) : undefined}
         onSessionForked={handleSessionForked}
         onAgentEnd={handleAgentEnd}
         onAttentionNeeded={handleAttentionNeeded}

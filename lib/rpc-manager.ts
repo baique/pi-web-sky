@@ -368,26 +368,6 @@ export class AgentSessionWrapper {
     }, 10 * 60 * 1000);
   }
 
-  private persistBashOnlySession(): void {
-    const manager = this.inner.sessionManager;
-    const sessionFile = manager.getSessionFile();
-    if (!sessionFile || existsSync(sessionFile)) return;
-
-    const header = manager.getHeader();
-    if (!header) return;
-
-    const content = [header, ...manager.getEntries()]
-      .map((entry) => JSON.stringify(entry))
-      .join("\n") + "\n";
-    writeFileSync(sessionFile, content, { encoding: "utf8", flag: "wx" });
-
-    // Pi normally delays the first flush until an assistant message exists.
-    // A leading shell command has no assistant message, so mark this SDK
-    // manager as flushed after writing its own generated entries.
-    (manager as unknown as { flushed: boolean }).flushed = true;
-    cacheSessionPath(this.inner.sessionId, sessionFile);
-  }
-
   onEvent(listener: EventListener): () => void {
     this.listeners.push(listener);
     for (const event of this.pendingUiRequests.values()) listener(event);
@@ -760,7 +740,6 @@ export class AgentSessionWrapper {
         );
         try {
           const result = await execution;
-          this.persistBashOnlySession();
           return result;
         } finally {
           this.resetIdleTimer();
@@ -1416,6 +1395,26 @@ function trackStartingSession(cwd: string): () => void {
   };
 }
 
+/**
+ * 新建会话创建即落盘：写空 header 文件并标记 flushed。
+ * pi 默认延迟到第一条 assistant 消息才 flush（避免生成空会话文件），但
+ * pi-web 的会话 ID 由创建方指定（任务/看板绑定在创建时就写库），若文件不
+ * 落盘，刷新后 /api/sessions 读不到该会话，绑定就会“丢失”。
+ * 调用后 manager 的后续 append 走 appendFileSync（见 SDK _persist）。
+ */
+function persistNewSessionFile(manager: SessionManager, sessionId: string): void {
+  const sessionFile = manager.getSessionFile();
+  if (!sessionFile || existsSync(sessionFile)) return;
+  const header = manager.getHeader();
+  if (!header) return;
+  const content = [header, ...manager.getEntries()]
+    .map((entry) => JSON.stringify(entry))
+    .join("\n") + "\n";
+  writeFileSync(sessionFile, content, { encoding: "utf8", flag: "wx" });
+  (manager as unknown as { flushed: boolean }).flushed = true;
+  cacheSessionPath(sessionId, sessionFile);
+}
+
 export function getRpcSession(sessionId: string): AgentSessionWrapper | undefined {
   return getRegistry().get(sessionId);
 }
@@ -1577,7 +1576,14 @@ export async function startRpcSession(
     sessionManager = SessionManager.open(sessionFile, undefined);
   } else {
     if (!cwd) throw new Error("cwd is required for a new session");
-    sessionManager = SessionManager.create(cwd, undefined);
+    // 指定会话 ID：合法的 sessionId 参数即最终会话 ID（SDK 原生支持 NewSessionOptions.id）。
+    // 新建会话的 ID 在发起时即可知，任务/看板绑定不再依赖等待 realSessionId 返回。
+    // 内部占位 key（如 route.ts 的 `__new__<uuid>`，双下划线前缀）不算指定 ID——
+    // 它们只作并发锁 key，真实 ID 仍由 pi 生成（向后兼容无 id 的调用方）。
+    const isExplicitId = sessionId.length > 0 && !sessionId.startsWith("__");
+    sessionManager = SessionManager.create(cwd, undefined, isExplicitId ? { id: sessionId } : undefined);
+    // 创建即落盘：会话文件从出生就在磁盘，刷新后绑定不丢（见 persistNewSessionFile）。
+    if (isExplicitId) persistNewSessionFile(sessionManager, sessionId);
   }
   const sessionCwd = sessionManager.getCwd();
   const finishStartingSession = trackStartingSession(sessionCwd);

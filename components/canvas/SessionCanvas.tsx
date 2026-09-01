@@ -13,16 +13,19 @@ import { confirm } from "./ConfirmDialog";
 import { BoardSearch } from "./BoardSearch";
 
 // ssr:false — tldraw 依赖浏览器环境，仅进入看板模式时下载（~1MB）。
+// 加载占位样式与 CanvasStage 数据同步段完全一致（深色半透明 + 白字 + spinner）。
 const CanvasStage = dynamic(() => import("./CanvasStage").then((m) => m.CanvasStage), {
   ssr: false,
   loading: () => (
     <div
       style={{
-        height: "100%",
+        position: "absolute",
+        inset: 0,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        color: "var(--text-muted)",
+        background: "rgba(8, 14, 30, 0.85)",
+        color: "rgba(255, 255, 255, 0.85)",
         fontSize: 13,
       }}
     >
@@ -314,7 +317,7 @@ export function SessionCanvas({
         >
           <button
             type="button"
-            onClick={() => board.addDraftCard()}
+            onClick={() => board.addNewSessionCard()}
             title={t("boards.newSession")}
             style={{ ...floatingIconBtn, color: "var(--accent)" }}
           >

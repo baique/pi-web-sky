@@ -2,7 +2,7 @@
 // board_nodes 节点）与指向它的连线成为孤儿数据。进入看板时懒加载清理一次。
 //
 // 孤儿判定（防误删"创建中"会话）：
-// - refId 非空（draft 卡 refId=null 不动）
+// - refId 非空（未绑定会话的节点不动）
 // - 会话文件不存在（resolveSessionPath === null；listAllSessions 已填充路径缓存）
 // - session_meta 无该会话记录（任务会话创建即写 meta，文件延迟落盘也安全）
 // 运行中会话文件存在，天然不被删。
