@@ -11,7 +11,6 @@ import { TaskCardTool } from "./TaskCardTool";
 import { SyncedContextMenu } from "./SyncedContextMenu";
 import { useI18n } from "@/hooks/useI18n";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
-import type { SessionInfo } from "@/lib/types";
 
 // 自定义 shape util：会话卡 + 自研 markdown 便笺 + 任务卡。
 const shapeUtils = [...defaultShapeUtils, SessionCardUtil, StickyNoteUtil, TaskCardUtil];

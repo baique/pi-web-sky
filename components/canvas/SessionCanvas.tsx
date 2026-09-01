@@ -6,7 +6,6 @@ import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
 import { useBoardCanvas } from "@/hooks/useBoardCanvas";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
-import type { SessionInfo } from "@/lib/types";
 import { BoardSearchProvider } from "./BoardSearchContext";
 import { GlassScopeProvider } from "./GlassScopeContext";
 import { BoardIdContext } from "./TaskCardShape";
@@ -53,22 +52,18 @@ const CanvasStage = dynamic(() => import("./CanvasStage").then((m) => m.CanvasSt
  */
 export function SessionCanvas({
   boardId,
-  projectKey,
   taskId,
   newSessionCwd,
-  onOpenSession,
   onRunningSessionIdsChange,
   wallSettings,
   updateWallSettings,
 }: {
   boardId: string;
-  projectKey?: string;
   /** 任务看板模式：非空时按任务内会话自动补卡（任务即看板） */
   taskId?: string;
   /** 看板新建会话绑定的工作目录（来自左侧栏 activeCwd） */
   newSessionCwd?: string;
   onExit: () => void;
-  onOpenSession: (session: SessionInfo, isRestore?: boolean) => void;
   onRunningSessionIdsChange?: (ids: Set<string>) => void;
   // 复用 AppShell 同一个 useWallpaperSettings 实例：scrim 滑块与气泡滑块
   // 完全同机制（同 localStorage、同 apply 写 CSS 变量），仅独立变量。
@@ -77,7 +72,7 @@ export function SessionCanvas({
 }) {
   const { t } = useI18n();
   const { isDark } = useTheme();
-  const board = useBoardCanvas({ boardId, projectKey, taskId, newSessionCwd, onOpenSession: (sid) => onOpenSession({ id: sid } as SessionInfo, false) });
+  const board = useBoardCanvas({ boardId, taskId, newSessionCwd });
   // 任务看板：卡片由任务会话驱动（自动补卡/随任务变化），会话卡不可从看板移除；
   // 但清空允许——仅作用于非会话元素（连线/便笺/文本），会话卡片保留。
   const isTaskBoard = Boolean(board.board?.taskId ?? taskId);

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { BoardInfo } from "@/lib/board-types";
 import { BOARD_CANVAS_CHANGED_EVENT } from "@/lib/board-events";
@@ -30,7 +30,7 @@ export function BoardSection({
 }) {
   const { t } = useI18n();
   const [boards, setBoards] = useState<BoardInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [newOpen, setNewOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);

@@ -81,18 +81,14 @@ type SessionCardProps = {
 
 export function useBoardCanvas({
   boardId,
-  projectKey,
   taskId,
   newSessionCwd,
-  onOpenSession,
 }: {
   boardId: string;
-  projectKey?: string;
   /** 任务看板模式：非空时按任务内会话自动补卡 + 补派生边（任务即看板） */
   taskId?: string;
   /** 看板新建会话绑定的工作目录（来自左侧栏选中目录 activeCwd） */
   newSessionCwd?: string;
-  onOpenSession?: (sessionId: string) => void;
 }) {
   const [board, setBoard] = useState<BoardInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -294,7 +290,6 @@ export function useBoardCanvas({
       }
     }
     if (updates.length > 0) editor.updateShapes(updates);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionTitles, editorReady]);
 
   // ---- tldraw 挂载 ----
@@ -377,9 +372,29 @@ export function useBoardCanvas({
     }) as typeof origDeleteShapes;
   }, []);
 
-  // ---- 派生边 reconcile（核心）：补卡 + exec 线 ----
-  // 读业务数据（任务会话 / 任务卡 sessionId）→ diff 画布 → editor 创建 shape。
-  // 确定性 id（session-<sid> / exec-<cardId>）→ 幂等；CRDT 合并，多端不冲突。
+  const findFreeSpot = useCallback((editor: Editor): { x: number; y: number } => {
+    const STEP = 24;
+    const PER_ROW = 4;
+    const occupied = editor
+      .getCurrentPageShapes()
+      .filter((s) => s.type === "session-card")
+      .map((s) => ({ x: s.x, y: s.y, w: (s.props as SessionCardProps).w || CARD_W, h: (s.props as SessionCardProps).h || CARD_H }));
+    const overlaps = (x: number, y: number) =>
+      occupied.some((o) => x < o.x + o.w + STEP && x + CARD_W + STEP > o.x && y < o.y + o.h + STEP && y + CARD_H + STEP > o.y);
+    let y = 60;
+    let guard = 0;
+    while (guard < 2000) {
+      for (let col = 0; col < PER_ROW; col += 1) {
+        const x = 60 + col * (CARD_W + STEP);
+        if (!overlaps(x, y)) return { x, y };
+      }
+      y += CARD_H + STEP;
+      guard += 1;
+    }
+    return { x: 60 + Math.random() * 120, y: 60 + Math.random() * 120 };
+  }, []);
+
+  // ---- 派生边 reconcile（核心）：补卡 + exec 线 + 依赖线 + 孤儿清理 ----
   const reconcileInFlightRef = useRef(false);
   const reconcile = useCallback(async () => {
     const editor = editorRef.current;
@@ -525,7 +540,7 @@ export function useBoardCanvas({
     } finally {
       reconcileInFlightRef.current = false;
     }
-  }, []);
+  }, [findFreeSpot]);
 
   useEffect(() => {
     reconcileRef.current = reconcile;
@@ -554,7 +569,6 @@ export function useBoardCanvas({
       clearTimeout(first);
       document.removeEventListener("visibilitychange", onVis);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveTaskId, editorReady, reconcile]);
 
   // ---- draft 卡转正：SessionWorkbench 内 ChatWindow 拿到 realId 后派发
@@ -625,29 +639,6 @@ export function useBoardCanvas({
         stale: false, expanded: false, w: CARD_W, h: CARD_H,
       } as never,
     });
-  }, []);
-
-  // ---- 自动找空位 ----
-  const findFreeSpot = useCallback((editor: Editor): { x: number; y: number } => {
-    const STEP = 24;
-    const PER_ROW = 4;
-    const occupied = editor
-      .getCurrentPageShapes()
-      .filter((s) => s.type === "session-card")
-      .map((s) => ({ x: s.x, y: s.y, w: (s.props as SessionCardProps).w || CARD_W, h: (s.props as SessionCardProps).h || CARD_H }));
-    const overlaps = (x: number, y: number) =>
-      occupied.some((o) => x < o.x + o.w + STEP && x + CARD_W + STEP > o.x && y < o.y + o.h + STEP && y + CARD_H + STEP > o.y);
-    let y = 60;
-    let guard = 0;
-    while (guard < 2000) {
-      for (let col = 0; col < PER_ROW; col += 1) {
-        const x = 60 + col * (CARD_W + STEP);
-        if (!overlaps(x, y)) return { x, y };
-      }
-      y += CARD_H + STEP;
-      guard += 1;
-    }
-    return { x: 60 + Math.random() * 120, y: 60 + Math.random() * 120 };
   }, []);
 
   // ---- 清空画布 ----
