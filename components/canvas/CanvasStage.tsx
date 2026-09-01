@@ -339,42 +339,34 @@ export function CanvasStage({
           <div style={{ position: "absolute", inset: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "center", color: "#f87171", fontSize: 13 }}>
             {board.error}
           </div>
-        ) : board.loading ? (
-          /* 数据加载中：不挂 Tldraw（画布未就绪），显示加载覆盖层 */
+        ) : board.loading || !board.syncStore || board.syncStore.status !== "synced-remote" ? (
+          /* 数据加载中：不挂 Tldraw（文档未同步），显示加载覆盖层 */
           <div style={{ position: "absolute", inset: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
             {t("boards.loadingCanvas")}
           </div>
         ) : (
-          <>
-            {/* Tldraw 必须无条件挂载：onMount → editorReady → hydrate 物化 → hydrated=true。
-                若用 !hydrated 挡住 Tldraw，会与 hydrate 依赖 editorReady 形成死锁（永远 loading）。 */}
-            <Tldraw
-              // maxPages: 1 — 关闭 tldraw 内置多页面能力：右键「移动到页面」菜单
-              // （MoveToPageMenu）与左下角页面导航均按单页面模式自动隐藏。
-              options={{ maxPages: 1 }}
-              shapeUtils={shapeUtils}
-              tools={[StickyNoteTool, TaskCardTool]}
-              overrides={uiOverrides}
-              onMount={(editor) => {
-                // 开启内置拖放吸附对齐（对齐线/中点/边缘），不影响展示效果
-                editor.user.updateUserPreferences({ isSnapMode: true });
-                board.onMount(editor);
-                // 聚焦画布：解除 tldraw 的 isFocused 死锁。autoFocus={false} 下 isFocused 恒 false，
-                // tldraw 的 wheel（画布缩放/平移 + ctrl+wheel 防页面缩放）与键盘全被门控失效。
-                // 聚焦后 ctrl+wheel 缩放画布、滚轮平移、快捷键恢复；侧栏输入框点击时焦点自然转移。
-                editor.focus();
-              }}
-              components={components}
-              autoFocus={false}
-              colorScheme={isDark ? "dark" : "light"}
-            />
-            {/* 物化完成前：加载覆盖层盖在画布上（不阻挡 Tldraw 挂载/物化，只遮住空画布窗口） */}
-            {!board.hydrated && (
-              <div style={{ position: "absolute", inset: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
-                {t("boards.loadingCanvas")}
-              </div>
-            )}
-          </>
+          <Tldraw
+            // 数据层：useSync 的 synced store（每看板一个 TLSocketRoom，CRDT 自动同步/持久化）
+            store={board.syncStore.store}
+            // maxPages: 1 — 关闭 tldraw 内置多页面能力：右键「移动到页面」菜单
+            // （MoveToPageMenu）与左下角页面导航均按单页面模式自动隐藏。
+            options={{ maxPages: 1 }}
+            shapeUtils={shapeUtils}
+            tools={[StickyNoteTool, TaskCardTool]}
+            overrides={uiOverrides}
+            onMount={(editor) => {
+              // 开启内置拖放吸附对齐（对齐线/中点/边缘），不影响展示效果
+              editor.user.updateUserPreferences({ isSnapMode: true });
+              board.onMount(editor);
+              // 聚焦画布：解除 tldraw 的 isFocused 死锁。autoFocus={false} 下 isFocused 恒 false，
+              // tldraw 的 wheel（画布缩放/平移 + ctrl+wheel 防页面缩放）与键盘全被门控失效。
+              // 聚焦后 ctrl+wheel 缩放画布、滚轮平移、快捷键恢复；侧栏输入框点击时焦点自然转移。
+              editor.focus();
+            }}
+            components={components}
+            autoFocus={false}
+            colorScheme={isDark ? "dark" : "light"}
+          />
         )}
       </div>
     </div>
