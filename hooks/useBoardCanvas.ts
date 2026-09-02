@@ -109,6 +109,9 @@ export function useBoardCanvas({
 
   const boardIdRef = useRef(boardId);
   boardIdRef.current = boardId;
+  // 任务看板 taskId：prop 可能在 URL 直达时为空，看板元信息(board.board.taskId)恒有 —— 归属用两者兜底
+  const boardRef = useRef<BoardInfo | null>(null);
+  boardRef.current = board;
   const taskIdRef = useRef(taskId ?? null);
   taskIdRef.current = taskId ?? null;
   const newSessionCwdRef = useRef(newSessionCwd);
@@ -466,10 +469,35 @@ export function useBoardCanvas({
     });
   }, []);
 
-  // ---- 拖入会话（普通看板）----
-  const addSessionNode = useCallback((sessionId: string, x: number, y: number) => {
+  // ---- 拖入会话（看板）----
+  /**
+   * 拖入会话卡。任务看板：拖入 = 加入当前任务 —— 先 PATCH 归属任务再落卡，
+   * 否则 10s reconcile 会把非任务会话当孤儿删（board-reconcile allSessionIds 只含任务会话）。
+   * 普通看板：直接落卡（无派生 reconcile，不删）。
+   */
+  const addSessionNode = useCallback(async (sessionId: string, x: number, y: number) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
+    // 任务看板：先把会话归属到任务（reconcile 孤儿删的判据是 session_meta 归属）
+    // taskId 优先 prop，URL 直达时兜底看板元信息
+    const taskId = taskIdRef.current ?? boardRef.current?.taskId ?? null;
+    if (taskId) {
+      try {
+        const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
+        const d = (await res.json()) as { task?: { sessionIds?: string[] } };
+        const sessionIds = d.task?.sessionIds ?? [];
+        if (!sessionIds.includes(sessionId)) {
+          await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionIds: [...sessionIds, sessionId] }),
+          });
+        }
+      } catch (error) {
+        console.warn(`[board] 拖入会话归属任务失败 ${sessionId}:`, error instanceof Error ? error.message : error);
+        // 归属失败仍落卡（reconcile 兜底前用户可见）；下次 reconcile 可能删，但不吞异常
+      }
+    }
     const summary = sessionTitlesRef.current[sessionId];
     const id = `session-${sessionId}`;
     nodesMap.set(id, {
@@ -587,7 +615,7 @@ export function useBoardCanvas({
     const nodesMap = nodesMapRef.current;
     const edgesMap = edgesMapRef.current;
     if (!nodesMap || !edgesMap) return;
-    const isTaskBoard = Boolean(taskIdRef.current);
+    const isTaskBoard = Boolean(taskIdRef.current ?? boardRef.current?.taskId);
     const toDelete = Array.from(nodesMap.values()).filter((n) => (isTaskBoard ? n.type !== "session-card" : true));
     for (const n of toDelete) {
       nodesMap.delete(n.id);
