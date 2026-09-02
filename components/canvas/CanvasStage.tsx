@@ -221,7 +221,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               defaultEdgeOptions={{ markerEnd: { type: "arrowclosed" }, style: { strokeWidth: 1.5, stroke: "#8b8fa3" } }}
             >
               <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="color-mix(in srgb, var(--border) 45%, transparent)" />
-              <Controls position="bottom-right" showInteractive={false} />
+              <Controls position="bottom-left" showInteractive={false} />
               <MiniMap
                 pannable
                 zoomable
