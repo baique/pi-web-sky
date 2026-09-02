@@ -136,15 +136,16 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
     const board = getBoard(card.boardId);
     if (board?.taskId) {
       assignSessionToTask(session.realSessionId, board.taskId);
-      // 任务看板派生 reconcile（后端权威）：补执行会话卡 + exec 线，广播到所有客户端
-      void reconcileBoard(card.boardId).catch((e) =>
-        console.warn(`[task-scheduler] reconcile ${card.boardId} 异常:`, e?.message ?? e),
-      );
+      // 注意：不在 assignSessionToTask 后 reconcile——此刻卡 sessionId 未落表，
+      // reconcile 只能补会话卡、建不了 exec 线 → 造成「先出卡后出线」。
+      // 统一在 updateCard(sessionId) 之后触发（补卡+建线同一次事务、一次广播）。
     }
 
     // 会话正忙（已在流式/处理中）：说明上一轮已发过 prompt，直接标 running，不重复发
     if (session.session.isRunning()) {
       updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
+      // sessionId 落表后立即 reconcile：补执行会话卡 + exec 线（卡线同现，不依赖定时兜底）
+      if (board?.taskId) reconcileTaskBoard(card.boardId);
       watchForAgentEnd(card, session.session);
       clearDispatchToken(card.id, token);
       console.log(`[task-scheduler] #${card.number} ${card.name} 会话忙（复用中），标 running 不重发`);
@@ -154,6 +155,8 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
     await session.session.send({ type: "prompt", message: buildTaskPrompt(card) });
 
     updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
+    // sessionId 落表后立即 reconcile：补执行会话卡 + exec 线（卡线同现，不依赖定时兜底）
+    if (board?.taskId) reconcileTaskBoard(card.boardId);
     watchForAgentEnd(card, session.session);
     clearDispatchToken(card.id, token);
     console.log(
