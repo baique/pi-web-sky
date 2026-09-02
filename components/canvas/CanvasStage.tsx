@@ -225,9 +225,17 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               <MiniMap
                 pannable
                 zoomable
-                style={{ background: "var(--board-scrim-bg)" }}
-                maskColor="color-mix(in srgb, var(--board-scrim-bg) 70%, transparent)"
-                nodeColor={() => "color-mix(in srgb, var(--accent) 45%, transparent)"}
+                style={{
+                  background: "var(--board-card-glass)",
+                  backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+                  WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+                  border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+                  borderRadius: 12,
+                  boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
+                  overflow: "hidden",
+                }}
+                maskColor="color-mix(in srgb, var(--board-card-glass) 78%, transparent)"
+                nodeColor={() => "color-mix(in srgb, var(--accent) 50%, transparent)"}
                 nodeStrokeColor={() => "var(--accent)"}
               />
             </ReactFlow>
