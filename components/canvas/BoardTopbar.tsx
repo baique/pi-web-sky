@@ -131,6 +131,7 @@ export function BoardTopbar({
           title="刷新画布"
           aria-label="刷新画布"
           style={{ ...btnStyle, cursor: reloading ? "default" : "pointer" }}
+          {...(reloading ? {} : iconHoverProps())}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: reloading ? "spin 0.8s linear infinite" : undefined }}>
             <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
@@ -147,10 +148,11 @@ export function BoardTopbar({
           title="新建会话"
           aria-label="新建会话"
           style={{ ...btnStyle, color: "var(--accent)" }}
+          {...iconHoverProps()}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
+          {/* 与左侧栏新建会话同款聊天气泡图标 */}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
         </button>
 
@@ -161,7 +163,8 @@ export function BoardTopbar({
           title="磨砂调节"
           aria-label="磨砂调节"
           aria-expanded={scrimOpen}
-          style={{ ...btnStyle, color: scrimOpen ? "var(--accent)" : undefined, background: scrimOpen ? "color-mix(in srgb, var(--accent) 12%, transparent)" : undefined }}
+          style={{ ...btnStyle, color: scrimOpen ? "var(--accent)" : "var(--text-muted)", background: scrimOpen ? "color-mix(in srgb, var(--accent) 12%, transparent)" : undefined }}
+          {...(scrimOpen ? {} : iconHoverProps())}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M12 3v2" />
@@ -183,6 +186,7 @@ export function BoardTopbar({
           title={isTaskBoard ? "清空画布（任务卡片保留）" : "清空画布"}
           aria-label="清空画布"
           style={btnStyle}
+          {...iconHoverProps()}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M18 6 6 18" />
@@ -202,6 +206,7 @@ export function BoardTopbar({
             color: queueOpen ? "var(--accent)" : "var(--text-muted)",
             background: queueOpen ? "color-mix(in srgb, var(--accent) 12%, transparent)" : undefined,
           }}
+          {...(queueOpen ? {} : iconHoverProps())}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: queueOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
             <polyline points="6 9 12 15 18 9" />
@@ -298,9 +303,22 @@ const btnStyle: React.CSSProperties = {
   border: "none",
   background: "transparent",
   color: "var(--text-muted)",
+  cursor: "pointer",
   borderRadius: 999,
   transition: "background 0.12s, color 0.12s",
 };
+
+/** 图标按钮 hover：背景浅提亮（--text 弱化色，深浅主题自适应）；展开态不注入避免覆盖底色 */
+function iconHoverProps() {
+  return {
+    onMouseEnter: (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.currentTarget.style.background = "color-mix(in srgb, var(--text) 8%, transparent)";
+    },
+    onMouseLeave: (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.currentTarget.style.background = "transparent";
+    },
+  };
+}
 
 /** 浮层面板（磨砂/执行队列）的玻璃样式 */
 const panelStyle: React.CSSProperties = {
