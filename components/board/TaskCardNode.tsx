@@ -363,7 +363,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
           卡根 overflow:hidden 会裁掉外扩的 resize 角柄 → 点击落到卡根变成拖卡，
           resize 永远无法触发。放外面后手柄可正常外扩/命中。
           直线隐藏（四边直线无法圆角）：选中态边线由卡根圆角 accent 边框呈现。 */}
-      <NodeResizer isVisible={selected} minWidth={expanded ? 480 : FORM_W} minHeight={expanded ? 400 : COLLAPSED_MIN_H} onResize={onResize} keepAspectRatio={false} lineStyle={{ borderColor: "color-mix(in srgb, var(--accent) 50%, transparent)" }} handleStyle={{ width: 10, height: 10, background: "var(--accent)", borderColor: "var(--bg-panel)", borderWidth: 2 }} />
+      <NodeResizer isVisible={selected} minWidth={expanded ? 480 : FORM_W} minHeight={expanded ? 400 : COLLAPSED_MIN_H} onResize={onResize} keepAspectRatio={false} />
       <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <div

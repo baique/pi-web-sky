@@ -388,27 +388,22 @@ body {
 [data-glass-scope="board"] .react-flow {
   --xy-background-color: transparent;
 }
-/* 看板节点 resize 手柄/边线：加大命中区域，方便拖拽缩放。
-   - 边线（line）默认 1px，命中带太薄 → 加宽边框命中（左右线扩左/右边框，上下线扩上/下边框）
-   - 角柄（handle）默认 5px → 加大到 10px（handleStyle 内联已设，这里兜底 hover 态不变形） */
+/* 看板节点 resize 手柄/边线：只留四边细线（去掉突兀的方块角柄），
+   命中带用 padding 扩大（视觉仍保持 1px 细线，背景只渲染内容盒中心）。
+   - 边线（line）：平时半透明 accent 细线，hover 变实色提示可拖拽
+   - 角柄（handle）：display:none 移除方块 */
+[data-glass-scope="board"] .react-flow__resize-control.handle {
+  display: none !important;
+}
 [data-glass-scope="board"] .react-flow__resize-control.line {
   border-width: 0 !important;
+  padding: 5px;
+  background-clip: content-box;
+  background-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  transition: background-color 0.12s;
 }
-[data-glass-scope="board"] .react-flow__resize-control.line.left,
-[data-glass-scope="board"] .react-flow__resize-control.line.right {
-  border-left-width: 2.5px !important;
-  border-right-width: 2.5px !important;
-}
-[data-glass-scope="board"] .react-flow__resize-control.line.top,
-[data-glass-scope="board"] .react-flow__resize-control.line.bottom {
-  border-top-width: 2.5px !important;
-  border-bottom-width: 2.5px !important;
-}
-[data-glass-scope="board"] .react-flow__resize-control.handle {
-  width: 10px !important;
-  height: 10px !important;
-  border-radius: 3px !important;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-panel) 60%, transparent);
+[data-glass-scope="board"] .react-flow__resize-control.line:hover {
+  background-color: var(--accent);
 }
 /* 贴顶栏向下展开面板的标准外壳：L-panel 玻璃 + 三边边框(顶贴栏) +
    底部圆角 + 统一阴影。顶部所有“点开向下展开”的弹层一律套此类。

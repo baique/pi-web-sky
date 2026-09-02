@@ -164,8 +164,6 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
         minHeight={60}
         onResize={onResize}
         keepAspectRatio={false}
-        lineStyle={{ borderColor: "color-mix(in srgb, var(--accent) 50%, transparent)" }}
-        handleStyle={{ width: 10, height: 10, background: "var(--accent)", borderColor: "var(--bg-panel)", borderWidth: 2 }}
       />
       <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />

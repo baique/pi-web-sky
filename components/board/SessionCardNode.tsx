@@ -126,8 +126,6 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
         minHeight={expanded ? 500 : CARD_H}
         onResize={onResize}
         keepAspectRatio={false}
-        lineStyle={{ borderColor: "color-mix(in srgb, var(--accent) 50%, transparent)" }}
-        handleStyle={{ width: 10, height: 10, background: "var(--accent)", borderColor: "var(--bg-panel)", borderWidth: 2 }}
       />
 
       {/* 连线 Handle：exec/依赖线端点（左侧 target / 右侧 source） */}
