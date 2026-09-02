@@ -145,6 +145,8 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     fontSize: 13,
     lineHeight: 1.5,
     userSelect: "none",
+    // 卡根默认箭头：非可移动区域（内容区）不用抓手；可拖的顶部把手行单独 grab
+    cursor: "default",
     // 统一预留内边距：连线 Handle 呼吸空间 + 贴边按下可拖拽移动（RF 可拖区）+ 内容与 resize 边界留间距
     padding: 6,
   };

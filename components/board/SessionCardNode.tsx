@@ -157,7 +157,8 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
         color: "var(--text)",
         userSelect: "none",
         padding: expanded ? 8 : "8px 10px 6px",
-        cursor: expanded ? "default" : "grab",
+        // 卡根整卡可拖（左右下边缘留抓手区），内部内容区单独 default
+        cursor: "grab",
         overflow: expanded ? "visible" : "hidden",
       }}
     >
@@ -196,17 +197,18 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
             {isNewSession ? "New session" : (title || "Untitled")}
           </span>
         )}
-        {!isNewSession && !renaming && (
-          <button type="button" onClick={startRename} title="Rename" aria-label="Rename" className="nodrag" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: "var(--text-dim)", cursor: "pointer", opacity: 0.65 }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>
-          </button>
-        )}
         {stale && (
           <span style={{ flexShrink: 0, fontSize: 9.5, color: "var(--text-dim)", border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)", borderRadius: 4, padding: "0 4px" }}>stale</span>
         )}
         <div style={{ flex: 1 }} />
         {/* 导航条 portal 挂载点 */}
         <div data-session-navbar-slot className="nodrag" style={{ display: "flex", alignItems: "center" }} />
+        {/* 右侧操作区最左：会话标题编辑（展开/收起按钮左侧） */}
+        {!isNewSession && !renaming && (
+          <button type="button" onClick={startRename} title="Rename" aria-label="Rename" className="nodrag" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: "var(--text-dim)", cursor: "pointer", opacity: 0.65 }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>
+          </button>
+        )}
         <button
           type="button"
           onClick={toggleExpand}
@@ -225,7 +227,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
       </div>
 
       {expanded ? (
-        <div className="nodrag" style={{ flex: 1, minHeight: 0, padding: "0 4px 0", pointerEvents: "all", overflow: "visible" }}>
+        <div className="nodrag" style={{ flex: 1, minHeight: 0, padding: "0 12px 0", pointerEvents: "all", overflow: "visible", cursor: "default" }}>
           <SessionWorkbench sessionId={sessionId} cwd={cwd} taskId={taskId} onPromote={handlePromote} />
         </div>
       ) : (
@@ -234,7 +236,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
           <div
             ref={replyScrollRef}
             className="nowheel nodrag"
-            style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "flex-start", gap: 2, overflowY: "auto", overflowX: "hidden", padding: "2px 2px 2px 0", scrollbarWidth: "thin", scrollbarColor: "color-mix(in srgb, var(--border) 70%, transparent) transparent", userSelect: "text" }}
+            style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "flex-start", gap: 2, overflowY: "auto", overflowX: "hidden", padding: "2px 12px 0", scrollbarWidth: "thin", scrollbarColor: "color-mix(in srgb, var(--border) 70%, transparent) transparent", userSelect: "text", cursor: "default" }}
           >
             {lastReply ? (
               <div style={{ fontSize: 11.5, lineHeight: 1.45, color: "var(--text-muted)", wordBreak: "break-word", overflowWrap: "anywhere", whiteSpace: "pre-wrap", maxWidth: "100%", userSelect: "text" }}>

@@ -62,6 +62,8 @@ declare global {
     startedAt: number;
     /** 最近一次调度动作（挂 globalThis 防 instrumentation 与 API 路由加载两份模块实例不互通） */
     lastAction: TaskSchedulerLastAction;
+    /** 调度器此刻正在做的动作（看板状态展示：工作中/休眠两态）；无=休眠 */
+    activity: SchedulerActivity | null;
   } | undefined;
 }
 
@@ -250,7 +252,10 @@ export async function runSchedulerTick(): Promise<number> {
   for (const card of cards) {
     // 并发闸门按 running 数实时判断（上一张派发后 running 可能已满）
     if (countRunningDispatched() >= TASK_SCHEDULER_MAX_CONCURRENCY) break;
-    const ok = await dispatchCard(card);
+    const ok = await withSchedulerActivity(
+      { kind: "dispatch", cardNumber: card.number, cardName: card.name, at: Date.now() },
+      () => dispatchCard(card),
+    );
     if (ok) {
       dispatched += 1;
       setLastAction({ type: "dispatch", cardNumber: card.number, cardName: card.name, at: Date.now() });
@@ -468,7 +473,7 @@ export function startTaskScheduler(): void {
       });
   }, TASK_SCHEDULER_INTERVAL_MS);
   timer.unref?.();
-  const sched = { timer, startedAt: Date.now(), lastAction: { type: "none" as const, at: 0 } };
+  const sched = { timer, startedAt: Date.now(), lastAction: { type: "none" as const, at: 0 }, activity: null };
   globalThis.__piTaskScheduler = sched;
   console.log(`[pi-web] task scheduler started (interval ${TASK_SCHEDULER_INTERVAL_MS}ms, max ${TASK_SCHEDULER_MAX_CONCURRENCY})`);
 }
@@ -492,6 +497,31 @@ export interface TaskSchedulerStatus {
   running: TaskCard[];
   /** 最近一次调度动作 */
   lastAction: TaskSchedulerLastAction;
+  /** 调度器此刻正在做的动作（工作中）；null=休眠 */
+  activity: SchedulerActivity | null;
+  /** 任务卡队列统计（按执行状态实时算，展示用） */
+  queue: TaskSchedulerQueueStats;
+}
+
+/** 调度器当前动作（看板状态展示）。kind：派发/回复续会话/审核/阻塞巡检。 */
+export interface SchedulerActivity {
+  kind: "dispatch" | "resume" | "review" | "blockcheck";
+  cardNumber?: number;
+  cardName?: string;
+  at: number;
+}
+
+export interface TaskSchedulerQueueStats {
+  /** 就绪可派发（todo & 未开始/可重试 & 前置均完成） */
+  dispatchable: number;
+  /** 调度器正在运行（执行会话真实在跑） */
+  running: number;
+  /** 待审核（review 态） */
+  review: number;
+  /** 等回复（waiting_reply 态） */
+  waitingReply: number;
+  /** 失败（含重试超限） */
+  failed: number;
 }
 
 function getLastAction(): TaskSchedulerLastAction {
@@ -501,13 +531,43 @@ function setLastAction(action: TaskSchedulerLastAction): void {
   if (globalThis.__piTaskScheduler) globalThis.__piTaskScheduler.lastAction = action;
 }
 
+/** 读取当前调度器动作（工作中状态），无则 null */
+function getActivity(): SchedulerActivity | null {
+  return globalThis.__piTaskScheduler?.activity ?? null;
+}
+
+/** 置/清当前调度器动作。UI 轮询读到非空 = 该动作工作中。 */
+function setActivity(activity: SchedulerActivity | null): void {
+  if (globalThis.__piTaskScheduler) globalThis.__piTaskScheduler.activity = activity;
+}
+
+/** 包一段调度动作：执行期间置 activity（工作中），结束清空（休眠）。
+ *  串行 tick 内各阶段不嵌套（同 tick 无并发），末尾 clear 不影响其他阶段。 */
+async function withSchedulerActivity<T>(activity: SchedulerActivity, fn: () => Promise<T>): Promise<T> {
+  setActivity(activity);
+  try {
+    return await fn();
+  } finally {
+    setActivity(null);
+  }
+}
+
 /** 当前调度器状态：真实运行中的卡 + 最近动作。UI 轮询展示「正在运行 xxx任务」。
  *  running 只列执行会话真实在跑的卡（以 getRunningRpcSessionIds 为准，不读过期卡状态）。 */
 export function getSchedulerStatus(): TaskSchedulerStatus {
   const runningIds = new Set(getRunningRpcSessionIds());
+  const running = listRunningDispatched().filter((c) => c.sessionId && runningIds.has(c.sessionId));
   return {
     started: Boolean(globalThis.__piTaskScheduler),
-    running: listRunningDispatched().filter((c) => c.sessionId && runningIds.has(c.sessionId)),
+    running,
     lastAction: getLastAction(),
+    activity: getActivity(),
+    queue: {
+      dispatchable: listDispatchableCards().length,
+      running: running.length,
+      review: listCardsByExecStatus(["review"]).length,
+      waitingReply: listCardsByExecStatus(["waiting_reply"]).length,
+      failed: listCardsByExecStatus(["failed"]).length,
+    },
   };
 }

@@ -392,6 +392,8 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
           flexDirection: "column",
           overflow: "hidden",
           userSelect: "none",
+          // 卡根整卡可拖（左右下边缘留抓手区），内部内容区单独 default
+          cursor: "grab",
           // 统一预留内边距：连线 Handle 呼吸空间 + 贴边按下可拖拽移动（RF 可拖区）+ 内容与 resize 边界留间距
           padding: 6,
         }}
@@ -430,7 +432,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       </div>
       {/* 内容区：编辑表单 */}
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        <div className="[scrollbar-width:none] nodrag nowheel" style={{ flex: "1 1 auto", minWidth: 0, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column" }}>
+        <div className="[scrollbar-width:none] nodrag nowheel" style={{ flex: "1 1 auto", minWidth: 0, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", cursor: "default" }}>
           {formBody}
         </div>
       </div>
