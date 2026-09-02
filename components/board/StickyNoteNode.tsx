@@ -129,9 +129,14 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     width: "100%",
     height: "100%",
     borderRadius: "var(--bubble-radius, 12px)",
-    border: isHighlighted ? "2px solid var(--accent)" : selected ? "1.5px solid var(--accent)" : "1px solid var(--bubble-border)",
+    border: isHighlighted ? "2px solid var(--accent)" : "1px solid var(--bubble-border)",
     background: "transparent",
-    boxShadow: isHighlighted ? HIGHLIGHT_SHADOW : "0 2px 10px -6px rgba(0,0,0,0.2)",
+    // 选中态：外圈描边用 box-shadow（带 5px 间距、不占布局→不压缩内容区）。边框保持固定 1px。
+    boxShadow: isHighlighted
+      ? HIGHLIGHT_SHADOW
+      : selected
+        ? "0 2px 10px -6px rgba(0,0,0,0.2), 0 0 0 5px transparent, 0 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent)"
+        : "0 2px 10px -6px rgba(0,0,0,0.2)",
     animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
     color: "var(--text)",
     display: "flex",

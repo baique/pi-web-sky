@@ -388,22 +388,21 @@ body {
 [data-glass-scope="board"] .react-flow {
   --xy-background-color: transparent;
 }
-/* 看板节点 resize 手柄/边线：只留四边细线（去掉突兀的方块角柄），
-   命中带用 padding 扩大（视觉仍保持 1px 细线，背景只渲染内容盒中心）。
-   - 边线（line）：平时半透明 accent 细线，hover 变实色提示可拖拽
-   - 角柄（handle）：display:none 移除方块 */
+/* 看板节点选中态 resize：外框视觉由卡根 box-shadow 呈现（带 5px 间距、不压缩内容区）。
+   NodeResizer 只提供拖拽命中：
+   - line：平时透明（不干扰外框），命中带 padding 6px 覆盖外框区域，hover 淡 accent 提示
+   - handle：隐藏（无角柄，四边拉伸） */
 [data-glass-scope="board"] .react-flow__resize-control.handle {
   display: none !important;
 }
 [data-glass-scope="board"] .react-flow__resize-control.line {
   border-width: 0 !important;
-  padding: 5px;
-  background-clip: content-box;
-  background-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  padding: 6px;
+  background: transparent !important;
   transition: background-color 0.12s;
 }
 [data-glass-scope="board"] .react-flow__resize-control.line:hover {
-  background-color: var(--accent);
+  background-color: color-mix(in srgb, var(--accent) 22%, transparent) !important;
 }
 /* 贴顶栏向下展开面板的标准外壳：L-panel 玻璃 + 三边边框(顶贴栏) +
    底部圆角 + 统一阴影。顶部所有“点开向下展开”的弹层一律套此类。
