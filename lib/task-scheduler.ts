@@ -522,15 +522,25 @@ export interface SchedulerActivity {
 
 export interface TaskSchedulerQueueStats {
   /** 就绪可派发（todo & 未开始/可重试 & 前置均完成） */
-  dispatchable: number;
-  /** 调度器正在运行（执行会话真实在跑） */
-  running: number;
+  dispatchable: TaskCardBrief[];
   /** 待审核（review 态） */
-  review: number;
+  review: TaskCardBrief[];
   /** 等回复（waiting_reply 态） */
-  waitingReply: number;
+  waitingReply: TaskCardBrief[];
   /** 失败（含重试超限） */
-  failed: number;
+  failed: TaskCardBrief[];
+}
+
+/** 队列卡片轻量字段（展示/定位用，不携带 description 等大字段） */
+export interface TaskCardBrief {
+  id: string;
+  boardId: string;
+  number: number;
+  name: string;
+}
+
+function toBrief(card: TaskCard): TaskCardBrief {
+  return { id: card.id, boardId: card.boardId, number: card.number, name: card.name };
 }
 
 function getLastAction(): TaskSchedulerLastAction {
@@ -572,11 +582,10 @@ export function getSchedulerStatus(): TaskSchedulerStatus {
     lastAction: getLastAction(),
     activity: getActivity(),
     queue: {
-      dispatchable: listDispatchableCards().length,
-      running: running.length,
-      review: listCardsByExecStatus(["review"]).length,
-      waitingReply: listCardsByExecStatus(["waiting_reply"]).length,
-      failed: listCardsByExecStatus(["failed"]).length,
+      dispatchable: listDispatchableCards().map(toBrief),
+      review: listCardsByExecStatus(["review"]).map(toBrief),
+      waitingReply: listCardsByExecStatus(["waiting_reply"]).map(toBrief),
+      failed: listCardsByExecStatus(["failed"]).map(toBrief),
     },
   };
 }

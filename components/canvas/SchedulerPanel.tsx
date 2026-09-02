@@ -5,9 +5,8 @@
  *
  * 数据全局（不分看板）：后端 /api/task-scheduler/status 返回调度器真实运行态。
  * 折叠态：小胶囊显示状态点 + 「调度器」+ 工作中摘要（正在派发/审核 或 运行中 N / 待审核 N）。
- * 展开态（向左下方展开）：派发/审查两态（工作中/休眠）、当前进行中任务、任务队列计数。
- * 点击「当前进行中」的任务：若该任务卡就在当前画布 → 平移居中 + accent 高亮（复用
- * setViewport + setHighlight）；不在当前画布则禁用（任务全局，卡片散在不同看板）。
+ * 展开态（向左下方展开）：派发/审查两态（工作中/休眠）、当前进行中任务、任务队列
+ * （各状态下的具体任务卡，点击定位到本看板对应卡；不在本画布则置灰提示）。
  *
  * 轮询 2.5s（与 running 快照同频）。
  */
@@ -17,11 +16,14 @@ import { useReactFlow } from "@xyflow/react";
 import { useBoardSearch } from "./BoardSearchContext";
 
 /** 与 lib/task-scheduler.ts 对齐（避免引 server 模块进 client bundle） */
-interface RunningCard {
+interface CardBrief {
   id: string;
   boardId: string;
   number: number;
   name: string;
+}
+
+interface RunningCard extends CardBrief {
   execStatus: string;
 }
 
@@ -31,11 +33,10 @@ interface SchedulerStatus {
   lastAction: { type: string; cardNumber?: number; cardName?: string; at: number };
   activity: { kind: "dispatch" | "resume" | "review" | "blockcheck"; cardNumber?: number; cardName?: string; at: number } | null;
   queue: {
-    dispatchable: number;
-    running: number;
-    review: number;
-    waitingReply: number;
-    failed: number;
+    dispatchable: CardBrief[];
+    review: CardBrief[];
+    waitingReply: CardBrief[];
+    failed: CardBrief[];
   };
 }
 
@@ -53,12 +54,12 @@ const ACTIVITY_LABEL: Record<string, string> = {
 function workingSummary(s: SchedulerStatus): string | null {
   if (s.activity) return ACTIVITY_LABEL[s.activity.kind] ?? "工作中";
   if (s.running.length > 0) return `运行中 ${s.running.length}`;
-  if (s.queue.review > 0) return `待审核 ${s.queue.review}`;
+  if (s.queue.review.length > 0) return `待审核 ${s.queue.review.length}`;
   return null;
 }
 
 export function SchedulerPanel({ nodes }: {
-  /** 当前画布节点（用于把全局 running 任务映射成本画布 nodeId） */
+  /** 当前画布节点（用于把全局 running/队列任务映射成本画布 nodeId） */
   nodes: Array<{ id: string; type?: string; data: Record<string, unknown> }>;
 }) {
   const { setViewport, getViewport, getNodes } = useReactFlow();
@@ -93,12 +94,12 @@ export function SchedulerPanel({ nodes }: {
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  // 当前画布内 running 任务卡：cardId → nodeId（供点击定位）
+  // 当前画布内任务卡：cardId → nodeId（供点击定位；只认 execStatus 相关态的在画卡）
   const nodeIdByCardId = useMemo(() => {
     const m = new Map<string, string>();
     for (const n of nodes) {
-      const d = n.data as { cardId?: string; execStatus?: string };
-      if (d.cardId && d.execStatus === "running") m.set(d.cardId, n.id);
+      const d = n.data as { cardId?: string };
+      if (d.cardId) m.set(d.cardId, n.id);
     }
     return m;
   }, [nodes]);
@@ -118,8 +119,6 @@ export function SchedulerPanel({ nodes }: {
 
   const s = status;
   const busy = Boolean(s?.activity);
-  const running = s?.running ?? [];
-  const queue = s?.queue;
   const summary = s ? workingSummary(s) : null;
 
   return (
@@ -132,7 +131,7 @@ export function SchedulerPanel({ nodes }: {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-label="调度器状态"
-        title="调度器状态（数据全局，不分看板）"
+        title="调度器状态"
         style={{
           display: "flex", alignItems: "center", gap: 7, height: 36,
           padding: "0 6px 0 14px", borderRadius: 999,
@@ -149,14 +148,14 @@ export function SchedulerPanel({ nodes }: {
           aria-hidden
           style={{
             width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-            background: busy ? "#f59e0b" : running.length > 0 ? "#10b981" : "var(--text-dim)",
-            boxShadow: busy ? "0 0 6px 1px rgba(245,158,11,0.6)" : running.length > 0 ? "0 0 6px 1px rgba(16,185,129,0.5)" : "none",
+            background: busy ? "#f59e0b" : (s?.running.length ?? 0) > 0 ? "#10b981" : "var(--text-dim)",
+            boxShadow: busy ? "0 0 6px 1px rgba(245,158,11,0.6)" : (s?.running.length ?? 0) > 0 ? "0 0 6px 1px rgba(16,185,129,0.5)" : "none",
             animation: busy ? "pulse 1.6s ease-in-out infinite" : undefined,
           }}
         />
-        <span style={{ fontSize: 12.5, fontWeight: 600 }}>调度器</span>
-        {s?.started === false && <span style={{ fontSize: 10.5, color: "var(--text-dim)" }}>未启动</span>}
-        {summary && <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>{summary}</span>}
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)" }}>调度器</span>
+        {s?.started === false && <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>未启动</span>}
+        {summary && <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>{summary}</span>}
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: "var(--text-muted)", transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}>
           <polyline points="6 9 12 15 18 9" />
         </svg>
@@ -165,7 +164,7 @@ export function SchedulerPanel({ nodes }: {
       {open && (
         <div style={{
           display: "flex", flexDirection: "column",
-          marginTop: 6, padding: "8px 0", width: 320,
+          marginTop: 6, padding: "8px 0", width: 340,
           borderRadius: 14,
           background: "var(--board-card-glass)",
           backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
@@ -174,9 +173,11 @@ export function SchedulerPanel({ nodes }: {
           boxShadow: "0 8px 30px -8px rgba(0,0,0,0.3)",
           color: "var(--text)",
         }}>
-          <div style={{ padding: "2px 14px 8px", borderBottom: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 13, fontWeight: 700 }}>调度器</span>
-            <span style={{ fontSize: 10.5, color: "var(--text-dim)" }}>全局 · 不分看板</span>
+          <div style={{ padding: "2px 14px 8px", borderBottom: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>调度器</span>
+            <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
+              {s?.started === false ? "未启动" : busy ? "工作中" : "休眠"}
+            </span>
           </div>
 
           {/* 派发 / 审查 两态（工作中 / 休眠） */}
@@ -185,54 +186,20 @@ export function SchedulerPanel({ nodes }: {
             <StateCell label="审查" active={s?.activity?.kind === "review" || s?.activity?.kind === "blockcheck"} activityLabel={s?.activity && (s.activity.kind === "review" || s.activity.kind === "blockcheck") ? ACTIVITY_LABEL[s.activity.kind] : undefined} />
           </div>
 
-          {/* 当前进行中的任务（全局 running，可点定位到本画布任务卡） */}
-          <div style={{ padding: "0 14px 8px" }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-meta)", letterSpacing: 0.3, marginBottom: 5 }}>当前进行中</div>
-            {running.length === 0 ? (
-              <div style={{ fontSize: 12, color: "var(--text-dim)", padding: "2px 2px 4px" }}>无</div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {running.slice(0, 6).map((c) => {
-                  const nodeId = nodeIdByCardId.get(c.id);
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => { if (nodeId) locate(nodeId); }}
-                      disabled={!nodeId}
-                      title={nodeId ? "点击定位到本看板任务卡" : "该任务在当前画布无对应卡片（其它看板/未渲染）"}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 7, width: "100%",
-                        padding: "4px 6px", border: "none", borderRadius: 6,
-                        background: "transparent", color: "var(--text)", fontSize: 12,
-                        textAlign: "left", cursor: nodeId ? "pointer" : "default",
-                        opacity: nodeId ? 1 : 0.55,
-                      }}
-                    >
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />
-                      <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>#{c.number} {c.name}</span>
-                    </button>
-                  );
-                })}
-                {running.length > 6 && (
-                  <div style={{ padding: "3px 6px 0", fontSize: 10.5, color: "var(--text-dim)" }}>…共 {running.length} 个</div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* 任务队列 */}
-          {queue && (
-            <div style={{ padding: "8px 14px 10px", borderTop: "1px solid color-mix(in srgb, var(--border) 50%, transparent)" }}>
-              <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-meta)", letterSpacing: 0.3, marginBottom: 6 }}>任务队列</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 5 }}>
-                <QueueChip label="待派发" value={queue.dispatchable} />
-                <QueueChip label="运行中" value={queue.running} accent />
-                <QueueChip label="待审核" value={queue.review} warn />
-                <QueueChip label="等回复" value={queue.waitingReply} />
-                <QueueChip label="失败" value={queue.failed} danger />
-              </div>
-            </div>
+          {/* 任务队列：分组列出具体任务，可点击定位本画布卡 */}
+          {s && (
+            <QueueGroup
+              title="任务队列"
+              groups={[
+                { label: "运行中", color: "#10b981", cards: s.running },
+                { label: "待审核", color: "#f59e0b", cards: s.queue.review },
+                { label: "待派发", color: "var(--accent)", cards: s.queue.dispatchable },
+                { label: "等回复", color: "var(--text-muted)", cards: s.queue.waitingReply },
+                { label: "失败", color: "#ef4444", cards: s.queue.failed },
+              ]}
+              nodeIdByCardId={nodeIdByCardId}
+              onLocate={locate}
+            />
           )}
 
           {!s && (
@@ -255,8 +222,8 @@ function StateCell({ label, active, activityLabel }: { label: string; active: bo
     }}>
       <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: active ? "#f59e0b" : "var(--text-dim)", boxShadow: active ? "0 0 6px 1px rgba(245,158,11,0.6)" : "none", animation: active ? "pulse 1.6s ease-in-out infinite" : undefined }} />
       <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.2 }}>{label}</span>
-        <span style={{ fontSize: 10, color: active ? "var(--text-muted)" : "var(--text-dim)", whiteSpace: "nowrap" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", lineHeight: 1.2 }}>{label}</span>
+        <span style={{ fontSize: 10, fontWeight: 600, color: active ? "var(--text-muted)" : "var(--text-muted)", whiteSpace: "nowrap" }}>
           {activityLabel ?? "休眠"}
         </span>
       </div>
@@ -264,13 +231,64 @@ function StateCell({ label, active, activityLabel }: { label: string; active: bo
   );
 }
 
-/** 队列小计数块 */
-function QueueChip({ label, value, accent, warn, danger }: { label: string; value: number; accent?: boolean; warn?: boolean; danger?: boolean }) {
-  const color = accent ? "#10b981" : warn ? "#f59e0b" : danger ? "#ef4444" : "var(--text-muted)";
+/** 队列分组：组标题 + 组内任务列表（每项可点定位） */
+function QueueGroup({ title, groups, nodeIdByCardId, onLocate }: {
+  title: string;
+  groups: Array<{ label: string; color: string; cards: CardBrief[] }>;
+  nodeIdByCardId: Map<string, string>;
+  onLocate: (nodeId: string) => void;
+}) {
+  const nonEmpty = groups.filter((g) => g.cards.length > 0);
+  const total = groups.reduce((n, g) => n + g.cards.length, 0);
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "5px 0", borderRadius: 8, background: "color-mix(in srgb, var(--border) 22%, transparent)" }}>
-      <span style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.1, color: value > 0 ? color : "var(--text-dim)" }}>{value}</span>
-      <span style={{ fontSize: 9.5, color: "var(--text-meta)" }}>{label}</span>
+    <div style={{ padding: "8px 12px 4px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 2px 4px" }}>
+        <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.3 }}>{title}</span>
+        <span style={{ fontSize: 10.5, fontWeight: 600, color: "var(--text-dim)" }}>共 {total}</span>
+      </div>
+      {nonEmpty.length === 0 ? (
+        <div style={{ fontSize: 12, color: "var(--text-dim)", padding: "2px 2px 6px" }}>队列空闲</div>
+      ) : (
+        nonEmpty.map((g) => (
+          <div key={g.label} style={{ marginBottom: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 2px 3px" }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: g.color, flexShrink: 0 }} />
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-muted)" }}>{g.label}</span>
+              <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{g.cards.length}</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              {g.cards.slice(0, 4).map((c) => {
+                const nodeId = nodeIdByCardId.get(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => { if (nodeId) onLocate(nodeId); }}
+                    disabled={!nodeId}
+                    title={nodeId ? "点击定位到本看板任务卡" : "该任务不在当前看板"}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6, width: "100%",
+                      padding: "4px 6px", border: "none", borderRadius: 6,
+                      background: "transparent", color: "var(--text)", fontSize: 12,
+                      textAlign: "left", cursor: nodeId ? "pointer" : "default",
+                      opacity: nodeId ? 1 : 0.55,
+                    }}
+                  >
+                    <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>#{c.number}</span> {c.name}
+                    </span>
+                    {!nodeId && <span style={{ flexShrink: 0, fontSize: 9.5, color: "var(--text-dim)" }}>其它看板</span>}
+                  </button>
+                );
+              })}
+              {g.cards.length > 4 && (
+                <div style={{ padding: "2px 6px", fontSize: 10, color: "var(--text-dim)" }}>…共 {g.cards.length} 个</div>
+              )}
+            </div>
+          </div>
+        ))
+      )}
     </div>
   );
 }
