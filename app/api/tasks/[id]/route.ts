@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { deleteTask, getTask, listTaskSessionIds, updateTask } from "@/lib/task-store";
 import { deleteSessionTrees } from "@/lib/session-delete";
-import { reconcileBoard } from "@/lib/board-reconcile";
+import { destroyBoardYjsDocument, reconcileBoard } from "@/lib/board-reconcile";
 
 // GET /api/tasks/[id] → { task: { id, name, ... } | null }
 // 会话输入框 placeholder / 详情面板用：按任务 id 取单个任务（含名称与任务下会话）。
@@ -88,6 +88,10 @@ export async function DELETE(
   try {
     const deletedSessionIds = await deleteSessionTrees(listTaskSessionIds(id));
     deleteTask(id);
+    // RF 画布 yjs 文档随任务看板一并销毁（业务行已删，防 id 复用旧文档复活）
+    await destroyBoardYjsDocument(id).catch((e) =>
+      console.warn(`[boards] destroy task board yjs doc ${id}:`, e?.message ?? e),
+    );
     return NextResponse.json({ ok: true, deletedSessionIds });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

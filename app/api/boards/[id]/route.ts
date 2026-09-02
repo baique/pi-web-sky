@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getBoard, renameBoard, deleteBoard } from "@/lib/board-store";
 import { SYSTEM_RUNNING_BOARD_ID } from "@/lib/board-types";
+import { destroyBoardYjsDocument } from "@/lib/board-reconcile";
 
 export const dynamic = "force-dynamic";
 
@@ -41,5 +42,9 @@ export async function DELETE(_request: Request, { params }: Params) {
   }
   const ok = deleteBoard(id);
   if (!ok) return NextResponse.json({ error: "board not found" }, { status: 404 });
+  // RF 画布 yjs 文档一并销毁（业务行已删，防看板 id 复用旧文档复活）
+  await destroyBoardYjsDocument(id).catch((e) =>
+    console.warn(`[boards] destroy yjs doc ${id}:`, e?.message ?? e),
+  );
   return NextResponse.json({ ok: true });
 }

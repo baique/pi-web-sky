@@ -6,7 +6,7 @@ import * as Y from "yjs";
 import type { Node, Edge, NodeChange, EdgeChange } from "@xyflow/react";
 import { applyNodeChanges, applyEdgeChanges } from "@xyflow/react";
 import type { BoardInfo, RunningSnapshot } from "@/lib/board-types";
-import { dispatchBoardSessionDeleted } from "@/lib/board-events";
+import { dispatchBoardSessionCreated, dispatchBoardSessionDeleted } from "@/lib/board-events";
 import { confirm } from "@/components/canvas/ConfirmDialog";
 
 // ============================================================================
@@ -471,35 +471,20 @@ export function useBoardCanvas({
 
   // ---- 拖入会话（看板）----
   /**
-   * 拖入会话卡。任务看板：拖入 = 加入当前任务 —— 先 PATCH 归属任务再落卡，
+   * 拖入会话卡。任务看板：拖入 = 加入当前任务 —— 先落卡（用户立即可见），再异步归属任务，
    * 否则 10s reconcile 会把非任务会话当孤儿删（board-reconcile allSessionIds 只含任务会话）。
    * 普通看板：直接落卡（无派生 reconcile，不删）。
+   * 注意：落卡在前，归属在后 —— 归属是网络请求，若先 await 会阻塞落卡（拖入无反应假象）。
    */
-  const addSessionNode = useCallback(async (sessionId: string, x: number, y: number) => {
+  const addSessionNode = useCallback((sessionId: string, x: number, y: number) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
-    // 任务看板：先把会话归属到任务（reconcile 孤儿删的判据是 session_meta 归属）
-    // taskId 优先 prop，URL 直达时兜底看板元信息
-    const taskId = taskIdRef.current ?? boardRef.current?.taskId ?? null;
-    if (taskId) {
-      try {
-        const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
-        const d = (await res.json()) as { task?: { sessionIds?: string[] } };
-        const sessionIds = d.task?.sessionIds ?? [];
-        if (!sessionIds.includes(sessionId)) {
-          await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionIds: [...sessionIds, sessionId] }),
-          });
-        }
-      } catch (error) {
-        console.warn(`[board] 拖入会话归属任务失败 ${sessionId}:`, error instanceof Error ? error.message : error);
-        // 归属失败仍落卡（reconcile 兜底前用户可见）；下次 reconcile 可能删，但不吞异常
-      }
-    }
+    // 先落卡（同步，用户松手立即看到卡）
     const summary = sessionTitlesRef.current[sessionId];
     const id = `session-${sessionId}`;
+    // 归属目标：任务看板拖入 = 加入本任务。落卡即写 data.taskId——reconcile 孤儿删放行它
+    // （归属异步完成前不把卡当孤儿删）；普通看板 taskId 为空。
+    const taskId = taskIdRef.current ?? boardRef.current?.taskId ?? null;
     nodesMap.set(id, {
       id,
       type: "session-card",
@@ -517,9 +502,42 @@ export function useBoardCanvas({
         endedAt: 0,
         stale: false,
         expanded: false,
+        taskId: taskId ?? "",
         w: CARD_W, h: CARD_H, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0,
       },
     });
+    // 任务看板：归属到任务（避免 reconcile 孤儿删）—— 异步后台做，不阻塞落卡
+    if (taskId) {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
+          const d = (await res.json()) as { task?: { sessionIds?: string[] } };
+          const sessionIds = d.task?.sessionIds ?? [];
+          if (!sessionIds.includes(sessionId)) {
+            await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sessionIds: [...sessionIds, sessionId] }),
+            });
+            // 归属成功 → 通知侧栏刷新：会话从游离区移入该任务分组下
+            dispatchBoardSessionCreated(sessionId);
+          }
+        } catch (error) {
+          console.warn(`[board] 拖入会话归属任务失败 ${sessionId}:`, error instanceof Error ? error.message : error);
+        } finally {
+          // 归属 settle（成败皆清）：撤掉落卡时的 taskId 声明。
+          // 成功后会话已入本任务 sessionIds（reconcile 不再当孤儿）；
+          // 失败后卡回到无保护态，下轮 reconcile 正确按成员关系清理（与 WIP 注释一致）。
+          const nodesMap = nodesMapRef.current;
+          if (nodesMap?.has(id)) {
+            const cur = nodesMap.get(id);
+            if (cur && (cur.data as Record<string, unknown>)?.taskId) {
+              nodesMap.set(id, { ...cur, data: { ...cur.data, taskId: "" } });
+            }
+          }
+        }
+      })();
+    }
   }, []);
 
   // ---- 删除（确认制）：删会话/任务卡 → 确认 → 删 Y.Doc 节点 + 调删除 API ----

@@ -18,6 +18,7 @@ import { projectTreeForResponse } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
 import { setSessionPinned, taskNameForSession, unassignSession } from "@/lib/task-store";
 import { removeSessionFromBoards } from "@/lib/board-store";
+import { removeSessionsFromYjsBoards } from "@/lib/board-reconcile";
 
 export async function GET(
   req: Request,
@@ -143,6 +144,7 @@ export async function DELETE(
       invalidateSessionPathCache(id);
       invalidateSessionListCache();
       unassignSession(id);
+      await removeSessionsFromYjsBoards([id]);
       return NextResponse.json({ ok: true, updatedBoards: toUpdatedBoards(boardClean.boards) });
     }
 
@@ -192,6 +194,9 @@ export async function DELETE(
     invalidateSessionPathCache(id);
     invalidateSessionListCache();
     unassignSession(id);
+    // RF 画布（yjs）清理：普通看板无 reconcile 兜底，会话卡会永久残留（幽灵卡）——
+    // 单删也走 removeSessionsFromYjsBoards（无 __yjsBoard 时为空操作）。
+    await removeSessionsFromYjsBoards([id]);
     return NextResponse.json({ ok: true, updatedBoards: toUpdatedBoards(boardClean.boards) });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

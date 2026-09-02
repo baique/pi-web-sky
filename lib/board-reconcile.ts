@@ -11,7 +11,7 @@
 //
 // 触发：调度器写业务表后 / 任务归属变化 / 建卡删卡 / 定时兜底（见 board-reconcile-scheduler）
 // ============================================================================
-import { getBoard } from "./board-store";
+import { getBoard, listAllBoards } from "./board-store";
 import { listTaskSessionIds } from "./task-store";
 import { listCards, listLinks } from "./task-card-store";
 
@@ -119,19 +119,29 @@ export async function reconcileBoard(boardId: string): Promise<void> {
     const nodes = Array.from(nodesMap.values()) as unknown as DocNode[];
 
     // ---- 1) 会话卡：缺补、孤儿删 ----
-    const existingSessionBySid = new Map(); // sid -> node
+    const existingSessionBySid = new Map(); // sid -> node（转正卡）
+    const pendingSids = new Set(); // 新建中占位卡（cwd 非空）的 sid——视为「该 sid 已有卡，不补、不孤儿删」
     for (const n of nodes) {
       if (n?.type !== "session-card") continue;
       const sid = n.data?.sessionId;
       if (!sid) continue;
-      // 新建中占位卡（cwd 非空）：不参与 existingSessionBySid（补卡/孤儿删都不管它）
-      if (isPendingNewSession(n)) continue;
+      // 新建中占位卡（cwd 非空）：不参与转正卡 map，也不做孤儿删；
+      // 但它的 sid 要进 pendingSids——窗口期（服务端已 assign、前端尚未转正清 cwd）
+      // 补卡循环应把该 sid 视为「已覆盖」，否则会补出第二张确定性 session-<sid> 卡。
+      if (isPendingNewSession(n)) {
+        pendingSids.add(sid);
+        continue;
+      }
       existingSessionBySid.set(sid, n);
     }
     // 孤儿删：画布有、业务表没有的会话卡（非新会话卡）→ 删
+    // 例外：卡声明归属本板任务（data.taskId === 本板 taskId，拖入已存在会话时前端先落卡
+    // 异步归属，归属完成前本板 reconcile 不能把它当孤儿删——否则用户刚拖的卡消失）
     const orphanIds = [];
     for (const [sid, n] of existingSessionBySid) {
-      if (!allSessionIds.has(sid)) orphanIds.push(n.id);
+      if (allSessionIds.has(sid)) continue;
+      if (n.data?.taskId === taskId) continue;
+      orphanIds.push(n.id);
     }
     for (const id of orphanIds) {
       nodesMap.delete(id);
@@ -148,7 +158,8 @@ export async function reconcileBoard(boardId: string): Promise<void> {
     {
       const remaining = Array.from(nodesMap.values());
       for (const sid of allSessionIds) {
-        if (existingSessionBySid.has(sid)) continue;
+        // 已有转正卡 或 存在同 sid 新建中占位卡（窗口期视为已覆盖）→ 不补
+        if (existingSessionBySid.has(sid) || pendingSids.has(sid)) continue;
         const id = `session-${sid}`;
         const spot = findFreeSpot(remaining);
         nodesMap.set(id, {
@@ -356,4 +367,56 @@ export async function ensureTaskSessionCard(boardId: string, sessionId: string):
       },
     });
   });
+}
+
+/**
+ * 从所有 RF 看板的 yjs 文档中删除指定会话的会话卡（含占位卡）并级联删边。
+ *
+ * 背景：会话删除（单删 / 删任务整树）只走 removeSessionFromBoards 清 tldraw 遗留的
+ * board_nodes 废弃表，对 RF 画布（yjs Y.Doc）无效——任务看板由 10s reconcile 兜底删，
+ * 普通看板 reconcileBoard 直接 return，会话卡永久残留（幽灵卡）。
+ *
+ * 定位：会话卡落在哪块看板没有反向索引，只能枚举全部看板逐个扫（低频操作可接受；
+ * 维护反向索引属过度设计）。幂等：板上没有匹配卡时无变更。
+ */
+export async function removeSessionsFromYjsBoards(sessionIds: string[]): Promise<void> {
+  if (sessionIds.length === 0) return;
+  const yjs = globalThis.__yjsBoard;
+  if (!yjs) return; // server.mjs 未加载（独立构建/测试环境）→ 跳过
+  const targets = new Set(sessionIds);
+  for (const board of listAllBoards()) {
+    try {
+      await yjs.mutateBoard(board.id, (maps) => {
+        const nodesMap = maps.nodes;
+        const edgesMap = maps.edges;
+        const hitIds: string[] = [];
+        for (const n of Array.from(nodesMap.values()) as unknown as DocNode[]) {
+          if (n?.type === "session-card" && n.data?.sessionId && targets.has(String(n.data.sessionId))) {
+            hitIds.push(n.id);
+          }
+        }
+        if (hitIds.length === 0) return;
+        for (const id of hitIds) {
+          nodesMap.delete(id);
+          for (const e of Array.from(edgesMap.values())) {
+            if (e.source === id || e.target === id) edgesMap.delete(e.id);
+          }
+        }
+      });
+    } catch (e) {
+      // 单板清理失败不中断其余板（也绝不拖垮会话删除主流程）
+      console.warn(`[board] 会话删除清理 yjs 板 ${board.id} 异常:`, e instanceof Error ? e.message : e);
+    }
+  }
+}
+
+/**
+ * 删除看板的 yjs 文档（业务行删完后调用）。
+ * deleteBoard/deleteTask 只清 boards/board_nodes 等业务表，yjs_documents 行残留会导致
+ * 看板 id 复用时旧文档复活；此处同时断开该看板的活动连接。
+ */
+export async function destroyBoardYjsDocument(boardId: string): Promise<void> {
+  const yjs = globalThis.__yjsBoard;
+  if (!yjs) return;
+  await yjs.destroyBoardDocument(boardId);
 }

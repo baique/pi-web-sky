@@ -15,6 +15,7 @@ import { sessionPathKey } from "./session-path";
 import { getRpcSession } from "./rpc-manager";
 import { unassignSession } from "./task-store";
 import { removeSessionFromBoards } from "./board-store";
+import { removeSessionsFromYjsBoards } from "./board-reconcile";
 
 /** 递归收集一个会话的全部 fork 后代 id（含自身）。 */
 export async function collectSessionDescendants(rootId: string): Promise<string[]> {
@@ -82,5 +83,9 @@ export async function deleteSessionTrees(rootIds: string[]): Promise<string[]> {
       } catch { /* keep deleting the rest */ }
     }
   }
+  // RF 画布（yjs）清理：从所有普通看板移除这些会话的卡（含占位卡）。
+  // 任务看板由删除方（deleteTask）整体销毁文档，这里一并处理也无害；
+  // 无 __yjsBoard（测试/独立构建）时为空操作。
+  await removeSessionsFromYjsBoards(deleted);
   return deleted;
 }
