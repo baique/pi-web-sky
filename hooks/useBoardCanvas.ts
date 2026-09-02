@@ -131,10 +131,40 @@ export function useBoardCanvas({
     nodesMapRef.current = nodesMap;
     edgesMapRef.current = edgesMap;
 
-    const syncNodes = () => setNodes(Array.from(nodesMap.values()));
+    const syncNodes = (changes?: Y.YMapEvent<Node>) => {
+      // yjs 铁律：changes 只能在 observe 回调同步阶段访问（事务结束后抛错），
+      // 必须在这里先取出变化的 key 集合，再传给异步的 setNodes reducer。
+      const changedIds = changes ? new Set(Array.from(changes.keys.keys())) : null;
+      setNodes((prev) => {
+        // selected/dragging 是 UI 态：只存活于本地 state，绝不进 yjs。
+        // 回灌时从上一帧保留同 id 节点的选中/拖拽态，并剥掉 yjs 可能的历史残留
+        // （曾误将 select 写回 yjs → reload 后节点依然选中）。
+        const uiNode = (x: Node) => x as Node & { selected?: boolean; dragging?: boolean };
+        const prevSelected = new Set(prev.filter((n) => uiNode(n).selected).map((n) => n.id));
+        const prevDragging = new Set(prev.filter((n) => uiNode(n).dragging).map((n) => n.id));
+        // yjs Y.Map 每次 get 都 JSON decode 出全新对象（data 引用全变 →
+        // 节点组件 memo 失效 → 拖一张卡全部卡每帧重渲染）。
+        // 只重建本次变化的节点，未变节点复用上一帧对象 → data 引用稳定。
+        const prevById = new Map(prev.map((n) => [n.id, n]));
+        return Array.from(nodesMap.values()).map((n) => {
+          if (changedIds && !changedIds.has(n.id)) {
+            const old = prevById.get(n.id);
+            if (old) return old; // 未变：整对象复用（含 selected/dragging/引用）
+          }
+          const out = { ...n } as Node & { selected?: boolean; dragging?: boolean };
+          // 剥掉 yjs 残留的 UI 态字段
+          delete out.selected;
+          delete out.dragging;
+          // 从上一帧恢复本地 UI 态
+          if (prevSelected.has(n.id)) out.selected = true;
+          if (prevDragging.has(n.id)) out.dragging = true;
+          return out;
+        });
+      });
+    };
     const syncEdges = () => setEdges(Array.from(edgesMap.values()));
     const onSynced = () => setReady(true);
-    nodesMap.observe(syncNodes);
+    nodesMap.observe(syncNodes as (e: unknown) => void);
     edgesMap.observe(syncEdges);
     p.on("synced", onSynced);
     syncNodes();
@@ -318,9 +348,17 @@ export function useBoardCanvas({
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
+    // select：UI 态，只在本地 state 应用（绝不写 yjs——避免持久化/广播选中）。
+    // 下次 yjs 回灌（syncNodes）会从上一帧 state 保留 selected，不丢选中。
+    const selectChanges = changes.filter((c) => c.type === "select") as Extract<NodeChange, { type: "select" }>[];
+    if (selectChanges.length) {
+      setNodes((prev) => applyNodeChanges(selectChanges, prev));
+    }
+    const dataChanges = changes.filter((c) => c.type !== "select");
+    if (dataChanges.length === 0) return;
     const current = Array.from(nodesMap.values());
-    const next = applyNodeChanges(changes, current);
-    for (const c of changes) {
+    const next = applyNodeChanges(dataChanges, current);
+    for (const c of dataChanges) {
       if (c.type === "add" || c.type === "replace") {
         nodesMap.set(c.item.id, c.item);
       } else if (c.type === "remove" && nodesMap.has(c.id)) {
@@ -334,7 +372,11 @@ export function useBoardCanvas({
         }
       } else if (c.type === "position" || c.type === "dimensions") {
         const n = next.find((x) => x.id === c.id);
-        if (n) nodesMap.set(c.id, n);
+        if (n) {
+          // 剥掉 dragging（UI 态，不落文档；RF 拖拽态由本地 store 管）
+          const { dragging: _d, ...clean } = n;
+          nodesMap.set(c.id, clean);
+        }
       }
     }
   }, []);

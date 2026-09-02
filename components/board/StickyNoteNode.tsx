@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { NodeProps } from "@xyflow/react";
+import { NodeResizer, Handle, Position, type NodeProps } from "@xyflow/react";
 import ReactMarkdown from "react-markdown";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
 import { CardKindBadge } from "@/components/canvas/CardKindBadge";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
-import { useNodePosition } from "./nodePosition";
+import { memoBoardNode } from "./memoNode";
 
 /**
  * 自研 markdown 便笺（RF 节点版，替代 tldraw sticky-note shape）。
@@ -43,7 +43,7 @@ export const BADGE_NAMES: Record<string, string> = {
   purple: "紫",
 };
 
-export function StickyNoteNode({ id, data, selected, width, height }: NodeProps & { data: StickyNoteData }) {
+function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & { data: StickyNoteData }) {
   const { updateNode, deleteNode } = useBoardCanvasOps();
   const { highlightId } = useBoardSearch();
   const isHighlighted = highlightId === id;
@@ -53,9 +53,7 @@ export function StickyNoteNode({ id, data, selected, width, height }: NodeProps 
   const badge = data.badge ?? "blue";
 
   // 玻璃（局部贴图）：从 RF store 读节点 position
-  const position = useNodePosition(id);
-  const { setContainer, setNode } = useCardGlass("var(--assistant-card-glass)");
-  useEffect(() => { setNode(position ? { id, position, data, type: "sticky-note", style: { width: w, height: h } } as never : null); /* eslint-disable-line */ });
+  const { setContainer } = useCardGlass("var(--assistant-card-glass)");
 
   // 本地编辑态（RF 无 tldraw editing 概念）
   const [isEditing, setIsEditing] = useState(false);
@@ -63,6 +61,7 @@ export function StickyNoteNode({ id, data, selected, width, height }: NodeProps 
   const [draftBadge, setDraftBadge] = useState(badge);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   // 旧便笺无 createdAt 时兜底（惰性初始化，不 render 期 Date.now）
   const [createdAt] = useState(() => data.createdAt ?? Date.now());
   const [copied, setCopied] = useState(false);
@@ -93,6 +92,22 @@ export function StickyNoteNode({ id, data, selected, width, height }: NodeProps 
     setDraftBadge(badge);
     setIsEditing(false);
   }, [text, badge]);
+
+  // 失焦自动保存：textarea 失去焦点且焦点不在本卡内 → 保存并退出编辑。
+  // （点画布空白/点别的节点/切走应用 → 等价 tldraw 点别处退出编辑自动保存）
+  const handleTextareaBlur = useCallback((e: React.FocusEvent<HTMLTextAreaElement>) => {
+    const next = e.relatedTarget;
+    const root = rootRef.current;
+    // 焦点仍在卡内（点徽记/取消/完成等按钮，它们可聚焦且 onMouseDown 已 preventDefault）→ 保持编辑
+    if (root && next instanceof Node && root.contains(next)) return;
+    // 焦点移出卡片：自动保存退出
+    save();
+    setIsEditing(false);
+  }, [save]);
+
+  // 编辑态下点击取消/完成按钮时，阻止 mousedown 把焦点从 textarea 移走，
+  // 避免误触发 blur 自动保存；按钮 onClick 仍正常触发取消/完成。
+  const keepTextareaFocus = useCallback((e: React.MouseEvent) => { e.preventDefault(); }, []);
 
   const copyContent = useCallback(
     (e: React.MouseEvent) => {
@@ -125,71 +140,108 @@ export function StickyNoteNode({ id, data, selected, width, height }: NodeProps 
     fontSize: 13,
     lineHeight: 1.5,
     userSelect: "none",
+    // 统一预留 4px 内边距：连线 Handle 呼吸空间 + 贴边按下可拖拽移动（RF 可拖区）
+    padding: 4,
   };
 
   // 非编辑态内容交互：阻止事件冒泡到 RF（避免触发节点拖动/画布平移）
   const isolateContent = useCallback((e: React.PointerEvent) => { if (e.button === 0) e.stopPropagation(); }, []);
 
+  // resize：写回 style + data.w/h（NodeResizer 已改 style，这里同步 data）
+  const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
+    updateNode(id, { data: { ...data, w: params.width, h: params.height } });
+  }, [id, data, updateNode]);
+
   return (
+    <>
+      {/* resize 手柄 + 连线 Handle 挂在卡根外（RF wrapper 直接子级）：
+          卡根 overflow:hidden 会裁掉外扩的 resize 角柄 → 点击落到卡根变成拖卡，
+          resize 永远无法触发。放外面后手柄可正常外扩/命中。
+          直线隐藏（四边直线无法圆角）：选中态边线由卡根圆角 accent 边框呈现。 */}
+      <NodeResizer
+        isVisible={selected}
+        minWidth={120}
+        minHeight={60}
+        onResize={onResize}
+        keepAspectRatio={false}
+        lineStyle={{ borderColor: "transparent" }}
+        handleStyle={{ background: "var(--accent)", borderColor: "var(--accent)" }}
+      />
+      <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
+      <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
     <div
-      ref={setContainer}
+      ref={(el) => { setContainer(el); rootRef.current = el; }}
       data-board-node
       data-testid={`sticky-note-${id}`}
       style={bubbleStyle}
-      className="nodrag nowheel"
+      // 根可拖（RF 默认）：顶部把手行即拖拽把手；内容区/编辑控件各自 nodrag 隔离。
+      // 原地双击（不移动）不启动拖动，dblclick 正常触发进入编辑。
+      className="nowheel"
       onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
     >
-      {/* 顶部拖拽把手：不拦 pointer（让 RF 拖动节点）；按钮独立接收点击 */}
-      <div style={{ flexShrink: 0, height: 32, display: "flex", alignItems: "center", gap: 6, padding: "0 var(--bubble-pad-x, 12px)", fontSize: 10, color: "var(--text-muted)", cursor: "grab", boxSizing: "border-box" }}>
-        <CardKindBadge kind="note" color={BADGE_COLORS[badge] ?? BADGE_COLORS.blue} />
-        <div style={{ flex: 1 }} />
-        <span style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{formatNoteTime(createdAt)}</span>
-        <button
-          type="button"
-          title={copied ? "已复制" : "复制内容"}
-          onClick={copyContent}
-          style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: copied ? "var(--accent)" : "var(--text-dim)", cursor: "pointer" }}
-        >
-          {copied ? (
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
-          ) : (
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-          )}
-        </button>
+      {/* 顶部把手行（始终一行、高度固定 32——编辑/预览切换顶部不跳动）：
+          预览态 = 徽记 + 时间戳 + 复制，整条是拖拽区（不拦 pointer → RF 拖动节点）；
+          编辑态 = 徽记（草稿色）+ 5 色徽记选择 + 取消/完成，整行 nodrag 不可拖（空区也不误拖） */}
+      <div
+        className={isEditing ? "nodrag" : ""}
+        style={{ flexShrink: 0, height: 32, display: "flex", alignItems: "center", gap: 6, padding: "0 var(--bubble-pad-x, 12px)", fontSize: 10, color: "var(--text-muted)", cursor: isEditing ? "default" : "grab", boxSizing: "border-box" }}
+      >
+        <CardKindBadge kind="note" color={BADGE_COLORS[isEditing ? draftBadge : badge] ?? BADGE_COLORS.blue} />
+        {isEditing ? (
+          <>
+            <div className="nodrag" style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              {Object.entries(BADGE_COLORS).map(([key, color]) => (
+                <button
+                  key={key}
+                  type="button"
+                  title={`徽记·${BADGE_NAMES[key] ?? key}`}
+                  className="nodrag"
+                  onClick={(e) => { e.stopPropagation(); setDraftBadge(key); }}
+                  style={{ width: 14, height: 14, padding: 0, border: "none", borderRadius: "50%", background: color, cursor: "pointer", boxShadow: draftBadge === key ? `0 0 0 2px var(--bg-panel), 0 0 0 3.5px ${color}` : `0 0 0 1px color-mix(in srgb, ${color} 45%, transparent)`, opacity: draftBadge === key ? 1 : 0.72 }}
+                />
+              ))}
+            </div>
+            <div style={{ flex: 1 }} />
+            <button type="button" className="nodrag" onMouseDown={keepTextareaFocus} onClick={cancel} style={footerBtnStyle} title="放弃变更 (Esc)">取消</button>
+            <button type="button" className="nodrag" onMouseDown={keepTextareaFocus} onClick={finish} style={footerBtnStyle} title="完成 (Ctrl+Enter)">完成</button>
+          </>
+        ) : (
+          <>
+            <div style={{ flex: 1 }} />
+            <span style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{formatNoteTime(createdAt)}</span>
+            <button
+              type="button"
+              title={copied ? "已复制" : "复制内容"}
+              onClick={copyContent}
+              className="nodrag"
+              style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: copied ? "var(--accent)" : "var(--text-dim)", cursor: "pointer" }}
+            >
+              {copied ? (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+              ) : (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+              )}
+            </button>
+          </>
+        )}
       </div>
 
       {isEditing ? (
-        <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-          {/* 编辑态：徽记选择 + 取消/完成 */}
-          <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 var(--bubble-pad-x, 12px)", height: 26, flexShrink: 0 }}>
-            {Object.entries(BADGE_COLORS).map(([key, color]) => (
-              <button
-                key={key}
-                type="button"
-                title={`徽记·${BADGE_NAMES[key] ?? key}`}
-                onClick={(e) => { e.stopPropagation(); setDraftBadge(key); }}
-                style={{ width: 14, height: 14, padding: 0, border: "none", borderRadius: "50%", background: color, cursor: "pointer", boxShadow: draftBadge === key ? `0 0 0 2px var(--bg-panel), 0 0 0 3.5px ${color}` : `0 0 0 1px color-mix(in srgb, ${color} 45%, transparent)`, opacity: draftBadge === key ? 1 : 0.72 }}
-              />
-            ))}
-            <div style={{ flex: 1 }} />
-            <button type="button" onClick={cancel} style={footerBtnStyle} title="放弃变更 (Esc)">取消</button>
-            <button type="button" onClick={finish} style={footerBtnStyle} title="完成 (Ctrl+Enter)">完成</button>
-          </div>
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(); }
-              else if (e.key === "Escape") { e.preventDefault(); cancel(); }
-            }}
-            spellCheck={false}
-            placeholder="Markdown 便笺…"
-            className="sticky-note-input"
-            style={{ flex: 1, minHeight: 0, resize: "none", border: "none", outline: "none", background: "transparent", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 14, lineHeight: 1.7, padding: "var(--bubble-pad-y, 8px) var(--bubble-pad-x, 12px)" }}
-          />
-        </div>
+        <textarea
+          ref={textareaRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(); }
+            else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+          }}
+          spellCheck={false}
+          onBlur={handleTextareaBlur}
+          placeholder="Markdown 便笺…"
+          className="sticky-note-input nodrag nowheel"
+          style={{ flex: 1, minHeight: 0, resize: "none", border: "none", outline: "none", background: "transparent", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 14, lineHeight: 1.7, padding: "var(--bubble-pad-y, 8px) var(--bubble-pad-x, 12px)" }}
+        />
       ) : (
         <div
           ref={contentRef}
@@ -209,6 +261,7 @@ export function StickyNoteNode({ id, data, selected, width, height }: NodeProps 
         </div>
       )}
     </div>
+    </>
   );
 }
 
@@ -230,3 +283,6 @@ function formatNoteTime(ts: number): string {
   if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
+
+/** memo 化导出：忽略拖拽/位置类 props 每帧变化，避免拖拽时整卡重渲染 */
+export const StickyNoteNode = memoBoardNode(StickyNoteNodeImpl);

@@ -1,100 +1,113 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { useReactFlow, type Node, type XYPosition } from "@xyflow/react";
+import { useCallback, useEffect, useRef } from "react";
+import { useNodeId, useReactFlow, useStoreApi, type XYPosition } from "@xyflow/react";
 
 /**
  * 卡片玻璃（局部贴图版）：每张卡片内嵌一个「视口对齐的模糊壁纸层」。
  *
  * React Flow 版：节点在 viewport（translate+scale）内，与 tldraw 同构。
- * - node 的 flow 坐标 → 屏幕位置：flowToScreenPosition(node.position)
+ * - node 的 flow 坐标 → 屏幕位置：由 RF store 的 nodeLookup 提供
+ *   （node.internals.positionAbsolute / node.position + viewport transform）
  * - 卡片内部层（在 node 内，flow 坐标）要图对齐屏幕原点：
  *   dx = -screenPos / zoom（node 内 flow 偏移经 zoom 放大 = 屏幕偏移）
  * - 层尺寸 = 视口 / zoom（经 zoom 放大后 = 视口）
  *
- * 同步时机：RF 的 onMove / 节点位置变化 → rAF 合并每帧一次。
- * 用 useReactFlow 的 flowToScreenPosition 算，不读 DOM rect（避免强制 reflow）。
+ * 性能关键（勿退回 React 订阅）：
+ * 节点拖动/画布 pan/zoom 时，位置每帧变。若用 useStore（React 订阅）会让
+ * 整张卡组件每帧重渲染——展开态会话卡含整个工作台，卡顿严重。
+ * 这里用 vanilla store.subscribe（不触发 React 渲染）+ rAF 合并，
+ * 直接改层 transform（合成层位移），拖动期间零 React 重渲染。
+ *
+ * 屏幕位置计算：用 RF 标准 flowToScreenPosition（勿手算 viewport——曾因手算
+ * transform 导致壁纸错位）。node 位置从 store 的 nodeLookup 实时取，
+ * 不经 React state，避免整卡重渲染。
  */
 
-/**
- * 生成内嵌模糊壁纸层。返回回调 ref（挂到卡片内容容器）。
- * bgToken：卡片玻璃底色（--board-card-glass / --assistant-card-glass 等）。
- */
 export function useCardGlass(bgToken: string, deps: unknown[] = []) {
-  const { flowToScreenPosition, getZoom } = useReactFlow();
+  const nodeId = useNodeId();
+  const { flowToScreenPosition } = useReactFlow();
+  const storeApi = useStoreApi();
   const layerRef = useRef<HTMLDivElement | null>(null);
-  const nodePosRef = useRef<XYPosition>({ x: 0, y: 0 });
-  // 节点位置由宿主组件通过 setNodePosition 传入（避免 useReactFlow 实例在节点内循环）
-  const nodeRef = useRef<Node | null>(null);
+  // 上次写入的几何（避免值未变时空写 DOM）
+  const lastGeom = useRef<string>("");
 
-  const syncLayer = () => {
+  /** 同步层到视口对齐（核心数学，见文件头注释） */
+  const syncLayer = useCallback(() => {
     const layer = layerRef.current;
-    if (!layer) return;
-    const zoom = getZoom();
-    const pos = flowToScreenPosition(nodePosRef.current);
-    layer.style.width = `${window.innerWidth / zoom}px`;
-    layer.style.height = `${window.innerHeight / zoom}px`;
+    if (!layer || !nodeId) return;
+    const s = storeApi.getState();
+    const node = s.nodeLookup.get(nodeId);
+    if (!node) return;
+    const zoom = s.transform[2];
+    // 屏幕位置：RF 标准换算（含容器偏移），勿手算
+    const pos = flowToScreenPosition({ x: node.position.x, y: node.position.y });
+    const w = window.innerWidth / zoom;
+    const h = window.innerHeight / zoom;
+    const key = `${pos.x.toFixed(1)}|${pos.y.toFixed(1)}|${zoom.toFixed(3)}|${w}|${h}`;
+    if (key === lastGeom.current) return;
+    lastGeom.current = key;
+    layer.style.width = `${w}px`;
+    layer.style.height = `${h}px`;
     layer.style.transform = `translate(${-pos.x / zoom}px, ${-pos.y / zoom}px)`;
-  };
-
-  /** 宿主在节点 render 时传入当前节点（含 position），更新引用并同步 */
-  const setNode = (node: Node | null) => {
-    nodeRef.current = node;
-    if (node) nodePosRef.current = node.position;
-    syncLayer();
-  };
+  }, [nodeId, storeApi, flowToScreenPosition]);
 
   /** 回调 ref：挂到卡片内容容器，创建/复用模糊壁纸层 */
-  const setContainer = (node: HTMLDivElement | null) => {
+  const setContainer = useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
-    const existing = node.querySelector<HTMLDivElement>("[data-glass-layer]");
+    // 复用已挂载的裁剪壳（内含玻璃层）
+    const existing = node.querySelector<HTMLDivElement>("[data-glass-clip]");
     if (existing) {
-      layerRef.current = existing;
+      layerRef.current = existing.querySelector<HTMLDivElement>("[data-glass-layer]");
       syncLayer();
       return;
     }
+    // 裁剪壳：只裁玻璃层（圆角 + overflow hidden），不裁内容。
+    // 必须独立于内容容器——内容容器 overflow 可能为 visible（会话卡展开态工作台），
+    // 玻璃层尺寸=全视口，若直接挂内容根且根 overflow:visible 会溢出盖满全屏。
+    const clip = document.createElement("div");
+    clip.dataset.glassClip = "1";
+    clip.style.cssText =
+      `position:absolute;left:0;top:0;width:100%;height:100%;` +
+      `border-radius:inherit;overflow:hidden;pointer-events:none;z-index:-1;`;
     const layer = document.createElement("div");
     layer.dataset.glassLayer = "1";
     layer.style.cssText =
-      `position:absolute;left:0;top:0;pointer-events:none;z-index:-1;` +
+      `position:absolute;left:0;top:0;pointer-events:none;` +
       // 合成层提升：每帧改 transform 只走合成，不触发重排/重绘
       `will-change:transform;` +
       `background-image:linear-gradient(${bgToken}, ${bgToken}), var(--glass-bg-image, none);` +
       `background-repeat:no-repeat,no-repeat;` +
       `background-size:100% 100%,100% 100%;`;
-    node.prepend(layer);
+    clip.appendChild(layer);
+    node.prepend(clip);
     layerRef.current = layer;
     syncLayer();
-  };
+  }, [syncLayer]);
 
-  // 滚动/移动时同步（画布 pan/zoom）
+  // 节点拖动 + 画布 pan/zoom 都同步：vanilla store.subscribe（不触发 React 渲染）
+  // + rAF 合并每帧一次。拖拽期间整卡组件零重渲染，只有层的 transform 在动。
   useEffect(() => {
+    if (!nodeId) return;
     let raf = 0;
-    const onMove = () => {
+    const schedule = () => {
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
         syncLayer();
       });
     };
-    // 监听全局移动：画布 pan/zoom 变化时同步所有卡片玻璃层
-    window.addEventListener("scroll", onMove, true);
-    window.addEventListener("resize", onMove);
-    // 画布 zoom/pan 由 RF 控制，这里用 interval 轻量兜底 + rAF
-    const iv = setInterval(() => {
-      // 只在新位置变化时同步（性能）
-      const layer = layerRef.current;
-      if (layer) syncLayer();
-    }, 250);
-    onMove();
+    // 监听所有变化，内部做廉价判断：只有本节点位置或 viewport 变了才调度
+    const unsub = storeApi.subscribe(() => schedule());
+    schedule();
     return () => {
-      window.removeEventListener("scroll", onMove, true);
-      window.removeEventListener("resize", onMove);
-      clearInterval(iv);
+      unsub();
       if (raf) cancelAnimationFrame(raf);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
-  return { setContainer, setNode };
+  return { setContainer };
 }
+
+export type { XYPosition };

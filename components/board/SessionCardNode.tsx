@@ -7,10 +7,10 @@ import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 import type { CanvasPhase, SessionCardData } from "@/hooks/useBoardCanvas";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
+import { memoBoardNode } from "./memoNode";
 import { dispatchBoardSessionRenamed } from "@/lib/board-events";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
 import { CardKindBadge } from "@/components/canvas/CardKindBadge";
-import { useNodePosition } from "./nodePosition";
 
 /**
  * 会话卡（RF 节点版，替代 tldraw session-card shape）。
@@ -34,18 +34,19 @@ const phaseMeta: Record<string, { dot: string; label: string }> = {
   "just-ended": { dot: "#10b981", label: "done" },
 };
 
-export function SessionCardNode({ id, data, selected, width, height }: NodeProps & { data: SessionCardData }) {
+function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & { data: SessionCardData }) {
   const { updateNode, deleteNode } = useBoardCanvasOps();
   const { highlightId } = useBoardSearch();
   const isHighlighted = highlightId === id;
   const w = width ?? data.w ?? CARD_W;
   const h = height ?? data.h ?? CARD_H;
   const expanded = Boolean(data.expanded);
+  // 最新 data 镜像：回调（promote/resize）读 ref，不依赖渲染期 data 引用（引用随 yjs 回灌变化 → 回调每帧重建 → 工作台 memo 失效）
+  const dataRef = useRef(data);
+  dataRef.current = data;
   const { title, projectName, messageCount, phase, runningMs, endedAt, lastActivityAt, stale, sessionId, lastReply, cwd, taskId } = data;
   const isNewSession = Boolean(cwd);
-  const position = useNodePosition(id);
-  const { setContainer, setNode } = useCardGlass("var(--board-card-glass)");
-  useEffect(() => { setNode(position ? { id, position, data, type: "session-card", style: { width: w, height: h } } as never : null); /* eslint-disable-line */ });
+  const { setContainer } = useCardGlass("var(--board-card-glass)");
 
   // 收合态中间区滚动容器 ref（内部滚动 nowheel 由 RF 隔离）
   const replyScrollRef = useRef<HTMLDivElement | null>(null);
@@ -93,8 +94,9 @@ export function SessionCardNode({ id, data, selected, width, height }: NodeProps
     }
     const next = nextExpandState(data, w, h);
     updateNode(id, { data: next.data });
-    // 尺寸通过 style 同步（RF 用 style 控制节点大小）
-    updateNode(id, { style: { width: next.w, height: next.h } });
+    // 尺寸三处对齐：顶层 width/height（NodeResizer 拖过会残留，RF 优先读它）
+    // + style（RF 备选）。只改 style 会被顶层残留值屏蔽。
+    updateNode(id, { width: next.w, height: next.h, style: { width: next.w, height: next.h } });
   };
 
   // resize：写回 style + data.w/h（NodeResizer 已改 style，这里同步 data）
@@ -104,26 +106,49 @@ export function SessionCardNode({ id, data, selected, width, height }: NodeProps
 
   // 新会话卡转正：清 cwd 字段（写 Y.Doc → CRDT 广播）
   const handlePromote = useCallback(() => {
-    updateNode(id, { data: { ...data, cwd: "", taskId: "" } });
-  }, [id, data, updateNode]);
+    const d = dataRef.current;
+    updateNode(id, { data: { ...d, cwd: "", taskId: "" } });
+  }, [id, updateNode]);
 
   const meta = phaseMeta[phase] ?? phaseMeta.idle;
 
   // 收合态滚轮内部滚动（RF 的 nowheel 类已处理，这里不需要额外监听）
 
   return (
+    <>
+      {/* resize 手柄 + 连线 Handle 挂在卡根外（RF wrapper 直接子级）：
+          卡根 overflow:hidden（或展开态 visible）会裁掉/错位外扩的 resize 角柄，
+          放外面后手柄可正常外扩/命中。
+          直线隐藏（四边直线无法圆角）：选中态边线由卡根圆角 accent 边框呈现。 */}
+      <NodeResizer
+        isVisible={selected}
+        minWidth={expanded ? 600 : CARD_W}
+        minHeight={expanded ? 500 : CARD_H}
+        onResize={onResize}
+        keepAspectRatio={false}
+        lineStyle={{ borderColor: "transparent" }}
+        handleStyle={{ background: "var(--accent)", borderColor: "var(--accent)" }}
+      />
+
+      {/* 连线 Handle：exec/依赖线端点（左侧 target / 右侧 source） */}
+      <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
+      <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
+
     <div
       ref={setContainer}
       data-board-node
       data-testid={`session-card-${sessionId}`}
+      onDoubleClick={toggleExpand}
       style={{
         position: "relative",
         width: "100%",
         height: "100%",
         borderRadius: expanded ? 18 : 14,
-        border: isHighlighted ? "2px solid var(--accent)" : `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
+        border: selected
+          ? "2px solid var(--accent)"
+          : isHighlighted ? "2px solid var(--accent)" : `1px solid ${stale ? "color-mix(in srgb, var(--border) 80%, transparent)" : "color-mix(in srgb, var(--border) 60%, transparent)"}`,
         background: "transparent",
-        boxShadow: isHighlighted ? HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
+        boxShadow: selected ? "0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent), 0 2px 12px -6px rgba(0,0,0,0.18)" : isHighlighted ? HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
         animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
         opacity: stale ? 0.55 : 1,
         display: "flex",
@@ -135,25 +160,11 @@ export function SessionCardNode({ id, data, selected, width, height }: NodeProps
         overflow: expanded ? "visible" : "hidden",
       }}
     >
-      {/* resize 手柄（两态最小尺寸） */}
-      <NodeResizer
-        isVisible={selected}
-        minWidth={expanded ? 600 : CARD_W}
-        minHeight={expanded ? 500 : CARD_H}
-        onResize={onResize}
-        keepAspectRatio={false}
-        lineStyle={{ borderColor: "var(--accent)" }}
-        handleStyle={{ background: "var(--accent)", borderColor: "var(--accent)" }}
-      />
 
-      {/* 连线 Handle：exec/依赖线端点（左侧 target / 右侧 source） */}
-      <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
-      <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
-
-      {/* 标题栏 = 拖拽区（不拦 pointer → RF 拖动节点） */}
+      {/* 标题栏 = 恒可拖拽层（展开/收起都保留可拖）：不拦 pointer → RF 拖动节点。
+          内部交互（改名输入/按钮/导航槽）各自 nodrag 隔离。 */}
       <div
         data-session-titlebar
-        className={expanded ? "nodrag" : ""}
         style={{
           flexShrink: 0,
           display: "flex",
@@ -176,6 +187,7 @@ export function SessionCardNode({ id, data, selected, width, height }: NodeProps
             onChange={(e) => setRenameValue(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void commitRename(); if (e.key === "Escape") cancelRename(); }}
             onBlur={() => void commitRename()}
+            className="nodrag"
             style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--side-input)", color: "var(--text)" }}
           />
         ) : (
@@ -212,7 +224,7 @@ export function SessionCardNode({ id, data, selected, width, height }: NodeProps
       </div>
 
       {expanded ? (
-        <div style={{ flex: 1, minHeight: 0, padding: "0 4px 0", pointerEvents: "all", overflow: "visible" }}>
+        <div className="nodrag" style={{ flex: 1, minHeight: 0, padding: "0 4px 0", pointerEvents: "all", overflow: "visible" }}>
           <SessionWorkbench sessionId={sessionId} cwd={cwd} taskId={taskId} onPromote={handlePromote} />
         </div>
       ) : (
@@ -246,6 +258,7 @@ export function SessionCardNode({ id, data, selected, width, height }: NodeProps
         </>
       )}
     </div>
+    </>
   );
 }
 
@@ -284,3 +297,6 @@ function formatTime(lastActivityAt: number): string {
   if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
+
+/** memo 化导出：忽略拖拽/位置类 props 每帧变化，避免拖拽时整卡重渲染 */
+export const SessionCardNode = memoBoardNode(SessionCardNodeImpl);

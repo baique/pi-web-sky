@@ -11,8 +11,8 @@ import { CardKindBadge } from "@/components/canvas/CardKindBadge";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
 import { WorktreePicker } from "@/components/canvas/WorktreePicker";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
-import { useNodePosition } from "./nodePosition";
 import { useBoardId, useBoardDefaultCwd } from "./BoardIdContext";
+import { memoBoardNode } from "./memoNode";
 
 /**
  * 任务卡（RF 节点版，替代 tldraw task-card shape）。
@@ -61,10 +61,11 @@ export const EXEC_BADGE: Record<ExecStatus, { color: string; label: string }> = 
 const FORM_W = 380;
 const FORM_H = 270;
 const EXPANDED_W = 760;
-const EXPANDED_H = 600;
+/** 展开态默认高 = 旧版 600 + 20px 余量（用户指定） */
+const EXPANDED_H = 620;
 const COLLAPSED_MIN_H = 240;
 
-export function TaskCardNode({ id, data, selected, width, height }: NodeProps & { data: TaskCardData }) {
+function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { data: TaskCardData }) {
   const { updateNode, deleteNode } = useBoardCanvasOps();
   const w = width ?? data.w ?? FORM_W;
   const h = height ?? data.h ?? FORM_H;
@@ -77,9 +78,7 @@ export function TaskCardNode({ id, data, selected, width, height }: NodeProps & 
   const { detail, candidates, loading, error, reload, createCard, saveCard } = useTaskCard(cardId || null, boardId);
 
   // 玻璃
-  const position = useNodePosition(id);
-  const { setContainer, setNode } = useCardGlass("var(--assistant-card-glass)");
-  useEffect(() => { setNode(position ? { id, position, data, type: "task-card", style: { width: w, height: h } } as never : null); /* eslint-disable-line */ });
+  const { setContainer } = useCardGlass("var(--assistant-card-glass)");
 
   const isCreating = !cardId;
   const sessionId = detail?.card.sessionId ?? null;
@@ -260,15 +259,40 @@ export function TaskCardNode({ id, data, selected, width, height }: NodeProps & 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, isCreating]);
 
-  // 双击切换展开/收合
+  // 双击切换展开/收合（展开尺寸固定参考旧版：760×(600+20)，两态不记忆——
+  // resize 曾长期失效导致记忆字段全是脏值（380×240 被记成展开尺寸），不可信）
   const toggleExpand = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (expanded) {
-      updateNode(id, { data: { ...data, expanded: false, expandedW: w, expandedH: h, w: data.collapsedW || FORM_W, h: data.collapsedH || FORM_H } });
+      updateNode(id, {
+        data: {
+          ...data,
+          expanded: false,
+          expandedW: EXPANDED_W, expandedH: EXPANDED_H,
+          w: FORM_W, h: FORM_H,
+          collapsedW: FORM_W, collapsedH: FORM_H,
+        },
+        // 尺寸三处对齐：顶层 width/height（NodeResizer 拖过会残留，RF 优先读它）
+        // + style（RF 备选）+ data.w/h（镜像）。只改 style 会被顶层残留值屏蔽。
+        width: FORM_W,
+        height: FORM_H,
+        style: { width: FORM_W, height: FORM_H },
+      });
     } else {
-      updateNode(id, { data: { ...data, expanded: true, collapsedW: w, collapsedH: h, w: data.expandedW || EXPANDED_W, h: data.expandedH || EXPANDED_H } });
+      updateNode(id, {
+        data: {
+          ...data,
+          expanded: true,
+          expandedW: EXPANDED_W, expandedH: EXPANDED_H,
+          w: EXPANDED_W, h: EXPANDED_H,
+          collapsedW: FORM_W, collapsedH: FORM_H,
+        },
+        width: EXPANDED_W,
+        height: EXPANDED_H,
+        style: { width: EXPANDED_W, height: EXPANDED_H },
+      });
     }
-  }, [id, data, expanded, w, h, updateNode]);
+  }, [id, data, expanded, updateNode]);
 
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
     updateNode(id, { data: { ...data, w: params.width, h: params.height } });
@@ -334,30 +358,38 @@ export function TaskCardNode({ id, data, selected, width, height }: NodeProps & 
   );
 
   return (
-    <div
-      ref={(node) => { rootRef.current = node; setContainer(node); }}
-      data-board-node
-      data-testid={`task-card-${id}`}
-      className="nodrag"
-      onDoubleClick={toggleExpand}
-      style={{
-        position: "relative",
-        width: "100%",
-        height: "100%",
-        borderRadius: "var(--bubble-radius, 12px)",
-        border: selected ? "1.5px solid var(--accent)" : "1px solid var(--bubble-border)",
-        background: "transparent",
-        boxShadow: "0 2px 10px -6px rgba(0,0,0,0.2)",
-        color: "var(--text)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        userSelect: "none",
-      }}
-    >
-      <NodeResizer isVisible={selected} minWidth={expanded ? 480 : FORM_W} minHeight={expanded ? 400 : COLLAPSED_MIN_H} onResize={onResize} keepAspectRatio={false} />
+    <>
+      {/* resize 手柄 + 连线 Handle 挂在卡根外（RF wrapper 直接子级）：
+          卡根 overflow:hidden 会裁掉外扩的 resize 角柄 → 点击落到卡根变成拖卡，
+          resize 永远无法触发。放外面后手柄可正常外扩/命中。
+          直线隐藏（四边直线无法圆角）：选中态边线由卡根圆角 accent 边框呈现。 */}
+      <NodeResizer isVisible={selected} minWidth={expanded ? 480 : FORM_W} minHeight={expanded ? 400 : COLLAPSED_MIN_H} onResize={onResize} keepAspectRatio={false} lineStyle={{ borderColor: "transparent" }} handleStyle={{ background: "var(--accent)", borderColor: "var(--accent)" }} />
       <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
+      <div
+        ref={(node) => { rootRef.current = node; setContainer(node); }}
+        data-board-node
+        data-testid={`task-card-${id}`}
+        // 根可拖（RF 默认）：标题栏即拖拽把手；内容区（表单）与交互控件各自 nodrag 隔离，
+        // 双击（展开/收合）由 RF wrapper 的 dblclick 触发，不依赖根 nodrag。
+        onDoubleClick={toggleExpand}
+        style={{
+          position: "relative",
+          width: "100%",
+          height: "100%",
+          borderRadius: "var(--bubble-radius, 12px)",
+          border: selected ? "1.5px solid var(--accent)" : "1px solid var(--bubble-border)",
+          background: "transparent",
+          boxShadow: "0 2px 10px -6px rgba(0,0,0,0.2)",
+          color: "var(--text)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          userSelect: "none",
+          // 统一预留 4px 内边距：连线 Handle 呼吸空间 + 贴边按下可拖拽移动（RF 可拖区）
+          padding: 4,
+        }}
+      >
       {/* 拖拽把手：不拦 pointer（RF 拖动节点）；右上角操作按钮 nodrag 独立点击 */}
       <div style={{ flexShrink: 0, height: 36, display: "flex", alignItems: "center", gap: 6, padding: "0 10px", borderBottom: "1px solid var(--bubble-hairline)", cursor: "grab", fontSize: 11, color: "var(--text-muted)" }}>
         <span title={`执行状态：${(EXEC_BADGE[execStatus] ?? EXEC_BADGE.not_started).label}`} style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
@@ -396,7 +428,8 @@ export function TaskCardNode({ id, data, selected, width, height }: NodeProps & 
           {formBody}
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -475,3 +508,6 @@ function DuePicker({ due, onChange }: { due: number | null; onChange: (ms: numbe
     </div>
   );
 }
+
+/** memo 化导出：忽略拖拽/位置类 props 每帧变化，避免拖拽时整卡重渲染 */
+export const TaskCardNode = memoBoardNode(TaskCardNodeImpl);

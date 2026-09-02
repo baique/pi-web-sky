@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChatWindow } from "@/components/ChatWindow";
 import type { ChatInputHandle } from "@/components/ChatInput";
@@ -27,7 +27,7 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
  *   挂 ChatWindow，用户在卡内发消息 → ensure_session 携带该 UUID 创建会话 → onSessionCreated
  *   回调清 cwd 字段转正（卡片 sessionId 本就一致，无需事件桥写回）。
  */
-export function SessionWorkbench({
+export const SessionWorkbench = memo(function SessionWorkbench({
   sessionId,
   cwd,
   taskId,
@@ -320,7 +320,7 @@ export function SessionWorkbench({
       />
     </div>
   );
-}
+});
 
 const containerStyle: React.CSSProperties = {
   display: "flex",
