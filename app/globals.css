@@ -2221,8 +2221,8 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
    否则头部占位变化会反哺"超长"判定，在高度恰为一屏时形成反馈环闪烁。 */
 
 /* === tldraw 看板画布（SessionCanvas）===
-   tldraw 编辑器免费可用，仅隐藏商业许可水印（不影响任何功能）。 */
-.tl-watermark_SEE-LICENSE { display: none !important; }
+   tldraw License 要求不得干扰其 License Key 强制执行、不得移除其通知；
+   水印（含未授权状态水印）须保持可见，不得隐藏。 */
 
 /* === tldraw 画布玻璃化（SessionCanvas）===
    画布背景透明，露出页面背景（壁纸/纯色），与 AI 消息气泡玻璃观感一致。
