@@ -148,10 +148,11 @@ export async function reconcileBoard(boardId: string): Promise<void> {
       }
     }
     // 缺卡补：业务表有、画布没有的会话卡 → 补（确定性 id，4 列布局落点）
+    // 补全 allSessionIds（任务根会话 + 任务卡执行会话）——exec 线目标会话卡必须有节点
     const hasPendingNew = pendingNewNodes.length > 0; // 有新建中卡时跳过补卡（避免占位并存）
     if (!hasPendingNew) {
       const remaining = Array.from(nodesMap.values());
-      for (const sid of sessionIds) {
+      for (const sid of allSessionIds) {
         if (existingSessionBySid.has(sid)) continue;
         const id = `session-${sid}`;
         const spot = findFreeSpot(remaining);
@@ -186,10 +187,63 @@ export async function reconcileBoard(boardId: string): Promise<void> {
       }
     }
 
+    // ---- 1.5) 任务卡节点补齐：业务表存在、画布无对应节点 → 补（exec 线锚点）----
+    // 任务卡由用户从工具栏拖出创建；业务表已存在的卡（外部建卡/历史数据）自动入板。
+    // 确定性 id（task-<cardId>）→ 幂等；孤儿任务卡节点（业务表已删）→ 删。
+    const existingCardByCardId = new Map(); // cardId -> node
+    for (const n of nodes) {
+      if (n?.type === "task-card" && n.data?.cardId) existingCardByCardId.set(n.data.cardId, n);
+    }
+    // 孤儿任务卡：画布有 cardId 但业务表没有 → 删节点（级联删边）
+    const knownCardIds = new Set(cards.map((c) => c.id));
+    const orphanCardIds = [];
+    for (const [cid, n] of existingCardByCardId) {
+      if (!knownCardIds.has(cid)) orphanCardIds.push(n.id);
+    }
+    for (const id of orphanCardIds) {
+      nodesMap.delete(id);
+      for (const e of Array.from(edgesMap.values())) {
+        if (e.source === id || e.target === id) edgesMap.delete(e.id);
+      }
+    }
+    // 缺卡补：业务表有、画布没有 → 补（form 尺寸，4 列布局）
+    {
+      const remaining = Array.from(nodesMap.values()) as DocNode[];
+      for (const card of cards) {
+        if (existingCardByCardId.has(card.id)) continue;
+        const id = `task-${card.id}`;
+        const spot = findFreeSpot(remaining, TASK_CARD_W, TASK_CARD_H);
+        nodesMap.set(id, {
+          id,
+          type: "task-card",
+          position: { x: spot.x, y: spot.y },
+          style: { width: TASK_CARD_W, height: TASK_CARD_H },
+          data: {
+            cardId: card.id,
+            number: card.number,
+            name: card.name,
+            description: card.description,
+            readyStatus: card.readyStatus,
+            execStatus: card.execStatus,
+            priority: card.priority,
+            due: card.due ?? undefined,
+            expanded: false,
+            w: TASK_CARD_W,
+            h: TASK_CARD_H,
+            expandedW: 0,
+            expandedH: 0,
+            collapsedW: 0,
+            collapsedH: 0,
+          },
+        });
+        remaining.push(nodesMap.get(id));
+      }
+    }
+
     // ---- 2) exec 线：任务卡 sessionId → 卡节点 + 会话节点 → 建线 ----
     // 卡 shape：cardId 映射到节点
     const cardShapes = new Map(); // cardId -> node
-    for (const n of nodes) {
+    for (const n of Array.from(nodesMap.values()) as DocNode[]) {
       if (n?.type === "task-card" && n.data?.cardId) cardShapes.set(n.data.cardId, n);
     }
     const sessionShapes = new Map(); // sid -> node（含刚补的）
@@ -220,7 +274,7 @@ export async function reconcileBoard(boardId: string): Promise<void> {
         id,
         source: cardShape.id,
         target: wanted.id,
-        type: "derived",
+        type: "default",
         data: { execLink: true, cardId: card.id, sessionId: card.sessionId },
         markerEnd: { type: "arrowclosed" },
         style: { strokeWidth: 1.5, stroke: "#3184f8", strokeDasharray: "6 4" },
@@ -251,7 +305,7 @@ export async function reconcileBoard(boardId: string): Promise<void> {
             id,
             source: fromShape.id,
             target: toShape.id,
-            type: "derived",
+            type: "default",
             data: { taskLink: link.kind },
             markerEnd: { type: "arrowclosed" },
             style: { strokeWidth: 1.5, stroke: "#f59e0b" },

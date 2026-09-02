@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NodeResizer, type NodeProps } from "@xyflow/react";
+import { NodeResizer, Handle, Position, type NodeProps } from "@xyflow/react";
 import { SessionWorkbench } from "@/components/canvas/SessionWorkbench";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 import type { CanvasPhase, SessionCardData } from "@/hooks/useBoardCanvas";
@@ -145,6 +145,10 @@ export function SessionCardNode({ id, data, selected, width, height }: NodeProps
         lineStyle={{ borderColor: "var(--accent)" }}
         handleStyle={{ background: "var(--accent)", borderColor: "var(--accent)" }}
       />
+
+      {/* 连线 Handle：exec/依赖线端点（左侧 target / 右侧 source） */}
+      <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
+      <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
 
       {/* 标题栏 = 拖拽区（不拦 pointer → RF 拖动节点） */}
       <div

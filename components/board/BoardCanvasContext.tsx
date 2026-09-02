@@ -14,6 +14,8 @@ export interface BoardCanvasOps {
   deleteNode: (id: string) => void;
   /** 新增边（连线） */
   addEdge: (edge: Edge) => void;
+  /** 新增节点（新建便笺/任务卡等） */
+  addNode: (node: Node) => void;
   /** 当前看板 id */
   boardId: string | null;
 }
@@ -26,6 +28,6 @@ export function BoardCanvasProvider({ value, children }: { value: BoardCanvasOps
 
 export function useBoardCanvasOps(): BoardCanvasOps {
   const ctx = useContext(BoardCanvasContext);
-  if (!ctx) return { updateNode: () => {}, deleteNode: () => {}, addEdge: () => {}, boardId: null };
+  if (!ctx) return { updateNode: () => {}, deleteNode: () => {}, addEdge: () => {}, addNode: () => {}, boardId: null };
   return ctx;
 }

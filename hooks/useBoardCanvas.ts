@@ -504,6 +504,12 @@ export function useBoardCanvas({
     edgesMap.set(edge.id, edge);
   }, []);
 
+  const addNode = useCallback((node: Node) => {
+    const nodesMap = nodesMapRef.current;
+    if (!nodesMap) return;
+    nodesMap.set(node.id, node);
+  }, []);
+
   // ---- 清空画布 ----
   const clearBoard = useCallback(async () => {
     const nodesMap = nodesMapRef.current;
@@ -543,12 +549,13 @@ export function useBoardCanvas({
       deleteNodeWithConfirm,
       updateNode,
       addEdge,
+      addNode,
       clearBoard,
       sessionTitles,
       loadSessionSummaries,
       reloadCanvas: load,
     }),
-    [board, loading, error, running, nodes, edges, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, addEdge, clearBoard, sessionTitles, loadSessionSummaries, load],
+    [board, loading, error, running, nodes, edges, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, load],
   );
 }
 
