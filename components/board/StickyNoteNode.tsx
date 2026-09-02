@@ -140,8 +140,8 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     fontSize: 13,
     lineHeight: 1.5,
     userSelect: "none",
-    // 统一预留 4px 内边距：连线 Handle 呼吸空间 + 贴边按下可拖拽移动（RF 可拖区）
-    padding: 4,
+    // 统一预留内边距：连线 Handle 呼吸空间 + 贴边按下可拖拽移动（RF 可拖区）+ 内容与 resize 边界留间距
+    padding: 6,
   };
 
   // 非编辑态内容交互：阻止事件冒泡到 RF（避免触发节点拖动/画布平移）
@@ -164,8 +164,8 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
         minHeight={60}
         onResize={onResize}
         keepAspectRatio={false}
-        lineStyle={{ borderColor: "transparent" }}
-        handleStyle={{ background: "var(--accent)", borderColor: "var(--accent)" }}
+        lineStyle={{ borderColor: "color-mix(in srgb, var(--accent) 50%, transparent)" }}
+        handleStyle={{ width: 10, height: 10, background: "var(--accent)", borderColor: "var(--bg-panel)", borderWidth: 2 }}
       />
       <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
