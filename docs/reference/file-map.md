@@ -87,7 +87,8 @@ SessionSidebar.tsx  session tree + FileExplorer
 SessionStatsSummary.tsx  session stats compact summary（统计弹层第一行，复用 AppShell 顶栏格式）
 ChatWindow.tsx      chat composition + completion sound wrapper
 canvas/             board mode components：SessionCanvas / SessionWorkbench / SessionNavBar /
-                    CanvasStage / BoardSearch / ThemedSelect / BoardSection / BoardContextMenu
+                    CanvasStage / BoardSearch / ThemedSelect / BoardSection / BoardContextMenu /
+                    BoardTopbar（左上功能区）/ SchedulerPanel（右上调度器状态面板）
 board/              RF 自定义节点：SessionCardNode / TaskCardNode / StickyNoteNode /
                     BoardCanvasContext / BoardContextMenu / BoardIdContext / nodePosition
 ChatInput.tsx       input bar + model/thinking/tools/compact controls

@@ -275,7 +275,10 @@ export async function processReplyQueue(): Promise<number> {
     const card = getCard(q.cardId);
     if (!card || card.execStatus !== "waiting_reply" || !card.sessionId) continue;
     if (countRunningDispatched() >= TASK_SCHEDULER_MAX_CONCURRENCY) break;
-    const ok = await resumeWithAnswer(card, q);
+    const ok = await withSchedulerActivity(
+      { kind: "resume", cardNumber: card.number, cardName: card.name, at: Date.now() },
+      () => resumeWithAnswer(card, q),
+    );
     if (ok) {
       resumed += 1;
       setLastAction({ type: "resume", cardNumber: card.number, cardName: card.name, at: Date.now() });
@@ -352,13 +355,16 @@ export async function processReviewCards(): Promise<number> {
     reviewAuditAt.set(card.id, now);
     const cwd = resolveDispatchCwd(card);
     if (!cwd) continue;
-    const result = await runAuditVerdict({
-      cwd,
-      cardNumber: card.number,
-      cardName: card.name,
-      taskDescription: card.description,
-      recentMessages: snapshot.recentText,
-    });
+    const result = await withSchedulerActivity(
+      { kind: "review", cardNumber: card.number, cardName: card.name, at: Date.now() },
+      () => runAuditVerdict({
+        cwd,
+        cardNumber: card.number,
+        cardName: card.name,
+        taskDescription: card.description,
+        recentMessages: snapshot.recentText,
+      }),
+    );
     if (result?.verdict === "done") {
       updateCard(card.id, { execStatus: "done" });
       console.log(`[task-scheduler] #${card.number} 审核通过 → done（${result.reason}）`);
@@ -394,13 +400,16 @@ export async function checkRunningCardsBlocked(): Promise<number> {
     blockCheckAt.set(card.id, now);
     const cwd = resolveDispatchCwd(card);
     if (!cwd) continue;
-    const result = await runBlockCheck({
-      cwd,
-      cardNumber: card.number,
-      cardName: card.name,
-      taskDescription: card.description,
-      recentMessages: snapshot.recentText,
-    });
+    const result = await withSchedulerActivity(
+      { kind: "blockcheck", cardNumber: card.number, cardName: card.name, at: Date.now() },
+      () => runBlockCheck({
+        cwd,
+        cardNumber: card.number,
+        cardName: card.name,
+        taskDescription: card.description,
+        recentMessages: snapshot.recentText,
+      }),
+    );
     if (!result) continue;
     switch (result.kind) {
       case "sync_server":
