@@ -201,6 +201,18 @@ export function useBoardCanvas({
     void load();
   }, [load]);
 
+  /** 强制重载画布：触发后端 reconcile（画布对齐业务表：补缺/删孤儿/建线）→ 刷新看板元信息。
+   *  reconcile 写 yjs 文档，已连接的 provider 通过 CRDT 广播自动收到并重渲染。
+   *  切换看板（key 重挂载）/刷新页面（整页重载）各自走独立生命周期，此方法不依赖它们。 */
+  const reloadCanvas = useCallback(async () => {
+    try {
+      await fetch(`/api/boards/${encodeURIComponent(boardId)}/reconcile`, { method: "POST" });
+    } catch {
+      // reconcile 失败不影响后续元信息刷新
+    }
+    await load();
+  }, [boardId, load]);
+
   // ---- 运行中快照轮询：更新卡片 phase/runningMs + 任务卡 execStatus + 即时补卡 ----
   const [running, setRunning] = useState<RunningSnapshot | null>(
     () => (globalThis as { __piRunningSnapshot?: RunningSnapshot }).__piRunningSnapshot ?? null,
@@ -536,6 +548,28 @@ export function useBoardCanvas({
     nodesMap.set(id, { ...cur, ...patch });
   }, []);
 
+  /**
+   * 规范化节点 id：新建任务卡派发成功后，把随机 UUID 节点 id 改成确定性 `task-<cardId>`，
+   * 避免与后端 reconcile 补出的 task-<cardId> 节点并存（重复卡）。yjs 删旧建新 + 级联更新边端点。
+   */
+  const normalizeNodeId = useCallback((oldId: string, newId: string) => {
+    const nodesMap = nodesMapRef.current;
+    if (!nodesMap || !oldId || oldId === newId) return;
+    const node = nodesMap.get(oldId);
+    if (!node) return;
+    nodesMap.delete(oldId);
+    nodesMap.set(newId, { ...node, id: newId });
+    // 级联：以旧 id 为端点的边改指向新 id
+    const edgesMap = edgesMapRef.current;
+    if (edgesMap) {
+      for (const e of Array.from(edgesMap.values())) {
+        if (e.source === oldId || e.target === oldId) {
+          edgesMap.set(e.id, { ...e, source: e.source === oldId ? newId : e.source, target: e.target === oldId ? newId : e.target });
+        }
+      }
+    }
+  }, []);
+
   const addEdge = useCallback((edge: Edge) => {
     const edgesMap = edgesMapRef.current;
     if (!edgesMap) return;
@@ -586,14 +620,15 @@ export function useBoardCanvas({
       addNewSessionCard,
       deleteNodeWithConfirm,
       updateNode,
+      normalizeNodeId,
       addEdge,
       addNode,
       clearBoard,
       sessionTitles,
       loadSessionSummaries,
-      reloadCanvas: load,
+      reloadCanvas,
     }),
-    [board, loading, error, running, nodes, edges, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, load],
+    [board, loading, error, running, nodes, edges, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load],
   );
 }
 

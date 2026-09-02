@@ -46,6 +46,9 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
       const full = board.nodes.find((n) => n.id === id);
       if (full) void board.deleteNodeWithConfirm?.(full);
     },
+    normalizeNodeId: (oldId, newId) => {
+      board.normalizeNodeId?.(oldId, newId);
+    },
     deleteEdge: (id) => {
       // 复用 onEdgesChange 的 remove（派生边由后端 reconcile 保护，此处自动跳过）
       board.onEdgesChange?.([{ type: "remove", id }]);

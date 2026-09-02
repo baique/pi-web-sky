@@ -178,6 +178,13 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
   }
 }
 
+/** 任务看板派生 reconcile（后端权威）：补执行会话卡 + exec 线，广播到所有客户端 */
+function reconcileTaskBoard(boardId: string): void {
+  void reconcileBoard(boardId).catch((e) =>
+    console.warn(`[task-scheduler] reconcile ${boardId} 异常:`, e?.message ?? e),
+  );
+}
+
 /**
  * 订阅执行会话 agent_end：会话跑完立即把卡转 review（待审核），不等下一轮 reconcile。
  * 事件驱动实现「会话执行完立即进入待审核」。回调只处理卡仍为 running 的情况，避免覆盖后续流转。

@@ -66,7 +66,7 @@ const EXPANDED_H = 620;
 const COLLAPSED_MIN_H = 240;
 
 function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { data: TaskCardData }) {
-  const { updateNode, deleteNode } = useBoardCanvasOps();
+  const { updateNode, deleteNode, normalizeNodeId } = useBoardCanvasOps();
   const w = width ?? data.w ?? FORM_W;
   const h = height ?? data.h ?? FORM_H;
   const expanded = Boolean(data.expanded);
@@ -179,8 +179,11 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     savingRef.current = false;
     setSaving(false);
     if (created) {
-      // 更新节点 data：空卡转正为已建卡（cardId 落节点，CRDT 持久化）
-      updateNode(id, { data: { ...data, cardId: created.id, number: created.number, name: created.name, readyStatus: created.readyStatus, execStatus: created.execStatus, priority: created.priority, due: created.due ?? undefined } });
+      // 规范化节点 id：随机 UUID → task-<cardId>（与服务端 reconcile 的确定性 id 一致，避免重复卡）。
+      // 必须先改 id 再落 cardId，否则 reconcile 已按 task-<cardId> 补卡时两者并存。
+      const newId = `task-${created.id}`;
+      normalizeNodeId(id, newId);
+      updateNode(newId, { data: { ...data, cardId: created.id, number: created.number, name: created.name, readyStatus: created.readyStatus, execStatus: created.execStatus, priority: created.priority, due: created.due ?? undefined } });
       setDraft((d) => (d ? { ...d, ...created, sessionId: created.sessionId } : d));
       void reload();
     }

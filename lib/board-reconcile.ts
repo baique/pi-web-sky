@@ -120,15 +120,12 @@ export async function reconcileBoard(boardId: string): Promise<void> {
 
     // ---- 1) 会话卡：缺补、孤儿删 ----
     const existingSessionBySid = new Map(); // sid -> node
-    const pendingNewNodes = []; // 新会话卡（cwd 非空）
     for (const n of nodes) {
       if (n?.type !== "session-card") continue;
       const sid = n.data?.sessionId;
       if (!sid) continue;
-      if (isPendingNewSession(n)) {
-        pendingNewNodes.push(n);
-        continue;
-      }
+      // 新建中占位卡（cwd 非空）：不参与 existingSessionBySid（补卡/孤儿删都不管它）
+      if (isPendingNewSession(n)) continue;
       existingSessionBySid.set(sid, n);
     }
     // 孤儿删：画布有、业务表没有的会话卡（非新会话卡）→ 删
@@ -144,9 +141,11 @@ export async function reconcileBoard(boardId: string): Promise<void> {
       }
     }
     // 缺卡补：业务表有、画布没有的会话卡 → 补（确定性 id，4 列布局落点）
-    // 补全 allSessionIds（任务根会话 + 任务卡执行会话）——exec 线目标会话卡必须有节点
-    const hasPendingNew = pendingNewNodes.length > 0; // 有新建中卡时跳过补卡（避免占位并存）
-    if (!hasPendingNew) {
+    // 补全 allSessionIds（任务根会话 + 任务卡执行会话）——exec 线目标会话卡必须有节点。
+    // 注意：不能因画布存在「新建中占位卡」（pendingNew，cwd 非空）就跳过补卡——
+    // 那会让任务卡执行会话卡永远不补、exec 线断（历史 bug）。补卡 id 为确定性 session-<sid>，
+    // 与随机 id 的占位卡不冲突、幂等。
+    {
       const remaining = Array.from(nodesMap.values());
       for (const sid of allSessionIds) {
         if (existingSessionBySid.has(sid)) continue;
