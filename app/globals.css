@@ -379,6 +379,15 @@ body {
 [data-glass-scope="board"] .extension-status-shelf {
   background-image: none;
 }
+/* 看板画布（React Flow）：xyflow 深色模式默认给 .react-flow 涂一层不透明
+   近黑底（--xy-background-color-default: #141414，.dark 里设置），把 body 上
+   的壁纸与 scrim 全部盖住——浅色默认 transparent 所以正常。
+   看板底要透壁纸，把 --xy-background-color 置 transparent 即可：background-color
+   的 var 链优先查这个变量（.react-flow__background 点阵 svg 继承同一变量），
+   .dark 只改的是 default 那一级，不受影响。边/点阵等其它深色默认样式保留。 */
+[data-glass-scope="board"] .react-flow {
+  --xy-background-color: transparent;
+}
 /* 贴顶栏向下展开面板的标准外壳：L-panel 玻璃 + 三边边框(顶贴栏) +
    底部圆角 + 统一阴影。顶部所有“点开向下展开”的弹层一律套此类。
    内容面板内部布局(padding/宽高/滚动)仍由各组件内联自管。 */
