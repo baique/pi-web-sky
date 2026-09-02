@@ -27,6 +27,8 @@
     "next.config.ts",
     "server.mjs",
     "lib",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "package.json"
   ],
   "scripts": {

@@ -98,4 +98,15 @@ npm test             # 单元测试
 
 ## 许可证
 
-[MIT](./LICENSE)
+本项目代码以 [MIT](./LICENSE) 协议发布。
+
+**注意**：会话看板（画布）依赖 [tldraw](https://tldraw.dev) SDK（`tldraw` / `@tldraw/sync` / `@tldraw/sync-core`），
+tldraw **不是开源协议**，而是 source-available 的自有许可（免费仅限开发环境）：
+
+- 在**生产环境**（对外提供服务，含非 loopback 的内网 IP、公网部署）使用看板，需要 tldraw 的 License Key：
+  - 非商用项目可申请免费 **hobby license**（画布显示 "made with tldraw" 水印）；
+  - 商用项目须购买 **commercial license**（100 天免费 trial 可用于评估）。
+- 本项目自带功能与自身代码仍为 MIT；tldraw 代码须保持其原许可证，不能被重新声明为 MIT。
+- 本项目的 MIT 许可**不涵盖** tldraw；在非开发环境使用看板功能，请自行向 tldraw 申请相应许可。
+
+第三方依赖许可明细见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)（含 tldraw License 原文）。
