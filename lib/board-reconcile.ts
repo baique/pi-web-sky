@@ -17,8 +17,11 @@ import { listCards, listLinks } from "./task-card-store";
 
 // ---- yjs maps 类型 + mutateBoard（由 server.mjs 通过 globalThis 注入，避免 Next 打包 node:sqlite）----
 interface BoardMaps {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- yjs Map 泛型在服务端宽松处理（避免过度类型工程）
   nodes: import("yjs").Map<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   edges: import("yjs").Map<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   view: import("yjs").Map<any>;
   ydoc: import("yjs").Doc;
 }
@@ -46,13 +49,6 @@ interface DocNode {
   data?: Record<string, unknown>;
 }
 
-interface DocEdge {
-  id: string;
-  source?: string;
-  target?: string;
-  type?: string;
-  data?: Record<string, unknown>;
-}
 
 // ---- 卡片尺寸（与前端组件对齐，作补卡摆位锚点）----
 export const CARD_W = 340;
@@ -120,7 +116,7 @@ export async function reconcileBoard(boardId: string): Promise<void> {
   await mutateBoard(boardId, (maps) => {
     const nodesMap = maps.nodes;
     const edgesMap = maps.edges;
-    const nodes = Array.from(nodesMap.values()) as DocNode[];
+    const nodes = Array.from(nodesMap.values()) as unknown as DocNode[];
 
     // ---- 1) 会话卡：缺补、孤儿删 ----
     const existingSessionBySid = new Map(); // sid -> node
@@ -208,7 +204,7 @@ export async function reconcileBoard(boardId: string): Promise<void> {
     }
     // 缺卡补：业务表有、画布没有 → 补（form 尺寸，4 列布局）
     {
-      const remaining = Array.from(nodesMap.values()) as DocNode[];
+      const remaining = Array.from(nodesMap.values()) as unknown as DocNode[];
       for (const card of cards) {
         if (existingCardByCardId.has(card.id)) continue;
         const id = `task-${card.id}`;
@@ -243,7 +239,7 @@ export async function reconcileBoard(boardId: string): Promise<void> {
     // ---- 2) exec 线：任务卡 sessionId → 卡节点 + 会话节点 → 建线 ----
     // 卡 shape：cardId 映射到节点
     const cardShapes = new Map(); // cardId -> node
-    for (const n of Array.from(nodesMap.values()) as DocNode[]) {
+    for (const n of Array.from(nodesMap.values()) as unknown as DocNode[]) {
       if (n?.type === "task-card" && n.data?.cardId) cardShapes.set(n.data.cardId, n);
     }
     const sessionShapes = new Map(); // sid -> node（含刚补的）

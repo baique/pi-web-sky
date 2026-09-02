@@ -83,12 +83,6 @@ export interface SessionCardData extends Record<string, unknown> {
   collapsedH: number;
 }
 
-/** 后端 reconcile 会用确定性 id（session-<sid>）补卡；前端新建用 UUID */
-function isNewSessionNode(node: Node | undefined): boolean {
-  const d = node?.data as { cwd?: string } | undefined;
-  return Boolean(node && d && typeof d.cwd === "string" && d.cwd.length > 0);
-}
-
 export function useBoardCanvas({
   boardId,
   taskId,

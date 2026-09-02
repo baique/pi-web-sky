@@ -37,7 +37,7 @@ Browser                Next.js Server              AgentSession (in-process)
 **Session browsing** (read-only): reads `.jsonl` files through SDK `SessionManager` helpers and `lib/session-reader.ts` — no AgentSession created.  
 **Sending a message**: `startRpcSession()` in `lib/rpc-manager.ts` creates an AgentSession in-process.
 
-**Board mode** (会话看板): selecting a board (`?board=`) replaces the ChatWindow area with the tldraw canvas (`SessionCanvas`) — the sidebar stays visible, exiting / clicking a session / new-session returns to chat. **画布数据层已迁移到 tldraw sync**（2026-09）：每看板一个 `TLSocketRoom`（内嵌 Next.js server：`server.mjs` + `lib/sync-room-server.mjs`，同端口 30143），画布文档持久化到 `~/.pi/agent/sync.db`；前端 `useSync` 连接（CRDT 自动合并，无全量保存/乐观锁/409）。业务派生边（exec/依赖线）由前端 reconcile 从业务表渲染（`useBoardCanvas.ts`）。旧 `lib/board-store.ts` 的 nodes/edges 表废弃保留。`__running__` 系统看板已移除。
+**Board mode** (会话看板): selecting a board (`?board=`) replaces the ChatWindow area with the React Flow canvas (`SessionCanvas`) — the sidebar stays visible, exiting / clicking a session / new-session returns to chat. **画布已迁移到自研（React Flow + yjs，2026-09）**：每看板一个 Y.Doc（`@hocuspocus/server` 内嵌：`server.mjs` + `lib/yjs-room-server.mjs`，同端口），画布文档持久化到 `~/.pi/agent/sync.db` 的 `yjs_documents` 表；前端 `HocuspocusProvider` 连接（CRDT 自动合并，无全量保存/乐观锁/409）。业务派生边（exec/依赖线/会话卡/任务卡）由**后端 reconcile** 从业务表渲染（`lib/board-reconcile.ts`）。旧 `lib/board-store.ts` 的 nodes/edges 表废弃保留。`__running__` 系统看板已移除。
 
 ---
 
@@ -56,8 +56,8 @@ Browser                Next.js Server              AgentSession (in-process)
 - **运行状态轮询**：2.5s 轮询、后台 tab 暂停；prompt 用单调 run id，旧 run 的迟到 SSE / 慢 reconciliation 必须忽略，防复活过期流式气泡。
 - **worktree 路径比较用 `samePath()` 绝不用 `===`**：git 在 Windows 也输出 POSIX 路径，读出来先过 `toNativePath()`；分支名不是路径，保留正斜杠。
 - **文件白名单只有一个实现**：`isPathWithinRoots()`（`lib/path-security.ts`）是 `isFilePathAllowed()` 的唯一实现，重解析 + case-fold 两侧，别另起炉灶。
-- **tldraw sync 画布铁律**：① `useSync` 的 shapeUtils 必须模块级常量（引用不稳定 → 每次渲染重建连接 → session 堆积 + push_result 死循环）；② sync-room-server 的 `handleSocketConnect` 自动挂 ws 监听，**绝不手动再 `ws.on("message")`**（重复 → push_result 双发 → 重连死循环）；③ sessionId 复用客户端 TAB_ID（不能随机生成）；④ 业务派生边（exec/依赖线）由前端 reconcile 渲染（确定性 id 幂等），后端只写业务表不写画布。详见 [boards.md](docs/reference/boards.md)。
-- **tldraw 全局 `user-select:none`**：会禁画布内文本选中——工作台消息区与便笺 markdown 必须显式恢复选中。
+- **yjs 画布铁律**：① `nodeTypes`/`edgeTypes` 必须模块级常量（引用不稳定 → 每次渲染重建 → 连接堆积）；② 派生元素（会话卡/exec线/依赖线）由**后端 reconcile** 权威渲染（确定性 id 幂等），前端只做用户布局增量，**不做孤儿清理**（多端不互相删卡）；③ 节点内交互用 RF 原生 `nowheel`/`nodrag`/`nopan`（可滚动区 nowheel、按钮输入 nodrag）；④ 节点必须有 `<Handle>` 才能连线。详见 [boards.md](docs/reference/boards.md)。
+- **RF 不设全局 `user-select:none`**：便笺/message 文本选中复制天然可用，无需 tldraw 时代的手动恢复/拦截 hack。
 - **`enabledModels` 是 `--models` 语法**：minimatch glob / 模糊匹配 / `:thinkingLevel` 后缀，绝不能当字面字符串比较；交给 `lib/model-scope.ts` 委托 SDK 解析。
 
 ---
@@ -69,7 +69,7 @@ Browser                Next.js Server              AgentSession (in-process)
 | 主题 | 文件 | 什么时候读 |
 |---|---|---|
 | 会话生命周期 | [docs/reference/sessions.md](docs/reference/sessions.md) | 改会话加载 / 分支 / SSE / compaction / 运行状态轮询 / 会话文件读写 / 会话文件格式 |
-| 会话看板 | [docs/reference/boards.md](docs/reference/boards.md) | 改看板 / 画布 / **sync-server / 派生边 reconcile** / 任务即看板 / 便笺 / scrim / tldraw 自定义 shape |
+| 会话看板 | [docs/reference/boards.md](docs/reference/boards.md) | 改看板 / 画布 / **派生边 reconcile（后端权威）** / 任务即看板 / 便笺 / scrim / React Flow 节点 / yjs 数据层 |
 | 看板交互与事件层 | [docs/reference/board-events.md](docs/reference/board-events.md) | 改卡片交互 / 滚轮 / 右键菜单 / 事件劫持 / 焦点 / 新增自定义 shape 卡片 |
 | 认证与模型 | [docs/reference/auth-models.md](docs/reference/auth-models.md) | 改 provider 列表 / 登录 / models.json / 模型选择 / enabledModels / 思考级别 |
 | Worktree 与文件白名单 | [docs/reference/worktrees-files.md](docs/reference/worktrees-files.md) | 改 worktree / 项目分组 / /api/files / 文件浏览权限 |

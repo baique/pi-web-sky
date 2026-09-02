@@ -86,9 +86,10 @@ AppShell.tsx        layout + URL state + tab management
 SessionSidebar.tsx  session tree + FileExplorer
 SessionStatsSummary.tsx  session stats compact summary（统计弹层第一行，复用 AppShell 顶栏格式）
 ChatWindow.tsx      chat composition + completion sound wrapper
-canvas/             board mode components：SessionCanvas / SessionCardShape / SessionWorkbench /
-                    StickyNoteShape / TaskCardShape / TaskCardTool / ThemedSelect / BoardSection /
-                    CanvasStage / SessionNavBar / BoardToolbar / SyncedContextMenu
+canvas/             board mode components：SessionCanvas / SessionWorkbench / SessionNavBar /
+                    CanvasStage / BoardSearch / ThemedSelect / BoardSection / BoardContextMenu
+board/              RF 自定义节点：SessionCardNode / TaskCardNode / StickyNoteNode /
+                    BoardCanvasContext / BoardContextMenu / BoardIdContext / nodePosition
 ChatInput.tsx       input bar + model/thinking/tools/compact controls
 MessageView.tsx     renders one message (user/assistant/toolCall/toolResult)
 BranchNavigator.tsx in-session branch switcher
@@ -123,7 +124,7 @@ TurnWrittenFiles.tsx    files written this turn (buttons opening each in the vie
 ```
 useAgentSession.ts  messages + streaming + SSE + fork/navigate/reconciliation logic
 useAudio.ts         completion sound + browser AudioContext unlock
-useBoardCanvas.ts   board canvas: tldraw sync/reconcile/findFreeSpot/addNewSessionCard
+useBoardCanvas.ts   board canvas: yjs/Hocuspocus 绑定 + running/摘要轮询 + addNewSessionCard/deleteNode
 useTaskCards.ts     task card 数据 hook（详情/候选卡/建卡/保存）
 useBroadcast.ts     composer broadcast slots (left phase / right notices, P0-P3 priority)
 useDragDrop.ts      shared drag/drop state
