@@ -417,17 +417,18 @@ export function useBoardCanvas({
   }, []);
 
   // ---- 新会话卡（用户点 + 创建）----
-  const addNewSessionCard = useCallback(() => {
+  const addNewSessionCard = useCallback((flowPos?: { x: number; y: number }) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
     const w = NEW_SESSION_CARD_W;
     const h = NEW_SESSION_CARD_H;
-    const viewport = { x: 0, y: 0 }; // 简单落点（首屏中心由 view 计算，简化：固定偏移）
     const sessionId = crypto.randomUUID();
     const id = crypto.randomUUID();
-    // 新建会话卡在视口中心附近（简化用画布原点 + 级联偏移）
-    const x = viewport.x + 60 + (nodesMap.size % 3) * 24;
-    const y = viewport.y + 60 + (nodesMap.size % 3) * 24;
+    // 落点：传入 flow 坐标（视口中心）则用传入值；否则画布原点附近 + 级联偏移避免重叠
+    const baseX = flowPos?.x ?? 60;
+    const baseY = flowPos?.y ?? 60;
+    const x = baseX + (nodesMap.size % 3) * 24;
+    const y = baseY + (nodesMap.size % 3) * 24;
     nodesMap.set(id, {
       id,
       type: "session-card",

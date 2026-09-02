@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReactFlow, Background, Controls, MiniMap, type NodeTypes, type OnConnect, BackgroundVariant, type Node } from "@xyflow/react";
+import { ReactFlow, Background, Controls, MiniMap, useReactFlow, type NodeTypes, type OnConnect, BackgroundVariant, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
 import { useI18n } from "@/hooks/useI18n";
@@ -27,44 +27,13 @@ const nodeTypes: NodeTypes = {
 
 export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; isDark: boolean }) {
   const { t } = useI18n();
+  // RF 坐标转换：屏幕坐标（clientX/Y）→ flow 坐标（节点 position）。
+  // 新建节点/拖放落点都经它换算，保证放到“鼠标所指/视口中心”的位置。
+  const { screenToFlowPosition } = useReactFlow();
   const [dragOver, setDragOver] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
   // 右键菜单 state
   const [menu, setMenu] = useState<BoardMenuState | null>(null);
-
-  // 会话拖入画布：原生 dragover/drop（capture 阶段）
-  useEffect(() => {
-    const el = stageRef.current;
-    if (!el) return;
-    const onDragOverNative = (e: DragEvent) => {
-      if (!e.dataTransfer?.types.includes("text/session-id")) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      setDragOver(true);
-    };
-    const onDragLeaveNative = () => setDragOver(false);
-    const onDropNative = (e: DragEvent) => {
-      if (!e.dataTransfer?.types.includes("text/session-id")) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setDragOver(false);
-      const sid = e.dataTransfer.getData("text/session-id");
-      if (!sid) return;
-      const rect = el.getBoundingClientRect();
-      // 相对画布容器 → flow 坐标：RF 的 pane 坐标系以容器左上为原点（无 pan 时）
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      board.addSessionNode(sid, x, y);
-    };
-    el.addEventListener("dragover", onDragOverNative, true);
-    el.addEventListener("dragleave", onDragLeaveNative, true);
-    el.addEventListener("drop", onDropNative, true);
-    return () => {
-      el.removeEventListener("dragover", onDragOverNative, true);
-      el.removeEventListener("dragleave", onDragLeaveNative, true);
-      el.removeEventListener("drop", onDropNative, true);
-    };
-  }, [board]);
 
   // BoardCanvasOps：把 Y.Doc 写操作暴露给节点组件
   const ops = useMemo<BoardCanvasOps>(() => ({
@@ -85,6 +54,71 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     addNode: (node) => board.addNode?.(node),
   }), [board]);
 
+  // 新建便笺/任务卡：拖放落点或点击视口中心（flow 坐标）
+  const addNodeAt = useCallback((type: "sticky-note" | "task-card", flowPos: { x: number; y: number }) => {
+    if (type === "sticky-note") {
+      ops.addNode({ id: crypto.randomUUID(), type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 338, height: 230 }, data: { text: "", badge: "blue" } });
+    } else {
+      ops.addNode({ id: crypto.randomUUID(), type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 270 }, data: { cardId: "", number: 0, name: "新建任务", description: "", readyStatus: "draft", execStatus: "not_started", priority: 0, expanded: false, w: 380, h: 270, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0 } });
+    }
+  }, [ops]);
+
+  // 点击工具栏按钮：节点出现在当前视口中心（方便用户继续调整位置）
+  const addNodeAtViewportCenter = useCallback((type: "sticky-note" | "task-card") => {
+    const pane = document.querySelector(".react-flow__pane");
+    const rect = pane?.getBoundingClientRect();
+    const cx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const cy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+    addNodeAt(type, screenToFlowPosition({ x: cx, y: cy }));
+  }, [addNodeAt, screenToFlowPosition]);
+
+  // 工具栏按钮拖拽：标记工具类型（text/board-tool），画布 drop 时按落点创建
+  const onToolDragStart = useCallback((e: React.DragEvent, tool: string) => {
+    e.dataTransfer.setData("text/board-tool", tool);
+    e.dataTransfer.effectAllowed = "copy";
+  }, []);
+
+  // 会话/工具拖入画布：原生 dragover/drop（capture 阶段）
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onDragOverNative = (e: DragEvent) => {
+      const types = e.dataTransfer?.types ?? [];
+      if (!types.includes("text/session-id") && !types.includes("text/board-tool")) return;
+      if (!e.dataTransfer) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      setDragOver(true);
+    };
+    const onDragLeaveNative = () => setDragOver(false);
+    const onDropNative = (e: DragEvent) => {
+      const types = e.dataTransfer?.types ?? [];
+      if (!types.includes("text/session-id") && !types.includes("text/board-tool")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOver(false);
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const sid = dt.getData("text/session-id");
+      if (sid) {
+        board.addSessionNode(sid, pos.x, pos.y);
+        return;
+      }
+      const tool = dt.getData("text/board-tool");
+      if (tool === "sticky-note") addNodeAt("sticky-note", pos);
+      else if (tool === "task-card") addNodeAt("task-card", pos);
+    };
+    el.addEventListener("dragover", onDragOverNative, true);
+    el.addEventListener("dragleave", onDragLeaveNative, true);
+    el.addEventListener("drop", onDropNative, true);
+    return () => {
+      el.removeEventListener("dragover", onDragOverNative, true);
+      el.removeEventListener("dragleave", onDragLeaveNative, true);
+      el.removeEventListener("drop", onDropNative, true);
+    };
+  }, [board, screenToFlowPosition, addNodeAt]);
+
   // 删除：Delete/Backspace → 确认制（按节点类型）
   const onBeforeDelete = useCallback(async ({ nodes }: { nodes: Array<{ id: string }> }): Promise<boolean> => {
     if (!nodes || nodes.length === 0) return true;
@@ -94,6 +128,22 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     if (full) void board.deleteNodeWithConfirm?.(full);
     return false; // 阻止 RF 默认删除，由我们处理
   }, [board]);
+
+  // 双击空白 → 添加便笺（替代 RF 默认双击缩放）。
+  // RF 12 无 onPaneDoubleClick，用 onPaneClick 手动判连续两次快速点击（只在空白触发，天然排除节点）。
+  const lastPaneClickRef = useRef<{ t: number } | null>(null);
+  const onPaneClick = useCallback((e: React.MouseEvent) => {
+    setMenu(null);
+    const now = Date.now();
+    const last = lastPaneClickRef.current;
+    if (last && now - last.t < 320) {
+      lastPaneClickRef.current = null;
+      const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      addNodeAt("sticky-note", pos);
+      return;
+    }
+    lastPaneClickRef.current = { t: now };
+  }, [screenToFlowPosition, addNodeAt]);
 
   // 右键菜单 handlers
   const onNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
@@ -112,20 +162,10 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     setMenu({ x: e.clientX, y: e.clientY, node: null, edgeId: full?.id ?? null, edgeDerived: Boolean(d?.execLink || d?.taskLink) });
   }, [board.edges]);
 
-  // 工具栏：新建便笺/任务卡/文本（落点在视口中心附近）
-  const addNodeAtViewport = useCallback((type: "sticky-note" | "task-card" | "text") => {
-    const vp = document.querySelector(".react-flow__pane");
-    const rect = vp?.getBoundingClientRect();
-    const cx = rect ? rect.left + rect.width / 2 - 170 : 80;
-    const cy = rect ? rect.top + rect.height / 2 - 80 : 80;
-    if (type === "sticky-note") {
-      ops.addNode({ id: crypto.randomUUID(), type, position: { x: cx, y: cy }, style: { width: 338, height: 230 }, data: { text: "", badge: "blue" } });
-    } else if (type === "task-card") {
-      ops.addNode({ id: crypto.randomUUID(), type, position: { x: cx, y: cy }, style: { width: 380, height: 270 }, data: { cardId: "", number: 0, name: "新建任务", description: "", readyStatus: "draft", execStatus: "not_started", priority: 0, expanded: false, w: 380, h: 270, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0 } });
-    } else {
-      ops.addNode({ id: crypto.randomUUID(), type, position: { x: cx, y: cy }, style: { width: 220, height: 60 }, data: { text: "" } });
-    }
-  }, [ops]);
+  // 工具栏：新建便笺/任务（去掉文本工具）—— 点击=当前视口中心创建，拖拽=拖放进画布落点创建
+  const addNodeAtViewport = useCallback((type: "sticky-note" | "task-card") => {
+    addNodeAtViewportCenter(type);
+  }, [addNodeAtViewportCenter]);
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
@@ -169,7 +209,8 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               onNodeContextMenu={onNodeContextMenu}
               onPaneContextMenu={onPaneContextMenu}
               onEdgeContextMenu={onEdgeContextMenu}
-              onPaneClick={() => setMenu(null)}
+              onPaneClick={onPaneClick}
+              zoomOnDoubleClick={false}
               fitView
               fitViewOptions={{ padding: 0.2 }}
               minZoom={0.1}
@@ -191,17 +232,10 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               />
             </ReactFlow>
             {menu && <BoardContextMenu menu={menu} onClose={() => setMenu(null)} />}
-            {/* 工具栏：新建便笺/任务卡/文本（右下角玻璃浮层） */}
-            <div style={{ position: "absolute", right: 12, bottom: 64, zIndex: 30, display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "var(--board-card-glass)", backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)" }}>
-              <ToolbarBtn title="新建便笺" onClick={() => addNodeAtViewport("sticky-note")}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M8 15h4" /></svg>
-              </ToolbarBtn>
-              <ToolbarBtn title="新建任务卡" onClick={() => addNodeAtViewport("task-card")}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M8 15h4" /></svg>
-              </ToolbarBtn>
-              <ToolbarBtn title="新建文本" onClick={() => addNodeAtViewport("text")}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7V5h16v2" /><path d="M12 5v14" /><path d="M9 19h6" /></svg>
-              </ToolbarBtn>
+            {/* 工具栏：便笺/任务（底部居中玻璃浮层）。点击=当前视口中心创建；拖拽=拖放进画布落点创建 */}
+            <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 16, zIndex: 30, display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "var(--board-card-glass)", backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)" }}>
+              <ToolbarBtn label="便笺" onClick={() => addNodeAtViewport("sticky-note")} onDragStart={(e) => onToolDragStart(e, "sticky-note")} />
+              <ToolbarBtn label="任务" onClick={() => addNodeAtViewport("task-card")} onDragStart={(e) => onToolDragStart(e, "task-card")} />
             </div>
           </BoardCanvasProvider>
         )}
@@ -210,18 +244,20 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   );
 }
 
-function ToolbarBtn({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
+function ToolbarBtn({ label, onClick, onDragStart }: { label: string; onClick: () => void; onDragStart: (e: React.DragEvent) => void }) {
   return (
     <button
       type="button"
-      title={title}
-      aria-label={title}
+      draggable
+      title={label}
+      aria-label={label}
       onClick={onClick}
-      style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, padding: 0, border: "none", borderRadius: 7, background: "transparent", color: "var(--text-muted)", cursor: "pointer", transition: "background 0.12s, color 0.12s" }}
+      onDragStart={onDragStart}
+      style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "6px 14px", border: "none", borderRadius: 7, background: "transparent", color: "var(--text-muted)", fontSize: 12.5, cursor: "grab", userSelect: "none", transition: "background 0.12s, color 0.12s" }}
       onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 12%, transparent)"; e.currentTarget.style.color = "var(--accent)"; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
     >
-      {children}
+      {label}
     </button>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { ReactFlowProvider } from "@xyflow/react";
+import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
 import { useBoardCanvas } from "@/hooks/useBoardCanvas";
@@ -317,17 +317,7 @@ export function SessionCanvas({
             boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
           }}
         >
-          <button
-            type="button"
-            onClick={() => board.addNewSessionCard()}
-            title={t("boards.newSession")}
-            style={{ ...floatingIconBtn, color: "var(--accent)" }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
+          <NewSessionButton onNewSession={(pos) => board.addNewSessionCard(pos)} />
           <button
             type="button"
             disabled
@@ -466,3 +456,32 @@ const floatingIconBtn: React.CSSProperties = {
   borderRadius: 7,
   transition: "background 0.12s, color 0.12s",
 };
+
+/**
+ * 新建会话按钮：新卡出现在当前视口中心（方便用户继续调整位置）。
+ * 必须在 ReactFlowProvider 内渲染（useReactFlow 取 viewport 换算屏幕中心→flow 坐标）。
+ */
+function NewSessionButton({ onNewSession }: { onNewSession: (pos: { x: number; y: number }) => void }) {
+  const { t } = useI18n();
+  const { screenToFlowPosition } = useReactFlow();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        const pane = document.querySelector(".react-flow__pane");
+        const rect = pane?.getBoundingClientRect();
+        const cx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+        const cy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+        onNewSession(screenToFlowPosition({ x: cx, y: cy }));
+      }}
+      title={t("boards.newSession")}
+      aria-label={t("boards.newSession")}
+      style={{ ...floatingIconBtn, color: "var(--accent)" }}
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <line x1="12" y1="5" x2="12" y2="19" />
+        <line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
+    </button>
+  );
+}
