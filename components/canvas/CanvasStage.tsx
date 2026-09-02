@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReactFlow, Background, Controls, type NodeTypes, type OnConnect, BackgroundVariant, type Node } from "@xyflow/react";
+import { ReactFlow, Background, Controls, MiniMap, type NodeTypes, type OnConnect, BackgroundVariant, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
 import { useI18n } from "@/hooks/useI18n";
@@ -73,7 +73,13 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
       board.updateNode?.(id, patch);
     },
     deleteNode: (id) => {
-      void board.deleteNodeWithConfirm?.({ id, type: "", data: {}, position: { x: 0, y: 0 } } as never);
+      // 传完整 node 给确认制（识别类型决定删会话/任务卡/便笺），不能只传 id
+      const full = board.nodes.find((n) => n.id === id);
+      if (full) void board.deleteNodeWithConfirm?.(full);
+    },
+    deleteEdge: (id) => {
+      // 复用 onEdgesChange 的 remove（派生边由后端 reconcile 保护，此处自动跳过）
+      board.onEdgesChange?.([{ type: "remove", id }]);
     },
     addEdge: (edge) => board.addEdge?.(edge),
     addNode: (node) => board.addNode?.(node),
@@ -102,7 +108,8 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     e.preventDefault();
     // 找到 edge 的 data 判断派生边
     const full = board.edges.find((ed) => ed.id === edge.id);
-    setMenu({ x: e.clientX, y: e.clientY, node: null, edgeId: full?.id ?? null });
+    const d = full?.data as { execLink?: boolean; taskLink?: string } | undefined;
+    setMenu({ x: e.clientX, y: e.clientY, node: null, edgeId: full?.id ?? null, edgeDerived: Boolean(d?.execLink || d?.taskLink) });
   }, [board.edges]);
 
   // 工具栏：新建便笺/任务卡/文本（落点在视口中心附近）
@@ -174,6 +181,14 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
             >
               <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="color-mix(in srgb, var(--border) 45%, transparent)" />
               <Controls position="bottom-right" showInteractive={false} />
+              <MiniMap
+                pannable
+                zoomable
+                style={{ background: "var(--board-scrim-bg)" }}
+                maskColor="color-mix(in srgb, var(--board-scrim-bg) 70%, transparent)"
+                nodeColor={() => "color-mix(in srgb, var(--accent) 45%, transparent)"}
+                nodeStrokeColor={() => "var(--accent)"}
+              />
             </ReactFlow>
             {menu && <BoardContextMenu menu={menu} onClose={() => setMenu(null)} />}
             {/* 工具栏：新建便笺/任务卡/文本（右下角玻璃浮层） */}

@@ -6,7 +6,7 @@
  * - 派生边右键：只读提示（exec/依赖线由后端 reconcile 权威维护，不可删）
  * - 空白右键：新建便笺 / 新建任务卡 / 新建文本
  */
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 import type { Node } from "@xyflow/react";
 import { useI18n } from "@/hooks/useI18n";
 import { useBoardCanvasOps } from "@/components/board/BoardCanvasContext";
@@ -16,23 +16,27 @@ export interface BoardMenuState {
   y: number;
   node: Node | null;
   edgeId: string | null;
+  /** 边是否为派生边（exec/依赖线，由后端 reconcile 权威维护，不可删） */
+  edgeDerived?: boolean;
 }
 
 export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onClose: () => void }) {
   const { t } = useI18n();
   const ops = useBoardCanvasOps();
-  const { node, edgeId, x, y } = menu;
+  const { node, edgeId, x, y, edgeDerived } = menu;
 
-  // 派生边判断：edgeId 对应的 edge 是否 exec/依赖
-  const isDerivedEdge = useMemo(() => {
-    if (!edgeId) return false;
-    return true; // 简化：边右键都按派生处理（后续可细化）
-  }, [edgeId]);
+  // 派生边判断：edgeId 对应的 edge 是否 exec/依赖（由 CanvasStage 计算传入）
+  const isDerivedEdge = Boolean(edgeId && edgeDerived);
 
   const handleDeleteNode = useCallback(() => {
     if (node) ops.deleteNode(node.id);
     onClose();
   }, [node, ops, onClose]);
+
+  const handleDeleteEdge = useCallback(() => {
+    if (edgeId && !isDerivedEdge) ops.deleteEdge(edgeId);
+    onClose();
+  }, [edgeId, isDerivedEdge, ops, onClose]);
 
   const addNote = useCallback(() => {
     ops.addNode({
@@ -97,9 +101,12 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
         userSelect: "none",
       }}
     >
-      {edgeId && (
-        <MenuItem disabled label={isDerivedEdge ? "派生连线（自动生成，不可删除）" : "连线"} />
-      )}
+      {edgeId &&
+        (isDerivedEdge ? (
+          <MenuItem disabled label="派生连线（自动生成，不可删除）" />
+        ) : (
+          <MenuItem danger label="删除连线" onClick={handleDeleteEdge} />
+        ))}
       {node && (
         <MenuItem
           label={isSession ? "删除会话" : isTask ? "删除任务卡" : "删除便笺"}
