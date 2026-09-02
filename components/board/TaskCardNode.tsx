@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NodeResizer, Handle, Position, type NodeProps } from "@xyflow/react";
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import { Markdown } from "@tiptap/markdown";
+import { Placeholder } from "@tiptap/extension-placeholder";
 import type { ExecStatus, ReadyStatus, TaskCard } from "@/lib/task-card-store";
 import { linkTargetIds, useTaskCard } from "@/hooks/useTaskCards";
 import { ThemedSelect } from "@/components/canvas/ThemedSelect";
@@ -315,12 +319,10 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       />
       {nameError && <div style={{ color: "#f87171", fontSize: 11, marginTop: 3 }}>{nameError}</div>}
       <label style={LABEL_STYLE}>需求说明</label>
-      <textarea
-        style={{ ...FIELD_STYLE, flex: 1, minHeight: 70, resize: "none", fontFamily: "var(--font-mono)", fontSize: 11 }}
+      <MarkdownField
         value={draft.description}
-        onChange={(e) => set("description", e.target.value)}
+        onChange={(md) => set("description", md)}
         placeholder="任务描述"
-        spellCheck={false}
       />
       <CollapsibleSection title="高级" open={advancedOpen} onToggle={() => setAdvancedOpen((v) => !v)}>
         <label style={LABEL_STYLE}>工作目录</label>
@@ -513,6 +515,72 @@ function DuePicker({ due, onChange }: { due: number | null; onChange: (ms: numbe
       <div style={{ flex: 1, minWidth: 0 }}>
         <ThemedSelect value={String(day)} options={days.map((v) => ({ value: v, label: v }))} onChange={(v) => assemble(y, m, Number(v))} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * 任务卡表单的 markdown 字段（需求说明）：TipTap WYSIWYG，所见即所得。
+ *
+ * 与便笺 NoteEditor 的差异：这是**受控桥**——父表单用 value/onChange 驱动，
+ * 编辑器自身非受控（ProseMirror doc 为内部真相），只在外源 value 变化时同步；
+ * 且常驻无独立“编辑态/预览态”（任务卡表单一直可编辑）。
+ *
+ * 防循环：onUpdate 不回设 content（只 onChange 上抛）；外部 value 变化时
+ * 仅当与编辑器当前 markdown 不同才 setContent，避免自身回写触发再同步。
+ */
+function MarkdownField({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (md: string) => void;
+  placeholder?: string;
+}) {
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      Markdown,
+      Placeholder.configure({ placeholder }),
+    ],
+    content: value || "",
+    contentType: "markdown",
+    editorProps: {
+      attributes: {
+        class: "markdown-body task-card-md-field",
+        spellcheck: "false",
+      },
+    },
+    onUpdate: ({ editor }) => {
+      onChange(editor.getMarkdown());
+    },
+  });
+
+  // 外源 value 变化（createCard/reload 重建 draft、重置表单）→ 同步进编辑器；
+  // 与当前内容相同则跳过（防输入时自身回写触发重设导致光标跳动）
+  useEffect(() => {
+    if (!editor) return;
+    const current = editor.getMarkdown();
+    if (current !== value) {
+      editor.commands.setContent(value || "", { contentType: "markdown" });
+    }
+  }, [editor, value]);
+
+  return (
+    <div
+      className="nodrag nowheel task-card-md-wrap"
+      style={{
+        ...FIELD_STYLE,
+        flex: 1,
+        minHeight: 70,
+        overflowY: "auto",
+        cursor: "text",
+        padding: 0,
+        userSelect: "text",
+      }}
+    >
+      <EditorContent editor={editor} />
     </div>
   );
 }

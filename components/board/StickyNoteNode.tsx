@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NodeResizer, Handle, Position, type NodeProps } from "@xyflow/react";
 import ReactMarkdown from "react-markdown";
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import { Markdown } from "@tiptap/markdown";
+// ProseMirror 基样式（white-space/ligatures 等），与 @xyflow 同方式按需引入
+import "prosemirror-view/style/prosemirror.css";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
 import { CardKindBadge } from "@/components/canvas/CardKindBadge";
 import { useCardGlass } from "@/hooks/useCardGlass";
@@ -12,7 +17,7 @@ import { memoBoardNode } from "./memoNode";
 /**
  * 自研 markdown 便笺（RF 节点版，替代 tldraw sticky-note shape）。
  * 观感 = AI 消息气泡同款毛玻璃（复用 --bubble-* / --assistant-card-glass token）。
- * - 双击进入编辑：textarea 写 markdown 源码
+ * - 双击进入编辑：TipTap WYSIWYG（ProseMirror 内核），无工具栏，所见即所得
  * - 非编辑态：react-markdown 渲染，左上角对齐
  * - 缩放由 RF 节点（NodeResizer）控制
  * - 内部滚动用 nowheel class（RF 原生隔离，不缩放画布）
@@ -47,8 +52,8 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   const { updateNode, deleteNode } = useBoardCanvasOps();
   const { highlightId } = useBoardSearch();
   const isHighlighted = highlightId === id;
-  const w = width ?? 338;
-  const h = height ?? 230;
+  const w = width ?? 380;
+  const h = height ?? 280;
   const text = data.text ?? "";
   const badge = data.badge ?? "blue";
 
@@ -57,30 +62,36 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
 
   // 本地编辑态（RF 无 tldraw editing 概念）
   const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState(text);
   const [draftBadge, setDraftBadge] = useState(badge);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  // 编辑中的最新 markdown（同步镜像）：TipTap onUpdate 实时写这里，save/finish/blur 读它——
+  // 不依赖 React state（异步提交会丢 blur/Ctrl+Enter 瞬间的最后输入）
+  const latestMdRef = useRef(text);
   // 旧便笺无 createdAt 时兜底（惰性初始化，不 render 期 Date.now）
   const [createdAt] = useState(() => data.createdAt ?? Date.now());
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 进入编辑同步草稿；外部 text 变化时重置
+  // 进入编辑重置镜像 + 徽记草稿（TipTap 编辑器初始化由子组件 NoteEditor 在 mount 时完成）
   useEffect(() => {
     if (isEditing) {
-      setDraft(text);
       setDraftBadge(badge);
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      latestMdRef.current = text;
     }
   }, [isEditing, text, badge]);
 
+  // onDraftChange：实时写 markdown 镜像
+  const handleDraftChange = useCallback((md: string) => {
+    latestMdRef.current = md;
+  }, []);
+
   const save = useCallback(() => {
-    if (draft !== text || draftBadge !== badge) {
-      updateNode(id, { data: { ...data, text: draft, badge: draftBadge } });
+    const md = latestMdRef.current;
+    if (md !== text || draftBadge !== badge) {
+      updateNode(id, { data: { ...data, text: md, badge: draftBadge } });
     }
-  }, [draft, draftBadge, text, badge, updateNode, id, data]);
+  }, [draftBadge, text, badge, updateNode, id, data]);
 
   const finish = useCallback(() => {
     save();
@@ -88,26 +99,18 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   }, [save]);
 
   const cancel = useCallback(() => {
-    setDraft(text);
     setDraftBadge(badge);
+    latestMdRef.current = text;
     setIsEditing(false);
   }, [text, badge]);
 
-  // 失焦自动保存：textarea 失去焦点且焦点不在本卡内 → 保存并退出编辑。
+  // 失焦自动保存：编辑器失去焦点且焦点移出卡片 → 保存并退出编辑。
   // （点画布空白/点别的节点/切走应用 → 等价 tldraw 点别处退出编辑自动保存）
-  const handleTextareaBlur = useCallback((e: React.FocusEvent<HTMLTextAreaElement>) => {
-    const next = e.relatedTarget;
-    const root = rootRef.current;
-    // 焦点仍在卡内（点徽记/取消/完成等按钮，它们可聚焦且 onMouseDown 已 preventDefault）→ 保持编辑
-    if (root && next instanceof Node && root.contains(next)) return;
-    // 焦点移出卡片：自动保存退出
+  // 点卡内按钮（徽记/取消/完成）焦点仍在卡内，NoteEditor 的 onBlur 内判断后不触发。
+  const handleBlurExit = useCallback(() => {
     save();
     setIsEditing(false);
   }, [save]);
-
-  // 编辑态下点击取消/完成按钮时，阻止 mousedown 把焦点从 textarea 移走，
-  // 避免误触发 blur 自动保存；按钮 onClick 仍正常触发取消/完成。
-  const keepTextareaFocus = useCallback((e: React.MouseEvent) => { e.preventDefault(); }, []);
 
   const copyContent = useCallback(
     (e: React.MouseEvent) => {
@@ -207,8 +210,8 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
               ))}
             </div>
             <div style={{ flex: 1 }} />
-            <button type="button" className="nodrag" onMouseDown={keepTextareaFocus} onClick={cancel} style={footerBtnStyle} title="放弃变更 (Esc)">取消</button>
-            <button type="button" className="nodrag" onMouseDown={keepTextareaFocus} onClick={finish} style={footerBtnStyle} title="完成 (Ctrl+Enter)">完成</button>
+            <button type="button" className="nodrag" onClick={cancel} style={footerBtnStyle} title="放弃变更 (Esc)">取消</button>
+            <button type="button" className="nodrag" onClick={finish} style={footerBtnStyle} title="完成 (Ctrl+Enter)">完成</button>
           </>
         ) : (
           <>
@@ -232,20 +235,14 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
       </div>
 
       {isEditing ? (
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(); }
-            else if (e.key === "Escape") { e.preventDefault(); cancel(); }
-          }}
-          spellCheck={false}
-          onBlur={handleTextareaBlur}
-          placeholder="Markdown 便笺…"
-          className="sticky-note-input nodrag nowheel"
-          style={{ flex: 1, minHeight: 0, resize: "none", border: "none", outline: "none", background: "transparent", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 14, lineHeight: 1.7, padding: "var(--bubble-pad-y, 8px) var(--bubble-pad-x, 12px)" }}
+        <NoteEditor
+          key={`${id}-edit`}
+          initialText={text}
+          onDraftChange={handleDraftChange}
+          onExit={finish}
+          onCancel={cancel}
+          onBlurExit={handleBlurExit}
+          rootRef={rootRef}
         />
       ) : (
         <div
@@ -287,6 +284,110 @@ function formatNoteTime(ts: number): string {
   const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
   if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+/**
+ * 便笺编辑态的 TipTap WYSIWYG 编辑器。
+ * - markdown ↔ ProseMirror 双向转换：初值用 initialText 解析，编辑中经 getMarkdown() 同步回 draft
+ * - 无工具栏：手打 md 语法即时渲染成块（StarterKit 范围，不含表格/任务列表）
+ * - 键盘：Ctrl/Cmd+Enter 完成，Esc 取消（均 stopPropagation 防 RF 拖拽/画布缩放）
+ * - 失焦：焦点移到卡外 → onBlurExit（自动保存）；焦点仍在卡内（点徽记/取消/完成按钮）→ 保持编辑
+ * - 随 isEditing 条件卸载，useEditor 自动 destroy
+ */
+function NoteEditor({
+  initialText,
+  onDraftChange,
+  onExit,
+  onCancel,
+  onBlurExit,
+  rootRef,
+}: {
+  initialText: string;
+  onDraftChange: (text: string) => void;
+  onExit: () => void;
+  onCancel: () => void;
+  onBlurExit: () => void;
+  rootRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  // 取消中标记：Esc/取消按钮触发的取消不应被随后的 blur 自动保存抢先
+  const cancellingRef = useRef(false);
+  const editor = useEditor({
+    extensions: [StarterKit, Markdown],
+    content: initialText || "",
+    contentType: "markdown",
+    editorProps: {
+      attributes: {
+        // 等宽对齐 markdown-body（预览态同款字体），行高 1.7 保持编辑/预览一致
+        class: "markdown-body sticky-note-editor",
+        spellcheck: "false",
+      },
+    },
+    onUpdate: ({ editor }) => {
+      if (cancellingRef.current) return; // 取消中忽略输入同步
+      onDraftChange(editor.getMarkdown());
+    },
+    onBlur: ({ editor, event }) => {
+      // 取消中（Esc/点取消按钮）：blur 不再触发保存退出
+      if (cancellingRef.current) return;
+      // 先把最终内容同步回父（blur 时 React setState 可能尚未提交，直接读 editor 保证不丢尾输入）
+      onDraftChange(editor.getMarkdown());
+      // 点卡内可聚焦元素（徽记/取消/完成按钮）：焦点移到卡内，保持编辑
+      const next = (event as FocusEvent).relatedTarget;
+      const root = rootRef.current;
+      if (root && next instanceof Node && root.contains(next)) return;
+      onBlurExit();
+    },
+  });
+
+  // 进入编辑立即聚焦（textarea 时代 focus 在首行；contenteditable focus 置于文档开头）
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      editor?.commands.focus("start");
+    });
+  }, [editor]);
+
+  // 取消：标记后在下一 tick 清标记（父组件卸载本组件前 blur 可能先到），并回调父取消
+  const handleCancel = useCallback(() => {
+    cancellingRef.current = true;
+    // 让 blur（若有）先过去，再触发取消；父取消会卸载本组件，ref 标记随之销毁
+    requestAnimationFrame(() => {
+      onCancel();
+    });
+  }, [onCancel]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      e.stopPropagation();
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        // 先同步当前内容（keydown 时 React setState 可能未提交），再让父完成保存
+        if (editor) onDraftChange(editor.getMarkdown());
+        onExit();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        handleCancel();
+      }
+    },
+    [editor, onDraftChange, onExit, handleCancel],
+  );
+
+  return (
+    <div
+      className="nodrag nowheel sticky-note-edit-wrap"
+      data-testid="sticky-note-editor"
+      onKeyDown={handleKeyDown}
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+        // 卡根 userSelect:none 会抑制编辑选中；编辑态显式恢复文本选择
+        userSelect: "text",
+        padding: "var(--bubble-pad-y, 8px) var(--bubble-pad-x, 12px)",
+      }}
+    >
+      <EditorContent editor={editor} />
+    </div>
+  );
 }
 
 /** memo 化导出：忽略拖拽/位置类 props 每帧变化，避免拖拽时整卡重渲染 */

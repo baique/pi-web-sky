@@ -775,6 +775,25 @@ pre, code {
   font-size: 0.92em;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent);
 }
+/* 代码块容器（预览 react-markdown 与编辑态 TipTap ProseMirror 共用 .markdown-body）：
+   无此样式时 pre 裸文本不可见——编辑态输入 ``` 回车后也看不出块已开启 */
+.markdown-body pre {
+  background: var(--bubble-code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--bubble-inner-radius);
+  padding: 8px 12px;
+  margin: 8px 0;
+  overflow-x: auto;
+  line-height: 1.55;
+}
+.markdown-body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.92em;
+  font-family: var(--font-mono);
+  white-space: pre;
+}
 .markdown-body .contains-task-list {
   padding-left: 0;
   list-style: none;
@@ -2302,12 +2321,31 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
 }
 /* 网格保持淡显（可选），但背景绝不能有实色 */
 
-/* === 便笺占位提示（StickyNoteShape）===
-   占位文字遵循主题：浅色偏白（接近浅底）、深色偏深灰（接近深底）——
-   "深白浅黑"，比 --text-dim 更淡，明显区分于正文与占位。 */
-.sticky-note-input::placeholder {
-  color: color-mix(in srgb, var(--text) 18%, transparent);
+/* === 便笺 WYSIWYG 编辑态（TipTap）===
+   编辑器内部排版复用 .markdown-body（所见即所得）；这里只处理编辑器容器专属：
+   - 聚焦不加描边（无工具栏场景，卡内编辑态保持干净）
+   - ProseMirror 内容区最小可点高度（空便笺进入编辑也能点中） */
+.sticky-note-edit-wrap .ProseMirror {
+  outline: none;
+  min-height: 60px;
+  cursor: text;
 }
-html.dark .sticky-note-input::placeholder {
-  color: color-mix(in srgb, var(--text) 28%, transparent);
+/* 编辑态代码块/引用等块级与预览一致（markdown-body 已定义，ProseMirror 需要 caret 色可见） */
+.sticky-note-edit-wrap .ProseMirror { caret-color: var(--text); }
+
+/* === 任务卡需求说明 markdown 字段（TipTap）===
+   容器对齐 FIELD_STYLE（透明底+1px边框）；内容超高时容器内滚动（不溢出边框）；
+   空态占位经 Placeholder decoration 的 data-placeholder + is-editor-empty 渲染 */
+.task-card-md-wrap .ProseMirror {
+  outline: none;
+  padding: 4px 8px;
+  cursor: text;
+  caret-color: var(--text);
+}
+.task-card-md-wrap .ProseMirror.is-editor-empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-dim);
+  pointer-events: none;
+  float: left;
+  height: 0;
 }
