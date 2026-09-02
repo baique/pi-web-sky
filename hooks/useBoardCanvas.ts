@@ -424,11 +424,12 @@ export function useBoardCanvas({
     const h = NEW_SESSION_CARD_H;
     const sessionId = crypto.randomUUID();
     const id = crypto.randomUUID();
-    // 落点：传入 flow 坐标（视口中心）则用传入值；否则画布原点附近 + 级联偏移避免重叠
-    const baseX = flowPos?.x ?? 60;
-    const baseY = flowPos?.y ?? 60;
-    const x = baseX + (nodesMap.size % 3) * 24;
-    const y = baseY + (nodesMap.size % 3) * 24;
+    // 落点：传入的 flowPos 视为卡片【中心】坐标（NewSessionButton 传视口中心）→
+    // position 是左上角，需减去卡片宽高的一半让卡片居中。未传则画布原点附近 + 级联偏移。
+    const cx = flowPos?.x ?? 60;
+    const cy = flowPos?.y ?? 60;
+    const x = cx - w / 2 + (nodesMap.size % 3) * 24;
+    const y = cy - h / 2 + (nodesMap.size % 3) * 24;
     nodesMap.set(id, {
       id,
       type: "session-card",
