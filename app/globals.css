@@ -391,9 +391,18 @@ body {
 /* 看板节点选中态 resize：外框视觉由卡根 box-shadow 呈现（带 5px 间距、不压缩内容区）。
    NodeResizer 只提供拖拽命中：
    - line：平时透明（不干扰外框），命中带 padding 6px 覆盖外框区域，hover 淡 accent 提示
-   - handle：隐藏（无角柄，四边拉伸） */
+   - handle：四角透明小圆点（保留对角缩放交互，视觉不突兀），hover 才显示 accent */
 [data-glass-scope="board"] .react-flow__resize-control.handle {
-  display: none !important;
+  width: 11px !important;
+  height: 11px !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 50% !important;
+  transition: background-color 0.12s, border-color 0.12s;
+}
+[data-glass-scope="board"] .react-flow__resize-control.handle:hover {
+  background-color: color-mix(in srgb, var(--accent) 45%, transparent) !important;
+  border-color: var(--bg-panel) !important;
 }
 [data-glass-scope="board"] .react-flow__resize-control.line {
   border-width: 0 !important;

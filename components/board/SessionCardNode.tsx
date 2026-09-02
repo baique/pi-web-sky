@@ -148,7 +148,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
         background: "transparent",
         // 选中态：外圈描边用 box-shadow（带 5px 间距、不占布局→不压缩内容区）。边框保持固定 1px。
         boxShadow: selected
-          ? "0 0 0 5px transparent, 0 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent), 0 2px 12px -6px rgba(0,0,0,0.18)"
+          ? "0 0 0 5px transparent, 0 0 16px 5px color-mix(in srgb, var(--accent) 28%, transparent), 0 2px 12px -6px rgba(0,0,0,0.18)"
           : isHighlighted ? HIGHLIGHT_SHADOW : "0 2px 12px -6px rgba(0,0,0,0.18)",
         animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
         opacity: stale ? 0.55 : 1,

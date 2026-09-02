@@ -135,7 +135,7 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     boxShadow: isHighlighted
       ? HIGHLIGHT_SHADOW
       : selected
-        ? "0 2px 10px -6px rgba(0,0,0,0.2), 0 0 0 5px transparent, 0 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent)"
+        ? "0 2px 10px -6px rgba(0,0,0,0.2), 0 0 0 5px transparent, 0 0 16px 5px color-mix(in srgb, var(--accent) 28%, transparent)"
         : "0 2px 10px -6px rgba(0,0,0,0.2)",
     animation: isHighlighted ? "board-search-glow 1.8s ease-out forwards" : undefined,
     color: "var(--text)",
