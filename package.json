@@ -39,21 +39,19 @@
     "start:lan": "NODE_ENV=production HOSTNAME=0.0.0.0 node server.mjs",
     "lint": "eslint .",
     "test": "node --experimental-strip-types --test \"app/**/*.test.mjs\" \"components/**/*.test.mjs\" \"hooks/**/*.test.mjs\" \"lib/**/*.test.mjs\" \"public/**/*.test.mjs\"",
-    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",
-    "sync": "node scripts/sync-server.mjs",
-    "sync:dev": "node scripts/sync-server.mjs",
-    "migrate-boards": "node scripts/migrate-boards.mjs"
+    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.84.3",
     "@earendil-works/pi-ai": "0.84.3",
     "@earendil-works/pi-coding-agent": "0.84.3",
     "@earendil-works/pi-tui": "0.84.3",
+    "@hocuspocus/provider": "^4.6.0",
+    "@hocuspocus/server": "^4.6.0",
     "@lydell/node-pty": "^1.2.0-beta.15",
-    "@tldraw/sync": "^5.3.2",
-    "@tldraw/sync-core": "^5.3.2",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "@xyflow/react": "^12.11.6",
     "js-yaml": "^5.2.3",
     "next": "16.3.1",
     "proper-lockfile": "4.1.2",
@@ -61,8 +59,8 @@
     "react-dom": "^19.2.4",
     "remark-frontmatter": "^5.0.0",
     "thinking-orbs": "^0.3.1",
-    "tldraw": "^5.3.2",
-    "undici": "8.10.0"
+    "undici": "8.10.0",
+    "yjs": "^13.6.32"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",

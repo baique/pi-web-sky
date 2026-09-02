@@ -1,56 +1,50 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Mat, type Editor, type TLShapeId } from "tldraw";
+import { useReactFlow, type Node, type XYPosition } from "@xyflow/react";
 
 /**
  * 卡片玻璃（局部贴图版）：每张卡片内嵌一个「视口对齐的模糊壁纸层」。
  *
- * 为什么不用 background-position / background-attachment: fixed：
- * tldraw 画布有 camera transform（.tl-shape 页坐标 transform + 外层 .tl-shapes
- * camera transform），Chrome 在这类容器里会忽略 background-position、把 fixed
- * 背景退化渲染成整张拉伸（已实测）。所以改为 DOM 层 + 手动 transform 定位：
+ * React Flow 版：节点在 viewport（translate+scale）内，与 tldraw 同构。
+ * - node 的 flow 坐标 → 屏幕位置：flowToScreenPosition(node.position)
+ * - 卡片内部层（在 node 内，flow 坐标）要图对齐屏幕原点：
+ *   dx = -screenPos / zoom（node 内 flow 偏移经 zoom 放大 = 屏幕偏移）
+ * - 层尺寸 = 视口 / zoom（经 zoom 放大后 = 视口）
  *
- * 数学推导（关键，勿改）：
- * - 卡片屏幕位置 pos = editor.pageToScreen(shape.x, shape.y)（含 camera）
- * - 卡片内部层在 .tl-shape（页坐标 transform）内，自身页偏移 dx 经 camera
- *   显示为 dx × zoom 的屏幕偏移
- * - 要让层的图原点对齐屏幕原点：dx × zoom = -pos → dx = -pos / zoom
- * - 图要显示成视口大小：页尺寸 = 视口 / zoom（经 zoom 放大后 = 视口）
- *
- * 同步时机：tldraw change 事件（拖拽/平移/缩放）→ rAF 合并每帧一次。
- * 用 pageToScreen（tldraw 数据）算，不读 DOM rect（避免强制 reflow）。
+ * 同步时机：RF 的 onMove / 节点位置变化 → rAF 合并每帧一次。
+ * 用 useReactFlow 的 flowToScreenPosition 算，不读 DOM rect（避免强制 reflow）。
  */
-export function useCardGlass(editor: Editor | null | undefined, shapeId: TLShapeId, bgToken: string) {
-  const layerRef = useRef<HTMLDivElement | null>(null);
 
-  // 同步层到视口对齐（核心数学，见文件头注释）
+/**
+ * 生成内嵌模糊壁纸层。返回回调 ref（挂到卡片内容容器）。
+ * bgToken：卡片玻璃底色（--board-card-glass / --assistant-card-glass 等）。
+ */
+export function useCardGlass(bgToken: string, deps: unknown[] = []) {
+  const { flowToScreenPosition, getZoom } = useReactFlow();
+  const layerRef = useRef<HTMLDivElement | null>(null);
+  const nodePosRef = useRef<XYPosition>({ x: 0, y: 0 });
+  // 节点位置由宿主组件通过 setNodePosition 传入（避免 useReactFlow 实例在节点内循环）
+  const nodeRef = useRef<Node | null>(null);
+
   const syncLayer = () => {
     const layer = layerRef.current;
     if (!layer) return;
-    const shape = editor?.getShape(shapeId);
-    if (!shape || !editor) return;
-    const zoom = editor.getZoomLevel();
-    // 用页变换（pageTransform）取 shape 的真实页位置：组合后 shape.x/y 是
-    // 相对 group 的坐标，但 .tl-shape 的 transform 是含 group 偏移的页变换，
-    // 两者基准不同 → 层会错位（组合后透明的根因）。
-    const pageTransform = editor.getShapePageTransform(shapeId);
-    if (!pageTransform) return;
-    // Mat.Point 取变换的平移分量（shape 真实页位置，含 group 偏移）
-    const pagePos = Mat.Point(pageTransform);
-    const pos = editor.pageToScreen({ x: pagePos.x, y: pagePos.y });
-    // 层图是视口快照（useGlassWallpaper 按视口绘制），层图原点必须对齐
-    // 屏幕原点 (0,0)：层 transform = -pos/zoom。pos 用 pageTransform（含
-    // group 偏移）→ 组合后不透明错位；组合前 pagePos=shape.x 与原行为一致。
+    const zoom = getZoom();
+    const pos = flowToScreenPosition(nodePosRef.current);
     layer.style.width = `${window.innerWidth / zoom}px`;
     layer.style.height = `${window.innerHeight / zoom}px`;
     layer.style.transform = `translate(${-pos.x / zoom}px, ${-pos.y / zoom}px)`;
   };
 
-  // 回调 ref：挂到卡片内容容器，创建模糊壁纸层。
-  // 不用一次性标记（dataset.glassReady）守卫：tldraw 组合/取消组合会重建
-  // shape 容器 DOM——节点可能被复用但 prepend 的层已被清掉，标记守卫会
-  // 跳过重建 → 卡片透明。改为检查层是否真的还在 DOM 里。
+  /** 宿主在节点 render 时传入当前节点（含 position），更新引用并同步 */
+  const setNode = (node: Node | null) => {
+    nodeRef.current = node;
+    if (node) nodePosRef.current = node.position;
+    syncLayer();
+  };
+
+  /** 回调 ref：挂到卡片内容容器，创建/复用模糊壁纸层 */
   const setContainer = (node: HTMLDivElement | null) => {
     if (!node) return;
     const existing = node.querySelector<HTMLDivElement>("[data-glass-layer]");
@@ -67,32 +61,40 @@ export function useCardGlass(editor: Editor | null | undefined, shapeId: TLShape
       `will-change:transform;` +
       `background-image:linear-gradient(${bgToken}, ${bgToken}), var(--glass-bg-image, none);` +
       `background-repeat:no-repeat,no-repeat;` +
-      // 图按层尺寸铺满（层 = 视口/zoom），否则降采样图 auto 只显示 1/4
       `background-size:100% 100%,100% 100%;`;
     node.prepend(layer);
     layerRef.current = layer;
-    // 立即同步：层重建后不等下一次 change（组合可能不触发后续 change）
     syncLayer();
   };
 
+  // 滚动/移动时同步（画布 pan/zoom）
   useEffect(() => {
-    if (!editor) return;
     let raf = 0;
-    const schedule = () => {
+    const onMove = () => {
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
         syncLayer();
       });
     };
-    const onChange = () => schedule();
-    schedule();
-    editor.on("change", onChange);
+    // 监听全局移动：画布 pan/zoom 变化时同步所有卡片玻璃层
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    // 画布 zoom/pan 由 RF 控制，这里用 interval 轻量兜底 + rAF
+    const iv = setInterval(() => {
+      // 只在新位置变化时同步（性能）
+      const layer = layerRef.current;
+      if (layer) syncLayer();
+    }, 250);
+    onMove();
     return () => {
-      editor.off("change", onChange);
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+      clearInterval(iv);
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [editor, shapeId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
 
-  return setContainer;
+  return { setContainer, setNode };
 }

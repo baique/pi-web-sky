@@ -6,4 +6,7 @@ export async function register(): Promise<void> {
 
   const { startTaskScheduler } = await import("@/lib/task-scheduler");
   startTaskScheduler();
+
+  const { startBoardReconcileScheduler } = await import("@/lib/board-reconcile-scheduler");
+  startBoardReconcileScheduler();
 }

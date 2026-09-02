@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { deleteTask, getTask, listTaskSessionIds, updateTask } from "@/lib/task-store";
 import { deleteSessionTrees } from "@/lib/session-delete";
+import { reconcileBoard } from "@/lib/board-reconcile";
 
 // GET /api/tasks/[id] → { task: { id, name, ... } | null }
 // 会话输入框 placeholder / 详情面板用：按任务 id 取单个任务（含名称与任务下会话）。
@@ -68,6 +69,10 @@ export async function PATCH(
     if (!task) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
+    // 任务会话归属变化 → 任务看板派生 reconcile（补/清会话卡 + 孤儿删，后端权威）
+    void reconcileBoard(id).catch((e) =>
+      console.warn(`[tasks] reconcile ${id} 异常:`, e?.message ?? e),
+    );
     return NextResponse.json({ task });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

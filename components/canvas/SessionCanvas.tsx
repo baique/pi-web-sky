@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { ReactFlowProvider } from "@xyflow/react";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
 import { useBoardCanvas } from "@/hooks/useBoardCanvas";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
 import { BoardSearchProvider } from "./BoardSearchContext";
 import { GlassScopeProvider } from "./GlassScopeContext";
-import { BoardIdContext } from "./TaskCardShape";
+import { BoardIdContext } from "@/components/board/BoardIdContext";
 import { confirm } from "./ConfirmDialog";
 import { BoardSearch } from "./BoardSearch";
 
@@ -156,10 +157,11 @@ export function SessionCanvas({
       }}
     >
       {/* 搜索高亮 context：shape 组件（会话卡/便笺）读它渲染 accent 描边。
-          必须包住 CanvasStage（tldraw），让自定义 shape 能读到 context。 */}
+          必须包住 CanvasStage（RF），让自定义节点能读到 context。 */}
       <GlassScopeProvider value="board">
       <BoardIdContext.Provider value={{ boardId: board.board?.id ?? null, defaultCwd: newSessionCwd ?? null }}>
       <BoardSearchProvider>
+      <ReactFlowProvider>
       {/* 看板名称：左上角常驻（玻璃胶囊）。loading 期间不渲染。 */}
       {!board.loading && board.board?.name && (
         <div
@@ -285,7 +287,7 @@ export function SessionCanvas({
             zIndex: 40,
           }}
         >
-          <BoardSearch editor={board.editor} inputRef={searchBoxRef} />
+          <BoardSearch inputRef={searchBoxRef} nodes={board.nodes as never} />
         </div>
       )}
       {/* 顶部悬浮按钮组：清理失效 + 磨砂调节 */}
@@ -442,6 +444,7 @@ export function SessionCanvas({
         board={board}
         isDark={isDark}
       />
+      </ReactFlowProvider>
       </BoardSearchProvider>
       </BoardIdContext.Provider>
       </GlassScopeProvider>

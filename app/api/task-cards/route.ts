@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createCard, deleteCard, getCard, listCards, listLinks, replaceLinks } from "@/lib/task-card-store";
 import { getBoard } from "@/lib/board-store";
+import { reconcileBoard } from "@/lib/board-reconcile";
 
 export const dynamic = "force-dynamic";
 
@@ -122,6 +123,11 @@ export async function POST(req: Request) {
       deleteCard(card.id);
       throw error;
     }
+
+    // 任务看板派生 reconcile：补/清依赖线（确定性 id 幂等）
+    void reconcileBoard(board.id).catch((e) =>
+      console.warn(`[task-cards] reconcile ${board.id} 异常:`, e?.message ?? e),
+    );
 
     return NextResponse.json({ card, updated: getBoard(board.id)?.updated ?? null }, { status: 201 });
   } catch (error) {

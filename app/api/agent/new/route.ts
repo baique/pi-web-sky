@@ -88,6 +88,15 @@ export async function POST(req: Request) {
       if (!assignSessionToTask(realSessionId, taskId)) {
         throw new Error(`Task not found: ${taskId}`);
       }
+      // 任务看板若已存在 → 新会话入板（后端权威，窗口期不依赖前端）
+      const { getBoard } = await import("@/lib/board-store");
+      const board = getBoard(taskId);
+      if (board) {
+        const { reconcileBoard } = await import("@/lib/board-reconcile");
+        void reconcileBoard(board.id).catch((e) =>
+          console.warn(`[agent/new] reconcile ${board.id} 异常:`, e?.message ?? e),
+        );
+      }
     }
 
     const state = await session.send({ type: "get_state" }) as {

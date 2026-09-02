@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useEditor } from "tldraw";
 import { ChatWindow } from "@/components/ChatWindow";
 import type { ChatInputHandle } from "@/components/ChatInput";
 import { SessionNavBar, type SessionNavBarHandle } from "./SessionNavBar";
@@ -32,16 +31,18 @@ export function SessionWorkbench({
   sessionId,
   cwd,
   taskId,
+  onPromote,
 }: {
   sessionId: string;
   /** 新会话卡（看板新建会话）绑定目录；cwd 非空 = 会话尚未创建 */
   cwd?: string;
   /** 新会话卡（任务看板）目标任务 id */
   taskId?: string;
+  /** 新会话卡转正回调（会话创建成功）：由父节点清 cwd 字段（写 Y.Doc） */
+  onPromote?: () => void;
 }) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
-  const editor = useEditor();
 
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -88,13 +89,13 @@ export function SessionWorkbench({
 
   // 导航条 portal 目标：卡片标题栏内的 slot（展开按钮之前）
   const [navbarSlot, setNavbarSlot] = useState<HTMLElement | null>(null);
-  // tldraw 重渲染会替换 DOM，每次渲染后重新查找 slot（仅当确实变化时更新，避免无限循环）。
-  // 结构：卡片(.tl-html-container) > 标题栏 + 工作台；slot 在标题栏内。
+  // RF 节点重渲染会替换 DOM，每次渲染后重新查找 slot（仅当确实变化时更新，避免无限循环）。
+  // 结构：自定义节点根元素（带 data-board-node）> 标题栏 + 工作台；slot 在标题栏内。
   useEffect(() => {
-    const card = rootRef.current?.closest(".tl-html-container");
+    const card = rootRef.current?.closest("[data-board-node]");
     const slot = card?.querySelector("[data-session-navbar-slot]") as HTMLElement | null ?? null;
     setNavbarSlot((prev) => (prev === slot ? prev : slot));
-    // 无依赖数组：tldraw 重渲染会替换 DOM，必须每次渲染后重挂监听/同步（与 wheel 拦截同风格）
+    // 无依赖数组：RF 节点重渲染会替换 DOM，必须每次渲染后重挂监听/同步（与 wheel 拦截同风格）
   });
 
   // 会话统计 + Context 用量 + TODO（经 ChatWindow 回调捕获，卡片内自渲染）
@@ -122,25 +123,17 @@ export function SessionWorkbench({
   }, []);
 
   // 新会话卡转正：ChatWindow 拿到 realId 后回调。会话创建成功（文件已落盘），
-  // 卡片 sessionId 本就是发起时生成的 UUID（= created.id），这里只清 cwd 字段
-  // 标记“会话已创建”转正为普通卡（CRDT 同步到文档），并派发事件让侧栏刷新。
+  // 由父节点清 cwd 字段标记“会话已创建”转正为普通卡（写 Y.Doc，CRDT 广播），
+  // 并派发事件让侧栏刷新。
   const handleSessionCreated = useCallback((created: SessionInfo) => {
     if (!created?.id) return;
     // 本实例内发过消息（prompt 在跑）：转正保持 isNew 不断 SSE
     localPromotedRef.current = true;
-    // 清 cwd 字段（shape props 更新经 CRDT 同步持久化，无需服务端写回）
-    const card = rootRef.current?.closest(".tl-html-container");
-    const nodeId = card?.getAttribute("data-node-id");
-    if (nodeId) {
-      editor.updateShapes([{
-        id: `shape:${nodeId}` as never,
-        type: "session-card",
-        props: { cwd: "" },
-      } as never]);
-    }
+    // 父节点清 cwd 字段（写 Y.Doc → CRDT 同步持久化）
+    onPromote?.();
     // 事件桥：侧栏刷新（会话已挂到任务/出现在左侧树）
     dispatchBoardSessionCreated(created.id);
-  }, [editor]);
+  }, [onPromote]);
 
   // 事件桥转发：工作台内无法直接拿 AppShell handler，走全局事件（携带 sessionId）
   const handleOpenFile = useCallback((filePath: string) => {

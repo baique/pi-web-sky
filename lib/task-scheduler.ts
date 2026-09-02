@@ -1,6 +1,7 @@
 import { existsSync } from "fs";
 import { randomUUID } from "crypto";
 import { getBoard } from "./board-store";
+import { reconcileBoard } from "./board-reconcile";
 import { startRpcSession, getRunningRpcSessionIds } from "./rpc-manager";
 import { resolveSessionPath } from "./session-reader";
 import { assignSessionToTask } from "./task-store";
@@ -135,6 +136,10 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
     const board = getBoard(card.boardId);
     if (board?.taskId) {
       assignSessionToTask(session.realSessionId, board.taskId);
+      // 任务看板派生 reconcile（后端权威）：补执行会话卡 + exec 线，广播到所有客户端
+      void reconcileBoard(card.boardId).catch((e) =>
+        console.warn(`[task-scheduler] reconcile ${card.boardId} 异常:`, e?.message ?? e),
+      );
     }
 
     // 会话正忙（已在流式/处理中）：说明上一轮已发过 prompt，直接标 running，不重复发
