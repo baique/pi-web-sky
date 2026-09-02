@@ -350,7 +350,7 @@ function TaskCard({
           <span
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
-            style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, padding: "3px 0 3px 5px" }}
+            style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, minHeight: 38, padding: "3px 8px 3px 5px", boxSizing: "border-box" }}
           >
             {/* 图标槽：与任务行 FolderIcon 同尺寸同起点，保持文字对齐 */}
             <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>
@@ -366,7 +366,7 @@ function TaskCard({
               }}
               onBlur={commitRename}
               autoFocus
-              style={{ flex: 1, minWidth: 0, fontSize: 12, padding: "5px 8px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--side-input)", color: "var(--text)", height: 30 }}
+              style={{ flex: 1, minWidth: 0, fontSize: 12, border: "none", outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box", height: "100%", padding: 0 }}
             />
           </span>
         ) : (

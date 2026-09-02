@@ -463,7 +463,7 @@ function BoardRow({
         <span
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
-          style={{ display: "flex", alignItems: "center", gap: 4, margin: "3px 6px", padding: "0 0 0 5px", width: "calc(100% - 12px)", boxSizing: "border-box" }}
+          style={{ display: "flex", alignItems: "center", gap: 4, margin: "0 4px 2px", padding: "0 8px 0 5px", height: 38, boxSizing: "border-box" }}
         >
           {/* 图标槽：与看板行图标同尺寸同起点，保持文字对齐 */}
           <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>
@@ -480,7 +480,7 @@ function BoardRow({
             onBlur={onCommitRename}
             autoFocus
             placeholder={t("boards.namePlaceholder")}
-            style={{ flex: 1, minWidth: 0, fontSize: 12, padding: "5px 8px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--side-input)", color: "var(--text)", height: 30 }}
+            style={{ flex: 1, minWidth: 0, fontSize: 12, border: "none", outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box", height: "100%", padding: 0 }}
           />
         </span>
       ) : (

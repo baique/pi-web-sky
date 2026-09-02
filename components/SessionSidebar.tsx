@@ -2612,13 +2612,13 @@ function SessionItem({
           style={{
             flex: 1,
             fontSize: 12,
-            padding: "5px 8px",
-            border: "1px solid var(--accent)",
-            borderRadius: 5,
+            border: "none",
             outline: "none",
-            background: "var(--side-input)",
+            background: "transparent",
             color: "var(--text)",
-            height: 30,
+            boxSizing: "border-box",
+            height: "100%",
+            padding: 0,
           }}
         />
       ) : (
