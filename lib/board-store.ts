@@ -183,6 +183,19 @@ export function listBoards(projectKey: string): BoardInfo[] {
 }
 
 /**
+ * 全部看板（不含系统看板，系统看板由调用方前置插入）。全局共享视图：
+ * 不看 project_key，所有手动看板 + 任务型看板一起返回（展示层自行过滤 taskId）。
+ */
+export function listAllBoards(): BoardInfo[] {
+  const rows = getDb()
+    .prepare(
+      "SELECT id, project_key AS projectKey, name, is_system AS isSystem, task_id AS taskId, sort_order AS sortOrder, created, updated FROM boards WHERE is_system = 0 ORDER BY sort_order, created, rowid",
+    )
+    .all() as unknown as BoardRow[];
+  return rows.map((row) => rowToBoard(row, countNodes(row.id)));
+}
+
+/**
  * 项目内看板批量排序（完整有序 id 列表）。id 必须都属于该项目，否则事务回滚。
  */
 export function reorderBoards(projectKey: string, orderedIds: string[]): BoardInfo[] {
@@ -205,17 +218,42 @@ export function reorderBoards(projectKey: string, orderedIds: string[]): BoardIn
   return listBoards(projectKey);
 }
 
-/** 创建看板。空 projectKey / 空名抛错。taskId 可选：非空时看板为任务型（id = taskId）。 */
+/**
+ * 全局看板批量排序（完整有序 id 列表，手动看板范围：非系统、非任务型）。
+ * id 必须都存在且属于手动看板，否则事务回滚。
+ */
+export function reorderAllBoards(orderedIds: string[]): BoardInfo[] {
+  const db = getDb();
+  if (orderedIds.length === 0) return listAllBoards();
+  db.exec("BEGIN");
+  try {
+    const stmt = db.prepare("UPDATE boards SET sort_order = ?, updated = ? WHERE id = ? AND is_system = 0 AND task_id IS NULL");
+    orderedIds.forEach((id, index) => {
+      const res = stmt.run(index, now(), id);
+      if (res.changes === 0) {
+        throw new Error(`board ${id} does not belong to global manual scope`);
+      }
+    });
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return listAllBoards();
+}
+
+/** 创建看板。空 projectKey 表示全局共享看板（跨项目聚合，与系统看板同层）。
+ *  空名抛错。taskId 可选：非空时看板为任务型（id = taskId）。 */
 export function createBoard(projectKey: string, name: string, taskId?: string): BoardInfo {
   const trimmed = name.trim();
-  if (!projectKey) throw new Error("projectKey is required");
   if (!trimmed) throw new Error("name must not be empty");
   const id = taskId ?? randomUUID();
   const ts = now();
-  // 新看板置顶：sort_order 取当前项目最小值 - 1
-  const minRow = getDb()
-    .prepare("SELECT MIN(sort_order) AS minOrder FROM boards WHERE project_key = ?")
-    .get(projectKey) as { minOrder: number | null };
+  const global = !projectKey;
+  // 新看板置顶：全局看板取全部手动看板最小 - 1；项目看板取项目内最小 - 1
+  const minRow = global
+    ? (getDb().prepare("SELECT MIN(sort_order) AS minOrder FROM boards WHERE is_system = 0 AND task_id IS NULL").get() as { minOrder: number | null })
+    : (getDb().prepare("SELECT MIN(sort_order) AS minOrder FROM boards WHERE project_key = ?").get(projectKey) as { minOrder: number | null });
   const sortOrder = minRow.minOrder === null ? 0 : minRow.minOrder - 1;
   getDb()
     .prepare("INSERT INTO boards (id, project_key, name, is_system, task_id, sort_order, created, updated) VALUES (?, ?, ?, 0, ?, ?, ?, ?)")

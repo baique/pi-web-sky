@@ -9,18 +9,16 @@ import { BOARD_CANVAS_CHANGED_EVENT } from "@/lib/board-events";
  * 侧栏「看板」栏目：位于会话 tab 内、任务区上方，样式与任务条目一致。
  * - 展开/收起（持久化）
  * - 系统「运行中」看板恒置顶（不可改名/删除/拖拽）
- * - 项目看板行：点击进入看板模式；悬停 [改名] [删除]；拖拽排序（与任务一致）
+ * - 全局共享看板行（不随上方选中的目录变化）：点击进入看板模式；悬停 [改名] [删除]；拖拽排序
  * - 新建看板 = 新建任务样式（标题行 + 内联输入）
  */
 export function BoardSection({
-  projectKey,
   activeBoardId,
   collapsed,
   onToggleCollapsed,
   onOpenBoard,
   refreshKey,
 }: {
-  projectKey: string | null;
   activeBoardId: string | null;
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -45,9 +43,7 @@ export function BoardSection({
 
   const load = useCallback(async () => {
     try {
-      const params = new URLSearchParams();
-      if (projectKey) params.set("projectKey", projectKey);
-      const res = await fetch(`/api/boards?${params.toString()}`, { cache: "no-store" });
+      const res = await fetch("/api/boards", { cache: "no-store" });
       if (!res.ok) return;
       const data = (await res.json()) as { boards: BoardInfo[] };
       setBoards(data.boards);
@@ -56,7 +52,7 @@ export function BoardSection({
     } finally {
       setLoading(false);
     }
-  }, [projectKey]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -79,13 +75,13 @@ export function BoardSection({
 
   const create = async () => {
     const name = newName.trim();
-    if (!name || !projectKey || busy) return;
+    if (!name || busy) return;
     setBusy(true);
     try {
       const res = await fetch("/api/boards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectKey, name }),
+        body: JSON.stringify({ name }),
       });
       if (res.ok) {
         const data = (await res.json()) as { board: BoardInfo };
@@ -174,7 +170,7 @@ export function BoardSection({
     const to = ids.indexOf(targetId);
     setDragBoard(null);
     setDropIndicator(null);
-    if (from === -1 || to === -1 || !projectKey) return;
+    if (from === -1 || to === -1) return;
     const next = [...ids];
     next.splice(from, 1);
     const insertAt = next.indexOf(targetId) + (pos.before ? 0 : 1);
@@ -182,9 +178,9 @@ export function BoardSection({
     void fetch("/api/boards/reorder", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectKey, orderedIds: next }),
+      body: JSON.stringify({ orderedIds: next }),
     }).then((r) => { if (r.ok) return load(); return undefined; }).catch(() => {});
-  }, [boards, dropIndicator, dragBoard, projectKey, load]);
+  }, [boards, dropIndicator, dragBoard, load]);
 
   // 任务型看板不混入手动看板列表（任务行本身即入口）；仅展示手动看板。
   const projectBoards = boards.filter((b) => !b.isSystem && b.taskId == null);
@@ -306,7 +302,7 @@ export function BoardSection({
             </div>
           )}
 
-          {/* 项目看板 */}
+          {/* 全局共享看板 */}
           {projectBoards.length === 0 && (
             <div style={{ padding: "6px 10px", color: "var(--text-muted)", fontSize: 11.5, fontStyle: "italic" }}>
               {t("boards.empty")}
@@ -384,7 +380,7 @@ export function BoardSection({
   );
 }
 
-/** 单个项目看板行（样式与任务条目完全一致：38px 高、FolderIcon 槽 20px、悬浮操作按钮） */
+/** 单个全局共享看板行（样式与任务条目完全一致：38px 高、FolderIcon 槽 20px、悬浮操作按钮） */
 function BoardRow({
   board,
   isActive,
