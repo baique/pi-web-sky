@@ -147,7 +147,7 @@ export function BoardTopbar({
           onClick={newAtViewportCenter}
           title="新建会话"
           aria-label="新建会话"
-          style={{ ...btnStyle, color: "var(--accent)" }}
+          style={btnStyle}
           {...iconHoverProps()}
         >
           {/* 与左侧栏新建会话同款聊天气泡图标 */}
