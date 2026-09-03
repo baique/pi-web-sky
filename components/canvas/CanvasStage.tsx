@@ -303,7 +303,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               {snapLines.length > 0 && (() => {
                 const vp = getViewport();
                 return (
-                  <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", overflow: "visible", zIndex: 20, transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})` }}>
+                  <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", overflow: "visible", zIndex: 20, transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`, transformOrigin: "0 0" }}>
                     {snapLines.map((line, i) => (
                       <line
                         key={i}

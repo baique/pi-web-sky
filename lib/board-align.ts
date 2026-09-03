@@ -10,17 +10,32 @@ export interface SnapResult {
   snapY: number | null;
 }
 
+/** 吸附阈值（flow 坐标 px） */
 export const SNAP_THRESHOLD = 8;
+/** 仅当两节点包围盒间距 ≤ 此值时才参与对齐，避免远距离节点误触发 */
+const MAX_ALIGN_DISTANCE = 200;
 
 function bounds(n: Node) {
   const w = Number(n.style?.width) || 0;
   const h = Number(n.style?.height) || 0;
   return {
     left: n.position.x, right: n.position.x + w, cx: n.position.x + w / 2,
-    top: n.position.y, bottom: n.position.y + h, cy: n.position.y + h / 2,
+    top: n.position.y, bottom: n.position.y + h, cy: n.position.y + h / 2, w, h,
   };
 }
 
+/** 两节点包围盒的近似间距（flow 坐标） */
+function boxDistance(a: ReturnType<typeof bounds>, b: ReturnType<typeof bounds>) {
+  const dx = Math.max(0, Math.max(a.left - b.right, b.left - a.right));
+  const dy = Math.max(0, Math.max(a.top - b.bottom, b.top - a.bottom));
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * 计算拖动节点的对齐参考线 + 吸附位置。
+ * 仅比对主轴（左/中/右 × 上/中/下），命中阈值内按轴独立返回。
+ * 参考线范围覆盖两节点并集，延伸 6px 端点标记。
+ */
 export function computeSnap(
   draggedId: string,
   draggedPos: { x: number; y: number },
@@ -48,11 +63,16 @@ export function computeSnap(
   for (const o of nodes) {
     if (o.id === draggedId) continue;
     const ob = bounds(o);
+
+    // 距离过滤：包围盒间距过远的节点不参与对齐
+    if (boxDistance(d, ob) > MAX_ALIGN_DISTANCE) continue;
+
     const oMinX = Math.min(ob.left, ob.right);
     const oMaxX = Math.max(ob.left, ob.right);
     const oMinY = Math.min(ob.top, ob.bottom);
     const oMaxY = Math.max(ob.top, ob.bottom);
 
+    // 水平对齐（x 轴）→ 竖向参考线
     const hEdges: Array<[number, number]> = [
       [d.left, ob.left], [d.left, ob.cx], [d.left, ob.right],
       [d.cx, ob.left], [d.cx, ob.cx], [d.cx, ob.right],
@@ -68,6 +88,7 @@ export function computeSnap(
       }
     }
 
+    // 竖直对齐（y 轴）→ 横向参考线
     const vEdges: Array<[number, number]> = [
       [d.top, ob.top], [d.top, ob.cy], [d.top, ob.bottom],
       [d.cy, ob.top], [d.cy, ob.cy], [d.cy, ob.bottom],
@@ -83,15 +104,26 @@ export function computeSnap(
       }
     }
 
+    // 两条轴都已命中可提前退出
     if (bestDistX < threshold && bestDistY < threshold) break;
   }
 
   const lines: AlignLine[] = [];
   if (lineX !== null && lineXOther) {
-    lines.push({ x1: lineX, y1: Math.min(dMinY, lineXOther.minY), x2: lineX, y2: Math.max(dMaxY, lineXOther.maxY) });
+    lines.push({
+      x1: lineX,
+      y1: Math.min(dMinY, lineXOther.minY) - 6,
+      x2: lineX,
+      y2: Math.max(dMaxY, lineXOther.maxY) + 6,
+    });
   }
   if (lineY !== null && lineYOther) {
-    lines.push({ x1: Math.min(dMinX, lineYOther.minX), y1: lineY, x2: Math.max(dMaxX, lineYOther.maxX), y2: lineY });
+    lines.push({
+      x1: Math.min(dMinX, lineYOther.minX) - 6,
+      y1: lineY,
+      x2: Math.max(dMaxX, lineYOther.maxX) + 6,
+      y2: lineY,
+    });
   }
 
   return { lines, snapX, snapY };
