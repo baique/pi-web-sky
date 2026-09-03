@@ -57,7 +57,7 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
       style: { width: 380, height: 270 },
       data: {
         cardId: "", number: 0, name: "新建任务", description: "",
-        readyStatus: "draft", execStatus: "not_started", priority: 0,
+        readyStatus: "draft", priority: 0,
         expanded: false, w: 380, h: 270, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0,
       },
     });
@@ -98,7 +98,7 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
         ))}
       {node && (
         <MenuItem
-          label={isSession ? "删除会话" : isTask ? "删除任务卡" : "删除便笺"}
+          label={isSession ? "移除会话卡片" : isTask ? "删除任务卡" : "删除便笺"}
           danger
           onClick={handleDeleteNode}
         />

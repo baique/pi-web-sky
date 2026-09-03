@@ -230,7 +230,6 @@ export async function reconcileBoard(boardId: string): Promise<void> {
             name: card.name,
             description: card.description,
             readyStatus: card.readyStatus,
-            execStatus: card.execStatus,
             priority: card.priority,
             due: card.due ?? undefined,
             expanded: false,

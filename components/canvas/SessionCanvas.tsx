@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
-import { useBoardCanvas } from "@/hooks/useBoardCanvas";
+import { useBoardCanvas, TaskCardStatusProvider, type TaskCardStatusValue } from "@/hooks/useBoardCanvas";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
 import { BoardSearchProvider } from "./BoardSearchContext";
 import { GlassScopeProvider } from "./GlassScopeContext";
@@ -56,6 +56,16 @@ export function SessionCanvas({
   // 任务看板：卡片由任务会话驱动（自动补卡/随任务变化），会话卡不可从看板移除；
   // 但清空允许——仅作用于非会话元素（连线/便笺/文本），会话卡片保留。
   const isTaskBoard = Boolean(board.board?.taskId ?? taskId);
+  // 任务卡状态上下文值：getStatus 读 running 轮询维护的状态镜像（每次 taskCardStatus 变化重建，
+  // 订阅节点随之更新徽章）；register/unregister 稳定引用（TaskCardNode mount/unmount 调用）。
+  const taskCardStatusValue = useMemo<TaskCardStatusValue>(
+    () => ({
+      getStatus: (cardId) => board.taskCardStatus[cardId],
+      register: board.registerVisibleTaskCard,
+      unregister: board.unregisterVisibleTaskCard,
+    }),
+    [board.taskCardStatus, board.registerVisibleTaskCard, board.unregisterVisibleTaskCard],
+  );
   // 看板搜索框 input ref：Ctrl+F 聚焦目标（仅看板模式生效）
   const searchBoxRef = useRef<HTMLInputElement>(null);
   // Ctrl+F / Cmd+F：聚焦看板搜索框（preventDefault 拦浏览器查找栏）。
@@ -115,6 +125,7 @@ export function SessionCanvas({
       <BoardIdContext.Provider value={{ boardId: board.board?.id ?? null, defaultCwd: newSessionCwd ?? null }}>
       <BoardSearchProvider>
       <ReactFlowProvider>
+      <TaskCardStatusProvider value={taskCardStatusValue}>
       {!board.loading && (
         <BoardTopbar
           boardName={board.board?.name ?? ""}
@@ -133,6 +144,7 @@ export function SessionCanvas({
           wallSettings={wallSettings}
           updateWallSettings={updateWallSettings}
           nodes={board.nodes as never}
+          taskCardStatus={board.taskCardStatus}
         />
       )}
       <SchedulerPanel nodes={board.nodes as never} />
@@ -153,6 +165,7 @@ export function SessionCanvas({
         board={board}
         isDark={isDark}
       />
+      </TaskCardStatusProvider>
       </ReactFlowProvider>
       </BoardSearchProvider>
       </BoardIdContext.Provider>

@@ -8,6 +8,7 @@ import { Markdown } from "@tiptap/markdown";
 import { Placeholder } from "@tiptap/extension-placeholder";
 import type { ExecStatus, ReadyStatus, TaskCard } from "@/lib/task-card-store";
 import { linkTargetIds, useTaskCard } from "@/hooks/useTaskCards";
+import { useTaskCardStatus, useTaskCardVisibility } from "@/hooks/useBoardCanvas";
 import { ThemedSelect } from "@/components/canvas/ThemedSelect";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { TaskCardMultiSelect } from "@/components/canvas/TaskCardMultiSelect";
@@ -86,6 +87,18 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
 
   const isCreating = !cardId;
   const sessionId = detail?.card.sessionId ?? null;
+  // 可见任务卡注册：cardId 非空（已建卡）即注册进可见集合，驱动 running 轮询携带其 id；
+  // unmount/切卡注销。草稿卡（cardId 空）无 DB 状态，不注册。
+  const { register, unregister } = useTaskCardVisibility();
+  useEffect(() => {
+    if (!cardId) return;
+    register(cardId);
+    return () => unregister(cardId);
+  }, [cardId, register, unregister]);
+  // 执行状态（DB 真相镜像，running 轮询更新；不读 yjs data.execStatus）。
+  // store 透出 string，展示侧按白名单收窄（服务端 store 已校验合法）。
+  const status = useTaskCardStatus(cardId);
+  const execStatus: ExecStatus = (status?.execStatus ?? "not_started") as ExecStatus;
 
   // 展开即时：重新拉详情
   useEffect(() => {
@@ -189,7 +202,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       // 必须先改 id 再落 cardId，否则 reconcile 已按 task-<cardId> 补卡时两者并存。
       const newId = `task-${created.id}`;
       normalizeNodeId(id, newId);
-      updateNode(newId, { data: { ...data, cardId: created.id, number: created.number, name: created.name, readyStatus: created.readyStatus, execStatus: created.execStatus, priority: created.priority, due: created.due ?? undefined } });
+      updateNode(newId, { data: { ...data, cardId: created.id, number: created.number, name: created.name, readyStatus: created.readyStatus, priority: created.priority, due: created.due ?? undefined } });
       setDraft((d) => (d ? { ...d, ...created, sessionId: created.sessionId } : d));
       void reload();
     }
@@ -306,8 +319,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     updateNode(id, { data: { ...data, w: params.width, h: params.height } });
   }, [id, data, updateNode]);
 
-  // exec 状态：轮询已写 data.execStatus（running 快照），直接读
-  const execStatus = data.execStatus ?? detail?.card.execStatus ?? "not_started";
+  // （exec 状态已由上方 useTaskCardStatus 从 running 轮询镜像读取）
 
   const formBody = draft ? (
     <>

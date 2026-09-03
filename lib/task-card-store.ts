@@ -126,6 +126,17 @@ export function getCard(id: string): TaskCard | undefined {
   return row ? rowToCard(row) : undefined;
 }
 
+/** 按 id 列表批量取卡（保持传入顺序；不存在 id 跳过）。可见卡状态查询用，单次 IN 查询。 */
+export function listCardsByIds(ids: string[]): TaskCard[] {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = getDb()
+    .prepare(`SELECT ${CARD_COLUMNS} FROM task_cards WHERE id IN (${placeholders})`)
+    .all(...ids) as unknown as TaskCardRow[];
+  const byId = new Map(rows.map((r) => [r.id, rowToCard(r)]));
+  return ids.map((id) => byId.get(id)).filter((c): c is TaskCard => Boolean(c));
+}
+
 /** 某看板的全部任务卡，按编号升序。 */
 export function listCards(boardId: string): TaskCard[] {
   const rows = getDb()

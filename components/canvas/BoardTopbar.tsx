@@ -14,6 +14,7 @@
 import { useMemo, useState } from "react";
 import { useReactFlow } from "@xyflow/react";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
+import type { TaskCardRunningState } from "@/lib/board-types";
 import { useBoardSearch } from "./BoardSearchContext";
 
 /** session-card 运行中 phase（useBoardCanvas running 快照写入；waiting_input 视为待用户，不算运行） */
@@ -36,6 +37,7 @@ export function BoardTopbar({
   wallSettings,
   updateWallSettings,
   nodes,
+  taskCardStatus,
 }: {
   boardName: string;
   /** 任务看板：清空文案与可用性提示随此变化 */
@@ -50,6 +52,8 @@ export function BoardTopbar({
   updateWallSettings: (patch: Partial<WallpaperSettings>) => void;
   /** 当前画布节点（yjs 派生，扫描运行中卡片用） */
   nodes: Array<{ id: string; type: string; data: Record<string, unknown> }>;
+  /** 任务卡状态镜像（DB 真相；task-card running 判定改读这里，不读 yjs data.execStatus） */
+  taskCardStatus: Record<string, TaskCardRunningState>;
 }) {
   const { setViewport, getViewport, getNodes, screenToFlowPosition } = useReactFlow();
   const { setHighlight } = useBoardSearch();
@@ -60,15 +64,19 @@ export function BoardTopbar({
   const runningItems = useMemo<RunningItem[]>(() => {
     const out: RunningItem[] = [];
     for (const n of nodes) {
-      const d = n.data as { phase?: string; title?: string; sessionId?: string; cardId?: string; execStatus?: string; name?: string; number?: number };
       if (n.type === "session-card") {
+        const d = n.data as { phase?: string; title?: string; sessionId?: string };
         const running = d.phase !== undefined && RUNNING_PHASES.has(d.phase);
         if (!running || !d.sessionId) continue;
         const title = (d.title ?? "").trim();
         if (!title) continue;
         out.push({ nodeId: n.id, label: title, kind: "session" });
       } else if (n.type === "task-card") {
-        if (d.execStatus !== "running" || !d.cardId) continue;
+        const d = n.data as { cardId?: string; name?: string; number?: number };
+        if (!d.cardId) continue;
+        // running 判定：读 DB 状态镜像（不读 yjs data.execStatus —— 状态已从卡分离）
+        const st = taskCardStatus[d.cardId];
+        if (!st || st.execStatus !== "running") continue;
         const name = (d.name ?? "").trim();
         if (!name) continue;
         const num = typeof d.number === "number" && d.number > 0 ? `#${d.number} ` : "";
@@ -76,7 +84,7 @@ export function BoardTopbar({
       }
     }
     return out;
-  }, [nodes]);
+  }, [nodes, taskCardStatus]);
 
   /** 定位卡片：节点平移到视口中心（保持缩放）+ accent 高亮描边渐隐（同看板 Ctrl+F） */
   const locate = (nodeId: string) => {

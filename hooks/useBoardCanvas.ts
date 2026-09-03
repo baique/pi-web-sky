@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, createElement, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
 import type { Node, Edge, NodeChange, EdgeChange } from "@xyflow/react";
 import { applyNodeChanges, applyEdgeChanges } from "@xyflow/react";
-import type { BoardInfo, RunningSnapshot } from "@/lib/board-types";
-import { dispatchBoardSessionCreated, dispatchBoardSessionDeleted } from "@/lib/board-events";
+import type { BoardInfo, RunningSnapshot, TaskCardRunningState } from "@/lib/board-types";
+import { dispatchBoardSessionCreated } from "@/lib/board-events";
 import { confirm } from "@/components/canvas/ConfirmDialog";
 
 // ============================================================================
@@ -216,7 +216,7 @@ export function useBoardCanvas({
     await load();
   }, [boardId, load]);
 
-  // ---- 运行中快照轮询：更新卡片 phase/runningMs + 任务卡 execStatus + 即时补卡 ----
+  // ---- 运行中快照轮询：更新会话卡 phase/runningMs + 可见任务卡状态 ----------------
   const [running, setRunning] = useState<RunningSnapshot | null>(
     () => (globalThis as { __piRunningSnapshot?: RunningSnapshot }).__piRunningSnapshot ?? null,
   );
@@ -226,6 +226,19 @@ export function useBoardCanvas({
   }, []);
   const runningPollInFlightRef = useRef(false);
 
+  // ---- 可见任务卡注册表：任务卡组件 mount/unmount 时注册/注销自己的 cardId ----
+  // 轮询携带这些 cardId（?boardId&cardIds=）请求**全量**状态（含 failed/done），
+  // 写 taskCardStatus（DB 真相的展示镜像）供 TaskCardNode 徽章读取。
+  // yjs 不再承载 execStatus —— 这就是「状态从卡分离」的接入点。
+  const visibleTaskCardIdsRef = useRef<Set<string>>(new Set());
+  const [taskCardStatus, setTaskCardStatus] = useState<Record<string, TaskCardRunningState>>({});
+  const registerVisibleTaskCard = useCallback((cardId: string) => {
+    visibleTaskCardIdsRef.current.add(cardId);
+  }, []);
+  const unregisterVisibleTaskCard = useCallback((cardId: string) => {
+    visibleTaskCardIdsRef.current.delete(cardId);
+  }, []);
+
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -233,36 +246,66 @@ export function useBoardCanvas({
       if (stopped || runningPollInFlightRef.current || document.visibilityState !== "visible") return;
       runningPollInFlightRef.current = true;
       try {
-        const res = await fetch("/api/agent/running", { cache: "no-store" });
+        // 可见任务卡：带 cardIds 请求全量状态；无可见卡则不带参（左侧栏语义不变）
+        const visibleIds = Array.from(visibleTaskCardIdsRef.current);
+        const qs = visibleIds.length > 0 && boardIdRef.current
+          ? `?boardId=${encodeURIComponent(boardIdRef.current)}&cardIds=${encodeURIComponent(visibleIds.join(","))}`
+          : "";
+        const res = await fetch(`/api/agent/running${qs}`, { cache: "no-store" });
         if (!res.ok) return;
         const data = (await res.json()) as RunningSnapshot;
         if (stopped) return;
         setRunningCached(data);
+        // 任务卡状态镜像（不写 yjs）：仅保留仍在可见集合内的卡，避免状态残留。
+        // 关键：只在内容**实际变化**时 setState（否则每次轮询都新建对象引用 →
+        // 下游 useMemo 依赖引用变化 → 整树重渲染 → 拖拽卡顿，memo 被击穿）。
+        const applyTaskCards = (merge: (prev: Record<string, TaskCardRunningState>) => Record<string, TaskCardRunningState>) => {
+          setTaskCardStatus((prev) => {
+            const next = merge(prev);
+            if (next === prev) return prev;
+            const prevKeys = Object.keys(prev);
+            const nextKeys = Object.keys(next);
+            if (prevKeys.length === nextKeys.length && prevKeys.every((k) => next[k] === prev[k])) return prev;
+            return next;
+          });
+        };
+        if (data.taskCards.length > 0) {
+          applyTaskCards((prev) => {
+            let changed = false;
+            const next = { ...prev };
+            for (const c of data.taskCards) {
+              if (next[c.cardId] !== c) { next[c.cardId] = c; changed = true; }
+            }
+            return changed ? next : prev;
+          });
+        } else if (visibleIds.length > 0) {
+          // 请求了可见卡但后端一条没回 → 这些卡已被删 → 从镜像清掉
+          applyTaskCards((prev) => {
+            let changed = false;
+            const next = { ...prev };
+            for (const id of visibleIds) {
+              if (next[id]) { delete next[id]; changed = true; }
+            }
+            return changed ? next : prev;
+          });
+        }
         const nodesMap = nodesMapRef.current;
         if (!nodesMap) return;
-        // 增量更新：running 状态写回 Y.Map（CRDT 广播到多端）
+        // 会话卡：phase/runningMs 仍写回 Y.Map（CRDT 广播，供多端一致展示运行态）
         for (const node of Array.from(nodesMap.values())) {
-          if (node.type === "session-card") {
-            const d = node.data as SessionCardData;
-            if (!d.sessionId) continue;
-            const state = data.states[d.sessionId] as { phase?: CanvasPhase; startedAt?: number } | undefined;
-            const runningNow = data.runningSessionIds.includes(d.sessionId);
-            if (runningNow && state) {
-              const phase = (state.phase as CanvasPhase) ?? "waiting_model";
-              const runningMs = state.startedAt ? Date.now() - state.startedAt : 0;
-              if (d.phase !== phase || d.runningMs !== runningMs || d.endedAt !== 0) {
-                nodesMap.set(node.id, { ...node, data: { ...d, phase, runningMs, endedAt: 0 } });
-              }
-            } else if (!runningNow && d.phase !== "idle") {
-              nodesMap.set(node.id, { ...node, data: { ...d, phase: "idle", runningMs: 0, endedAt: 0 } });
+          if (node.type !== "session-card") continue;
+          const d = node.data as SessionCardData;
+          if (!d.sessionId) continue;
+          const state = data.states[d.sessionId] as { phase?: CanvasPhase; startedAt?: number } | undefined;
+          const runningNow = data.runningSessionIds.includes(d.sessionId);
+          if (runningNow && state) {
+            const phase = (state.phase as CanvasPhase) ?? "waiting_model";
+            const runningMs = state.startedAt ? Date.now() - state.startedAt : 0;
+            if (d.phase !== phase || d.runningMs !== runningMs || d.endedAt !== 0) {
+              nodesMap.set(node.id, { ...node, data: { ...d, phase, runningMs, endedAt: 0 } });
             }
-          } else if (node.type === "task-card") {
-            const d = node.data as { cardId?: string; execStatus?: string };
-            if (!d.cardId) continue;
-            const st = data.taskCards?.find((c) => c.cardId === d.cardId && c.boardId === boardIdRef.current);
-            if (st && st.execStatus !== d.execStatus) {
-              nodesMap.set(node.id, { ...node, data: { ...d, execStatus: st.execStatus } });
-            }
+          } else if (!runningNow && d.phase !== "idle") {
+            nodesMap.set(node.id, { ...node, data: { ...d, phase: "idle", runningMs: 0, endedAt: 0 } });
           }
         }
       } catch {
@@ -555,15 +598,12 @@ export function useBoardCanvas({
         }
         return;
       }
-      const ok = await confirm({ message: "删除该会话？\n将同时删除画布卡片并断开任务卡关联。此操作不可撤销。" });
+      const ok = await confirm({ message: "移除该会话卡片？\n会话本身将保留在会话列表中，可随时重新拖入。" });
       if (!ok) return;
       nodesMap.delete(node.id);
       for (const e of Array.from(edgesMap.values())) {
         if (e.source === node.id || e.target === node.id) edgesMap.delete(e.id);
       }
-      fetch(`/api/sessions/${encodeURIComponent(d.sessionId)}`, { method: "DELETE" })
-        .then(() => dispatchBoardSessionDeleted(d.sessionId!))
-        .catch((e) => console.warn(`[board] 删除会话 ${d.sessionId} 异常`, e));
     } else if (node.type === "task-card") {
       const d = node.data as { cardId?: string };
       if (!d.cardId) {
@@ -653,6 +693,10 @@ export function useBoardCanvas({
       error,
       running,
       runningCount: running?.runningSessionIds.length ?? 0,
+      // 可见任务卡状态镜像（DB 真相的展示快照，running 轮询维护）
+      taskCardStatus,
+      registerVisibleTaskCard,
+      unregisterVisibleTaskCard,
       // React Flow 受控数据
       nodes,
       edges,
@@ -674,8 +718,49 @@ export function useBoardCanvas({
       loadSessionSummaries,
       reloadCanvas,
     }),
-    [board, loading, error, running, nodes, edges, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load],
+    [board, loading, error, running, nodes, edges, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, registerVisibleTaskCard, unregisterVisibleTaskCard],
   );
 }
 
 export type UseBoardCanvasReturn = ReturnType<typeof useBoardCanvas>;
+
+// ============================================================================
+// 任务卡状态上下文（状态分离的核心接入点）
+//
+// 设计：任务卡 execStatus 不在 yjs 数据中承载（不再写回、不再作为真相），
+// 而由 running 轮询（?cardIds=）拉取 DB 快照到 taskCardStatus map，经此 context
+// 提供给 TaskCardNode 徽章 / BoardTopbar 执行队列。数据库是唯一真相源；
+// 可见卡在 TaskCardNode mount 时 register、unmount 时 unregister，驱动轮询参数。
+// ============================================================================
+
+/** 任务卡状态查询 + 可见注册（SessionCanvas 提供，RF 节点经此读取） */
+export interface TaskCardStatusValue {
+  /** 单卡状态（DB 真相镜像）；未拉到/不存在 → null */
+  getStatus: (cardId: string) => TaskCardRunningState | undefined;
+  /** 已建卡（cardId 非空）进入视口时注册；画布据此携带 cardIds 请求 */
+  register: (cardId: string) => void;
+  /** 卡片卸载时注销 */
+  unregister: (cardId: string) => void;
+}
+
+const TaskCardStatusContext = createContext<TaskCardStatusValue | null>(null);
+
+/** 供 SessionCanvas 包住 ReactFlow：把 useBoardCanvas 的状态镜像桥接给 RF 节点 */
+export function TaskCardStatusProvider({ value, children }: { value: TaskCardStatusValue; children: ReactNode }) {
+  return createElement(TaskCardStatusContext.Provider, { value }, children);
+}
+
+/** 读取单卡实时状态（TaskCardNode 徽章 / BoardTopbar 用） */
+export function useTaskCardStatus(cardId: string | null): TaskCardRunningState | undefined {
+  const ctx = useContext(TaskCardStatusContext);
+  return cardId && ctx ? ctx.getStatus(cardId) : undefined;
+}
+
+/** 注册/注销可见卡（TaskCardNode mount/unmount 调用） */
+export function useTaskCardVisibility() {
+  const ctx = useContext(TaskCardStatusContext);
+  return {
+    register: ctx?.register ?? (() => {}),
+    unregister: ctx?.unregister ?? (() => {}),
+  };
+}
