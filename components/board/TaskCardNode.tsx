@@ -434,7 +434,8 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       </div>
       {/* 内容区：编辑表单 */}
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        <div className="[scrollbar-width:none] nodrag nowheel" style={{ flex: "1 1 auto", minWidth: 0, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", cursor: "default" }}>
+        {/* 表单区必须显式恢复文本选中：卡根 userSelect:none 会抑制输入框/表单文字选中复制 */}
+        <div className="[scrollbar-width:none] nodrag nowheel" style={{ flex: "1 1 auto", minWidth: 0, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", cursor: "default", userSelect: "text" }}>
           {formBody}
         </div>
       </div>

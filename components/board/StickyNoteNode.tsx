@@ -248,7 +248,8 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
         <div
           ref={contentRef}
           className="nowheel nodrag"
-          style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px var(--bubble-pad-x, 12px) var(--bubble-pad-y, 8px)", textAlign: "left", cursor: "text" }}
+          // 预览态 markdown 必须显式恢复文本选中：卡根 userSelect:none 会抑制整卡选中（编辑态已单独恢复）
+          style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px var(--bubble-pad-x, 12px) var(--bubble-pad-y, 8px)", textAlign: "left", cursor: "text", userSelect: "text" }}
           onPointerDown={isolateContent}
           onPointerUp={isolateContent}
           onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}

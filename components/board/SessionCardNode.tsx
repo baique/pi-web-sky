@@ -227,7 +227,8 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
       </div>
 
       {expanded ? (
-        <div className="nodrag" style={{ flex: 1, minHeight: 0, padding: "0 12px 0", pointerEvents: "all", overflow: "visible", cursor: "default" }}>
+        // 展开工作台（消息/工具/代码块）必须显式恢复文本选中：卡根 userSelect:none 会抑制整卡选中
+        <div className="nodrag" style={{ flex: 1, minHeight: 0, padding: "0 12px 0", pointerEvents: "all", overflow: "visible", cursor: "default", userSelect: "text" }}>
           <SessionWorkbench sessionId={sessionId} cwd={cwd} taskId={taskId} onPromote={handlePromote} />
         </div>
       ) : (
