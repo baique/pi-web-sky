@@ -621,15 +621,15 @@ function MarkdownField({
 const TEMPLATES: Record<string, { label: string; content: string }> = {
   feat: {
     label: "feat",
-    content: "## 需求\n\n## 背景\n\n## 约束\n\n## 验收标准",
+    content: "## 需求\n\n\n## 背景\n\n\n## 约束\n\n\n## 验收标准\n\n",
   },
   bug: {
     label: "bug",
-    content: "## 问题说明\n\n## 最小复现步骤\n\n## 是否只报告原因不执行修复",
+    content: "## 问题说明\n\n\n## 最小复现步骤\n\n\n## 是否只报告原因不执行修复\n\n",
   },
   design: {
     label: "design",
-    content: "## 需求\n\n## 约束",
+    content: "## 需求\n\n\n## 约束\n\n",
   },
 };
 
