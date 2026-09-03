@@ -102,7 +102,19 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
   };
 
   // resize：写回 style + data.w/h + 对齐参考线吸附
+  // resizingRef 守卫：停止后 yjs 尺寸回灌可能再触发 onResize，不得再画线（抬起线不消失）
+  const resizingRef = useRef(false);
+  const onResizeStart = useCallback(() => {
+    resizingRef.current = true;
+    setSnapLines([]);
+  }, [setSnapLines]);
+  const onResizeEnd = useCallback(() => {
+    resizingRef.current = false;
+    setSnapLines([]);
+    requestAnimationFrame(() => setSnapLines([]));
+  }, [setSnapLines]);
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
+    if (!resizingRef.current) return;
     const nodes = getNodes();
     const self = nodes.find((n) => n.id === id);
     const pos = self?.position ?? { x: 0, y: 0 };
@@ -110,8 +122,8 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
     setSnapLines(snap.lines);
     const finalW = snap.snapW ?? params.width;
     const finalH = snap.snapH ?? params.height;
-    updateNode(id, { data: { ...data, w: finalW, h: finalH } });
-  }, [id, data, updateNode, setSnapLines, getNodes]);
+    updateNode(id, { data: { ...dataRef.current, w: finalW, h: finalH } });
+  }, [id, updateNode, setSnapLines, getNodes]);
 
   // 新会话卡转正：清 cwd 字段（写 Y.Doc → CRDT 广播）
   const handlePromote = useCallback(() => {
@@ -210,14 +222,14 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
           <span style={{ flexShrink: 0, fontSize: 9.5, color: "var(--text-dim)", border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)", borderRadius: 4, padding: "0 4px" }}>stale</span>
         )}
         <div style={{ flex: 1 }} />
-        {/* 导航条 portal 挂载点 */}
-        <div data-session-navbar-slot className="nodrag" style={{ display: "flex", alignItems: "center" }} />
-        {/* 右侧操作区最左：会话标题编辑（展开/收起按钮左侧） */}
+        {/* 右侧操作区最左：会话标题编辑（历史按钮左侧） */}
         {!isNewSession && !renaming && (
           <button type="button" onClick={startRename} title="Rename" aria-label="Rename" className="nodrag" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: "var(--text-dim)", cursor: "pointer", opacity: 0.65 }}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>
           </button>
         )}
+        {/* 导航条 portal 挂载点 */}
+        <div data-session-navbar-slot className="nodrag" style={{ display: "flex", alignItems: "center" }} />
         <button
           type="button"
           onClick={toggleExpand}
