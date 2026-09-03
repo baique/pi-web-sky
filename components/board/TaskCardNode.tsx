@@ -113,6 +113,8 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
           retryCount: 0,
           sessionId: null,
           dispatchToken: null,
+          owner: null,
+          heartbeat: 0,
           created: 0,
           updated: 0,
         }

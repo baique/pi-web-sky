@@ -88,7 +88,7 @@ export function initSchema(db: DatabaseSync): void {
  * 老库打开时自动按序补齐缺失的迁移（每个迁移一个事务，成功后推进版本号），
  * 新库建表后从 v0 一路迁到 SCHEMA_VERSION。重复打开不再执行已完成的迁移。
  */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 interface Migration {
   version: number;
@@ -173,6 +173,18 @@ const MIGRATIONS: Migration[] = [
       // 多实例（dev + 全局 CLI + 残留服务）共库时，同一张卡可能被多个调度器
       // 同时捞到并发派发 → 双会话。派发前条件 UPDATE 原子抢 token，谁抢到谁执行。
       "ALTER TABLE task_cards ADD COLUMN dispatch_token TEXT NULL;",
+    ],
+  },
+  {
+    version: 9,
+    name: "task_cards.owner + heartbeat (状态判定实例归属)",
+    statements: [
+      // 多实例共库时，「会话是否在跑」是本进程私有（getRunningRpcSessionIds），
+      // 非派发实例会误把别人在跑的卡翻成 review（#27）。给 running 卡标 owner
+      // + heartbeat，非 owner 且 owner 心跳新鲜 → 跳过，只有 owner（或 owner
+      // 心跳过期被接管）才判定状态，使「谁判定某张卡」确定。
+      "ALTER TABLE task_cards ADD COLUMN owner TEXT NULL;",
+      "ALTER TABLE task_cards ADD COLUMN heartbeat INTEGER NOT NULL DEFAULT 0;",
     ],
   },
 ];
