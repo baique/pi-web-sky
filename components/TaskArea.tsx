@@ -339,7 +339,7 @@ function TaskCard({
         onMouseLeave={() => setHovered(false)}
         style={{
           display: "flex", alignItems: "center", gap: 4, minHeight: 38,
-          padding: "3px 8px 3px 5px",
+          padding: "0 8px 0 5px",
           borderRadius: 6,
           background: isActive ? "var(--side-active)" : hovered ? "var(--side-hover)" : "transparent",
           cursor: "pointer",
