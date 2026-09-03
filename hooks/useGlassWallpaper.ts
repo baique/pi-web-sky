@@ -37,7 +37,7 @@ const REGEN_DEBOUNCE_MS = 400;
 
 /** 拖动中气泡档实时预览的防抖间隔（ms）：停顿稍久就重算气泡模糊图，
  *  比全局提交的 400ms 更跟手，实现"边拖边预览"。 */
-const PREVIEW_DEBOUNCE_MS = 40;
+const PREVIEW_DEBOUNCE_MS = 120;
 
 // 拖动中实时预览所需的模块级上下文（由 useGlassWallpaper 维护）
 let lastBgUrl: string | null = null;

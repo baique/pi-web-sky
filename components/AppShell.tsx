@@ -113,9 +113,12 @@ function GlassSlider({ label, icon, value, min, max, unit, onCommit, preview }: 
   preview?: (v: number) => void;
 }) {
   const [local, setLocal] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
   // 全局值变化（重置按钮等）时同步本地显示
   useEffect(() => setLocal(value), [value]);
-  const commit = () => onCommit(local);
+  const commit = () => {
+    if (inputRef.current) onCommit(Number(inputRef.current.value));
+  };
   return (
     <div
       style={{
@@ -128,12 +131,13 @@ function GlassSlider({ label, icon, value, min, max, unit, onCommit, preview }: 
       <span style={{ width: 14, flexShrink: 0, textAlign: "center", fontSize: 12 }}>{icon}</span>
       <span style={{ flexShrink: 0 }}>{label}</span>
       <input
+        ref={inputRef}
         type="range"
         min={min}
         max={max}
-        value={local}
+        defaultValue={value}
         onChange={(e) => {
-          // 拖动中只更新本地 + 轻量预览：AppShell 不重渲染，避免每格 20ms 阻塞
+          // 拖动中只更新本地显示 + 轻量预览：input 不受控，避免拖拽重置
           const v = Number(e.target.value);
           setLocal(v);
           preview?.(v);
