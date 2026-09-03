@@ -331,7 +331,10 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
         placeholder="任务名称"
       />
       {nameError && <div style={{ color: "#f87171", fontSize: 11, marginTop: 3 }}>{nameError}</div>}
-      <label style={LABEL_STYLE}>需求说明</label>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "8px 0 3px" }}>
+        <label style={{ ...LABEL_STYLE, margin: 0 }}>需求说明</label>
+        <TemplateSelector onSelect={(tpl) => set("description", (draft?.description ?? "") + (draft?.description ? "\n\n" : "") + tpl)} />
+      </div>
       <MarkdownField
         value={draft.description}
         onChange={(md) => set("description", md)}
@@ -607,6 +610,102 @@ function MarkdownField({
       onMouseDown={handleWrapMouseDown}
     >
       <EditorContent editor={editor} />
+    </div>
+  );
+}
+
+/**
+ * 模板选择器（plaintext 形式，非按钮）。
+ * 点击展开下拉菜单，选择后追加模板到 description。
+ */
+const TEMPLATES: Record<string, { label: string; content: string }> = {
+  feat: {
+    label: "feat",
+    content: "## 需求\n\n\n## 背景\n\n\n## 约束\n\n\n## 验收标准\n\n",
+  },
+  bug: {
+    label: "bug",
+    content: "## 问题说明\n\n\n## 最小复现步骤\n\n\n## 是否只报告原因不执行修复\n\n",
+  },
+  design: {
+    label: "design",
+    content: "## 需求\n\n\n## 约束\n\n",
+  },
+};
+
+function TemplateSelector({ onSelect }: { onSelect: (template: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} style={{ position: "relative" }}>
+      <span
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          fontSize: 10,
+          color: "var(--text-dim)",
+          cursor: "pointer",
+          userSelect: "none",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 2,
+        }}
+      >
+        模板
+        <svg width="8" height="8" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+          <polyline points="2 3.5 5 6.5 8 3.5" />
+        </svg>
+      </span>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            zIndex: 120,
+            minWidth: 90,
+            background: "var(--popover-glass)",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            boxShadow: "0 6px 20px -6px rgba(0,0,0,0.35)",
+            padding: 4,
+          }}
+        >
+          {Object.entries(TEMPLATES).map(([key, { label, content }]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => { onSelect(content); setOpen(false); }}
+              style={{
+                display: "block",
+                width: "100%",
+                boxSizing: "border-box",
+                padding: "5px 8px",
+                border: "none",
+                borderRadius: 4,
+                background: "transparent",
+                color: "var(--text)",
+                fontSize: 11,
+                textAlign: "left",
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--side-hover)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
