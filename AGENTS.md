@@ -61,7 +61,7 @@ Browser                Next.js Server              AgentSession (in-process)
 **Session browsing** (read-only): reads `.jsonl` files through SDK `SessionManager` helpers and `lib/session-reader.ts` — no AgentSession created.  
 **Sending a message**: `startRpcSession()` in `lib/rpc-manager.ts` creates an AgentSession in-process.
 
-**Board mode** (会话看板): selecting a board (`?board=`) replaces the ChatWindow area with the React Flow canvas (`SessionCanvas`) — the sidebar stays visible, exiting / clicking a session / new-session returns to chat. **画布已迁移到自研（React Flow + yjs，2026-09）**：每看板一个 Y.Doc（`@hocuspocus/server` 内嵌：`server.mjs` + `lib/yjs-room-server.mjs`，同端口），画布文档持久化到 `~/.pi/agent/sync.db` 的 `yjs_documents` 表；前端 `HocuspocusProvider` 连接（CRDT 自动合并，无全量保存/乐观锁/409）。业务派生边（exec/依赖线/会话卡/任务卡）由**后端 reconcile** 从业务表渲染（`lib/board-reconcile.ts`）。旧 `lib/board-store.ts` 的 nodes/edges 表废弃保留。`__running__` 系统看板已移除。
+**Board mode** (会话看板): selecting a board (`?board=`) replaces the ChatWindow area with the React Flow canvas (`SessionCanvas`) — the sidebar stays visible, exiting / clicking a session / new-session returns to chat. **画布已迁移到自研（React Flow + yjs，2026-09）**：每看板一个 Y.Doc（`@hocuspocus/server` 内嵌：`server.mjs` + `lib/yjs-room-server.mjs`，同端口），画布文档持久化到 `~/.pi/agent/sync.db` 的 `yjs_documents` 表；前端 `HocuspocusProvider` 连接（CRDT 自动合并，无全量保存/乐观锁/409）。业务派生边（exec/依赖线/会话卡/任务卡）由**后端 reconcile** 从业务表渲染（`lib/board-reconcile.ts`）。旧 `lib/board-store.ts` 的 nodes/edges 表仅作业务表辅助（countNodes/级联清空）保留，画布渲染完全走 yjs。`__running__` 系统看板的后端支持（`getSystemRunningBoard`，不落库恒存在）保留供 `/api/boards` 使用，UI 入口已移除。
 
 ---
 
