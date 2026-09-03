@@ -24,6 +24,8 @@ type GlassSettings = {
 
 /** chrome 档模糊半径，与 globals.css 的 --glass-blur-heavy 保持一致（12px）。 */
 const HEAVY_BLUR = 12;
+const BLUR_ATTENUATION = 0.75;
+const PREVIEW_RENDER_SCALE = 0.25;
 
 /** 生成降采样比例：模糊图对清晰度不敏感，输出降采样后成本大幅下降（显示时
  *  100% 拉伸，模糊视觉几乎无差异）。 */
@@ -34,8 +36,8 @@ const RENDER_SCALE = 0.5;
 const REGEN_DEBOUNCE_MS = 400;
 
 /** 拖动中气泡档实时预览的防抖间隔（ms）：停顿稍久就重算气泡模糊图，
- *  比全局提交的 400ms 更跟手，实现“边拖边预览”。 */
-const PREVIEW_DEBOUNCE_MS = 120;
+ *  比全局提交的 400ms 更跟手，实现"边拖边预览"。 */
+const PREVIEW_DEBOUNCE_MS = 40;
 
 // 拖动中实时预览所需的模块级上下文（由 useGlassWallpaper 维护）
 let lastBgUrl: string | null = null;
@@ -54,7 +56,7 @@ export function previewBubbleBlur(blur: number) {
   const gen = ++previewGen;
   if (previewTimer) window.clearTimeout(previewTimer);
   previewTimer = window.setTimeout(async () => {
-    const url = await generateGlassImage(lastBgUrl!, blur, lastSettings!);
+    const url = await generateGlassImage(lastBgUrl!, Math.round(blur * BLUR_ATTENUATION), lastSettings!, PREVIEW_RENDER_SCALE);
     if (!url || gen !== previewGen) {
       // 已有更新的预览/正式生成，丢弃这次结果
       if (url) URL.revokeObjectURL(url);
@@ -117,9 +119,10 @@ async function generateGlassImage(
   bgUrl: string,
   blur: number,
   s: GlassSettings,
+  renderScale: number = RENDER_SCALE,
 ): Promise<string | null> {
-  // dpr 含降采样：分辨率 = 视口 × devicePixelRatio × RENDER_SCALE
-  const dpr = (window.devicePixelRatio || 1) * RENDER_SCALE;
+  // dpr 含降采样：分辨率 = 视口 × devicePixelRatio × renderScale
+  const dpr = (window.devicePixelRatio || 1) * renderScale;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const pad = Math.max(1, Math.ceil(blur));
@@ -199,9 +202,11 @@ export function useGlassWallpaper(
     let bubbleUrl: string | null = null;
     let heavyUrl: string | null = null;
     const run = async () => {
+      const bubbleBlur = Math.round(settings.bubbleBlur * BLUR_ATTENUATION);
+      const heavyBlur = Math.round(HEAVY_BLUR * BLUR_ATTENUATION);
       const [b, h] = await Promise.all([
-        generateGlassImage(bgUrl, settings.bubbleBlur, settings),
-        generateGlassImage(bgUrl, HEAVY_BLUR, settings),
+        generateGlassImage(bgUrl, bubbleBlur, settings),
+        generateGlassImage(bgUrl, heavyBlur, settings),
       ]);
       if (cancelled) {
         if (b) URL.revokeObjectURL(b);
