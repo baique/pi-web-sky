@@ -50,6 +50,7 @@ export const BADGE_NAMES: Record<string, string> = {
 };
 
 function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & { data: StickyNoteData }) {
+  const { getNodes } = useReactFlow();
   const { updateNode, deleteNode, setSnapLines } = useBoardCanvasOps();
   const { highlightId } = useBoardSearch();
   const isHighlighted = highlightId === id;
@@ -160,7 +161,6 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
 
   // resize：写回 style + data.w/h + 对齐参考线吸附
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
-    const { getNodes } = useReactFlow();
     const nodes = getNodes();
     const self = nodes.find((n) => n.id === id);
     const pos = self?.position ?? { x: 0, y: 0 };
@@ -169,7 +169,7 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     const finalW = snap.snapW ?? params.width;
     const finalH = snap.snapH ?? params.height;
     updateNode(id, { data: { ...data, w: finalW, h: finalH } });
-  }, [id, data, updateNode, setSnapLines]);
+  }, [id, data, updateNode, setSnapLines, getNodes]);
 
   return (
     <>

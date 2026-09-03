@@ -72,6 +72,7 @@ const EXPANDED_H = 620;
 const COLLAPSED_MIN_H = 240;
 
 function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { data: TaskCardData }) {
+  const { getNodes } = useReactFlow();
   const { updateNode, deleteNode, normalizeNodeId, setSnapLines } = useBoardCanvasOps();
   const w = width ?? data.w ?? FORM_W;
   const h = height ?? data.h ?? FORM_H;
@@ -317,7 +318,6 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
   }, [id, data, expanded, w, h, updateNode]);
 
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
-    const { getNodes } = useReactFlow();
     const nodes = getNodes();
     const self = nodes.find((n) => n.id === id);
     const pos = self?.position ?? { x: 0, y: 0 };
@@ -326,7 +326,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     const finalW = snap.snapW ?? params.width;
     const finalH = snap.snapH ?? params.height;
     updateNode(id, { data: { ...data, w: finalW, h: finalH } });
-  }, [id, data, updateNode, setSnapLines]);
+  }, [id, data, updateNode, setSnapLines, getNodes]);
 
   // （exec 状态已由上方 useTaskCardStatus 从 running 轮询镜像读取）
 
