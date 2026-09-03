@@ -190,10 +190,10 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
             onKeyDown={(e) => { if (e.key === "Enter") void commitRename(); if (e.key === "Escape") cancelRename(); }}
             onBlur={() => void commitRename()}
             className="nodrag"
-            style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--side-input)", color: "var(--text)" }}
+            style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--side-input)", color: "var(--text)", boxSizing: "border-box" }}
           />
         ) : (
-          <span style={{ fontSize: expanded ? 12.5 : 12.5, fontWeight: 600, minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box" }}>
             {isNewSession ? "New session" : (title || "Untitled")}
           </span>
         )}
