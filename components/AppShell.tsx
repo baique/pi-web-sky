@@ -414,7 +414,7 @@ export function AppShell() {
     setBgMenuOpen((v) => !v);
   }, []);
 
-  // Close the background picker on outside click.
+  // Close the background picker on outside click / Escape.
   useEffect(() => {
     if (!bgMenuOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -427,8 +427,15 @@ export function AppShell() {
         setBgMenuOpen(false);
       }
     };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setBgMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
   }, [bgMenuOpen]);
   useEffect(() => {
     setMobileSidebarReady(true);
@@ -2749,7 +2756,7 @@ export function AppShell() {
               </button>
               {isMobile && (
                 <div style={{ height: "100%", flexShrink: 0 }}>
-                  <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} />
+                  <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} onOpenBoard={handleOpenBoard} />
                 </div>
               )}
               {renderSessionStatsButton(true)}
@@ -2783,7 +2790,7 @@ export function AppShell() {
           {!isMobile && (
             <>
               <div style={{ height: "100%", flexShrink: 0 }}>
-                <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} />
+                <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} onOpenBoard={handleOpenBoard} />
               </div>
               {renderBackgroundButton(false)}
               {renderThemeButton(false)}

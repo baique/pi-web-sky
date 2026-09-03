@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useRouter } from "next/navigation";
 import type { SessionInfo } from "@/lib/types";
 
 interface SearchHit {
@@ -12,8 +13,28 @@ interface SearchHit {
   snippet: string;
 }
 
+interface TaskCardHit {
+  id: string;
+  boardId: string;
+  projectKey: string;
+  number: number;
+  name: string;
+  description: string;
+  readyStatus: string;
+  execStatus: string;
+  titleMatch: boolean;
+  snippet: string;
+}
+
+interface SearchResponse {
+  indexing: boolean;
+  results: SearchHit[];
+  taskCards: TaskCardHit[];
+}
+
 interface Props {
   onSelectSession: (session: SessionInfo) => void;
+  onOpenBoard?: (boardId: string) => void;
 }
 
 const DEBOUNCE_MS = 350;
@@ -44,11 +65,13 @@ function renderSnippet(snippet: string): React.ReactNode {
  * results. Mobile: icon button that expands a full-width overlay input.
  * Carries the trailing divider that separates it from the buttons on its right.
  */
-export function SidebarGlobalSearch({ onSelectSession }: Props) {
+export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchHit[] | null>(null);
+  const [taskCards, setTaskCards] = useState<TaskCardHit[] | null>(null);
   const [indexing, setIndexing] = useState(false);
   const [open, setOpen] = useState(false);
   const [mobileOverlay, setMobileOverlay] = useState(false);
@@ -90,10 +113,11 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
       setOpen(true);
       setIndexing(true);
       fetch(`/api/search?q=${encodeURIComponent(q)}&limit=20`, { signal: controller.signal })
-        .then((r) => (r.ok ? (r.json() as Promise<{ results: SearchHit[]; indexing: boolean }>) : null))
+        .then((r) => (r.ok ? (r.json() as Promise<SearchResponse>) : null))
         .then((d) => {
           if (d) {
             setResults(d.results ?? []);
+            setTaskCards(d.taskCards ?? []);
             setIndexing(d.indexing);
           }
         })
@@ -116,6 +140,7 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
     setMobileOverlay(false);
     setQuery("");
     setResults(null);
+    setTaskCards(null);
   }, []);
 
   // Close on outside click / Escape.
@@ -155,7 +180,12 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
     fontSize: 12,
   };
 
-  const resultsPanel = (results: SearchHit[] | null, indexing: boolean) => (
+  const handlePickTaskCard = useCallback((card: TaskCardHit) => {
+    close();
+    onOpenBoard?.(card.boardId);
+  }, [close, onOpenBoard]);
+
+  const resultsPanel = (results: SearchHit[] | null, taskCards: TaskCardHit[] | null, indexing: boolean) => (
     <div
       ref={panelRef}
       className="glass-top-panel"
@@ -170,61 +200,108 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
         <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--text-muted)" }}>
           {t("search.indexing")}
         </div>
-      ) : results === null || results.length === 0 ? (
+      ) : (results === null || results.length === 0) && (taskCards === null || taskCards.length === 0) ? (
         <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--text-muted)" }}>
           {query.trim() ? t("search.noResults") : t("search.empty")}
         </div>
       ) : (
         <div style={{ overflowY: "auto" }}>
-          {results.map((hit) => {
-            const s = hit.session;
-            const title = s.name || s.firstMessage.slice(0, 50) || s.id.slice(0, 12);
-            return (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => handlePick(s)}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  padding: "8px 12px",
-                  background: "none",
-                  border: "none",
-                  borderBottom: "1px solid var(--border)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                  {hit.titleMatch && (
-                    <span
-                      style={{
-                        flexShrink: 0, fontSize: 9, fontFamily: "var(--font-mono)",
-                        color: "var(--accent)", background: "var(--side-selected)",
-                        border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
-                        borderRadius: 3, padding: "0 4px", lineHeight: "15px",
-                      }}
-                    >
-                      {t("search.title")}
+          {/* 任务卡结果 */}
+          {taskCards && taskCards.length > 0 && (
+            <>
+              <div style={{ padding: "6px 12px 2px", fontSize: 10, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                {t("search.taskCards")}
+              </div>
+              {taskCards.map((card) => (
+                <button
+                  key={`task-${card.id}`}
+                  type="button"
+                  onClick={() => handlePickTaskCard(card)}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    padding: "8px 12px",
+                    background: "none",
+                    border: "none",
+                    borderBottom: "1px solid var(--border)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    {card.titleMatch && (
+                      <span style={{ flexShrink: 0, fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--accent)", background: "var(--side-selected)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)", borderRadius: 3, padding: "0 4px", lineHeight: "15px" }}>
+                        {t("search.title")}
+                      </span>
+                    )}
+                    <span style={{ flexShrink: 0, fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+                      #{card.number}
                     </span>
-                  )}
-                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
-                    {title}
-                  </span>
-                  <span style={{ flexShrink: 0, fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
-                    {s.cwd.split(/[\\/]/).filter(Boolean).pop()}
-                  </span>
-                </div>
-                {hit.snippet && (
-                  <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {renderSnippet(hit.snippet)}
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
+                      {card.name}
+                    </span>
                   </div>
-                )}
-              </button>
-            );
-          })}
+                  {card.snippet && (
+                    <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {card.snippet}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </>
+          )}
+          {/* 会话结果 */}
+          {results && results.length > 0 && (
+            <>
+              <div style={{ padding: "6px 12px 2px", fontSize: 10, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                {t("search.sessions")}
+              </div>
+              {results.map((hit) => {
+                const s = hit.session;
+                const title = s.name || s.firstMessage.slice(0, 50) || s.id.slice(0, 12);
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handlePick(s)}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      padding: "8px 12px",
+                      background: "none",
+                      border: "none",
+                      borderBottom: "1px solid var(--border)",
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                      {hit.titleMatch && (
+                        <span style={{ flexShrink: 0, fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--accent)", background: "var(--side-selected)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)", borderRadius: 3, padding: "0 4px", lineHeight: "15px" }}>
+                          {t("search.title")}
+                        </span>
+                      )}
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
+                        {title}
+                      </span>
+                      <span style={{ flexShrink: 0, fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+                        {s.cwd.split(/[\\/]/).filter(Boolean).pop()}
+                      </span>
+                    </div>
+                    {hit.snippet && (
+                      <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {renderSnippet(hit.snippet)}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -286,7 +363,7 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
                 {t("sidebar.cancel")}
               </button>
             </div>
-            {query.trim() && resultsPanel(results, indexing)}
+            {query.trim() && resultsPanel(results, taskCards, indexing)}
           </div>,
           document.body,
         )}
@@ -340,7 +417,7 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
       </div>
       {open && pos && createPortal(
         <div style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 520 }}>
-          {resultsPanel(results, indexing)}
+          {resultsPanel(results, taskCards, indexing)}
         </div>,
         document.body,
       )}

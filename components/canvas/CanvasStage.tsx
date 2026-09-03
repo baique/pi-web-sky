@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlow, Background, Controls, MiniMap, useReactFlow, type NodeTypes, type OnConnect, BackgroundVariant, type Node, type Viewport } from "@xyflow/react";
+import { computeSnap, type SnapResult } from "@/lib/board-align";
 import "@xyflow/react/dist/style.css";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
 import { useI18n } from "@/hooks/useI18n";
@@ -30,10 +31,12 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   const { t } = useI18n();
   // RF 坐标转换：屏幕坐标（clientX/Y）→ flow 坐标（节点 position）。
   // 新建节点/拖放落点都经它换算，保证放到“鼠标所指/视口中心”的位置。
-  const { screenToFlowPosition, setViewport } = useReactFlow();
+  const { screenToFlowPosition, setViewport, getNodes, getViewport } = useReactFlow();
   const [dragOver, setDragOver] = useState(false);
   // 右键菜单 state
   const [menu, setMenu] = useState<BoardMenuState | null>(null);
+  // 对齐参考线
+  const [snapLines, setSnapLines] = useState<SnapResult["lines"]>([]);
 
   // 画布位置记忆：synced 后设到 yjs 记住的位置
   useEffect(() => {
@@ -187,6 +190,29 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     e.preventDefault();
     setMenu({ x: e.clientX, y: e.clientY, node: null, edgeId: null });
   }, []);
+  // 对齐参考线 handlers
+  const onNodeDragStart = useCallback((_: MouseEvent | TouchEvent, node: Node) => {
+    setSnapLines([]);
+  }, []);
+
+  const onNodeDrag = useCallback((_: MouseEvent | TouchEvent, node: Node) => {
+    const snap = computeSnap(node.id, node.position, getNodes());
+    setSnapLines(snap.lines);
+  }, [getNodes]);
+
+  const onNodeDragStop = useCallback(
+    (_: MouseEvent | TouchEvent, node: Node) => {
+      const snap = computeSnap(node.id, node.position, getNodes());
+      if (snap.snapX !== null || snap.snapY !== null) {
+        board.updateNode?.(node.id, {
+          position: { x: snap.snapX ?? node.position.x, y: snap.snapY ?? node.position.y },
+        });
+      }
+      setSnapLines([]);
+    },
+    [board, getNodes],
+  );
+
   const onEdgeContextMenu = useCallback((e: React.MouseEvent, edge: { id: string }) => {
     e.preventDefault();
     // 找到 edge 的 data 判断派生边
@@ -199,6 +225,23 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   const addNodeAtViewport = useCallback((type: "sticky-note" | "task-card") => {
     addNodeAtViewportCenter(type);
   }, [addNodeAtViewportCenter]);
+
+  // Undo/Redo 键盘快捷键：Ctrl+Z / Ctrl+Shift+Z（仅在画布聚焦时生效）
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        board.undo?.();
+      } else if ((key === "z" && e.shiftKey) || key === "y") {
+        e.preventDefault();
+        board.redo?.();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [board]);
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
@@ -239,6 +282,9 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               onEdgeContextMenu={onEdgeContextMenu}
               onPaneClick={onPaneClick}
               onMoveEnd={onMoveEnd}
+              onNodeDragStart={onNodeDragStart}
+              onNodeDrag={onNodeDrag}
+              onNodeDragStop={onNodeDragStop}
               zoomOnDoubleClick={false}
               minZoom={0.1}
               maxZoom={2}
@@ -247,7 +293,6 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               proOptions={{ hideAttribution: false }} // 保留 attribution（MIT 合规，决策点③）
               defaultEdgeOptions={{ markerEnd: { type: "arrowclosed" }, style: { strokeWidth: 1.5, stroke: "#8b8fa3" } }}
             >
-              <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="color-mix(in srgb, var(--border) 45%, transparent)" />
               <Controls position="bottom-left" showInteractive={false} />
               <MiniMap
                 pannable
@@ -265,12 +310,36 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
                 nodeColor={() => "color-mix(in srgb, var(--accent) 50%, transparent)"}
                 nodeStrokeColor={() => "var(--accent)"}
               />
+              {snapLines.length > 0 && (() => {
+                const vp = getViewport();
+                return (
+                  <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", overflow: "visible", zIndex: 20, transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`, transformOrigin: "0 0" }}>
+                    {snapLines.map((line, i) => (
+                      <line
+                        key={i}
+                        className="board-align-line"
+                        x1={line.x1}
+                        y1={line.y1}
+                        x2={line.x2}
+                        y2={line.y2}
+                        stroke="var(--accent)"
+                        strokeWidth={1.2}
+                        strokeDasharray="4 3"
+                        opacity={0.7}
+                      />
+                    ))}
+                  </svg>
+                );
+              })()}
             </ReactFlow>
             {menu && <BoardContextMenu menu={menu} onClose={() => setMenu(null)} />}
             {/* 工具栏：便笺/任务（底部居中玻璃浮层）。点击=当前视口中心创建；拖拽=拖放进画布落点创建 */}
             <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 16, zIndex: 30, display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "var(--board-card-glass)", backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)" }}>
               <ToolbarBtn label="便笺" onClick={() => addNodeAtViewport("sticky-note")} onDragStart={(e) => onToolDragStart(e, "sticky-note")} />
               <ToolbarBtn label="任务" onClick={() => addNodeAtViewport("task-card")} onDragStart={(e) => onToolDragStart(e, "task-card")} />
+              <span style={{ width: 1, height: 18, background: "color-mix(in srgb, var(--border) 70%, transparent)", margin: "0 2px" }} />
+              <ToolbarBtn label="撤销" onClick={() => board.undo?.()} draggable={false} />
+              <ToolbarBtn label="重做" onClick={() => board.redo?.()} draggable={false} />
             </div>
           </BoardCanvasProvider>
         )}
@@ -279,11 +348,11 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   );
 }
 
-function ToolbarBtn({ label, onClick, onDragStart }: { label: string; onClick: () => void; onDragStart: (e: React.DragEvent) => void }) {
+function ToolbarBtn({ label, onClick, onDragStart, draggable: draggableProp = true }: { label: string; onClick: () => void; onDragStart?: (e: React.DragEvent) => void; draggable?: boolean }) {
   return (
     <button
       type="button"
-      draggable
+      draggable={draggableProp}
       title={label}
       aria-label={label}
       onClick={onClick}

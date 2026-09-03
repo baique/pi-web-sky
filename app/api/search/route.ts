@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { searchSessions } from "@/lib/session-search";
+import { searchTaskCardsAndSessions } from "@/lib/search";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,9 @@ export async function GET(req: Request) {
     const q = params.get("q") ?? "";
     const rawLimit = Number(params.get("limit"));
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.round(rawLimit) : 30;
-    const { indexing, results } = await searchSessions(q, limit);
+
+    const { indexing, results } = await searchTaskCardsAndSessions(q, limit);
+
     return NextResponse.json(
       { indexing, results },
       { headers: { "Cache-Control": "no-store" } },

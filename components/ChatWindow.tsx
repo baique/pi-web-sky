@@ -390,6 +390,15 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   const loadingOlderRef = useRef(false);
   // Drives the back-to-latest button in the ChatInput toolbar row.
   const [atBottom, setAtBottom] = useState(true);
+  // 防抖：避免流式输出时 atBottom 频繁变化导致置顶按钮闪烁
+  const atBottomDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setAtBottomDebounced = useCallback((value: boolean) => {
+    if (atBottomDebounceRef.current) clearTimeout(atBottomDebounceRef.current);
+    atBottomDebounceRef.current = setTimeout(() => {
+      setAtBottom(value);
+      atBottomDebounceRef.current = null;
+    }, 150);
+  }, []);
 
   // Pinned message windows — floating snapshot copies of individual bubbles.
   // Session-scoped and ephemeral: live in React state only, cleared on refresh
@@ -879,7 +888,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
           className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 pb-[4px] mb-[4px] [scrollbar-width:none]"
           onScroll={(e) => {
             const el = e.currentTarget;
-            setAtBottom(isScrollAtTail(el.scrollTop, el.clientHeight, el.scrollHeight));
+            setAtBottomDebounced(isScrollAtTail(el.scrollTop, el.clientHeight, el.scrollHeight));
           }}
         >
           <div style={{ minWidth: 0, padding: isMobile ? `0 ${CHAT_COLUMN_PADDING}px` : `0 ${CHAT_MESSAGE_RIGHT_PADDING}px 0 ${CHAT_COLUMN_PADDING}px` }}>
