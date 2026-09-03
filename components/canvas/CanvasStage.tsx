@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReactFlow, Background, Controls, MiniMap, useReactFlow, type NodeTypes, type OnConnect, BackgroundVariant, type Node } from "@xyflow/react";
+import { ReactFlow, Controls, MiniMap, useReactFlow, type NodeTypes, type OnConnect, type Node, type Viewport } from "@xyflow/react";
+import { computeSnap, type SnapResult } from "@/lib/board-align";
 import "@xyflow/react/dist/style.css";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
 import { useI18n } from "@/hooks/useI18n";
@@ -30,10 +31,12 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   const { t } = useI18n();
   // RF 坐标转换：屏幕坐标（clientX/Y）→ flow 坐标（节点 position）。
   // 新建节点/拖放落点都经它换算，保证放到“鼠标所指/视口中心”的位置。
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, getNodes, getViewport } = useReactFlow();
   const [dragOver, setDragOver] = useState(false);
   // 右键菜单 state
   const [menu, setMenu] = useState<BoardMenuState | null>(null);
+  // 对齐参考线
+  const [snapLines, setSnapLines] = useState<SnapResult["lines"]>([]);
 
   // BoardCanvasOps：把 Y.Doc 写操作暴露给节点组件
   const ops = useMemo<BoardCanvasOps>(() => ({
@@ -176,6 +179,29 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     e.preventDefault();
     setMenu({ x: e.clientX, y: e.clientY, node: null, edgeId: null });
   }, []);
+  // 对齐参考线 handlers
+  const onNodeDragStart = useCallback((_: MouseEvent | TouchEvent, node: Node) => {
+    setSnapLines([]);
+  }, []);
+
+  const onNodeDrag = useCallback((_: MouseEvent | TouchEvent, node: Node) => {
+    const snap = computeSnap(node.id, node.position, getNodes());
+    setSnapLines(snap.lines);
+  }, [getNodes]);
+
+  const onNodeDragStop = useCallback(
+    (_: MouseEvent | TouchEvent, node: Node) => {
+      const snap = computeSnap(node.id, node.position, getNodes());
+      if (snap.snapX !== null || snap.snapY !== null) {
+        board.updateNode?.(node.id, {
+          position: { x: snap.snapX ?? node.position.x, y: snap.snapY ?? node.position.y },
+        });
+      }
+      setSnapLines([]);
+    },
+    [board, getNodes],
+  );
+
   const onEdgeContextMenu = useCallback((e: React.MouseEvent, edge: { id: string }) => {
     e.preventDefault();
     // 找到 edge 的 data 判断派生边
@@ -244,6 +270,9 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               onPaneContextMenu={onPaneContextMenu}
               onEdgeContextMenu={onEdgeContextMenu}
               onPaneClick={onPaneClick}
+              onNodeDragStart={onNodeDragStart}
+              onNodeDrag={onNodeDrag}
+              onNodeDragStop={onNodeDragStop}
               zoomOnDoubleClick={false}
               fitView
               fitViewOptions={{ padding: 0.2 }}
@@ -254,7 +283,6 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               proOptions={{ hideAttribution: false }} // 保留 attribution（MIT 合规，决策点③）
               defaultEdgeOptions={{ markerEnd: { type: "arrowclosed" }, style: { strokeWidth: 1.5, stroke: "#8b8fa3" } }}
             >
-              <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="color-mix(in srgb, var(--border) 45%, transparent)" />
               <Controls position="bottom-left" showInteractive={false} />
               <MiniMap
                 pannable
@@ -272,6 +300,27 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
                 nodeColor={() => "color-mix(in srgb, var(--accent) 50%, transparent)"}
                 nodeStrokeColor={() => "var(--accent)"}
               />
+              {snapLines.length > 0 && (() => {
+                const vp = getViewport();
+                return (
+                  <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", overflow: "visible", zIndex: 20, transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})` }}>
+                    {snapLines.map((line, i) => (
+                      <line
+                        key={i}
+                        className="board-align-line"
+                        x1={line.x1}
+                        y1={line.y1}
+                        x2={line.x2}
+                        y2={line.y2}
+                        stroke="var(--accent)"
+                        strokeWidth={1.2}
+                        strokeDasharray="4 3"
+                        opacity={0.7}
+                      />
+                    ))}
+                  </svg>
+                );
+              })()}
             </ReactFlow>
             {menu && <BoardContextMenu menu={menu} onClose={() => setMenu(null)} />}
             {/* 工具栏：便笺/任务（底部居中玻璃浮层）。点击=当前视口中心创建；拖拽=拖放进画布落点创建 */}
