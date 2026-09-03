@@ -12,12 +12,7 @@ const { setDbForTesting, getDb } = await jiti.import("@/lib/sqlite-db.ts");
 const { createCard } = await jiti.import("@/lib/task-card-store.ts");
 const { GET: listBoards, POST: createBoard } = await jiti.import("./route.ts");
 const { GET: getBoard, PATCH: patchBoard, DELETE: deleteBoard } = await jiti.import("./[id]/route.ts");
-const { GET: getCanvas, PUT: putCanvas } = await jiti.import("./[id]/canvas/route.ts");
-const { POST: addNode } = await jiti.import("./[id]/nodes/route.ts");
 const { POST: purgeOrphans } = await jiti.import("./purge-orphans/route.ts");
-const { GET: getNode, PATCH: patchNode, DELETE: deleteNode } = await jiti.import("./[id]/nodes/[nid]/route.ts");
-const { POST: addEdge } = await jiti.import("./[id]/edges/route.ts");
-const { DELETE: deleteEdge } = await jiti.import("./[id]/edges/[eid]/route.ts");
 const { PUT: reorderBoards } = await jiti.import("./reorder/route.ts");
 
 const PROJECT = "proj-b";
@@ -148,125 +143,19 @@ test("reorder API: global reorder without projectKey + rollback", async () => {
   assert.deepEqual(afterBoards.map((x) => x.id), [C.id, A.id, B.id]);
 });
 
-test("canvas API: full replace + node/edge sub-resources", async () => {
-  freshDb();
-  const created = await createBoard(jsonReq("http://localhost/api/boards", "POST", { projectKey: PROJECT, name: "b" }));
-  const board = (await created.json()).board;
-
-  // PUT canvas on system board -> 403
-  const sysPut = await putCanvas(jsonReq("http://localhost/api/boards/__running__/canvas", "PUT", { nodes: [] }), {
-    params: Promise.resolve({ id: "__running__" }),
-  });
-  assert.equal(sysPut.status, 403);
-
-  // PUT canvas with nodes/edges/view
-  const node1 = {
-    id: "n1", boardId: board.id, kind: "session", refId: "s1",
-    x: 10, y: 20, w: 280, h: 120, expanded: false, props: {},
-    created: 1, updated: 1,
-  };
-  const node2 = {
-    id: "n2", boardId: board.id, kind: "session", refId: "s2",
-    x: 400, y: 20, w: 280, h: 120, expanded: false, props: {},
-    created: 2, updated: 2,
-  };
-  const edge = { id: "e1", boardId: board.id, fromId: "n1", toId: "n2", label: null, color: null, dashed: false, created: 3, updated: 3 };
-  const putRes = await putCanvas(jsonReq("http://localhost/api/boards/x/canvas", "PUT", {
-    nodes: [node1, node2],
-    edges: [edge],
-    view: { boardId: board.id, cameraX: -10, cameraY: -5, cameraZ: 0.9, updated: 4 },
-  }), { params: Promise.resolve({ id: board.id }) });
-  assert.equal(putRes.status, 200);
-
-  const canvasRes = await getCanvas(new Request("http://localhost/api/boards/x/canvas"), {
-    params: Promise.resolve({ id: board.id }),
-  });
-  const canvas = await canvasRes.json();
-  assert.equal(canvas.nodes.length, 2);
-  assert.equal(canvas.edges.length, 1);
-  assert.equal(canvas.view.cameraZ, 0.9);
-
-  // node sub-resource
-  const addRes = await addNode(jsonReq("http://localhost/api/boards/x/nodes", "POST", { refId: "s3", x: 5, y: 5, expanded: true }), {
-    params: Promise.resolve({ id: board.id }),
-  });
-  assert.equal(addRes.status, 201);
-  const added = (await addRes.json()).node;
-  assert.equal(added.expanded, true);
-
-  const patchRes = await patchNode(jsonReq("http://localhost/x", "PATCH", { x: 99, props: { color: "#f00" } }), {
-    params: Promise.resolve({ id: board.id, nid: added.id }),
-  });
-  assert.equal(patchRes.status, 200);
-  const patched = (await patchRes.json()).node;
-  assert.equal(patched.x, 99);
-  assert.deepEqual(patched.props, { color: "#f00" });
-
-  // PATCH 支持定向写入 refId（draft 卡转正）+ 返回 boards.updated（乐观锁基线）
-  const patchRefIdRes = await patchNode(jsonReq("http://localhost/x", "PATCH", { refId: "session-real-9" }), {
-    params: Promise.resolve({ id: board.id, nid: added.id }),
-  });
-  assert.equal(patchRefIdRes.status, 200);
-  const patchRefIdBody = await patchRefIdRes.json();
-  assert.equal(patchRefIdBody.node.refId, "session-real-9");
-  assert.equal(typeof patchRefIdBody.updated, "number");
-  // 缺省 refId 时保持不变（移动卡片不丢绑定）
-  const patchMoveRes = await patchNode(jsonReq("http://localhost/x", "PATCH", { x: 120 }), {
-    params: Promise.resolve({ id: board.id, nid: added.id }),
-  });
-  assert.equal((await patchMoveRes.json()).node.refId, "session-real-9");
-
-  // GET 按全局 nodeId 读节点（未转正卡轮询 ref_id 用；跨 board 前缀仍能命中）
-  const getRes = await getNode(new Request("http://localhost/x"), {
-    params: Promise.resolve({ id: board.id, nid: added.id }),
-  });
-  assert.equal(getRes.status, 200);
-  assert.equal((await getRes.json()).node.refId, "session-real-9");
-  const get404 = await getNode(new Request("http://localhost/x"), {
-    params: Promise.resolve({ id: board.id, nid: "no-such" }),
-  });
-  assert.equal(get404.status, 404);
-
-  // edge sub-resource
-  const edgeRes = await addEdge(jsonReq("http://localhost/api/boards/x/edges", "POST", { fromId: added.id, toId: "n1", dashed: true, label: "dep" }), {
-    params: Promise.resolve({ id: board.id }),
-  });
-  assert.equal(edgeRes.status, 201);
-  const addedEdge = (await edgeRes.json()).edge;
-  assert.equal(addedEdge.dashed, true);
-
-  const delEdgeRes = await deleteEdge(new Request("http://localhost/x", { method: "DELETE" }), {
-    params: Promise.resolve({ id: board.id, eid: addedEdge.id }),
-  });
-  assert.equal(delEdgeRes.status, 200);
-
-  // delete node cascades its edges
-  const delNodeRes = await deleteNode(new Request("http://localhost/x", { method: "DELETE" }), {
-    params: Promise.resolve({ id: board.id, nid: added.id }),
-  });
-  assert.equal(delNodeRes.status, 200);
-  const after = await getCanvas(new Request("http://localhost/api/boards/x/canvas"), {
-    params: Promise.resolve({ id: board.id }),
-  });
-  const afterCanvas = await after.json();
-  assert.equal(afterCanvas.nodes.length, 2);
-  assert.equal(afterCanvas.edges.length, 1); // only e1 remains
-});
-
 test("purge-orphans API: 删除指向已删会话的孤儿卡片", async () => {
   freshDb();
   const created = await createBoard(jsonReq("http://localhost/api/boards", "POST", { projectKey: PROJECT, name: "purge" }));
   const { board } = await created.json();
+  const now = Date.now();
+  const insertNode = (refId, x) =>
+    getDb()
+      .prepare("INSERT INTO board_nodes (id, board_id, kind, ref_id, x, y, w, h, expanded, props, created, updated) VALUES (?, ?, 'session', ?, ?, 0, 280, 120, 0, '{}', ?, ?)")
+      .run("n-" + Math.random().toString(36).slice(2), board.id, refId, x, now, now);
   // 孤儿节点（会话 id 随机，文件系统必不存在）
-  const orphanRes = await addNode(jsonReq("http://localhost/api/boards/x/nodes", "POST", { refId: "purge-nonexistent-" + Math.random().toString(36).slice(2), x: 0, y: 0 }), {
-    params: Promise.resolve({ id: board.id }),
-  });
-  assert.equal(orphanRes.status, 201);
+  insertNode("purge-nonexistent-" + Math.random().toString(36).slice(2), 0);
   // draft 节点（refId 为空）保留
-  const draftRes = await addNode(jsonReq("http://localhost/api/boards/x/nodes", "POST", { refId: null, x: 100, y: 0 }), {
-    params: Promise.resolve({ id: board.id }),
-  });
-  assert.equal(draftRes.status, 201);
+  insertNode(null, 100);
 
   const purgeRes = await purgeOrphans(new Request("http://localhost/api/boards/purge-orphans", { method: "POST" }));
   assert.equal(purgeRes.status, 200);
@@ -274,12 +163,9 @@ test("purge-orphans API: 删除指向已删会话的孤儿卡片", async () => {
   assert.equal(body.deletedNodes, 1);
   assert.deepEqual(body.boards, [board.id]);
 
-  const canvas = await getCanvas(new Request("http://localhost/api/boards/x/canvas"), {
-    params: Promise.resolve({ id: board.id }),
-  });
-  const canvasBody = await canvas.json();
-  assert.equal(canvasBody.nodes.length, 1); // draft 保留
-  assert.equal(canvasBody.nodes[0].refId, null);
+  const remaining = getDb().prepare("SELECT * FROM board_nodes WHERE board_id = ?").all(board.id);
+  assert.equal(remaining.length, 1); // draft 保留
+  assert.equal(remaining[0].ref_id, null);
 });
 
 test("purge-orphans API: 删除指向已删任务卡的 taskcard 孤儿节点，保留有效卡节点", async () => {
@@ -301,10 +187,7 @@ test("purge-orphans API: 删除指向已删任务卡的 taskcard 孤儿节点，
   const body = await purgeRes.json();
   assert.equal(body.deletedNodes, 1); // 只删 taskcard 孤儿，有效卡节点保留
 
-  const canvas = await getCanvas(new Request("http://localhost/api/boards/x/canvas"), {
-    params: Promise.resolve({ id: board.id }),
-  });
-  const canvasBody = await canvas.json();
-  assert.equal(canvasBody.nodes.length, 1);
-  assert.equal(canvasBody.nodes[0].refId, card.id);
+  const remaining = getDb().prepare("SELECT * FROM board_nodes WHERE board_id = ?").all(board.id);
+  assert.equal(remaining.length, 1);
+  assert.equal(remaining[0].ref_id, card.id);
 });
