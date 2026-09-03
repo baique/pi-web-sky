@@ -15,7 +15,7 @@ import { BoardSearch } from "./BoardSearch";
 import { BoardTopbar } from "./BoardTopbar";
 import { SchedulerPanel } from "./SchedulerPanel";
 
-// ssr:false — tldraw 依赖浏览器环境，仅进入看板模式时下载（~1MB）。
+// ssr:false — 画布依赖浏览器环境，仅进入看板模式时下载。
 // 加载占位样式与 CanvasStage 数据同步段完全一致（深色半透明 + 白字 + spinner）。
 const CanvasStage = dynamic(() => import("./CanvasStage").then((m) => m.CanvasStage), {
   ssr: false,
@@ -85,7 +85,7 @@ export function SessionCanvas({
   // 看板搜索框 input ref：Ctrl+F 聚焦目标（仅看板模式生效）
   const searchBoxRef = useRef<HTMLInputElement>(null);
   // Ctrl+F / Cmd+F：聚焦看板搜索框（preventDefault 拦浏览器查找栏）。
-  // 捕获阶段挂载，确保先于 tldraw 拿到事件；仅看板模式（本组件挂载期间）生效。
+  // 捕获阶段挂载，确保先于画布拿到事件；仅看板模式（本组件挂载期间）生效。
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "f") return;

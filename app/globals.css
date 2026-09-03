@@ -371,7 +371,7 @@ body {
   -webkit-backdrop-filter: blur(var(--glass-blur-popover)) saturate(var(--glass-saturate));
   transform: translateZ(0);
 }
-/* 看板画布内：tldraw transform 容器中 background-attachment: fixed 失效，
+/* 看板画布内：RF viewport transform 容器中 background-attachment: fixed 失效，
    .glass-canvas / .extension-status-shelf 会把壁纸按自身盒铺满，变成
    「每个元素一块独立壁纸」；统一禁用壁纸图，只留 --frame-glass 色层，
    透出卡片自身的局部模糊壁纸层（观感与气泡一致，零额外成本）。 */
@@ -2208,7 +2208,7 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
    尽力保留。选择器限定在 .board-workbench 内，不影响普通聊天底栏。 */
 .board-workbench .bottom-band {
   height: 36px;
-  /* 卡片外壳（.tl-html-container）已有 overflow:hidden + border-radius 18，会兜底裁剪底栏圆角。
+  /* 卡片外壳（.board-node-shell）已有 overflow:hidden + border-radius 18，会兜底裁剪底栏圆角。
      这里不能自己 overflow:hidden / clip-path：两者都会裁剪向上弹出的 widget 面板（pi-todo）。
      overflow: visible 让面板穿透，圆角交给卡片外壳处理。 */
   overflow: visible;
@@ -2273,37 +2273,10 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
    关键：两态不改变文档流高度（padding/高度恒定）——
    否则头部占位变化会反哺"超长"判定，在高度恰为一屏时形成反馈环闪烁。 */
 
-/* === tldraw 看板画布（SessionCanvas）===
-   tldraw License 要求不得干扰其 License Key 强制执行、不得移除其通知；
-   水印（含未授权状态水印）须保持可见，不得隐藏。 */
-
-/* === tldraw 画布玻璃化（SessionCanvas）===
+/* === 看板画布玻璃化（SessionCanvas）===
    画布背景透明，露出页面背景（壁纸/纯色），与 AI 消息气泡玻璃观感一致。
-   卡片/工具栏各自用 --panel-glass / --frame-glass，不在此重复叠 backdrop-filter。 */
-.tl-canvas { background: transparent !important; }
-.tl-container { background: transparent !important; }
-/* 最内层画布背景：tldraw 默认涂 --tl-color-background（不透明白），必须清掉才能透出壁纸 */
-.tl-background { background: transparent !important; }
-
-/* === tldraw 文本选中修复（SessionCanvas / StickyNote / 工作台）===
-   tldraw 自带 `.tl-container, .tl-container * { user-select: none }`，画布内所有
-   自定义 shape 的 HTML 内容（工作台消息区 / 便笺 markdown / 卡片摘要）都被禁选。
-   只放行 input/textarea/contenteditable。这里精确恢复可读内容区的文本选中：
-   - 会话卡展开工作台内全部内容（消息/工具/代码块）
-   - 便笺非编辑态 markdown 内容
-   不恢复的部分（保持 none，拖拽/缩放不误触）：
-   - 卡片外壳/标题栏/收合卡摘要（这些是画布拖拽区，选中文本会挡拖拽）
-   - 便笺外壳与编辑态 textarea（textarea 自带 user-select:text，无需重复） */
-.tl-container .board-workbench,
-.tl-container .board-workbench * {
-  -webkit-user-select: text;
-  user-select: text;
-}
-.tl-container [data-testid^="sticky-note"] .markdown-body,
-.tl-container [data-testid^="sticky-note"] .markdown-body * {
-  -webkit-user-select: text;
-  user-select: text;
-}
+   卡片/工具栏各自用 --panel-glass / --frame-glass，不在此重复叠 backdrop-filter。
+   具体透明化由 `[data-glass-scope="board"] .react-flow` 的 --xy-background-color 处理。 */
 
 /* === 看板玻璃 token（SessionCanvas）===
    卡片磨砂玻璃 alpha 跟随 --bubble-alpha（透明度滑块），blur 12px（略低于气泡 18px）。

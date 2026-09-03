@@ -50,9 +50,9 @@ if (!loopbackHostnames.has(hostname)) {
   }
 }
 
-// 直接跑自定义 server（server.mjs）：HTTP 交 Next，WebSocket upgrade 分流到 tldraw
-// sync 房间（/connect/:boardId）。不能只跑 `next start`——那样 WS 后台不启动，
-// 看板永远 loading（0.1.35 生产 bug 根因）。
+// 直接跑自定义 server（server.mjs）：HTTP 交 Next，WebSocket upgrade 分流到
+// 内嵌 yjs 协同房间（/connect，每看板一个 Y.Doc）。不能只跑 `next start`——那样
+// WS 后台不启动，看板永远 loading（0.1.35 生产 bug 根因）。
 const child = spawn(process.execPath, [serverEntry], {
   cwd: pkgDir,
   stdio: ["inherit", "pipe", "inherit"],

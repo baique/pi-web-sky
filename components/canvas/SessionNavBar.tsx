@@ -71,9 +71,7 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
   // 面板 portal 到 body 不受画布 zoom，用布局宽会在 zoom≠1 时比标题栏宽（超宽）或窄。
   const getPanelWidth = useCallback(() => {
     const tb = navRef.current?.closest("[data-session-titlebar]");
-    const w = tb?.getBoundingClientRect().width;
-    if (w) return w;
-    return navRef.current?.closest(".tl-html-container")?.getBoundingClientRect().width ?? 300;
+    return tb?.getBoundingClientRect().width ?? 300;
   }, []);
 
   // 空白处点击 / Escape 关闭所有弹层（与 AppShell 顶栏行为一致）

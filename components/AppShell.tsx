@@ -17,8 +17,8 @@ import { PluginsConfig } from "./PluginsConfig";
 import { McpConfigPanel } from "./McpConfigPanel";
 // ssr:false — xterm.js touches browser globals at import time.
 const TerminalPanel = dynamic(() => import("./TerminalPanel").then((m) => m.TerminalPanel), { ssr: false });
-// ssr:false — tldraw 依赖浏览器环境，仅进入看板模式时下载（~1MB）。
-// 外层 dynamic 提供 loading 占位（避免首帧纯白），内层 CanvasStage 再按需加载 tldraw。
+// ssr:false — 画布依赖浏览器环境，仅进入看板模式时下载（~1MB）。
+// 外层 dynamic 提供 loading 占位（避免首帧纯白），内层 CanvasStage 再按需加载画布。
 const SessionCanvas = dynamic(() => import("./canvas/SessionCanvas").then((m) => m.SessionCanvas), {
   ssr: false,
   loading: () => (
