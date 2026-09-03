@@ -266,40 +266,39 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, isCreating]);
 
-  // 双击切换展开/收合（展开尺寸固定参考旧版：760×(600+20)，两态不记忆——
-  // resize 曾长期失效导致记忆字段全是脏值（380×240 被记成展开尺寸），不可信）
+  // 双击切换展开/收合（两态手动尺寸保留：collapsedW/H ↔ expandedW/H）。
+  // 记忆字段做有效性过滤：旧版 resize 失效时曾把收合默认尺寸写进展开记忆
+  // （380×240 被记成展开尺寸），脏值 < 对应态 NodeResizer 最小值，过滤后回退默认。
   const toggleExpand = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
+    const curW = w;
+    const curH = h;
     if (expanded) {
+      // 展开 → 收合：记住当前展开尺寸，恢复记忆的收合尺寸（无/脏则回默认）
+      const ok = data.collapsedW >= FORM_W && data.collapsedH >= COLLAPSED_MIN_H;
+      const nw = ok ? data.collapsedW : FORM_W;
+      const nh = ok ? data.collapsedH : FORM_H;
       updateNode(id, {
-        data: {
-          ...data,
-          expanded: false,
-          expandedW: EXPANDED_W, expandedH: EXPANDED_H,
-          w: FORM_W, h: FORM_H,
-          collapsedW: FORM_W, collapsedH: FORM_H,
-        },
+        data: { ...data, expanded: false, expandedW: curW, expandedH: curH, w: nw, h: nh },
         // 尺寸三处对齐：顶层 width/height（NodeResizer 拖过会残留，RF 优先读它）
         // + style（RF 备选）+ data.w/h（镜像）。只改 style 会被顶层残留值屏蔽。
-        width: FORM_W,
-        height: FORM_H,
-        style: { width: FORM_W, height: FORM_H },
+        width: nw,
+        height: nh,
+        style: { width: nw, height: nh },
       });
     } else {
+      // 收合 → 展开：记住当前收合尺寸，恢复记忆的展开尺寸（无/脏则回默认）
+      const ok = data.expandedW >= 480 && data.expandedH >= 400;
+      const nw = ok ? data.expandedW : EXPANDED_W;
+      const nh = ok ? data.expandedH : EXPANDED_H;
       updateNode(id, {
-        data: {
-          ...data,
-          expanded: true,
-          expandedW: EXPANDED_W, expandedH: EXPANDED_H,
-          w: EXPANDED_W, h: EXPANDED_H,
-          collapsedW: FORM_W, collapsedH: FORM_H,
-        },
-        width: EXPANDED_W,
-        height: EXPANDED_H,
-        style: { width: EXPANDED_W, height: EXPANDED_H },
+        data: { ...data, expanded: true, collapsedW: curW, collapsedH: curH, w: nw, h: nh },
+        width: nw,
+        height: nh,
+        style: { width: nw, height: nh },
       });
     }
-  }, [id, data, expanded, updateNode]);
+  }, [id, data, expanded, w, h, updateNode]);
 
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
     updateNode(id, { data: { ...data, w: params.width, h: params.height } });
