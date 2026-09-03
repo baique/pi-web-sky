@@ -32,6 +32,7 @@
 | publish 报私有包错误 | 忘了 `--access public` | 用 `npm publish --access public` |
 | `npm view` 版本比本地大 | 之前发布未提交 | 先同步 git（按版本号补提交），再继续 |
 | 发布后 `npm run dev` 异常 | build 污染了 `.next` | 重启 dev，或删除 `.next` 后重跑 dev |
+| `next build` 报 `Multiple bundler flags set: TURBOPACK=auto, --webpack` | 进程环境带了 `TURBOPACK=auto`（npm exec / 某些 shell 注入），与 build 脚本的 `--webpack` 冲突 | 用 `env -u TURBOPACK npm run release` 重跑；重跑前先 `git checkout -- package.json package-lock.json` 把已 patch 的版本号还原，避免留半次发布的脏状态 |
 | GitHub Release 失败，日志报 `no matches found for ''`（老版 gh 报 `stat 错误`） | 工作流 env 变量大小写不一致，`gh release create` 收到空文件参数 | release.yml 已改为文件名直接由 `GITHUB_REF_NAME` 拼出（`pi-web-sky-${GITHUB_REF_NAME}.tar.gz`），不再跨步骤传环境变量；勿回退为 env 传递写法 |
 | workflow 修改后重跑仍失败 | GitHub Actions rerun 用的是触发时的旧 workflow 快照 | 不要 rerun；重打 tag 重新推送触发（`git push origin v0.1.x --force`，或删 tag 重打重推） |
 | 推送 tag 被拒（远端已存在同名 tag） | 同名 tag 已存在 | 确认意图后 `git push origin v0.1.x --force`；正常流程不应发生 |
