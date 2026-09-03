@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NodeResizer, Handle, Position, type NodeProps } from "@xyflow/react";
+import { NodeResizer, Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
+import { computeResizeSnap } from "@/lib/board-align";
 import ReactMarkdown from "react-markdown";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -49,7 +50,7 @@ export const BADGE_NAMES: Record<string, string> = {
 };
 
 function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & { data: StickyNoteData }) {
-  const { updateNode, deleteNode } = useBoardCanvasOps();
+  const { updateNode, deleteNode, setSnapLines } = useBoardCanvasOps();
   const { highlightId } = useBoardSearch();
   const isHighlighted = highlightId === id;
   const w = width ?? 380;
@@ -157,10 +158,18 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   // 非编辑态内容交互：阻止事件冒泡到 RF（避免触发节点拖动/画布平移）
   const isolateContent = useCallback((e: React.PointerEvent) => { if (e.button === 0) e.stopPropagation(); }, []);
 
-  // resize：写回 style + data.w/h（NodeResizer 已改 style，这里同步 data）
+  // resize：写回 style + data.w/h + 对齐参考线吸附
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
-    updateNode(id, { data: { ...data, w: params.width, h: params.height } });
-  }, [id, data, updateNode]);
+    const { getNodes } = useReactFlow();
+    const nodes = getNodes();
+    const self = nodes.find((n) => n.id === id);
+    const pos = self?.position ?? { x: 0, y: 0 };
+    const snap = computeResizeSnap(id, pos, params.width, params.height, nodes);
+    setSnapLines(snap.lines);
+    const finalW = snap.snapW ?? params.width;
+    const finalH = snap.snapH ?? params.height;
+    updateNode(id, { data: { ...data, w: finalW, h: finalH } });
+  }, [id, data, updateNode, setSnapLines]);
 
   return (
     <>

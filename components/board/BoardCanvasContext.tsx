@@ -6,6 +6,7 @@
  */
 import { createContext, useContext } from "react";
 import type { Node, Edge } from "@xyflow/react";
+import type { SnapResult } from "@/lib/board-align";
 
 export interface BoardCanvasOps {
   /** 更新节点（部分 data/style/position） */
@@ -20,6 +21,8 @@ export interface BoardCanvasOps {
   addEdge: (edge: Edge) => void;
   /** 新增节点（新建便笺/任务卡等） */
   addNode: (node: Node) => void;
+  /** 设置对齐参考线（resize/drag 时显示） */
+  setSnapLines: (lines: SnapResult["lines"]) => void;
   /** 当前看板 id */
   boardId: string | null;
 }
@@ -32,6 +35,6 @@ export function BoardCanvasProvider({ value, children }: { value: BoardCanvasOps
 
 export function useBoardCanvasOps(): BoardCanvasOps {
   const ctx = useContext(BoardCanvasContext);
-  if (!ctx) return { updateNode: () => {}, deleteNode: () => {}, normalizeNodeId: () => {}, deleteEdge: () => {}, addEdge: () => {}, addNode: () => {}, boardId: null };
+  if (!ctx) return { updateNode: () => {}, deleteNode: () => {}, normalizeNodeId: () => {}, deleteEdge: () => {}, addEdge: () => {}, addNode: () => {}, setSnapLines: () => {}, boardId: null };
   return ctx;
 }
