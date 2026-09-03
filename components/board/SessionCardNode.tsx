@@ -145,7 +145,9 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
         isVisible={selected}
         minWidth={expanded ? 600 : CARD_W}
         minHeight={expanded ? 500 : CARD_H}
+        onResizeStart={onResizeStart}
         onResize={onResize}
+        onResizeEnd={onResizeEnd}
         keepAspectRatio={false}
       />
 

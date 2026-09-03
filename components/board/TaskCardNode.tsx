@@ -317,7 +317,20 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     }
   }, [id, data, expanded, w, h, updateNode]);
 
+  // resize：写回 data.w/h + 对齐参考线吸附
+  // resizingRef 守卫：停止后 yjs 尺寸回灌可能再触发 onResize，不得再画线（抬起线不消失）
+  const resizingRef = useRef(false);
+  const onResizeStart = useCallback(() => {
+    resizingRef.current = true;
+    setSnapLines([]);
+  }, [setSnapLines]);
+  const onResizeEnd = useCallback(() => {
+    resizingRef.current = false;
+    setSnapLines([]);
+    requestAnimationFrame(() => setSnapLines([]));
+  }, [setSnapLines]);
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
+    if (!resizingRef.current) return;
     const nodes = getNodes();
     const self = nodes.find((n) => n.id === id);
     const pos = self?.position ?? { x: 0, y: 0 };
@@ -393,7 +406,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
           卡根 overflow:hidden 会裁掉外扩的 resize 角柄 → 点击落到卡根变成拖卡，
           resize 永远无法触发。放外面后手柄可正常外扩/命中。
           直线隐藏（四边直线无法圆角）：选中态边线由卡根圆角 accent 边框呈现。 */}
-      <NodeResizer isVisible={selected} minWidth={expanded ? 480 : FORM_W} minHeight={expanded ? 400 : COLLAPSED_MIN_H} onResize={onResize} onResizeEnd={() => setSnapLines([])} keepAspectRatio={false} />
+      <NodeResizer isVisible={selected} minWidth={expanded ? 480 : FORM_W} minHeight={expanded ? 400 : COLLAPSED_MIN_H} onResizeStart={onResizeStart} onResize={onResize} onResizeEnd={onResizeEnd} keepAspectRatio={false} />
       <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <div

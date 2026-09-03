@@ -192,17 +192,23 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     setMenu({ x: e.clientX, y: e.clientY, node: null, edgeId: null });
   }, []);
   // 对齐参考线 handlers
+  // draggingRef：守卫 onNodeDrag——拖拽停止后（含吸附修正引发的受控位置更新）
+  // 迟到的 onNodeDrag 不得再画线，否则会把刚清空的参考线又画回来（抬起不消失）。
+  const draggingRef = useRef(false);
   const onNodeDragStart = useCallback((_: MouseEvent | TouchEvent, node: Node) => {
+    draggingRef.current = true;
     setSnapLines([]);
   }, []);
 
   const onNodeDrag = useCallback((_: MouseEvent | TouchEvent, node: Node) => {
+    if (!draggingRef.current) return;
     const snap = computeSnap(node.id, node.position, getNodes());
     setSnapLines(snap.lines);
   }, [getNodes]);
 
   const onNodeDragStop = useCallback(
     (_: MouseEvent | TouchEvent, node: Node) => {
+      draggingRef.current = false;
       const snap = computeSnap(node.id, node.position, getNodes());
       if (snap.snapX !== null || snap.snapY !== null) {
         board.updateNode?.(node.id, {
@@ -210,10 +216,12 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
         });
       }
       setSnapLines([]);
+      // 吸附修正后 yjs 同步可能再次触发 onNodeDrag（见 draggingRef 注释），
+      // rAF 兜底再清一次，确保参考线在本次事件循环后一定消失。
+      requestAnimationFrame(() => setSnapLines([]));
     },
     [board, getNodes],
   );
-
   const onEdgeContextMenu = useCallback((e: React.MouseEvent, edge: { id: string }) => {
     e.preventDefault();
     // 找到 edge 的 data 判断派生边

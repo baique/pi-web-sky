@@ -160,7 +160,19 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   const isolateContent = useCallback((e: React.PointerEvent) => { if (e.button === 0) e.stopPropagation(); }, []);
 
   // resize：写回 style + data.w/h + 对齐参考线吸附
+  // resizingRef 守卫：停止后 yjs 尺寸回灌可能再触发 onResize，不得再画线（抬起线不消失）
+  const resizingRef = useRef(false);
+  const onResizeStart = useCallback(() => {
+    resizingRef.current = true;
+    setSnapLines([]);
+  }, [setSnapLines]);
+  const onResizeEnd = useCallback(() => {
+    resizingRef.current = false;
+    setSnapLines([]);
+    requestAnimationFrame(() => setSnapLines([]));
+  }, [setSnapLines]);
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
+    if (!resizingRef.current) return;
     const nodes = getNodes();
     const self = nodes.find((n) => n.id === id);
     const pos = self?.position ?? { x: 0, y: 0 };
@@ -181,7 +193,9 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
         isVisible={selected}
         minWidth={120}
         minHeight={60}
+        onResizeStart={onResizeStart}
         onResize={onResize}
+        onResizeEnd={onResizeEnd}
         keepAspectRatio={false}
       />
       <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />

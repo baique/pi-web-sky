@@ -15,9 +15,22 @@ export const SNAP_THRESHOLD = 8;
 /** 仅当两节点包围盒间距 ≤ 此值时才参与对齐，避免远距离节点误触发 */
 const MAX_ALIGN_DISTANCE = 200;
 
+/** 解析尺寸：RF style.width 可能是数字或 "380px" 字符串 */
+function toNum(v: unknown): number {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
 function bounds(n: Node) {
-  const w = Number(n.style?.width) || 0;
-  const h = Number(n.style?.height) || 0;
+  // 尺寸读取优先级：顶层 width/height（RF dimensions change 写这）→ style → data.w/h。
+  // resize 后 RF 只更新顶层 width/height，style 是旧值——只读 style 会对齐到改变前的尺寸。
+  const d = (n.data ?? {}) as { w?: unknown; h?: unknown };
+  const w = toNum(n.width) || toNum(n.style?.width) || toNum(d.w) || 0;
+  const h = toNum(n.height) || toNum(n.style?.height) || toNum(d.h) || 0;
   return {
     left: n.position.x, right: n.position.x + w, cx: n.position.x + w / 2,
     top: n.position.y, bottom: n.position.y + h, cy: n.position.y + h / 2, w, h,
