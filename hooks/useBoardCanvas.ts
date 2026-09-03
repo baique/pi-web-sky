@@ -107,6 +107,9 @@ export function useBoardCanvas({
   const readyRef = useRef(false);
   readyRef.current = ready;
 
+  // ---- Undo/Redo ----
+  const undoManagerRef = useRef<Y.UndoManager | null>(null);
+
   const boardIdRef = useRef(boardId);
   boardIdRef.current = boardId;
   // 任务看板 taskId：prop 可能在 URL 直达时为空，看板元信息(board.board.taskId)恒有 —— 归属用两者兜底
@@ -173,7 +176,15 @@ export function useBoardCanvas({
     syncNodes();
     syncEdges();
 
+    // UndoManager：追踪 nodesMap + edgesMap 的变化（忽略远程/初始同步）。
+    const undoManager = new Y.UndoManager([nodesMap, edgesMap], {
+      captureTimeout: 500,
+    });
+    undoManagerRef.current = undoManager;
+
     return () => {
+      undoManager.destroy();
+      undoManagerRef.current = null;
       nodesMap.unobserve(syncNodes);
       edgesMap.unobserve(syncEdges);
       p.off("synced", onSynced);
@@ -684,6 +695,14 @@ export function useBoardCanvas({
     // 任务看板：会话卡保留，派生边由后端 reconcile 补回
   }, []);
 
+  const undo = useCallback(() => {
+    undoManagerRef.current?.undo();
+  }, []);
+
+  const redo = useCallback(() => {
+    undoManagerRef.current?.redo();
+  }, []);
+
   const loading = !ready;
 
   return useMemo(
@@ -717,8 +736,10 @@ export function useBoardCanvas({
       sessionTitles,
       loadSessionSummaries,
       reloadCanvas,
+      undo,
+      redo,
     }),
-    [board, loading, error, running, nodes, edges, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, registerVisibleTaskCard, unregisterVisibleTaskCard],
+    [board, loading, error, running, nodes, edges, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, registerVisibleTaskCard, unregisterVisibleTaskCard, undo, redo],
   );
 }
 

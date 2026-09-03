@@ -189,6 +189,23 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     addNodeAtViewportCenter(type);
   }, [addNodeAtViewportCenter]);
 
+  // Undo/Redo 键盘快捷键：Ctrl+Z / Ctrl+Shift+Z（仅在画布聚焦时生效）
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        board.undo?.();
+      } else if ((key === "z" && e.shiftKey) || key === "y") {
+        e.preventDefault();
+        board.redo?.();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [board]);
+
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
       <div ref={stageRef} style={{ flex: 1, minHeight: 0, position: "relative" }}>
@@ -261,6 +278,9 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
             <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 16, zIndex: 30, display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "var(--board-card-glass)", backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)" }}>
               <ToolbarBtn label="便笺" onClick={() => addNodeAtViewport("sticky-note")} onDragStart={(e) => onToolDragStart(e, "sticky-note")} />
               <ToolbarBtn label="任务" onClick={() => addNodeAtViewport("task-card")} onDragStart={(e) => onToolDragStart(e, "task-card")} />
+              <span style={{ width: 1, height: 18, background: "color-mix(in srgb, var(--border) 70%, transparent)", margin: "0 2px" }} />
+              <ToolbarBtn label="撤销" onClick={() => board.undo?.()} draggable={false} />
+              <ToolbarBtn label="重做" onClick={() => board.redo?.()} draggable={false} />
             </div>
           </BoardCanvasProvider>
         )}
@@ -269,11 +289,11 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   );
 }
 
-function ToolbarBtn({ label, onClick, onDragStart }: { label: string; onClick: () => void; onDragStart: (e: React.DragEvent) => void }) {
+function ToolbarBtn({ label, onClick, onDragStart, draggable: draggableProp = true }: { label: string; onClick: () => void; onDragStart?: (e: React.DragEvent) => void; draggable?: boolean }) {
   return (
     <button
       type="button"
-      draggable
+      draggable={draggableProp}
       title={label}
       aria-label={label}
       onClick={onClick}

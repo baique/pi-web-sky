@@ -4,9 +4,8 @@
  * 看板左上角功能区（独立浮层，画布核心不动）。
  *
  * - 常驻：看板名 + 刷新、新建会话、磨砂调节、清空画布
- * - 展开（chevron）：执行队列 —— 当前画面中运行中的卡片（session-card 运行中 +
- *   task-card execStatus=running），点击定位到卡片（平移居中 + accent 描边渐隐，
- *   与 Ctrl+F 搜索同一套 setViewport + setHighlight 机制）。
+ * - 展开（chevron）：执行队列 —— 当前画面中运行中的会话卡（session-card 运行中），
+ *   点击定位到卡片（平移居中 + accent 描边渐隐，与 Ctrl+F 搜索同一套 setViewport + setHighlight 机制）。
  *
  * 必须在 ReactFlowProvider + BoardSearchProvider 内渲染（useReactFlow / setHighlight）。
  */
@@ -14,17 +13,15 @@
 import { useMemo, useState } from "react";
 import { useReactFlow } from "@xyflow/react";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
-import type { TaskCardRunningState } from "@/lib/board-types";
 import { useBoardSearch } from "./BoardSearchContext";
 
 /** session-card 运行中 phase（useBoardCanvas running 快照写入；waiting_input 视为待用户，不算运行） */
 const RUNNING_PHASES = new Set(["waiting_model", "running_tools", "running_command"]);
 
-/** 执行队列项：画面中运行中的卡片 */
+/** 执行队列项：画面中运行中的会话卡 */
 interface RunningItem {
   nodeId: string;
   label: string;
-  kind: "session" | "task";
 }
 
 export function BoardTopbar({
@@ -37,7 +34,6 @@ export function BoardTopbar({
   wallSettings,
   updateWallSettings,
   nodes,
-  taskCardStatus,
 }: {
   boardName: string;
   /** 任务看板：清空文案与可用性提示随此变化 */
@@ -52,39 +48,26 @@ export function BoardTopbar({
   updateWallSettings: (patch: Partial<WallpaperSettings>) => void;
   /** 当前画布节点（yjs 派生，扫描运行中卡片用） */
   nodes: Array<{ id: string; type: string; data: Record<string, unknown> }>;
-  /** 任务卡状态镜像（DB 真相；task-card running 判定改读这里，不读 yjs data.execStatus） */
-  taskCardStatus: Record<string, TaskCardRunningState>;
 }) {
   const { setViewport, getViewport, getNodes, screenToFlowPosition } = useReactFlow();
   const { setHighlight } = useBoardSearch();
   const [scrimOpen, setScrimOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
 
-  /** 执行队列：当前画面中运行中的卡片（会话卡运行中 + 任务卡 running）。 */
+  /** 执行队列：当前画面中运行中的会话卡（不含任务卡）。 */
   const runningItems = useMemo<RunningItem[]>(() => {
     const out: RunningItem[] = [];
     for (const n of nodes) {
-      if (n.type === "session-card") {
-        const d = n.data as { phase?: string; title?: string; sessionId?: string };
-        const running = d.phase !== undefined && RUNNING_PHASES.has(d.phase);
-        if (!running || !d.sessionId) continue;
-        const title = (d.title ?? "").trim();
-        if (!title) continue;
-        out.push({ nodeId: n.id, label: title, kind: "session" });
-      } else if (n.type === "task-card") {
-        const d = n.data as { cardId?: string; name?: string; number?: number };
-        if (!d.cardId) continue;
-        // running 判定：读 DB 状态镜像（不读 yjs data.execStatus —— 状态已从卡分离）
-        const st = taskCardStatus[d.cardId];
-        if (!st || st.execStatus !== "running") continue;
-        const name = (d.name ?? "").trim();
-        if (!name) continue;
-        const num = typeof d.number === "number" && d.number > 0 ? `#${d.number} ` : "";
-        out.push({ nodeId: n.id, label: `${num}${name}`, kind: "task" });
-      }
+      if (n.type !== "session-card") continue;
+      const d = n.data as { phase?: string; title?: string; sessionId?: string };
+      const running = d.phase !== undefined && RUNNING_PHASES.has(d.phase);
+      if (!running || !d.sessionId) continue;
+      const title = (d.title ?? "").trim();
+      if (!title) continue;
+      out.push({ nodeId: n.id, label: title });
     }
     return out;
-  }, [nodes, taskCardStatus]);
+  }, [nodes]);
 
   /** 定位卡片：节点平移到视口中心（保持缩放）+ accent 高亮描边渐隐（同看板 Ctrl+F） */
   const locate = (nodeId: string) => {
@@ -281,15 +264,10 @@ export function BoardTopbar({
                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
               >
                 <span aria-hidden style={{ flexShrink: 0, color: "var(--accent)", display: "inline-flex" }}>
-                  {item.kind === "session" ? (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-                  ) : (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
-                  )}
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
                 </span>
                 <span style={{ flexShrink: 0, width: 6, height: 6, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px 1px rgba(16,185,129,0.6)", animation: "pulse 1.6s ease-in-out infinite" }} />
                 <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.label}</span>
-                <span style={{ flexShrink: 0, fontSize: 10, color: "var(--text-dim)" }}>{item.kind === "session" ? "会话" : "任务"}</span>
               </button>
             ))
           )}

@@ -350,7 +350,7 @@ function TaskCard({
           <span
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
-            style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, minHeight: 38, padding: "3px 8px 3px 5px", boxSizing: "border-box" }}
+            style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, minHeight: 38, boxSizing: "border-box" }}
           >
             {/* 图标槽：与任务行 FolderIcon 同尺寸同起点，保持文字对齐 */}
             <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>

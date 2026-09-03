@@ -144,7 +144,6 @@ export function SessionCanvas({
           wallSettings={wallSettings}
           updateWallSettings={updateWallSettings}
           nodes={board.nodes as never}
-          taskCardStatus={board.taskCardStatus}
         />
       )}
       <SchedulerPanel nodes={board.nodes as never} />
