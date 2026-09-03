@@ -16,6 +16,30 @@ Lint: `npm run lint`
 
 ---
 
+## Git 工作流（新功能合并规范）
+
+**新功能一律从 main 拉分支开发，合并回 main 只保留一条提交**：
+
+```bash
+# 1. 从 main 拉开发分支
+git checkout main && git pull
+git checkout -b feat/<描述>
+# 2. 开发…可多次提交（过程提交随意，最终会被 squash）
+# 3. 合并回 main（squash，只留一条）
+git checkout main && git pull
+git merge --squash feat/<描述>
+git commit -m "feat(<scope>): 一句话描述"
+# 4. 删分支
+git branch -D feat/<描述>
+```
+
+- 用 `git merge --squash` 而非 `--no-ff`：合并进 main 时**不带 merge 提交、不带功能分支历史**，main 保持线性。
+- 提交信息遵循 conventional commits（`feat/fix/docs/chore/refactor` + 可选的 `<scope>`），一条提交描述完整功能。
+- **`chore: release` 提交与版本 tag 是发布锚点，绝不 squash 或删除**（v0.1.x tag 指向 release 提交）。
+- 复杂功能可在分支内多次提交，但**合并进 main 前必须压成一条**（`git merge --squash` 天然做到）。
+
+---
+
 ## Architecture
 
 ```
