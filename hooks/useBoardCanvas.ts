@@ -98,12 +98,14 @@ export function useBoardCanvas({
 
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+  const [viewport, setViewport] = useState<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 1 });
 
   // ---- Hocuspocus provider：连接看板文档 ----
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const providerRef = useRef<HocuspocusProvider | null>(null);
   const nodesMapRef = useRef<Y.Map<Node> | null>(null);
   const edgesMapRef = useRef<Y.Map<Edge> | null>(null);
+  const viewMapRef = useRef<Y.Map<number> | null>(null);
   const readyRef = useRef(false);
   readyRef.current = ready;
 
@@ -131,8 +133,10 @@ export function useBoardCanvas({
     setProvider(p);
     const nodesMap = p.document.getMap<Node>("nodes");
     const edgesMap = p.document.getMap<Edge>("edges");
+    const viewMap = p.document.getMap<number>("view");
     nodesMapRef.current = nodesMap;
     edgesMapRef.current = edgesMap;
+    viewMapRef.current = viewMap;
 
     const syncNodes = (changes?: Y.YMapEvent<Node>) => {
       // yjs 铁律：changes 只能在 observe 回调同步阶段访问（事务结束后抛错），
@@ -166,9 +170,22 @@ export function useBoardCanvas({
       });
     };
     const syncEdges = () => setEdges(Array.from(edgesMap.values()));
-    const onSynced = () => setReady(true);
+    const syncView = () => {
+      const vm = viewMapRef.current;
+      if (!vm) return;
+      setViewport({
+        x: vm.get("x") ?? 0,
+        y: vm.get("y") ?? 0,
+        zoom: vm.get("zoom") ?? 1,
+      });
+    };
+    const onSynced = () => {
+      syncView();
+      setReady(true);
+    };
     nodesMap.observe(syncNodes as (e: unknown) => void);
     edgesMap.observe(syncEdges);
+    viewMap.observe(syncView);
     p.on("synced", onSynced);
     syncNodes();
     syncEdges();
@@ -176,11 +193,13 @@ export function useBoardCanvas({
     return () => {
       nodesMap.unobserve(syncNodes);
       edgesMap.unobserve(syncEdges);
+      viewMap.unobserve(syncView);
       p.off("synced", onSynced);
       p.destroy();
       providerRef.current = null;
       nodesMapRef.current = null;
       edgesMapRef.current = null;
+      viewMapRef.current = null;
       setReady(false);
     };
   }, [syncUri, boardId]);
@@ -686,6 +705,14 @@ export function useBoardCanvas({
 
   const loading = !ready;
 
+  const saveViewport = useCallback((vp: { x: number; y: number; zoom: number }) => {
+    const vm = viewMapRef.current;
+    if (!vm) return;
+    vm.set("x", vp.x);
+    vm.set("y", vp.y);
+    vm.set("zoom", vp.zoom);
+  }, []);
+
   return useMemo(
     () => ({
       board,
@@ -700,6 +727,8 @@ export function useBoardCanvas({
       // React Flow 受控数据
       nodes,
       edges,
+      viewport,
+      saveViewport,
       onNodesChange,
       onEdgesChange,
       onConnect,
@@ -718,7 +747,7 @@ export function useBoardCanvas({
       loadSessionSummaries,
       reloadCanvas,
     }),
-    [board, loading, error, running, nodes, edges, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, registerVisibleTaskCard, unregisterVisibleTaskCard],
+    [board, loading, error, running, nodes, edges, viewport, saveViewport, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, registerVisibleTaskCard, unregisterVisibleTaskCard],
   );
 }
 

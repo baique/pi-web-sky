@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReactFlow, Background, Controls, MiniMap, useReactFlow, type NodeTypes, type OnConnect, BackgroundVariant, type Node } from "@xyflow/react";
+import { ReactFlow, Background, Controls, MiniMap, useReactFlow, type NodeTypes, type OnConnect, BackgroundVariant, type Node, type Viewport } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
 import { useI18n } from "@/hooks/useI18n";
@@ -30,10 +30,16 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   const { t } = useI18n();
   // RF 坐标转换：屏幕坐标（clientX/Y）→ flow 坐标（节点 position）。
   // 新建节点/拖放落点都经它换算，保证放到“鼠标所指/视口中心”的位置。
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, setViewport } = useReactFlow();
   const [dragOver, setDragOver] = useState(false);
   // 右键菜单 state
   const [menu, setMenu] = useState<BoardMenuState | null>(null);
+
+  // 画布位置记忆：synced 后设到 yjs 记住的位置
+  useEffect(() => {
+    if (!board.ready) return;
+    setViewport(board.viewport);
+  }, [board.ready, board.viewport, setViewport]);
 
   // BoardCanvasOps：把 Y.Doc 写操作暴露给节点组件
   const ops = useMemo<BoardCanvasOps>(() => ({
@@ -167,6 +173,11 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     lastPaneClickRef.current = { t: now };
   }, [screenToFlowPosition, addNodeAt]);
 
+  // 位置记忆：pan/zoom 结束保存
+  const onMoveEnd = useCallback((_e: MouseEvent | TouchEvent | null, vp: Viewport) => {
+    board.saveViewport?.(vp);
+  }, [board]);
+
   // 右键菜单 handlers
   const onNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
     e.preventDefault();
@@ -227,9 +238,8 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               onPaneContextMenu={onPaneContextMenu}
               onEdgeContextMenu={onEdgeContextMenu}
               onPaneClick={onPaneClick}
+              onMoveEnd={onMoveEnd}
               zoomOnDoubleClick={false}
-              fitView
-              fitViewOptions={{ padding: 0.2 }}
               minZoom={0.1}
               maxZoom={2}
               colorMode={isDark ? "dark" : "light"}

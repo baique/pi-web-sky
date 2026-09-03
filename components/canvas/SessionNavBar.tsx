@@ -25,18 +25,24 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
   stats: SessionStatsInfo | null;
   contextUsage: { percent: number | null; contextWindow: number; tokens: number | null } | null;
   todos: TodoItem[];
+  systemPrompt: string | null;
+  systemPromptLoading: boolean;
 }>(function SessionNavBar({
   sessionId,
   stats,
   contextUsage,
   todos,
+  systemPrompt,
+  systemPromptLoading,
 }, ref) {
   const { t } = useI18n();
   const [statsOpen, setStatsOpen] = useState(false);
   const [todoOpen, setTodoOpen] = useState(false);
+  const [systemOpen, setSystemOpen] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
   const statsBtnRef = useRef<HTMLButtonElement | null>(null);
   const todoBtnRef = useRef<HTMLButtonElement | null>(null);
+  const systemBtnRef = useRef<HTMLButtonElement | null>(null);
 
   // /session 等外部触发打开统计弹层
   useImperativeHandle(ref, () => ({
@@ -44,9 +50,10 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
   }), []);
 
   // 打开一个弹层时收起其他；target="none" 全部关闭
-  const openOne = (target: "stats" | "todo" | "none") => {
+  const openOne = (target: "stats" | "todo" | "system" | "none") => {
     setStatsOpen(target === "stats");
     setTodoOpen(target === "todo");
+    setSystemOpen(target === "system");
   };
 
   const handleFullHistory = useCallback(() => {
@@ -75,7 +82,7 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
   }, []);
 
   // 空白处点击 / Escape 关闭所有弹层（与 AppShell 顶栏行为一致）
-  const anyOpen = statsOpen || todoOpen;
+  const anyOpen = statsOpen || todoOpen || systemOpen;
   useEffect(() => {
     if (!anyOpen) return;
     const onPointerDown = (event: PointerEvent) => {
@@ -88,15 +95,18 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
         // portal 弹层内的点击不关闭
         if (document.querySelector('[data-session-nav-popover]')?.contains(target)) return;
         if (document.querySelector('[data-session-nav-todo]')?.contains(target)) return;
+        if (document.querySelector('[data-session-nav-system]')?.contains(target)) return;
         if (document.querySelector('.glass-top-panel')?.contains(target)) return;
       }
       setStatsOpen(false);
       setTodoOpen(false);
+      setSystemOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setStatsOpen(false);
       setTodoOpen(false);
+      setSystemOpen(false);
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown, true);
@@ -107,6 +117,7 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
   }, [anyOpen]);
 
   return (
+    <>
     <div
       ref={navRef}
       style={{
@@ -136,6 +147,34 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
           <path d="M12 7v5l3 2" />
         </svg>
         <span style={navBtnText}>{t("history.full")}</span>
+      </button>
+
+      <span style={navDivider} />
+
+      {/* 系统提示词 */}
+      <button
+        ref={systemBtnRef}
+        type="button"
+        onClick={() => openOne(systemOpen ? "none" : "system")}
+        title={t("system.prompt")}
+        aria-label={t("system.prompt")}
+        aria-expanded={systemOpen}
+        style={{
+          ...navBtnStyle,
+          background: systemOpen ? navBgActive : "transparent",
+          color: systemOpen ? "var(--accent)" : "var(--text-muted)",
+        }}
+        onMouseEnter={(e) => { if (!systemOpen) { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = navBgHover; } }}
+        onMouseLeave={(e) => { if (!systemOpen) { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "transparent"; } }}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemPrompt ? "var(--accent)" : "var(--text-dim)" }} aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+          <polyline points="10 9 9 9 8 9" />
+        </svg>
+        <span style={navBtnText}>{t("system.label")}</span>
       </button>
 
       <span style={navDivider} />
@@ -196,7 +235,11 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
       {todoOpen && todos.length > 0 && (
         <TodoPopover navRef={navRef} navWidth={getPanelWidth()} todos={todos} onClose={() => setTodoOpen(false)} />
       )}
+      {systemOpen && (
+        <SystemPopover navRef={navRef} navWidth={getPanelWidth()} prompt={systemPrompt} loading={systemPromptLoading} onClose={() => setSystemOpen(false)} />
+      )}
     </div>
+    </>
   );
 });
 
@@ -405,6 +448,98 @@ function StatsPopover({
           {section(t("session.tokens"), tokenRows, "right", true)}
         </div>
       </div>
+    </div>
+  );
+
+  return createPortal(popoverEl, document.body);
+}
+
+/** 系统提示词浮层：与统计浮层同模式（左对齐标题栏，顶贴标题栏底） */
+function SystemPopover({
+  navRef,
+  navWidth,
+  prompt,
+  loading,
+  onClose,
+}: {
+  navRef: React.RefObject<HTMLDivElement | null>;
+  navWidth: number;
+  prompt: string | null;
+  loading: boolean;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const update = () => {
+      const nav = navRef.current;
+      if (!nav) return;
+      const tb = nav.closest("[data-session-titlebar]") as HTMLElement | null;
+      const tbRect = tb?.getBoundingClientRect();
+      const left = tbRect ? tbRect.left : Math.min(nav.getBoundingClientRect().right - navWidth, Math.max(8, nav.getBoundingClientRect().left));
+      const top = tbRect ? tbRect.bottom : nav.getBoundingClientRect().bottom;
+      setPos({ top, left });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    if (navRef.current) ro.observe(navRef.current);
+    if (navRef.current?.closest("[data-session-titlebar]")) ro.observe(navRef.current.closest("[data-session-titlebar]") as Element);
+    window.addEventListener("resize", update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [navRef, navWidth]);
+
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (panelRef.current?.contains(target)) return;
+      if (navRef.current?.contains(target)) return;
+      onClose();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [navRef, onClose]);
+
+  if (!pos) return null;
+
+  const popoverEl = (
+    <div
+      ref={panelRef}
+      data-session-nav-system
+      role="dialog"
+      aria-label={t("system.prompt")}
+      className="glass-panel"
+      style={{
+        position: "fixed",
+        top: pos.top,
+        left: pos.left,
+        width: navWidth,
+        maxHeight: "min(420px, 52vh)",
+        overflowY: "auto",
+        zIndex: 1200,
+        padding: "12px 16px",
+        fontSize: 12,
+        lineHeight: 1.6,
+        fontFamily: "var(--font-mono)",
+        borderRadius: 12,
+        border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+        whiteSpace: "pre-wrap",
+        color: "var(--text-muted)",
+      }}
+    >
+      {prompt ? (
+        <div>{prompt}</div>
+      ) : prompt === "" ? (
+        <div style={{ fontStyle: "italic" }}>{t("system.empty")}</div>
+      ) : (
+        <div style={{ fontStyle: "italic" }}>
+          {loading ? t("system.loading") : t("system.load")}
+        </div>
+      )}
     </div>
   );
 

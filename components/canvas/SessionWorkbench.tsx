@@ -102,6 +102,10 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
   const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
   const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
+  const [systemPromptLoading, setSystemPromptLoading] = useState(false);
+  const systemPromptLoaderRef = useRef<(() => Promise<void>) | null>(null);
+  const systemPromptLoadIdRef = useRef(0);
 
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
@@ -121,6 +125,31 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   const handleTodosChange = useCallback((nextTodos: TodoItem[]) => {
     setTodos(nextTodos);
   }, []);
+
+  const handleSystemPromptChange = useCallback((prompt: string | null) => {
+    setSystemPrompt(prompt);
+    setSystemPromptLoading(false);
+  }, []);
+
+  const handleSystemPromptLoaderChange = useCallback((loader: (() => Promise<void>) | null) => {
+    systemPromptLoadIdRef.current += 1;
+    systemPromptLoaderRef.current = loader;
+    setSystemPromptLoading(false);
+  }, []);
+
+  // 系统提示词加载：面板打开时懒加载（与 AppShell 顶栏同机制）
+  useEffect(() => {
+    if (!navbarSlot) return;
+    const opening = systemPrompt === null && !systemPromptLoading;
+    if (!opening) return;
+    const load = systemPromptLoaderRef.current;
+    if (!load) return;
+    const loadId = ++systemPromptLoadIdRef.current;
+    setSystemPromptLoading(true);
+    void load().then(() => {
+      if (systemPromptLoadIdRef.current === loadId) setSystemPromptLoading(false);
+    });
+  }, [navbarSlot, systemPrompt, systemPromptLoading]);
 
   // 新会话卡转正：ChatWindow 拿到 realId 后回调。会话创建成功（文件已落盘），
   // 由父节点清 cwd 字段标记“会话已创建”转正为普通卡（写 Y.Doc，CRDT 广播），
@@ -290,6 +319,8 @@ export const SessionWorkbench = memo(function SessionWorkbench({
           stats={sessionStats}
           contextUsage={contextUsage}
           todos={todos}
+          systemPrompt={systemPrompt}
+          systemPromptLoading={systemPromptLoading}
         />,
         navbarSlot,
       )}
@@ -309,6 +340,8 @@ export const SessionWorkbench = memo(function SessionWorkbench({
         onSessionStatsPanelOpen={handleSessionStatsPanelOpen}
         onTodosChange={handleTodosChange}
         onOpenFile={handleOpenFile}
+        onSystemPromptChange={handleSystemPromptChange}
+        onSystemPromptLoaderChange={handleSystemPromptLoaderChange}
         onSessionCreated={isNewSession ? (created) => handleSessionCreated(created) : undefined}
         onSessionForked={handleSessionForked}
         onAgentEnd={handleAgentEnd}
