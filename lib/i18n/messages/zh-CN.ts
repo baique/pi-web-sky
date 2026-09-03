@@ -163,7 +163,7 @@ export const zhCNLocale: LocalePlugin = {
     "boards.system": "系统",
     "boards.title": "看板",
     "boards.dragToAdd": "从侧栏拖入会话以添加",
-    "boards.dropToAdd": "松手添加会话",
+    "boards.dropToAdd": "松手添加到看板",
     "boards.loadingSession": "正在加载会话…",
     "boards.sessionMissing": "会话已不存在",
     "boards.collapse": "收合",

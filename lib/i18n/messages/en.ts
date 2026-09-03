@@ -162,7 +162,7 @@ export const enLocale: LocalePlugin = {
     "boards.system": "System",
     "boards.title": "Boards",
     "boards.dragToAdd": "Drag sessions from the sidebar to add",
-    "boards.dropToAdd": "Drop to add session",
+    "boards.dropToAdd": "Drop to add to board",
     "boards.loadingSession": "Loading session…",
     "boards.sessionMissing": "Session no longer exists",
     "boards.collapse": "Collapse",

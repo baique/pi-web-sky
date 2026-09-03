@@ -46,6 +46,18 @@
 - 磨砂只为 blur 不动饱和度（深浅色一致观感）；`blur` 为 0 时把 `backdrop-filter` 置 `none`，避免 `saturate` 残留仍去饱和背景。
 - token 在 `:root` 定义，明暗主题共用同一套，不用在 `.dark` 重复。
 
+## 看板加载中遮罩（`--board-loading-*`）
+
+三处加载态（AppShell/SessionCanvas 的动态 chunk 加载 + CanvasStage 的 board.loading）共用 `BoardLoading` 组件与同一套 token：
+
+```
+--board-loading-bg   rgba(0,0,0,0.55) 与 scrim 同源的黑色半透明（深浅主题都用深色，浅色会发灰）
+--board-loading-text rgba(255,255,255,0.88) 浅色常量（遮罩是深色，浅色文字在两主题下都清晰）
+```
+
+- 只用颜色语义，不加 backdrop-filter（与 scrim “不是技术类似”）；alpha 比 scrim 底色略深，保证文字清晰。
+- token 在 `:root` 定义，明暗主题共用，不在 `.dark` 重复。
+
 ## 思考球 loading（`thinking-orbs`）
 
 Agent 运行状态用 [`thinking-orbs`](https://www.npmjs.com/package/thinking-orbs)（0.3.1，MIT）做加载球：

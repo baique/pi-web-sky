@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlow, Background, Controls, MiniMap, useReactFlow, type NodeTypes, type OnConnect, BackgroundVariant, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
@@ -10,6 +10,7 @@ import { StickyNoteNode } from "@/components/board/StickyNoteNode";
 import { TaskCardNode } from "@/components/board/TaskCardNode";
 import { BoardCanvasProvider, type BoardCanvasOps } from "@/components/board/BoardCanvasContext";
 import { BoardContextMenu, type BoardMenuState } from "@/components/board/BoardContextMenu";
+import { BoardLoading } from "./BoardLoading";
 
 /**
  * React Flow 画布舞台：无限画布 + 工具行 + 拖放添加会话。
@@ -80,33 +81,64 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     e.dataTransfer.effectAllowed = "copy";
   }, []);
 
-  // 会话/工具拖入画布 —— React Flow 官方 DragAndDrop 示例写法：
-  // onDragOver / onDrop 直接作为 <ReactFlow> 的 props。
-  // ReactFlowProps extends HTMLAttributes<HTMLDivElement>，RF 透传到画布根容器。
-  const onDragOver = useCallback((e: React.DragEvent) => {
-    // 官方示例：无条件 preventDefault，保持画布为可 drop 目标
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    const types = e.dataTransfer?.types ?? [];
-    setDragOver(types.includes("text/session-id") || types.includes("text/board-tool"));
-  }, []);
-  const onDrop = useCallback((e: React.DragEvent) => {
-    const types = e.dataTransfer?.types ?? [];
-    if (!types.includes("text/session-id") && !types.includes("text/board-tool")) return;
-    e.preventDefault();
-    setDragOver(false);
-    const dt = e.dataTransfer;
-    if (!dt) return;
-    const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-    const sid = dt.getData("text/session-id");
-    if (sid) {
-      // 任务看板拖入 = 加入任务：addSessionNode 内部先落卡再异步归属（防 reconcile 当孤儿删）
-      board.addSessionNode(sid, pos.x, pos.y);
-      return;
-    }
-    const tool = dt.getData("text/board-tool");
-    if (tool === "sticky-note") addNodeAt("sticky-note", pos);
-    else if (tool === "task-card") addNodeAt("task-card", pos);
+  // 会话/工具拖入画布 —— 原生 capture 监听挂外层容器（覆盖工具栏/浮层等 RF 外元素）。
+  // 用 capture 而非 React Flow props：props 只挂在 RF 根容器，松手在工具栏等兄弟浮层上时
+  // drop 不会触发；外层容器 capture 阶段先于一切子元素拿到事件，任何落点都能收到。
+  // stageRef 挂在画布外层容器（含工具栏），drop 位置经 screenToFlowPosition 换算。
+  const stageRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onDragOver = (e: DragEvent) => {
+      const types = e.dataTransfer?.types ?? [];
+      if (!types.includes("text/session-id") && !types.includes("text/board-tool")) return;
+      e.preventDefault();
+      if (e.dataTransfer) {
+        // dropEffect 必须与拖拽源的 effectAllowed 匹配，否则浏览器会取消 drop（dragend 无 drop）：
+        // 会话源声明 move、工具栏工具源声明 copy，各自匹配，不能一刀切成 move。
+        e.dataTransfer.dropEffect = types.includes("text/board-tool") ? "copy" : "move";
+      }
+      setDragOver(true);
+    };
+    // 拖出画布 / 拖拽结束（含 Escape 取消）都要复位，避免“松手添加”浮层卡死。
+    // relatedTarget 判定：移入容器内子元素（如 pane）不算离开，否则浮层会随 dragleave 闪断。
+    const onDragLeave = (e: DragEvent) => {
+      // 用 Element 而非 Node（Node 被 @xyflow/react 的类型占用）；
+      // 移入容器内子元素（如 pane）不算离开，否则浮层会随 dragleave 闪断。
+      const rt = e.relatedTarget as Element | null;
+      if (rt && el.contains(rt)) return;
+      setDragOver(false);
+    };
+    const onDragEnd = () => setDragOver(false);
+    const onDrop = (e: DragEvent) => {
+      const types = e.dataTransfer?.types ?? [];
+      if (!types.includes("text/session-id") && !types.includes("text/board-tool")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOver(false);
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const sid = dt.getData("text/session-id");
+      if (sid) {
+        // 任务看板拖入 = 加入任务：addSessionNode 内部先落卡再异步归属（防 reconcile 当孤儿删）
+        board.addSessionNode(sid, pos.x, pos.y);
+        return;
+      }
+      const tool = dt.getData("text/board-tool");
+      if (tool === "sticky-note") addNodeAt("sticky-note", pos);
+      else if (tool === "task-card") addNodeAt("task-card", pos);
+    };
+    el.addEventListener("dragover", onDragOver, true);
+    el.addEventListener("dragleave", onDragLeave, true);
+    el.addEventListener("dragend", onDragEnd, true);
+    el.addEventListener("drop", onDrop, true);
+    return () => {
+      el.removeEventListener("dragover", onDragOver, true);
+      el.removeEventListener("dragleave", onDragLeave, true);
+      el.removeEventListener("dragend", onDragEnd, true);
+      el.removeEventListener("drop", onDrop, true);
+    };
   }, [board, screenToFlowPosition, addNodeAt]);
 
   // 删除：Delete/Backspace → 确认制（按节点类型）
@@ -159,7 +191,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
-      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+      <div ref={stageRef} style={{ flex: 1, minHeight: 0, position: "relative" }}>
         {/* 画布 scrim：内容层之下、壁纸之上的一层暗色承托 + 磨砂（与旧一致） */}
         <div
           style={{
@@ -180,12 +212,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
         {board.error ? (
           <div style={{ position: "absolute", inset: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "center", color: "#f87171", fontSize: 13 }}>{board.error}</div>
         ) : board.loading ? (
-          <div style={{ position: "absolute", inset: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(8, 14, 30, 0.85)", color: "rgba(255, 255, 255, 0.85)", fontSize: 13 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span aria-hidden style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid rgba(255, 255, 255, 0.18)", borderTopColor: "rgba(255, 255, 255, 0.9)", animation: "spin 0.8s linear infinite" }} />
-              {t("boards.loadingCanvas")}
-            </div>
-          </div>
+          <BoardLoading label={t("boards.loadingCanvas")} />
         ) : (
           <BoardCanvasProvider value={ops}>
             <ReactFlow
@@ -196,8 +223,6 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               onConnect={board.onConnect as OnConnect}
               nodeTypes={nodeTypes}
               onBeforeDelete={onBeforeDelete}
-              onDragOver={onDragOver}
-              onDrop={onDrop}
               onNodeContextMenu={onNodeContextMenu}
               onPaneContextMenu={onPaneContextMenu}
               onEdgeContextMenu={onEdgeContextMenu}

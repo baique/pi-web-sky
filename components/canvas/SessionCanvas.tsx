@@ -9,6 +9,7 @@ import { useBoardCanvas } from "@/hooks/useBoardCanvas";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
 import { BoardSearchProvider } from "./BoardSearchContext";
 import { GlassScopeProvider } from "./GlassScopeContext";
+import { BoardLoading } from "./BoardLoading";
 import { BoardIdContext } from "@/components/board/BoardIdContext";
 import { confirm } from "./ConfirmDialog";
 import { BoardSearch } from "./BoardSearch";
@@ -16,38 +17,11 @@ import { BoardTopbar } from "./BoardTopbar";
 import { SchedulerPanel } from "./SchedulerPanel";
 
 // ssr:false — 画布依赖浏览器环境，仅进入看板模式时下载。
-// 加载占位样式与 CanvasStage 数据同步段完全一致（深色半透明 + 白字 + spinner）。
+// 加载占位样式与 CanvasStage 数据同步段完全一致（深色半透明 + 浅字 + spinner），
+// 与 AppShell 外层 loading 也用同一个 BoardLoading —— 观感上合并成一段连续加载。
 const CanvasStage = dynamic(() => import("./CanvasStage").then((m) => m.CanvasStage), {
   ssr: false,
-  loading: () => (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "rgba(8, 14, 30, 0.85)",
-        color: "rgba(255, 255, 255, 0.85)",
-        fontSize: 13,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span
-          aria-hidden
-          style={{
-            width: 14,
-            height: 14,
-            borderRadius: "50%",
-            border: "2px solid rgba(255, 255, 255, 0.18)",
-            borderTopColor: "rgba(255, 255, 255, 0.9)",
-            animation: "spin 0.8s linear infinite",
-          }}
-        />
-        正在加载画布…
-      </div>
-    </div>
-  ),
+  loading: () => <BoardLoading label="正在加载画布…" />,
 });
 
 /**

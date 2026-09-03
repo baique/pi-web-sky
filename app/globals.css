@@ -117,6 +117,13 @@
   --board-scrim-alpha: 0;
   --board-scrim-bg: rgba(0, 0, 0, var(--board-scrim-alpha));
   --board-scrim-blur: 2px;
+  /* 看板加载中遮罩（BoardLoading）—— 与 scrim 同源的黑色半透明，深浅主题都用深色
+     （浅色会发灰，视觉观感不佳）。alpha 比 scrim 底色略深，保证加载文字在壁纸上清晰；
+     不加 backdrop-filter（与 scrim “不是技术类似”，只取颜色语义）。
+     文字用浅色常量（遮罩是深色，浅色文字在深浅主题下都清晰；
+     若用 var(--text) 浅色主题会成深字压深底，故不跟随主题变量）。 */
+  --board-loading-bg: rgba(0, 0, 0, 0.55);
+  --board-loading-text: rgba(255, 255, 255, 0.88);
   /* Terminal body is transparent — the pane uses the message-bubble glass
      (--bubble-alpha / --glass-blur-bubble sliders) as its backdrop. */
   --glass-blur: 8px;

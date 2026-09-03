@@ -8,6 +8,7 @@ import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useGlassWallpaper, useGlassResizeTrigger, previewBubbleBlur } from "@/hooks/useGlassWallpaper";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
+import { BoardLoading } from "./canvas/BoardLoading";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
@@ -19,35 +20,10 @@ import { McpConfigPanel } from "./McpConfigPanel";
 const TerminalPanel = dynamic(() => import("./TerminalPanel").then((m) => m.TerminalPanel), { ssr: false });
 // ssr:false — 画布依赖浏览器环境，仅进入看板模式时下载（~1MB）。
 // 外层 dynamic 提供 loading 占位（避免首帧纯白），内层 CanvasStage 再按需加载画布。
+// 加载占位与内层用同一个 BoardLoading —— 两段加载视觉一致，从观感上合并成一段。
 const SessionCanvas = dynamic(() => import("./canvas/SessionCanvas").then((m) => m.SessionCanvas), {
   ssr: false,
-  loading: () => (
-    <div
-      style={{
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "var(--text-muted)",
-        fontSize: 13,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span
-          aria-hidden
-          style={{
-            width: 14,
-            height: 14,
-            borderRadius: "50%",
-            border: "2px solid color-mix(in srgb, var(--text) 15%, transparent)",
-            borderTopColor: "var(--accent)",
-            animation: "spin 0.8s linear infinite",
-          }}
-        />
-        正在加载画布…
-      </div>
-    </div>
-  ),
+  loading: () => <BoardLoading label="正在加载画布…" />,
 });
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
