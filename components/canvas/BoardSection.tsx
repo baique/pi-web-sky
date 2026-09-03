@@ -459,97 +459,99 @@ function BoardRow({
         opacity: isDragging ? 0.4 : 1,
       }}
     >
-      {renaming ? (
-        <span
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-          style={{ display: "flex", alignItems: "center", gap: 4, margin: "0 4px 2px", padding: "3px 8px 3px 5px", height: 38, boxSizing: "border-box" }}
-        >
-          {/* 图标槽：与看板行图标同尺寸同起点，保持文字对齐 */}
-          <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>
-            {boardIcon}
-          </span>
-          <input
-            ref={renameInputRef}
-            value={renameValue}
-            onChange={(e) => onRenameValueChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") onCommitRename();
-              if (e.key === "Escape") onCancelRename();
-            }}
-            onBlur={onCommitRename}
-            autoFocus
-            placeholder={t("boards.namePlaceholder")}
-            style={{ flex: 1, minWidth: 0, fontSize: 12, border: "none", outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box", height: "100%", padding: 0 }}
-          />
-        </span>
-      ) : (
-        <div
-          draggable
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          onClick={onOpenBoard}
-          data-board-row={board.id}
-          title={board.name}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            minHeight: 38,
-            padding: "3px 8px 3px 5px",
-            borderRadius: 6,
-            background: isActive ? "var(--side-active)" : hovered ? "var(--side-hover)" : "transparent",
-            cursor: "pointer",
-            transition: "background 0.12s",
-          }}
-        >
-          {/* 图标槽：与任务 FolderIcon 同尺寸同起点（20px 槽 + 13px 图标） */}
-          <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>
-            {boardIcon}
-          </span>
-          <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {board.name}
-          </span>
-          {board.nodeCount > 0 && (
-            <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10.5 }}>{board.nodeCount}</span>
-          )}
-          {hovered && (
-            <span style={{ position: "relative", display: "flex", gap: 3, flexShrink: 0, alignItems: "center" }}>
-              <button
-                type="button"
-                title={t("boards.rename")}
-                aria-label={t("boards.rename")}
-                onClick={(e) => { e.stopPropagation(); onStartRename(); }}
-                style={boardIconStyle}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-active)"; e.currentTarget.style.color = "var(--accent)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                title={t("boards.delete")}
-                aria-label={t("boards.delete")}
-                onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                style={boardIconStyle}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-active)"; e.currentTarget.style.color = "#ef4444"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                  <path d="M10 11v6M14 11v6" />
-                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                </svg>
-              </button>
+      <div
+        draggable={!renaming}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        onClick={onOpenBoard}
+        data-board-row={board.id}
+        title={board.name}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          minHeight: 38,
+          padding: "0 8px 0 5px",
+          borderRadius: 6,
+          background: isActive ? "var(--side-active)" : hovered ? "var(--side-hover)" : "transparent",
+          cursor: renaming ? "default" : "pointer",
+          transition: "background 0.12s",
+        }}
+      >
+        {renaming ? (
+          <span
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, minHeight: 38, boxSizing: "border-box" }}
+          >
+            {/* 图标槽：与看板行图标同尺寸同起点，保持文字对齐 */}
+            <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>
+              {boardIcon}
             </span>
-          )}
-        </div>
-      )}
+            <input
+              ref={renameInputRef}
+              value={renameValue}
+              onChange={(e) => onRenameValueChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onCommitRename();
+                if (e.key === "Escape") onCancelRename();
+              }}
+              onBlur={onCommitRename}
+              autoFocus
+              placeholder={t("boards.namePlaceholder")}
+              style={{ flex: 1, minWidth: 0, fontSize: 12, border: "none", outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box", height: "100%", padding: 0 }}
+            />
+          </span>
+        ) : (
+          <>
+            {/* 图标槽：与任务 FolderIcon 同尺寸同起点（20px 槽 + 13px 图标） */}
+            <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>
+              {boardIcon}
+            </span>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {board.name}
+            </span>
+            {board.nodeCount > 0 && (
+              <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10.5 }}>{board.nodeCount}</span>
+            )}
+            {hovered && (
+              <span style={{ position: "relative", display: "flex", gap: 3, flexShrink: 0, alignItems: "center" }}>
+                <button
+                  type="button"
+                  title={t("boards.rename")}
+                  aria-label={t("boards.rename")}
+                  onClick={(e) => { e.stopPropagation(); onStartRename(); }}
+                  style={boardIconStyle}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-active)"; e.currentTarget.style.color = "var(--accent)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  title={t("boards.delete")}
+                  aria-label={t("boards.delete")}
+                  onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                  style={boardIconStyle}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-active)"; e.currentTarget.style.color = "#ef4444"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    <path d="M10 11v6M14 11v6" />
+                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                  </svg>
+                </button>
+              </span>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
