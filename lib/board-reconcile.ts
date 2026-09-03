@@ -100,17 +100,23 @@ function findFreeSpot(nodes: DocNode[], width = CARD_W, height = CARD_H) {
 /**
  * 对单个看板执行派生 reconcile（幂等）。
  * 读业务表 → mutate Y.Doc：补/清会话卡、补/清 exec 线、补/清依赖线。
- * 仅任务看板（board.taskId 非空）有派生元素；普通看板跳过。
+ *
+ * 分两层：
+ *   - 任务卡派生（所有看板通用）：任务卡节点补齐、执行会话卡补齐（卡 sessionId）、
+ *     exec 线、依赖线。普通看板上的任务卡同样派发执行，执行会话卡+exec 线必须入板。
+ *   - 任务看板专属：任务根会话补齐（listTaskSessionIds）+ 会话卡孤儿删。
+ *     普通看板不做会话卡孤儿删——普通看板的会话卡由用户拖入/新建管理，不归业务表。
  */
 export async function reconcileBoard(boardId: string): Promise<void> {
   const board = getBoard(boardId);
-  if (!board?.taskId) return; // 普通看板：会话卡由用户拖入/新建管理，无派生
-  const taskId = board.taskId;
+  if (!board) return;
+  const isTaskBoard = Boolean(board.taskId);
 
-  const sessionIds = listTaskSessionIds(taskId);
   const cards = listCards(boardId);
-  // 全部会话 id（任务会话 + 任务卡执行会话）——执行会话卡必然存在（先有会话才有关联）
-  const allSessionIds = new Set(sessionIds);
+  // 全部应存在的会话 id：任务看板 = 根会话 + 任务卡执行会话；普通看板 = 仅任务卡执行会话。
+  // 执行会话卡必然存在（先有会话才有关联）——exec 线目标会话卡必须有节点。
+  const allSessionIds = new Set<string>();
+  if (isTaskBoard) for (const sid of listTaskSessionIds(board.taskId!)) allSessionIds.add(sid);
   for (const c of cards) if (c.sessionId) allSessionIds.add(c.sessionId);
 
   await mutateBoard(boardId, (maps) => {
@@ -134,14 +140,18 @@ export async function reconcileBoard(boardId: string): Promise<void> {
       }
       existingSessionBySid.set(sid, n);
     }
-    // 孤儿删：画布有、业务表没有的会话卡（非新会话卡）→ 删
+    // 孤儿删：画布有、业务表没有的会话卡（非新会话卡）→ 删（仅任务看板）
     // 例外：卡声明归属本板任务（data.taskId === 本板 taskId，拖入已存在会话时前端先落卡
     // 异步归属，归属完成前本板 reconcile 不能把它当孤儿删——否则用户刚拖的卡消失）
+    // 普通看板不删会话卡：会话卡由用户自由拖入/新建管理，不在本模块派生范围。
     const orphanIds = [];
-    for (const [sid, n] of existingSessionBySid) {
-      if (allSessionIds.has(sid)) continue;
-      if (n.data?.taskId === taskId) continue;
-      orphanIds.push(n.id);
+    if (isTaskBoard) {
+      const taskId = board.taskId!;
+      for (const [sid, n] of existingSessionBySid) {
+        if (allSessionIds.has(sid)) continue;
+        if (n.data?.taskId === taskId) continue;
+        orphanIds.push(n.id);
+      }
     }
     for (const id of orphanIds) {
       nodesMap.delete(id);

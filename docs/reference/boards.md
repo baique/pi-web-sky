@@ -19,8 +19,9 @@
 **派生元素由后端权威 reconcile**（`lib/board-reconcile.ts`）：
 - 业务表（tasks / task_cards / task_card_links / session_meta）= 唯一真相源，后端写。
 - 补会话卡（`session-<sid>`）、补任务卡（`task-<cardId>`）、exec 线（`exec-<cardId>-<sessionId>`）、依赖线（`link-<from>-<to>-<kind>`）——确定性 id 幂等，缺补多删，**绝不整表覆盖**。
+- **任务卡派生对所有看板生效**（普通看板上的任务卡也派发执行，同样补执行会话卡 + exec 线）；**会话卡孤儿删仅任务看板**——普通看板的会话卡由用户拖入/新建管理，不因业务表无记录而删除。
 - 孤儿删（业务表不存在的会话卡/任务卡节点）由后端唯一执行，前端不做 → 多端不互相删卡。
-- 触发：调度器派发 / 建卡删卡 / 任务归属变化 / 任务初始化 / 10s 定时兜底（`board-reconcile-scheduler`）。
+- 触发：调度器派发 / 建卡删卡 / 任务归属变化 / 任务初始化 / 10s 定时兜底（`board-reconcile-scheduler`，仅 leader 实例执行）。
 - **任务初始化是纯后台动作**：`/api/tasks/[id]/board` 建看板后立即 reconcile 补已有会话卡，不依赖前端加载时机。
 
 **前端职责**：用户内容（布局 / 尺寸 / 便笺文本 / 新建卡）+ 展示字段（phase / runningMs / 标题）写 Y.Doc 增量；不做孤儿清理 / 派生 reconcile。

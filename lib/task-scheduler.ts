@@ -6,6 +6,7 @@ import { startRpcSession, getRunningRpcSessionIds } from "./rpc-manager";
 import { resolveSessionPath } from "./session-reader";
 import { assignSessionToTask } from "./task-store";
 import { PRESET_FULL } from "./tool-presets";
+import { getInstanceId, isLeader, tryBecomeLeader, LEADER_STALE_MS } from "./scheduler-leader";
 import {
   countRunningDispatched,
   listDispatchableCards,
@@ -17,7 +18,6 @@ import {
   updateCard,
   acquireDispatchToken,
   clearDispatchToken,
-  heartbeatOwnedCards,
   type TaskCard,
   type TaskCardQuestion,
 } from "./task-card-store";
@@ -37,11 +37,6 @@ import {
 
 export const TASK_SCHEDULER_INTERVAL_MS = 10_000;
 export const TASK_SCHEDULER_MAX_CONCURRENCY = 1;
-
-/** 归属心跳刷新周期（独立于长 tick，防审核阻塞期间心跳断更） */
-export const HEARTBEAT_INTERVAL_MS = 10_000;
-/** owner 心跳过期阈值：超时视为 owner 已死，其他实例可接管判定 */
-export const OWNER_STALE_MS = 120_000;
 
 // ============================================================================
 // S3 巡检/审核参数
@@ -65,15 +60,12 @@ export const SESSION_SETTLE_MS = 5_000;
 declare global {
   var __piTaskScheduler: {
     timer: ReturnType<typeof setInterval>;
-    heartbeatTimer: ReturnType<typeof setInterval>;
     startedAt: number;
     /** 最近一次调度动作（挂 globalThis 防 instrumentation 与 API 路由加载两份模块实例不互通） */
     lastAction: TaskSchedulerLastAction;
     /** 调度器此刻正在做的动作（看板状态展示：工作中/休眠两态）；无=休眠 */
     activity: SchedulerActivity | null;
   } | undefined;
-  /** 本进程实例 id（防热重载换 id；多实例各持不同 id，作为任务卡 owner） */
-  var __piWebInstanceId: string | undefined;
 }
 
 /** 派发 cwd：card.cwd 优先；否则看板所属项目根（project_key 若是存在的目录）。 */
@@ -123,41 +115,18 @@ async function ensureExecutionSession(
   return { ...fresh, created: true };
 }
 
-/** 本进程实例 id：随机 UUID，globalThis 缓存（热重载不换），多实例各不同。 */
-export function getInstanceId(): string {
-  if (!globalThis.__piWebInstanceId) globalThis.__piWebInstanceId = randomUUID();
-  return globalThis.__piWebInstanceId;
-}
-
 /**
- * 归属守卫：这张卡的「状态判定」该不该由本实例做（#27 根因修复）。
- * - owner 为空（旧数据/未升级实例派发）→ 任何实例可处理（保持旧语义）
- * - owner == 我 → 我负责
- * - owner == 他人且心跳新鲜 → 他人活着，跳过（防误翻他人正在跑的会话）
- * - owner == 他人但心跳过期 → 他人已死，接管
- */
-export function isCardHandledByInstance(
-  card: Pick<TaskCard, "owner" | "heartbeat">,
-  myId: string,
-  now: number,
-): boolean {
-  return !card.owner || card.owner === myId || now - card.heartbeat >= OWNER_STALE_MS;
-}
-
-/**
- * 自愈：本地 registry 里真实在跑、但卡状态却是 review 的 → 拉回 running 并接管归属。
+ * 自愈：本地 registry 里真实在跑、但卡状态却是 review 的 → 拉回 running。
  * 兜底任何来源（未升级旧实例 / 竞态 / 手动）把还在跑的卡误标成 review 的情况——
  * 只有会话确实在跑（isRunning 真）才回拉，真结束待审核的卡不会被动。
  */
 export async function restoreRunningReviewCards(): Promise<number> {
-  const myId = getInstanceId();
-  const now = Date.now();
   const runningIds = new Set(getRunningRpcSessionIds());
   let restored = 0;
   for (const card of listCardsByExecStatus(["review"])) {
     if (!card.sessionId) continue;
     if (!runningIds.has(card.sessionId)) continue;
-    updateCard(card.id, { execStatus: "running", owner: myId, heartbeat: now });
+    updateCard(card.id, { execStatus: "running" });
     console.log(`[task-scheduler] #${card.number} ${card.name} 自愈：会话仍在跑 → 拉回 running`);
     restored += 1;
   }
@@ -195,9 +164,9 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
 
     // 会话正忙（已在流式/处理中）：说明上一轮已发过 prompt，直接标 running，不重复发
     if (session.session.isRunning()) {
-      updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running", owner: getInstanceId(), heartbeat: Date.now() });
+      updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
       // sessionId 落表后立即 reconcile：补执行会话卡 + exec 线（卡线同现，不依赖定时兜底）
-      if (board?.taskId) reconcileTaskBoard(card.boardId);
+      reconcileTaskBoard(card.boardId);
       watchForAgentEnd(card, session.session);
       clearDispatchToken(card.id, token);
       console.log(`[task-scheduler] #${card.number} ${card.name} 会话忙（复用中），标 running 不重发`);
@@ -206,9 +175,9 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
 
     await session.session.send({ type: "prompt", message: buildTaskPrompt(card) });
 
-    updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running", owner: getInstanceId(), heartbeat: Date.now() });
+    updateCard(card.id, { sessionId: session.realSessionId, execStatus: "running" });
     // sessionId 落表后立即 reconcile：补执行会话卡 + exec 线（卡线同现，不依赖定时兜底）
-    if (board?.taskId) reconcileTaskBoard(card.boardId);
+    reconcileTaskBoard(card.boardId);
     watchForAgentEnd(card, session.session);
     clearDispatchToken(card.id, token);
     console.log(
@@ -265,12 +234,9 @@ function watchForAgentEnd(card: TaskCard, session: Awaited<ReturnType<typeof sta
 export async function reconcileEndedRunningCards(): Promise<number> {
   const runningIds = new Set(getRunningRpcSessionIds());
   const now = Date.now();
-  const myId = getInstanceId();
   let flipped = 0;
   for (const card of listRunningDispatched()) {
     if (!card.sessionId) continue;
-    // 归属守卫：他人活着拥有的卡不归本实例判定（防误翻别人正在跑的会话，#27 根因）
-    if (!isCardHandledByInstance(card, myId, now)) continue;
     // 会话真实在跑 → 保持 running
     if (runningIds.has(card.sessionId)) continue;
     // 会话不在跑：确认已静默一段时间（防回合间隙误判），才转 review
@@ -325,14 +291,10 @@ export async function runSchedulerTick(): Promise<number> {
 
 /** 回复队列：answered 且卡仍在 waiting_reply → 发回复续会话 → running。 */
 export async function processReplyQueue(): Promise<number> {
-  const myId = getInstanceId();
-  const now = Date.now();
   let resumed = 0;
   for (const q of listAnswerableQuestions()) {
     const card = getCard(q.cardId);
     if (!card || card.execStatus !== "waiting_reply" || !card.sessionId) continue;
-    // 归属守卫：他人活着拥有的卡不归本实例续会话（防双实例重复发回复）
-    if (!isCardHandledByInstance(card, myId, now)) continue;
     if (countRunningDispatched() >= TASK_SCHEDULER_MAX_CONCURRENCY) break;
     const ok = await withSchedulerActivity(
       { kind: "resume", cardNumber: card.number, cardName: card.name, at: Date.now() },
@@ -355,7 +317,7 @@ async function resumeWithAnswer(card: TaskCard, q: TaskCardQuestion): Promise<bo
       type: "prompt",
       message: `【用户回答了你的提问】\n${q.answer}\n\n请据此继续完成任务。`,
     });
-    updateCard(card.id, { execStatus: "running", owner: getInstanceId(), heartbeat: Date.now() });
+    updateCard(card.id, { execStatus: "running" });
     console.log(`[task-scheduler] 回复续会话 #${card.number} ${card.name}`);
     return true;
   } catch (error) {
@@ -391,11 +353,8 @@ function enterWaitingReply(card: TaskCard, questionHint: string): void {
 /** 审核 review 卡：程序检测失败→failed；否则 AI 审核 → done/failed/waiting_reply/other。 */
 export async function processReviewCards(): Promise<number> {
   const now = Date.now();
-  const myId = getInstanceId();
   let processed = 0;
   for (const card of listCardsByExecStatus(["review"])) {
-    // 归属守卫：他人活着拥有的卡不归本实例审核（防双实例重复审核/判定互覆盖）
-    if (!isCardHandledByInstance(card, myId, now)) continue;
     const snapshot = card.sessionId ? await readSessionAuditSnapshot(card.sessionId) : null;
 
     // 1. 程序检测：最后消息有失败迹象 → 直接 failed（计次重试）
@@ -449,12 +408,9 @@ export async function processReviewCards(): Promise<number> {
 /** running 卡阻塞巡检：最后消息 > BLOCK_IDLE_MS 无进展 → AI 判定阻塞类型 → 处置。 */
 export async function checkRunningCardsBlocked(): Promise<number> {
   const now = Date.now();
-  const myId = getInstanceId();
   let handled = 0;
   for (const card of listCardsByExecStatus(["running"])) {
     if (!card.sessionId) continue;
-    // 归属守卫：他人活着拥有的卡不归本实例巡检
-    if (!isCardHandledByInstance(card, myId, now)) continue;
     // 冷却：同一卡冷却期内不重复判定
     const last = blockCheckAt.get(card.id) ?? 0;
     if (now - last < BLOCK_COOLDOWN_MS) continue;
@@ -530,11 +486,15 @@ async function abortAndReguide(card: TaskCard): Promise<void> {
   }
 }
 
-/** 启动调度器（instrumentation 注册；globalThis 防热重载重复启动）。 */
+/** 启动调度器（instrumentation 注册；globalThis 防热重载重复启动）。
+ *  单调度者：本实例每 10s 尝试注册/续期 leader；只有当前 leader 才跑调度 tick。
+ *  心跳独立于长 tick（审核最长 90s）——tick 阻塞期间心跳不断更，防被误接管。 */
 export function startTaskScheduler(): void {
   if (globalThis.__piTaskScheduler) return;
   let tickInFlight = false;
   const timer = setInterval(() => {
+    // 唯一调度者门控：非 leader 不派发/不巡检/不审核（#31 单调度者）
+    if (!isLeader()) return;
     // 防 tick 重叠：上一轮未跑完（AI 审核耗时可能超过周期）则跳过本轮
     if (tickInFlight) return;
     tickInFlight = true;
@@ -547,19 +507,19 @@ export function startTaskScheduler(): void {
       });
   }, TASK_SCHEDULER_INTERVAL_MS);
   timer.unref?.();
-  // 归属心跳：独立于长 tick（审核最长 90s），owner 存活期间心跳不断更，
-  // 其他实例据此知道该卡归谁、不误翻。
-  const heartbeatTimer = setInterval(() => {
+  // leader 心跳：尝试注册/续期；失败（他人活着）则本实例等待/接管由 tryBecomeLeader 判定。
+  // 独立于长 tick（审核最长 90s），leader 存活期间心跳不断更，其他实例据此知到谁在调度。
+  const leaderHeartbeatTimer = setInterval(() => {
     try {
-      heartbeatOwnedCards(getInstanceId());
+      tryBecomeLeader(getInstanceId());
     } catch (error) {
-      console.error("[task-scheduler] heartbeat error:", error instanceof Error ? error.message : error);
+      console.error("[task-scheduler] leader heartbeat error:", error instanceof Error ? error.message : error);
     }
-  }, HEARTBEAT_INTERVAL_MS);
-  heartbeatTimer.unref?.();
+  }, LEADER_STALE_MS / 3);
+  leaderHeartbeatTimer.unref?.();
   const sched = {
     timer,
-    heartbeatTimer,
+    heartbeatTimer: leaderHeartbeatTimer,
     startedAt: Date.now(),
     lastAction: { type: "none" as const, at: 0 },
     activity: null,
@@ -583,6 +543,9 @@ export interface TaskSchedulerLastAction {
 export interface TaskSchedulerStatus {
   /** 调度器是否已启动（in-process interval 活着） */
   started: boolean;
+  /** 本实例是否为唯一调度者（leader）。多实例共库时只有 leader 实际执行调度，
+   *  非 leader 展示只读队列，不做派发/巡检/审核。 */
+  leader: boolean;
   /** 调度器派发且正在运行的卡（列表可能为空=当前无调度执行） */
   running: TaskCard[];
   /** 最近一次调度动作 */
@@ -659,6 +622,7 @@ export function getSchedulerStatus(): TaskSchedulerStatus {
   const running = listRunningDispatched().filter((c) => c.sessionId && runningIds.has(c.sessionId));
   return {
     started: Boolean(globalThis.__piTaskScheduler),
+    leader: isLeader(),
     running,
     lastAction: getLastAction(),
     activity: getActivity(),

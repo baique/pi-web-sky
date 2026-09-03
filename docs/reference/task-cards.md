@@ -49,6 +49,15 @@ task_card_questions  待回答队列（S3 用）
 - 派生禁删：手动删 exec 线会被 reconcile 补回；真正的删除 = 清 `session_id` 或删任务卡。
 - **执行会话卡必然存在**：先有会话才有关联，reconcile 补所有任务会话（含执行会话），exec 线总有落点。
 
+## 单调度者（leader election）
+
+- 多实例共库时调度动作（派发/巡检/审核/续会话/定时 reconcile）**只允许一个实例执行**：
+  sqlite 单行表 `scheduler_leader` 注册，谁先注册谁是唯一调度者，心跳 10s 续期，
+  30s 过期其他实例可接管（`lib/scheduler-leader.ts`）。
+- 卡级 owner/heartbeat 仲裁已废弃（`task_cards.owner/heartbeat` 列保留供滚动升级，
+  逻辑不再读写）；`dispatch_token` 保留作 leader 切换瞬间的派发双保险。
+- 调度状态 API 返回 `leader` 字段，面板对非 leader 实例显示「跟随」。
+
 ## 删除（确认制 + 事务）
 
 - 删除拦截 toast 已废除（无 `boards.deleteBlocked`）；删除走**确认弹窗**（提示关联关系）→ 事务删除。

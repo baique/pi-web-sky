@@ -29,6 +29,8 @@ interface RunningCard extends CardBrief {
 
 interface SchedulerStatus {
   started: boolean;
+  /** 本实例是否为唯一调度者（多实例共库时只有 leader 实际调度） */
+  leader: boolean;
   running: RunningCard[];
   lastAction: { type: string; cardNumber?: number; cardName?: string; at: number };
   activity: { kind: "dispatch" | "resume" | "review" | "blockcheck"; cardNumber?: number; cardName?: string; at: number } | null;
@@ -155,6 +157,7 @@ export function SchedulerPanel({ nodes }: {
         />
         <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)" }}>调度器</span>
         {s?.started === false && <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>未启动</span>}
+        {s?.started === true && s?.leader === false && <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>跟随</span>}
         {summary && <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>{summary}</span>}
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: "var(--text-muted)", transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}>
           <polyline points="6 9 12 15 18 9" />
@@ -176,7 +179,7 @@ export function SchedulerPanel({ nodes }: {
           <div style={{ padding: "2px 14px 8px", borderBottom: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>调度器</span>
             <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
-              {s?.started === false ? "未启动" : busy ? "工作中" : "休眠"}
+              {s?.started === false ? "未启动" : s?.started === true && s?.leader === false ? "跟随（非调度者）" : busy ? "工作中" : "休眠"}
             </span>
           </div>
 

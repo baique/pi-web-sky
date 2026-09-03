@@ -43,10 +43,6 @@ export interface TaskCard {
   sessionId: string | null;
   /** 跨进程派发互斥 token：谁抢到谁执行（多实例共库防双会话） */
   dispatchToken: string | null;
-  /** 状态判定实例归属：派发/续会话时写入的实例 id；null=旧数据（任何实例可接管） */
-  owner: string | null;
-  /** 归属心跳（ms epoch）：owner 每 ~10s 刷新一次；过期视 owner 已死可接管 */
-  heartbeat: number;
   created: number;
   updated: number;
 }
@@ -77,8 +73,6 @@ interface TaskCardRow {
   retryCount: number;
   sessionId: string | null;
   dispatchToken: string | null;
-  owner: string | null;
-  heartbeat: number;
   created: number;
   updated: number;
 }
@@ -112,7 +106,7 @@ function rowToCard(row: TaskCardRow): TaskCard {
 }
 
 const CARD_COLUMNS =
-  "id, board_id AS boardId, project_key AS projectKey, number, name, description, ready_status AS readyStatus, exec_status AS execStatus, priority, due, attachments, cwd, use_worktree AS useWorktree, max_retries AS maxRetries, retry_count AS retryCount, session_id AS sessionId, dispatch_token AS dispatchToken, owner, heartbeat, created, updated";
+  "id, board_id AS boardId, project_key AS projectKey, number, name, description, ready_status AS readyStatus, exec_status AS execStatus, priority, due, attachments, cwd, use_worktree AS useWorktree, max_retries AS maxRetries, retry_count AS retryCount, session_id AS sessionId, dispatch_token AS dispatchToken, created, updated";
 
 function getCardRow(id: string): TaskCardRow | undefined {
   return getDb()
@@ -219,8 +213,6 @@ export function updateCard(
     maxRetries?: number;
     sessionId?: string | null;
     retryCount?: number;
-    owner?: string | null;
-    heartbeat?: number;
   },
 ): TaskCard | null {
   const db = getDb();
@@ -250,8 +242,6 @@ export function updateCard(
   if (patch.maxRetries !== undefined) bump("max_retries", patch.maxRetries);
   if (patch.sessionId !== undefined) bump("session_id", patch.sessionId);
   if (patch.retryCount !== undefined) bump("retry_count", patch.retryCount);
-  if (patch.owner !== undefined) bump("owner", patch.owner);
-  if (patch.heartbeat !== undefined) bump("heartbeat", patch.heartbeat);
   if (sets.length === 0) return rowToCard(existing);
 
   bump("updated", now());
@@ -447,21 +437,6 @@ export function clearDispatchToken(cardId: string, token: string): void {
   getDb()
     .prepare(`UPDATE task_cards SET dispatch_token = NULL, updated = ?2 WHERE id = ?1 AND dispatch_token = ?3`)
     .run(cardId, now(), token);
-}
-
-/**
- * 归属心跳刷新：把本实例拥有且仍在活跃生命周期（running/review/waiting_reply）
- * 的卡的 heartbeat 推到 now。多实例共库时，非 owner 靠它判断 owner 是否活着
- * （心跳过期 = owner 已死 → 可接管判定），避免误翻他人正在跑的卡。
- */
-export function heartbeatOwnedCards(owner: string): number {
-  const res = getDb()
-    .prepare(
-      `UPDATE task_cards SET heartbeat = ?1
-       WHERE owner = ?2 AND exec_status IN ('running', 'review', 'waiting_reply')`,
-    )
-    .run(now(), owner);
-  return Number(res.changes);
 }
 
 /** 调度器已派发且正在运行的任务卡数（全局并发闸门用）。 */
