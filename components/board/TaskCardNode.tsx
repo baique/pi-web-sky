@@ -581,6 +581,17 @@ function MarkdownField({
     }
   }, [editor, value]);
 
+  // 空内容时编辑器只占一行，wrap 下方留有空白；点空白区域时把光标送进编辑器。
+  // 只要点击来自 wrap 内部（无论编辑器内部还是空白），都确保编辑器聚焦。
+  const handleWrapMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (editor) {
+        editor.commands.focus("end");
+      }
+    },
+    [editor],
+  );
+
   return (
     <div
       className="nodrag nowheel task-card-md-wrap"
@@ -593,6 +604,7 @@ function MarkdownField({
         padding: 0,
         userSelect: "text",
       }}
+      onMouseDown={handleWrapMouseDown}
     >
       <EditorContent editor={editor} />
     </div>

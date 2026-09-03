@@ -6,7 +6,7 @@
  * - 派生边右键：只读提示（exec/依赖线由后端 reconcile 权威维护，不可删）
  * - 空白右键：新建便笺 / 新建任务卡
  */
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { Node } from "@xyflow/react";
 import { useI18n } from "@/hooks/useI18n";
 import { useBoardCanvasOps } from "@/components/board/BoardCanvasContext";
@@ -24,6 +24,20 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
   const { t } = useI18n();
   const ops = useBoardCanvasOps();
   const { node, edgeId, x, y, edgeDerived } = menu;
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // 全局消失：左键点菜单外部任意位置（节点/输入框/工具栏/小地图/画布）→ 关闭。
+  // capture 阶段拦截，早于 RF 的节点选中/拖拽/画布平移，避免菜单残留。
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return; // 仅左键；右键留给 onXxxContextMenu 换位
+      const el = menuRef.current;
+      if (el && e.target instanceof Element && el.contains(e.target)) return;
+      onClose();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [onClose]);
 
   // 派生边判断：edgeId 对应的 edge 是否 exec/依赖（由 CanvasStage 计算传入）
   const isDerivedEdge = Boolean(edgeId && edgeDerived);
@@ -72,6 +86,7 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
 
   return (
     <div
+      ref={menuRef}
       className="glass-popover"
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
