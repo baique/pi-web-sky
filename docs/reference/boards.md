@@ -48,9 +48,22 @@ npm run dev          # 单进程：HTTP + WS 同端口（yjs 房间内嵌，无�
 - **改名**：内联输入 → PATCH /api/sessions/[id] → 事件桥刷左侧树。
 - **节点 Handle**：连线端点（左 target / 右 source），exec/依赖线依赖它渲染。
 
+## 顶栏功能区与调度器面板
+
+- **BoardTopbar（左上）**：看板名（可改名）+ 新建会话/磨砂/清空 + 执行队列。看板全局共享：列表/新建/排序不再跟随选中目录（projectKey）变化。
+- **SchedulerPanel（右上）**：调度器状态面板——状态字加深，任务队列为具体任务可点击定位到画布对应卡。
+- 缩放控制（Controls）在左下角，小地图留右下（带玻璃框：board-card-glass 背景 + 磨砂 + 1px 边框 + 圆角阴影）。
+
 ## 看板内搜索（Ctrl+F）
 
 - 常驻搜索框（画布顶部居中玻璃胶囊），遍历 RF nodes（会话卡标题 + 便笺正文），命中后 `setViewport` 居中 + accent 描边渐隐（BoardSearchContext 驱动）。纯前端，不落库。
+
+## 便笺编辑（TipTap WYSIWYG）
+
+- **编辑态**：双击进入，TipTap WYSIWYG（ProseMirror 内核 + 官方 `@tiptap/markdown` 双向转换），无工具栏，所见即所得（复用 `.markdown-body` 观感）。
+- **存储格式不变**：便笺文本永远是 markdown 字符串（yjs `data.text`），解析/序列化只在编辑态内存发生（`latestMdRef` 镜像），blur/Ctrl+Enter 不丢尾输入；Esc 取消、失焦自动保存（textarea 时代语义保留）。
+- **实现**：TipTap 直接落在 `StickyNoteNode` 内（编辑态分支替换 textarea），不做受控反推（外源 text 只在进入编辑时重置）。设计见 `.agent/spec/2026-09-02-sticky-note-wysiwyg-design.md`。
+- 非编辑态预览仍用 `react-markdown` + `.markdown-body`（`app/globals.css`）。
 
 ## React Flow 集成要点
 

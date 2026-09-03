@@ -68,6 +68,7 @@ GET/PATCH/DELETE /api/task-cards/[id]          详情(links+inbound)/改字段(�
 ## 表单控件（TaskCardShape）
 
 - 右上角「派发」按钮：空卡 = 建卡向导（派发即建卡 todo）；已建卡 draft = 转 todo（可调度）；已建卡 todo = 执行状态徽章（只读，不再可回退草稿）。
+- **需求说明（description）**：`MarkdownField`（TipTap ProseMirror 内核，受控桥 value/onChange 驱动、外源变化防回写光标跳动、Placeholder 空态）；存储为 markdown 字符串。与便笺 WYSIWYG 同栈（`@tiptap/*`）。
 - 预计截止：`DuePicker`（年/月/日三 ThemedSelect 联动，ms epoch）。
 - 执行状态：只读徽章。
 - 工作目录：`DirectoryPicker` 弹窗（「选择目录」按钮）+ 只读展示；默认 = `useBoardDefaultCwd()`。
