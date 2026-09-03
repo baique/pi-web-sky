@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NodeResizer, Handle, Position, type NodeProps } from "@xyflow/react";
+import { NodeResizer, Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
+import { computeResizeSnap } from "@/lib/board-align";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
@@ -71,7 +72,8 @@ const EXPANDED_H = 620;
 const COLLAPSED_MIN_H = 240;
 
 function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { data: TaskCardData }) {
-  const { updateNode, deleteNode, normalizeNodeId } = useBoardCanvasOps();
+  const { getNodes } = useReactFlow();
+  const { updateNode, deleteNode, normalizeNodeId, setSnapLines } = useBoardCanvasOps();
   const w = width ?? data.w ?? FORM_W;
   const h = height ?? data.h ?? FORM_H;
   const expanded = Boolean(data.expanded);
@@ -316,8 +318,15 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
   }, [id, data, expanded, w, h, updateNode]);
 
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
-    updateNode(id, { data: { ...data, w: params.width, h: params.height } });
-  }, [id, data, updateNode]);
+    const nodes = getNodes();
+    const self = nodes.find((n) => n.id === id);
+    const pos = self?.position ?? { x: 0, y: 0 };
+    const snap = computeResizeSnap(id, pos, params.width, params.height, nodes);
+    setSnapLines(snap.lines);
+    const finalW = snap.snapW ?? params.width;
+    const finalH = snap.snapH ?? params.height;
+    updateNode(id, { data: { ...data, w: finalW, h: finalH } });
+  }, [id, data, updateNode, setSnapLines, getNodes]);
 
   // （exec 状态已由上方 useTaskCardStatus 从 running 轮询镜像读取）
 
@@ -384,7 +393,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
           卡根 overflow:hidden 会裁掉外扩的 resize 角柄 → 点击落到卡根变成拖卡，
           resize 永远无法触发。放外面后手柄可正常外扩/命中。
           直线隐藏（四边直线无法圆角）：选中态边线由卡根圆角 accent 边框呈现。 */}
-      <NodeResizer isVisible={selected} minWidth={expanded ? 480 : FORM_W} minHeight={expanded ? 400 : COLLAPSED_MIN_H} onResize={onResize} keepAspectRatio={false} />
+      <NodeResizer isVisible={selected} minWidth={expanded ? 480 : FORM_W} minHeight={expanded ? 400 : COLLAPSED_MIN_H} onResize={onResize} onResizeEnd={() => setSnapLines([])} keepAspectRatio={false} />
       <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <div

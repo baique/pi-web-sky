@@ -64,6 +64,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     },
     addEdge: (edge) => board.addEdge?.(edge),
     addNode: (node) => board.addNode?.(node),
+    setSnapLines: (lines) => setSnapLines(lines),
   }), [board]);
 
   // 新建便笺/任务卡：拖放落点或点击视口中心（flow 坐标）

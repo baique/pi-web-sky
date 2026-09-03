@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NodeResizer, Handle, Position, type NodeProps } from "@xyflow/react";
+import { NodeResizer, Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
+import { computeResizeSnap } from "@/lib/board-align";
 import { SessionWorkbench } from "@/components/canvas/SessionWorkbench";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 import type { CanvasPhase, SessionCardData } from "@/hooks/useBoardCanvas";
@@ -35,7 +36,8 @@ const phaseMeta: Record<string, { dot: string; label: string }> = {
 };
 
 function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & { data: SessionCardData }) {
-  const { updateNode, deleteNode } = useBoardCanvasOps();
+  const { getNodes } = useReactFlow();
+  const { updateNode, deleteNode, setSnapLines } = useBoardCanvasOps();
   const { highlightId } = useBoardSearch();
   const isHighlighted = highlightId === id;
   const w = width ?? data.w ?? CARD_W;
@@ -99,10 +101,17 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
     updateNode(id, { width: next.w, height: next.h, style: { width: next.w, height: next.h } });
   };
 
-  // resize：写回 style + data.w/h（NodeResizer 已改 style，这里同步 data）
+  // resize：写回 style + data.w/h + 对齐参考线吸附
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
-    updateNode(id, { data: { ...data, w: params.width, h: params.height } });
-  }, [id, data, updateNode]);
+    const nodes = getNodes();
+    const self = nodes.find((n) => n.id === id);
+    const pos = self?.position ?? { x: 0, y: 0 };
+    const snap = computeResizeSnap(id, pos, params.width, params.height, nodes);
+    setSnapLines(snap.lines);
+    const finalW = snap.snapW ?? params.width;
+    const finalH = snap.snapH ?? params.height;
+    updateNode(id, { data: { ...data, w: finalW, h: finalH } });
+  }, [id, data, updateNode, setSnapLines, getNodes]);
 
   // 新会话卡转正：清 cwd 字段（写 Y.Doc → CRDT 广播）
   const handlePromote = useCallback(() => {

@@ -128,3 +128,95 @@ export function computeSnap(
 
   return { lines, snapX, snapY };
 }
+
+/**
+ * 计算 resize 时的对齐参考线 + 吸附尺寸。
+ * 输入 position + 候选 width/height，输出吸附后的尺寸。
+ */
+export function computeResizeSnap(
+  nodeId: string,
+  position: { x: number; y: number },
+  width: number,
+  height: number,
+  nodes: Node[],
+  threshold: number = SNAP_THRESHOLD,
+): { lines: AlignLine[]; snapW: number | null; snapH: number | null } {
+  const node = nodes.find((n) => n.id === nodeId);
+  if (!node) return { lines: [], snapW: null, snapH: null };
+
+  const d = {
+    left: position.x, right: position.x + width, cx: position.x + width / 2,
+    top: position.y, bottom: position.y + height, cy: position.y + height / 2,
+    w: width, h: height,
+  };
+  const dMinX = Math.min(d.left, d.right);
+  const dMaxX = Math.max(d.left, d.right);
+  const dMinY = Math.min(d.top, d.bottom);
+  const dMaxY = Math.max(d.top, d.bottom);
+
+  let snapW: number | null = null;
+  let snapH: number | null = null;
+  let bestDistX = threshold;
+  let bestDistY = threshold;
+  let lineX: number | null = null;
+  let lineXOther: { minY: number; maxY: number } | null = null;
+  let lineY: number | null = null;
+  let lineYOther: { minX: number; maxX: number } | null = null;
+
+  for (const o of nodes) {
+    if (o.id === nodeId) continue;
+    const ob = bounds(o);
+    if (boxDistance(d, ob) > MAX_ALIGN_DISTANCE) continue;
+
+    const oMinX = Math.min(ob.left, ob.right);
+    const oMaxX = Math.max(ob.left, ob.right);
+    const oMinY = Math.min(ob.top, ob.bottom);
+    const oMaxY = Math.max(ob.top, ob.bottom);
+
+    // 水平：右边缘对齐其他节点的左/中/右
+    const hEdges: Array<[number, number]> = [
+      [d.right, ob.left], [d.right, ob.cx], [d.right, ob.right],
+    ];
+    for (const [de, oe] of hEdges) {
+      const dist = Math.abs(de - oe);
+      if (dist < bestDistX) {
+        bestDistX = dist;
+        snapW = oe - position.x;
+        lineX = oe;
+        lineXOther = { minY: oMinY, maxY: oMaxY };
+      }
+    }
+
+    // 竖直：底边缘对齐其他节点的上/中/下
+    const vEdges: Array<[number, number]> = [
+      [d.bottom, ob.top], [d.bottom, ob.cy], [d.bottom, ob.bottom],
+    ];
+    for (const [de, oe] of vEdges) {
+      const dist = Math.abs(de - oe);
+      if (dist < bestDistY) {
+        bestDistY = dist;
+        snapH = oe - position.y;
+        lineY = oe;
+        lineYOther = { minX: oMinX, maxX: oMaxX };
+      }
+    }
+
+    if (bestDistX < threshold && bestDistY < threshold) break;
+  }
+
+  const lines: AlignLine[] = [];
+  if (lineX !== null && lineXOther) {
+    lines.push({
+      x1: lineX, y1: Math.min(dMinY, lineXOther.minY) - 6,
+      x2: lineX, y2: Math.max(dMaxY, lineXOther.maxY) + 6,
+    });
+  }
+  if (lineY !== null && lineYOther) {
+    lines.push({
+      x1: Math.min(dMinX, lineYOther.minX) - 6, y1: lineY,
+      x2: Math.max(dMaxX, lineYOther.maxX) + 6, y2: lineY,
+    });
+  }
+
+  return { lines, snapW, snapH };
+}
