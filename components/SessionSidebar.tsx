@@ -1053,7 +1053,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // offset 语义 = 已加载的非置顶根数（服务端对 nonPinnedRoots slice）；
   // 去重基准 = 已加载的 sessions（不是全量 sessionIds——那是服务端 Task 的全量根 id，
   // 用它会把所有新页会话全部滤掉，加载更多恒无效）。
-  const handleLoadMoreTaskSessions = useCallback(async (taskId: string, offset: number) => {
+  const handleLoadMoreTaskSessions = useCallback(async (taskId: string, offset: number): Promise<void> => {
     const key = selectedProject?.key;
     if (!key) return;
     try {
@@ -2212,9 +2212,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                         {t("sidebar.noSessions")}
                       </div>
                     )}
-                    {/* 滚动分页哨兵：进入视口 → 追加下一页（#14）。 */}
+                    {/* 滚动分页：加载中整行居中；哨兵独立一行（不占用 loading 宽度） */}
                     {chatNodes.length > 0 && (
-                      <div ref={chatSentinelRef} style={{ height: 1 }} aria-hidden />
+                      <>
+                        {chatLoading && (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "6px 0", color: "var(--text-dim)", fontSize: 11 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true" style={{ flexShrink: 0, animation: "spin 0.9s linear infinite" }}>
+                              <path d="M21 12a9 9 0 1 1-5.7-8.4" />
+                            </svg>
+                            <span>{t("sidebar.loading")}</span>
+                          </div>
+                        )}
+                        <div ref={chatSentinelRef} style={{ height: 1 }} aria-hidden />
+                      </>
                     )}
                   </div>
                 )}

@@ -45,8 +45,8 @@ interface TaskGroup {
   hasMore: boolean;
   /** 剩余未加载根会话数（按钮文案）。 */
   remainingCount: number;
-  /** 按 offset 追加下一页会话详情（服务端分页）。 */
-  onLoadMore: () => void;
+  /** 按 offset 追加下一页会话详情（服务端分页），返回完成信号供按钮取消 loading。 */
+  onLoadMore: () => Promise<void> | void;
 }
 
 interface Props {
@@ -132,6 +132,7 @@ function TaskCard({
   hasMore,
   remainingCount,
   onLoadMore,
+  loadingMore,
   runningCount,
   activeSessionId,
   isActive,
@@ -160,6 +161,8 @@ function TaskCard({
   remainingCount: number;
   /** 按 offset 追加下一页会话详情。 */
   onLoadMore: () => void;
+  /** 该任务正在加载更多（按钮转圈）。 */
+  loadingMore?: boolean;
   /** 任务内运行中会话数（>0 时行前显示蓝色数字徽记）。 */
   runningCount?: number;
   /** 当前选中的会话 id；属于本任务时自动展开卡片。 */
@@ -611,18 +614,25 @@ function TaskCard({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onLoadMore(); }}
+              disabled={loadingMore}
               style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                 width: "100%", boxSizing: "border-box",
                 margin: "2px 0", padding: 0,
                 background: "transparent", border: "none",
-                color: "var(--text-dim)", fontSize: 11, cursor: "pointer",
-                transition: "color 0.12s",
+                color: "var(--text-dim)", fontSize: 11, cursor: loadingMore ? "default" : "pointer",
+                transition: "color 0.12s", opacity: loadingMore ? 0.7 : 1,
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+              onMouseEnter={(e) => { if (!loadingMore) e.currentTarget.style.color = "var(--text)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
             >
-              {t("sidebar.loadMoreSessions", { count: remainingCount })}
+              {loadingMore ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true" style={{ flexShrink: 0, animation: "spin 0.9s linear infinite" }}>
+                  <path d="M21 12a9 9 0 1 1-5.7-8.4" />
+                </svg>
+              ) : (
+                t("sidebar.loadMoreSessions", { count: remainingCount })
+              )}
             </button>
           )}
         </>
@@ -659,6 +669,8 @@ export function TaskArea({
   const [createHovered, setCreateHovered] = useState(false);
   const [cancelHovered, setCancelHovered] = useState(false);
   const newTaskRef = useRef<HTMLInputElement>(null);
+  /** 正在加载更多的任务 id（按钮转圈）。 */
+  const [loadingTaskId, setLoadingTaskId] = useState<string | null>(null);
   /** 拖拽中的任务（整卡拖动）。{ id, pinned } 用于同区判断。 */
   const [dragTask, setDragTask] = useState<{ id: string; pinned: boolean } | null>(null);
   /** 当前 hover 的落点：{ targetId, before }（插到目标前/后）。state 用于渲染边框指示。 */
@@ -832,6 +844,14 @@ export function TaskArea({
         const runningCount = runningSessionIds
           ? task.sessionIds.filter((sid) => runningSessionIds.has(sid)).length
           : 0;
+        const handleLoadMore = async () => {
+          setLoadingTaskId(task.id);
+          try {
+            await onLoadMore();
+          } finally {
+            setLoadingTaskId(null);
+          }
+        };
         return (
           <Fragment key={task.id}>
             {divider && (
@@ -845,7 +865,8 @@ export function TaskArea({
               sessionTotal={sessionTotal}
               hasMore={hasMore}
               remainingCount={remainingCount}
-              onLoadMore={onLoadMore}
+              onLoadMore={handleLoadMore}
+              loadingMore={loadingTaskId === task.id}
               runningCount={runningCount}
               activeSessionId={selectedSessionId}
               isActive={activeBoardId === task.id}
