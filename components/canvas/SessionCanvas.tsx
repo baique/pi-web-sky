@@ -146,7 +146,7 @@ export function SessionCanvas({
           nodes={board.nodes as never}
         />
       )}
-      <SchedulerPanel nodes={board.nodes as never} />
+      <SchedulerPanel nodes={board.nodes as never} onViewportSave={board.saveViewport} />
       {!board.loading && (
         <div
           style={{
@@ -157,7 +157,7 @@ export function SessionCanvas({
             zIndex: 40,
           }}
         >
-          <BoardSearch inputRef={searchBoxRef} nodes={board.nodes as never} />
+          <BoardSearch inputRef={searchBoxRef} nodes={board.nodes as never} onViewportSave={board.saveViewport} />
         </div>
       )}
       <CanvasStage

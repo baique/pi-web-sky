@@ -45,6 +45,7 @@ export function BoardSearch({
   editor: _unused,
   inputRef,
   nodes,
+  onViewportSave,
 }: {
   /** 兼容旧签名（RF 版不再用 tldraw editor） */
   editor?: unknown;
@@ -52,6 +53,8 @@ export function BoardSearch({
   inputRef?: RefObject<HTMLInputElement | null>;
   /** 当前画布节点（搜索遍历对象） */
   nodes?: Array<{ id: string; type: string; data: Record<string, unknown> }>;
+  /** 定位后把目标视口写回 yjs view map（位置记忆同源，防覆盖竞争） */
+  onViewportSave?: (vp: { x: number; y: number; zoom: number }) => void;
 }) {
   const { t } = useI18n();
   const { setHighlight } = useBoardSearch();
@@ -159,9 +162,14 @@ export function BoardSearch({
     const cy = node.position.y + h / 2;
     // 用 RF 的 setCenter（语义正确：把指定点移到视口中心，保持缩放），
     // 不用手算坐标的 setViewport——避免动画 transition 卡住 + 坐标算错。
-    void setCenter(cx, cy, { zoom: getViewport().zoom });
+    const p = setCenter(cx, cy, { zoom: getViewport().zoom });
+    // 定位后把目标视口写回 yjs view map：与位置记忆同源，
+    // 避免 CanvasStage 的位置记忆 effect 用旧值覆盖当前视口（定位被拽回）。
+    void Promise.resolve(p).then(() => {
+      onViewportSave?.(getViewport());
+    });
     setHighlight(nodeId);
-  }, [getNodes, getViewport, setCenter, setHighlight]);
+  }, [getNodes, getViewport, setCenter, setHighlight, onViewportSave]);
 
   /** 命中总数：节点命中 + 正文命中 */
   const totalCount = matches.length + (bodyHits?.length ?? 0);

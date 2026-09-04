@@ -38,11 +38,14 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   // 对齐参考线
   const [snapLines, setSnapLines] = useState<SnapResult["lines"]>([]);
 
-  // 画布位置记忆：synced 后设到 yjs 记住的位置
+  // 画布位置记忆：只在看板 ready（进入/切换）时恢复 yjs 记住的位置一次。
+  // 不做持续覆盖（不监听 board.viewport 变化）——否则 running 轮询等 yjs 回灌
+  // 会触发本 effect 用旧值 setViewport，覆盖用户拖拽/定位的当前视口（回跳/定位失效）。
   useEffect(() => {
     if (!board.ready) return;
     setViewport(board.viewport);
-  }, [board.ready, board.viewport, setViewport]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅 ready 时恢复一次
+  }, [board.ready]);
 
   // BoardCanvasOps：把 Y.Doc 写操作暴露给节点组件
   const ops = useMemo<BoardCanvasOps>(() => ({
