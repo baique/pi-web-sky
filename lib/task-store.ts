@@ -26,6 +26,25 @@ interface TaskRow {
 
 const now = () => Date.now();
 
+/**
+ * 全量会话归属映射（session_id -> task_id）。
+ * 供 /api/sessions 附加归属字段用——一次 join，避免 N+1 查询。
+ */
+export function listAllTaskSessionIds(): Map<string, string> {
+  const rows = getDb()
+    .prepare("SELECT session_id, task_id FROM session_meta WHERE task_id IS NOT NULL")
+    .all() as Array<{ session_id: string; task_id: string }>;
+  return new Map(rows.map((r) => [r.session_id, r.task_id]));
+}
+
+/** 全量任务 id → 名称映射（供 /api/sessions 附加 taskName 用）。 */
+export function listAllTaskNames(): Map<string, string> {
+  const rows = getDb()
+    .prepare("SELECT id, name FROM tasks")
+    .all() as Array<{ id: string; name: string }>;
+  return new Map(rows.map((r) => [r.id, r.name]));
+}
+
 /** 任务下根会话 id（不含 fork 子树，子树由树结构隐含归属）。 */
 export function listTaskSessionIds(taskId: string): string[] {
   // Order here is a fallback only: the sidebar re-sorts group contents by

@@ -10,6 +10,7 @@ import { join as joinPath, normalize as normalizePath } from "path";
 import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext, TodoItem } from "./types";
 import type { SessionEntry as PiSessionEntry } from "@earendil-works/pi-coding-agent";
 import { getDb } from "./sqlite-db";
+import { listAllTaskNames, listAllTaskSessionIds } from "./task-store";
 import { normalizeToolCalls } from "./normalize";
 import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
@@ -36,13 +37,26 @@ export async function attachSessionProjectInfo(sessions: SessionInfo[]): Promise
     // db not available — fall back to nothing pinned
   }
 
+  // 会话归属（taskId/taskName）批量附加：一次查全量归属与任务名映射，避免 N+1。
+  let taskIdBySession = new Map<string, string>();
+  let taskNameById = new Map<string, string>();
+  try {
+    taskIdBySession = listAllTaskSessionIds();
+    taskNameById = listAllTaskNames();
+  } catch {
+    // db not available — fall back to no ownership
+  }
+
   return sessions.map((session) => {
     const project = session.cwd ? projectByCwd.get(session.cwd) : undefined;
     const projectRoot = project?.projectRoot ?? session.cwd;
+    const taskId = taskIdBySession.get(session.id) ?? null;
     return {
       ...session,
       projectRoot,
       projectKey: projectIdentityKey(projectRoot),
+      taskId,
+      taskName: taskId ? (taskNameById.get(taskId) ?? null) : null,
       ...(project?.branch ? { branch: project.branch } : {}),
       ...(project?.isWorktree ? { isWorktree: true } : {}),
       ...(project?.isWorktree && project.branch ? { worktreeBranch: project.branch } : {}),
