@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { createTask, listTasks } from "@/lib/task-store";
-import { loadTaskSessionsPage } from "@/lib/session-reader";
+import { buildTaskSessionIndex, loadTaskSessionsPageWithIndex } from "@/lib/session-reader";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/tasks?projectKey=<key>[&offset=0&limit=5]
 //   每任务附会话详情（置顶全量 + 非置顶 offset/limit + rootTotal + sessionTotal）——
 //   服务端分流，前端零归属判断（不再用 /api/sessions join task.sessionIds 反查）。
+//   会话详情共用一个全量任务索引（readdir+header 一次扫，多任务复用，不随任务数线性变慢）。
 export async function GET(req: Request) {
   try {
     const search = new URL(req.url).searchParams;
@@ -16,10 +17,11 @@ export async function GET(req: Request) {
     const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 5;
     const tasks = listTasks(projectKey);
+    const index = await buildTaskSessionIndex();
     const tasksWithSessions = await Promise.all(
       tasks.map(async (task) => ({
         ...task,
-        ...(await loadTaskSessionsPage(task.id, offset, limit)),
+        ...(await loadTaskSessionsPageWithIndex(task.id, index, offset, limit)),
       })),
     );
     return NextResponse.json(
