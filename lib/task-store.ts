@@ -27,6 +27,20 @@ interface TaskRow {
 const now = () => Date.now();
 
 /**
+ * 归属写入后失效 /api/sessions 列表缓存（惰性 require 避开 session-reader ↔ task-store 循环）。
+ * 归属（assign/unassign/移动/pin）变化时，会话列表必须反映最新 taskId，
+ * 否则前端任务分组基于过期的 /api/sessions 快照，新会话会落聊天区。
+ */
+function invalidateSessionListCache(): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    require("./session-reader").invalidateSessionListCache();
+  } catch {
+    // 循环加载/不可用时忽略——下一次 force 刷新会重建缓存
+  }
+}
+
+/**
  * 全量会话归属映射（session_id -> task_id）。
  * 供 /api/sessions 附加归属字段用——一次 join，避免 N+1 查询。
  */
@@ -176,6 +190,7 @@ export function updateTask(
     db.exec("ROLLBACK");
     throw error;
   }
+  if (patch.sessionIds !== undefined) invalidateSessionListCache();
   return rowToTask(getTaskRow(id)!);
 }
 
@@ -230,6 +245,7 @@ export function deleteTask(id: string): void {
     db.exec("ROLLBACK");
     throw error;
   }
+  invalidateSessionListCache();
 }
 
 /** Session's current task id, or null when it is a temp session. */
@@ -272,6 +288,7 @@ export function assignSessionToTask(sessionId: string, taskId: string): boolean 
     db.exec("ROLLBACK");
     throw error;
   }
+  invalidateSessionListCache();
   return true;
 }
 
@@ -282,9 +299,11 @@ export function setSessionPinned(sessionId: string, pinned: boolean): void {
     "INSERT INTO session_meta (session_id, task_id, updated, pinned) VALUES (?, NULL, ?, ?) " +
       "ON CONFLICT(session_id) DO UPDATE SET pinned = excluded.pinned",
   ).run(sessionId, now(), pinned ? 1 : 0);
+  invalidateSessionListCache();
 }
 
 /** Drop all task/meta bookkeeping for a session (used on session delete). */
 export function unassignSession(sessionId: string): void {
   getDb().prepare("DELETE FROM session_meta WHERE session_id = ?").run(sessionId);
+  invalidateSessionListCache();
 }
