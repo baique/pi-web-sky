@@ -114,6 +114,8 @@ export function useBoardCanvas({
 
   const boardIdRef = useRef(boardId);
   boardIdRef.current = boardId;
+  // 任务会话补卡就绪 → 已通知过左侧刷新的 sessionId 集合（跨热重载/重连去重）
+  const notifiedReadySessionIdsRef = useRef<Set<string>>(new Set());
   // 任务看板 taskId：prop 可能在 URL 直达时为空，看板元信息(board.board.taskId)恒有 —— 归属用两者兜底
   const boardRef = useRef<BoardInfo | null>(null);
   boardRef.current = board;
@@ -145,6 +147,25 @@ export function useBoardCanvas({
       // yjs 铁律：changes 只能在 observe 回调同步阶段访问（事务结束后抛错），
       // 必须在这里先取出变化的 key 集合，再传给异步的 setNodes reducer。
       const changedIds = changes ? new Set(Array.from(changes.keys.keys())) : null;
+      // 任务会话补卡就绪 → 触发一次左侧刷新：
+      // 后端 reconcile 补执行会话卡（业务表已有、画布新增）时，左侧会话树不会自动感知，
+      // 这里在 synced 之后监听 yjs 新增的正式会话卡（cwd 空 = 就绪），dispatch 事件桥让 AppShell 刷新。
+      // 初始同步（synced 前 ready=false）不触发——打开看板时画布既有卡不重复刷新左侧；
+      // 同一 sessionId 只通知一次（notified 集合去重），占位卡（cwd 非空）不算就绪跳过。
+      if (changes && readyRef.current) {
+        let notifySid: string | null = null;
+        for (const [key, change] of changes.keys) {
+          if (change?.action !== "add") continue;
+          const n = nodesMap.get(key);
+          if (n?.type !== "session-card") continue;
+          const d = n.data as SessionCardData | undefined;
+          if (!d?.sessionId || d.cwd) continue;
+          if (notifiedReadySessionIdsRef.current.has(d.sessionId)) continue;
+          notifiedReadySessionIdsRef.current.add(d.sessionId);
+          notifySid = notifySid ?? d.sessionId;
+        }
+        if (notifySid) dispatchBoardSessionCreated(notifySid);
+      }
       setNodes((prev) => {
         // selected/dragging 是 UI 态：只存活于本地 state，绝不进 yjs。
         // 回灌时从上一帧保留同 id 节点的选中/拖拽态，并剥掉 yjs 可能的历史残留
