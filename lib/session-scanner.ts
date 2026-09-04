@@ -165,7 +165,8 @@ function scanTail(
   }
 }
 
-function scanOneSessionFile(path: string): SessionScanResult | null {
+/** 单个会话文件详情（阶段二按需读取：只对当前页/置顶子集调用）。 */
+export function scanOneSessionFile(path: string): SessionScanResult | null {
   let stat;
   try {
     stat = statSync(path);
@@ -198,11 +199,28 @@ function scanOneSessionFile(path: string): SessionScanResult | null {
   };
 }
 
-/**
- * 扫描 <agentDir>/sessions 下所有 jsonl。同步小 IO 串行即可（单文件只读
- * 头部小块 + 尾部反向分块），`sessionsDir` 仅在测试时注入。
- */
+/** 扫描 <agentDir>/sessions 下所有 jsonl。同步小 IO 串行即可（单文件只读
+ *  头部小块 + 尾部反向分块），`sessionsDir` 仅在测试时注入。
+ *  全量详情版本：每个文件读头部（首条消息）与尾部（自定义名/最后回复）。
+ *  侧栏聊天区已走两阶段分页（见 scanSessionFileMeta），此函数保留供
+ *  全量消费方（看板标题映射 / 会话恢复 / 无分页参数调用）使用。 */
 export async function scanSessionFiles(sessionsDir?: string): Promise<SessionScanResult[]> {
+  const metas = await scanSessionFileMeta(sessionsDir);
+  const results: SessionScanResult[] = [];
+  for (const meta of metas) {
+    const scanned = scanOneSessionFile(meta.path);
+    if (scanned) results.push(scanned);
+  }
+  results.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+  return results;
+}
+
+/** 阶段一元数据：只读目录项 + stat，不碰文件内容。
+ *  会话文件命名 `<timestamp>_<id>.jsonl`，id 直接从文件名解析（与 header 一致，
+ *  见 scanOneSessionFile 校验）；mtime 即最后活动时间（侧栏排序键）。
+ *  两阶段设计：这里全量便宜拿到 id+mtime 后，调用方先按归属过滤（聊天区
+ *  排除任务会话），再对需要的页/置顶子集调用 scanOneSessionFile 读详情。 */
+export async function scanSessionFileMeta(sessionsDir?: string): Promise<Array<{ path: string; id: string; modified: Date }>> {
   const root = sessionsDir ?? joinPath(getAgentDir(), "sessions");
   let projectDirs: string[];
   try {
@@ -214,24 +232,32 @@ export async function scanSessionFiles(sessionsDir?: string): Promise<SessionSca
     return [];
   }
 
-  const files: string[] = [];
+  const metas: Array<{ path: string; id: string; modified: Date }> = [];
   for (const dir of projectDirs) {
+    let names: string[];
     try {
-      for (const name of await readdir(dir)) {
-        if (name.endsWith(".jsonl")) files.push(joinPath(dir, name));
-      }
+      names = await readdir(dir);
     } catch {
-      // 单目录不可读则跳过，不影响其它目录。
+      continue; // 单目录不可读则跳过，不影响其它目录。
+    }
+    for (const name of names) {
+      if (!name.endsWith(".jsonl")) continue;
+      const path = joinPath(dir, name);
+      let stat;
+      try {
+        stat = statSync(path);
+      } catch {
+        continue;
+      }
+      if (!stat.isFile() || stat.size === 0) continue;
+      // 文件名 `..._<id>.jsonl`：下划线后到 .jsonl 之间即 session id。
+      const id = name.slice(0, -6).split("_").pop() ?? "";
+      if (!id) continue;
+      metas.push({ path, id, modified: stat.mtime });
     }
   }
-
-  const results: SessionScanResult[] = [];
-  for (const file of files) {
-    const scanned = scanOneSessionFile(file);
-    if (scanned) results.push(scanned);
-  }
-  results.sort((a, b) => b.modified.getTime() - a.modified.getTime());
-  return results;
+  metas.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+  return metas;
 }
 
 // 以对象形式暴露扫描入口，测试可替换实现（ESM 的模块绑定本身只读）。

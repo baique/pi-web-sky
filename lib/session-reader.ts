@@ -14,7 +14,7 @@ import { normalizeToolCalls } from "./normalize";
 import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
-import { scanSessionFiles, sessionScanner } from "./session-scanner";
+import { scanSessionFiles, scanSessionFileMeta, scanOneSessionFile, sessionScanner } from "./session-scanner";
 
 export { getAgentDir };
 
@@ -89,6 +89,90 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
     };
   });
   return attachSessionProjectInfo(sessions);
+}
+
+/** 聊天区会话两阶段分页（侧栏左侧聊天区）。
+ *
+ *  阶段一：scanSessionFileMeta——readdir + stat 拿全量 id+mtime（不读内容，
+ *  按 mtime 降序）；再用 session_meta.task_id 过滤掉任务会话，剩聊天区全集。
+ *  阶段二：只对「置顶全量 + 当前页」子集 scanOneSessionFile 读详情——列表
+ *  加载不再随会话总量线性变慢。
+ *
+ *  返回：pinned（置顶全量，不分页）+ sessions（当前页非置顶）+ total（非置顶总数）。
+ */
+export async function loadChatSessionsPage(options: {
+  offset?: number;
+  limit?: number;
+} = {}): Promise<{ pinned: SessionInfo[]; sessions: SessionInfo[]; total: number }> {
+  const offset = Math.max(0, Math.floor(options.offset ?? 0));
+  const limit = Math.max(1, Math.floor(options.limit ?? 20));
+
+  // 阶段一：全量 id+mtime（轻量，不读内容）。
+  const metas = await scanSessionFileMeta();
+
+  // 过滤：归属任务的会话交 /api/tasks 管，不进聊天区。
+  let taskSessionIds = new Set<string>();
+  try {
+    const { listAllTaskSessionIds } = await import("./task-store");
+    taskSessionIds = listAllTaskSessionIds();
+  } catch {
+    // db not available — fall back to all chat
+  }
+  const chatMetas = metas.filter((m) => !taskSessionIds.has(m.id));
+
+  // 阶段一排序：scanSessionFileMeta 已按 mtime 降序。置顶在列表里始终保持
+  // 独立全量（客户端置顶区单独渲染），非置顶按序取页。
+  const pinnedIds = listPinnedSessionIds();
+  const pinnedMetas = chatMetas.filter((m) => pinnedIds.has(m.id));
+  const nonPinnedMetas = chatMetas.filter((m) => !pinnedIds.has(m.id));
+  const pageMetas = nonPinnedMetas.slice(offset, offset + limit);
+
+  // 阶段二：只读置顶 + 当前页的详情。
+  const scanned = await readSessionDetails([...pinnedMetas, ...pageMetas]);
+  const pinnedCount = pinnedMetas.length;
+  const pinnedSessions = scanned.slice(0, pinnedCount);
+  const pageSessions = scanned.slice(pinnedCount);
+  const pinned = await attachSessionProjectInfo(pinnedSessions);
+  const sessions = await attachSessionProjectInfo(pageSessions);
+  return { pinned, sessions, total: nonPinnedMetas.length };
+}
+
+/** 阶段二：批量读详情（只读需要的子集）。返回顺序与入参一致。 */
+async function readSessionDetails(metas: Array<{ path: string; id: string; modified: Date }>): Promise<SessionInfo[]> {
+  const pathToId = new Map<string, string>();
+  for (const m of metas) pathToId.set(sessionPathKey(m.path), m.id);
+  const sessions: SessionInfo[] = [];
+  for (const meta of metas) {
+    const scanned = scanOneSessionFile(meta.path);
+    if (!scanned) continue;
+    cacheSessionPath(scanned.id, scanned.path);
+    sessions.push({
+      path: scanned.path,
+      id: scanned.id,
+      cwd: scanned.cwd,
+      name: scanned.name,
+      created: scanned.created.toISOString(),
+      modified: scanned.modified.toISOString(),
+      messageCount: 0,
+      firstMessage: scanned.firstMessage || "(no messages)",
+      lastReply: scanned.lastReply || "",
+      parentSessionId: scanned.parentSessionPath ? pathToId.get(sessionPathKey(scanned.parentSessionPath)) : undefined,
+      transient: false,
+    });
+  }
+  return sessions;
+}
+
+/** 全量置顶会话 id 集合（一次查询，避免逐会话查库）。 */
+function listPinnedSessionIds(): Set<string> {
+  try {
+    const rows = getDb()
+      .prepare("SELECT session_id FROM session_meta WHERE pinned = 1")
+      .all() as Array<{ session_id: string }>;
+    return new Set(rows.map((r) => r.session_id));
+  } catch {
+    return new Set();
+  }
 }
 
 export async function listAllSessions(options: { force?: boolean } = {}): Promise<SessionInfo[]> {

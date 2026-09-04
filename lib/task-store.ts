@@ -51,6 +51,15 @@ export function listTaskSessionIds(taskId: string): string[] {
     .map((r) => (r as { session_id: string }).session_id);
 }
 
+/** 全量归属任务会话 id 集合（session_meta.task_id 非空）。
+ *  供 /api/sessions 阶段一过滤用——聊天区只返回未归属会话，一次查询无 N+1。 */
+export function listAllTaskSessionIds(): Set<string> {
+  const rows = getDb()
+    .prepare("SELECT session_id FROM session_meta WHERE task_id IS NOT NULL")
+    .all() as Array<{ session_id: string }>;
+  return new Set(rows.map((r) => r.session_id));
+}
+
 function getTaskRow(id: string): TaskRow | undefined {
   return getDb()
     .prepare(
