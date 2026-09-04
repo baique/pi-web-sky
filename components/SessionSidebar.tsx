@@ -1152,15 +1152,24 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }
 
   const taskGroups = useMemo(() => {
-    // 会话自带归属（服务端 /api/sessions 已附加 taskId）——任务分组直接按标签过滤，
-    // 不再拿 task.sessionIds 去反查会话树（旧逻辑：归属依赖任务接口的 sessionIds 快照，
-    // 派发/新建后任务接口不刷新 → 新会话落聊天区）。fork 子树仍由 sessionTree 携带跟随根。
+    // Full-tree index (roots *and* descendants) so forked child sessions
+    // assigned to a task render inside the group and leave the chat region.
+    const byId = new Map<string, SessionTreeNode>();
+    const walk = (nodes: SessionTreeNode[]) => {
+      for (const n of nodes) {
+        byId.set(n.session.id, n);
+        walk(n.children);
+      }
+    };
+    walk(sessionTree);
     // 任务下全部会话数（含 fork 子树）——删除确认文案用。
     const countTree = (nodes: SessionTreeNode[]): number =>
       nodes.reduce((sum, n) => sum + 1 + countTree(n.children), 0);
     return tasks.map((task) => {
       const nodes = orderPinnedFirst(
-        sessionTree.filter((n) => n.session.taskId === task.id),
+        task.sessionIds
+          .map((sid) => byId.get(sid))
+          .filter((n): n is SessionTreeNode => Boolean(n)),
       );
       return { task, nodes, sessionTotal: countTree(nodes) };
     });
