@@ -68,7 +68,7 @@ function getTaskRow(id: string): TaskRow | undefined {
     .get(id) as TaskRow | undefined;
 }
 
-function listPinnedTaskSessionIds(taskId: string): string[] {
+export function listPinnedTaskSessionIds(taskId: string): string[] {
   return getDb()
     .prepare("SELECT session_id FROM session_meta WHERE task_id = ? AND pinned = 1")
     .all(taskId)

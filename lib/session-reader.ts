@@ -175,6 +175,77 @@ function listPinnedSessionIds(): Set<string> {
   }
 }
 
+/** 任务会话详情按需分页（侧栏任务区）。
+ *
+ *  服务端分流：任务下的会话详情由 /api/tasks 直接下发，前端不再用
+ *  /api/sessions 全量列表 join task.sessionIds 反查（旧设计已被服务端
+ *  分流取代——前端零归属判断）。
+ *
+ *  每任务返回：置顶根会话全量 + 非置顶根从 offset 起的 limit 个（含各自
+ *  fork 子树），外加 rootTotal（根会话总数，加载更多游标）与
+ *  sessionTotal（含子树全部节点数，删除确认文案用）。
+ */
+export async function loadTaskSessionsPage(
+  taskId: string,
+  offset = 0,
+  limit = 5,
+): Promise<{ sessions: SessionInfo[]; rootTotal: number; sessionTotal: number; pinnedSessionIds: string[] }> {
+  // 阶段一：全量 id+path+mtime（readdir+stat，不读内容）。
+  const metas = await scanSessionFileMeta();
+  const metaById = new Map(metas.map((m) => [m.id, m]));
+  const metaByPath = new Map(metas.map((m) => [sessionPathKey(m.path), m]));
+
+  // 父链索引（只读每个文件 header 首行——比 scanOneSessionFile 便宜，
+  // 不需要尾部反向分块）：childId -> parentId + parentId -> [childId]。
+  const childrenOf = new Map<string, string[]>();
+  for (const m of metas) {
+    let parentPath: string | undefined;
+    try {
+      parentPath = readSessionHeader(m.path)?.parentSession ?? undefined;
+    } catch {
+      // 首行不可读 → 视为根会话
+    }
+    if (!parentPath) continue;
+    const parentMeta = metaByPath.get(sessionPathKey(parentPath));
+    if (!parentMeta) continue;
+    const arr = childrenOf.get(parentMeta.id) ?? [];
+    arr.push(m.id);
+    childrenOf.set(parentMeta.id, arr);
+  }
+  const collectSubtree = (rootId: string): string[] => {
+    const out = [rootId];
+    const queue = [rootId];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      for (const child of childrenOf.get(cur) ?? []) {
+        out.push(child);
+        queue.push(child);
+      }
+    }
+    return out;
+  };
+
+  const { listTaskSessionIds, listPinnedTaskSessionIds } = await import("./task-store");
+  const rootIds = listTaskSessionIds(taskId);
+  const pinnedSessionIds = listPinnedTaskSessionIds(taskId);
+  const pinnedSet = new Set(pinnedSessionIds);
+  const nonPinnedRoots = rootIds.filter((id) => !pinnedSet.has(id));
+
+  // 当前页根 = 置顶全量 + 非置顶 slice(offset, offset+limit)；子树跟随根。
+  const pageRootIds = [...pinnedSessionIds, ...nonPinnedRoots.slice(offset, offset + limit)];
+  const wantedIds = new Set<string>();
+  for (const rid of pageRootIds) {
+    for (const id of collectSubtree(rid)) wantedIds.add(id);
+  }
+  const orderedMetas = [...wantedIds].map((id) => metaById.get(id)).filter((m): m is NonNullable<typeof m> => Boolean(m));
+  const sessions = await attachSessionProjectInfo(await readSessionDetails(orderedMetas));
+
+  // sessionTotal：任务下全部根 + 子树节点数（删除确认文案）。
+  const allIds = new Set<string>();
+  for (const rid of rootIds) for (const id of collectSubtree(rid)) allIds.add(id);
+  return { sessions, rootTotal: rootIds.length, sessionTotal: allIds.size, pinnedSessionIds };
+}
+
 export async function listAllSessions(options: { force?: boolean } = {}): Promise<SessionInfo[]> {
   if (options.force) invalidateSessionListCache();
   const generation = globalThis.__piSessionListGeneration ?? 0;

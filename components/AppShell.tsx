@@ -1313,6 +1313,11 @@ export function AppShell() {
       setRefreshKey((k) => k + 1);
       setExplorerRefreshKey((k) => k + 1);
     };
+    // 任务卡创建/保存（派发路径）→ 刷新侧栏任务区（/api/tasks 重拉，
+    // 新派发的会话落任务分组而不是聊天区）。
+    const onBoardTasksChanged = () => {
+      setRefreshKey((k) => k + 1);
+    };
     // 看板内会话改名 → 刷新侧栏（左侧树名称同步）
     const onBoardSessionRenamed = (e: Event) => {
       const detail = (e as CustomEvent<{ sessionId: string; name?: string }>).detail;
@@ -1357,6 +1362,7 @@ export function AppShell() {
     window.addEventListener("pi-web:board-session-forked", onBoardSessionForked);
     window.addEventListener("pi-web:board-session-created", onBoardSessionCreated);
     window.addEventListener("pi-web:board-session-renamed", onBoardSessionRenamed);
+    window.addEventListener("pi-web:board-tasks-changed", onBoardTasksChanged);
     window.addEventListener("pi-web:board-agent-end", onBoardAgentEnd);
     window.addEventListener("pi-web:board-attention-needed", onBoardAttentionNeeded);
     return () => {
@@ -1364,6 +1370,7 @@ export function AppShell() {
       window.removeEventListener("pi-web:board-session-forked", onBoardSessionForked);
       window.removeEventListener("pi-web:board-session-created", onBoardSessionCreated);
       window.removeEventListener("pi-web:board-session-renamed", onBoardSessionRenamed);
+      window.removeEventListener("pi-web:board-tasks-changed", onBoardTasksChanged);
       window.removeEventListener("pi-web:board-agent-end", onBoardAgentEnd);
       window.removeEventListener("pi-web:board-attention-needed", onBoardAttentionNeeded);
     };

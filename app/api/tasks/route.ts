@@ -1,14 +1,31 @@
 import { NextResponse } from "next/server";
 import { createTask, listTasks } from "@/lib/task-store";
+import { loadTaskSessionsPage } from "@/lib/session-reader";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/tasks?projectKey=<key>
+// GET /api/tasks?projectKey=<key>[&offset=0&limit=5]
+//   每任务附会话详情（置顶全量 + 非置顶 offset/limit + rootTotal + sessionTotal）——
+//   服务端分流，前端零归属判断（不再用 /api/sessions join task.sessionIds 反查）。
 export async function GET(req: Request) {
   try {
-    const projectKey = new URL(req.url).searchParams.get("projectKey") ?? "";
+    const search = new URL(req.url).searchParams;
+    const projectKey = search.get("projectKey") ?? "";
+    const rawOffset = Number(search.get("offset"));
+    const rawLimit = Number(search.get("limit"));
+    const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 5;
     const tasks = listTasks(projectKey);
-    return NextResponse.json({ tasks }, { headers: { "Cache-Control": "no-store" } });
+    const tasksWithSessions = await Promise.all(
+      tasks.map(async (task) => ({
+        ...task,
+        ...(await loadTaskSessionsPage(task.id, offset, limit)),
+      })),
+    );
+    return NextResponse.json(
+      { tasks: tasksWithSessions },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     return NextResponse.json(
       { error: String(error) },

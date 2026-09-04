@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ExecStatus, LinkKind, ReadyStatus, TaskCard, TaskCardLink } from "@/lib/task-card-store";
-import { dispatchBoardBaseUpdated } from "@/lib/board-events";
+import { dispatchBoardBaseUpdated, dispatchBoardTasksChanged } from "@/lib/board-events";
 
 /**
  * 任务卡数据 hook：拉取单卡详情（含依赖两向）+ 同看板候选卡（依赖选择用），
@@ -103,6 +103,9 @@ export function useTaskCard(cardId: string | null, boardId: string | null) {
       // 建卡会 bump boards.updated：派发事件让 useBoardCanvas 刷新乐观锁基线，
       // 避免后续防抖全量保存携带过期基线被 409 拒绝（保存冲突提示的根因）。
       if (typeof j.updated === "number") dispatchBoardBaseUpdated(input.boardId, j.updated);
+      // 建卡即派发（readyStatus=todo → 调度器异步建会话并写入 session_meta）：
+      // 通知 AppShell 刷新侧栏任务区，新会话落任务分组而不是聊天区。
+      dispatchBoardTasksChanged();
       return j.card;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -141,6 +144,8 @@ export function useTaskCard(cardId: string | null, boardId: string | null) {
       if (typeof j.updated === "number" && detailRef.current?.card.boardId) {
         dispatchBoardBaseUpdated(detailRef.current.card.boardId, j.updated);
       }
+      // 保存可能改 readyStatus（派发/状态流转）→ 侧栏任务区重新拉取。
+      dispatchBoardTasksChanged();
       await reload();
       return true;
     } catch (e) {

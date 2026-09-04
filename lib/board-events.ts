@@ -32,6 +32,9 @@ export const BOARD_CANVAS_CHANGED_EVENT = "pi-web:board-canvas-changed";
 /** 任务卡 API 操作 bump 了 boards.updated → useBoardCanvas 刷新乐观锁基线 */
 export const BOARD_BASE_UPDATED_EVENT = "pi-web:board-base-updated";
 
+/** 任务卡创建/保存（派发路径）→ AppShell 刷新侧栏任务区（/api/tasks 重拉） */
+export const BOARD_TASKS_CHANGED_EVENT = "pi-web:board-tasks-changed";
+
 declare global {
   interface WindowEventMap {
     "pi-web:board-open-file": CustomEvent<{ sessionId: string; filePath: string }>;
@@ -43,6 +46,7 @@ declare global {
     "pi-web:board-attention-needed": CustomEvent<{ sessionId: string; title?: string; method: string }>;
     "pi-web:board-canvas-changed": CustomEvent<{ boardId: string }>;
     "pi-web:board-base-updated": CustomEvent<{ boardId: string; updated: number }>;
+    "pi-web:board-tasks-changed": CustomEvent<Record<string, never>>;
   }
 }
 
@@ -80,4 +84,8 @@ export function dispatchBoardCanvasChanged(boardId: string): void {
 
 export function dispatchBoardBaseUpdated(boardId: string, updated: number): void {
   window.dispatchEvent(new CustomEvent(BOARD_BASE_UPDATED_EVENT, { detail: { boardId, updated } }));
+}
+
+export function dispatchBoardTasksChanged(): void {
+  window.dispatchEvent(new CustomEvent(BOARD_TASKS_CHANGED_EVENT, { detail: {} }));
 }
