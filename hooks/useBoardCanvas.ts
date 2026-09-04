@@ -152,16 +152,21 @@ export function useBoardCanvas({
         const uiNode = (x: Node) => x as Node & { selected?: boolean; dragging?: boolean };
         const prevSelected = new Set(prev.filter((n) => uiNode(n).selected).map((n) => n.id));
         const prevDragging = new Set(prev.filter((n) => uiNode(n).dragging).map((n) => n.id));
-        // yjs Y.Map 每次 get 都 JSON decode 出全新对象（data 引用全变 →
-        // 节点组件 memo 失效 → 拖一张卡全部卡每帧重渲染）。
-        // 只重建本次变化的节点，未变节点复用上一帧对象 → data 引用稳定。
+        // 拖拽保护：position 只写本地（dragStop 才落 yjs），若拖拽期间远端写入触发
+        // 回灌，dragging 中的节点必须沿用本地 position，否则会被 yjs 旧值冲回。
         const prevById = new Map(prev.map((n) => [n.id, n]));
         return Array.from(nodesMap.values()).map((n) => {
           if (changedIds && !changedIds.has(n.id)) {
             const old = prevById.get(n.id);
             if (old) return old; // 未变：整对象复用（含 selected/dragging/引用）
           }
+          const draggingNode = prevById.get(n.id) && uiNode(prevById.get(n.id)!)?.dragging;
           const out = { ...n } as Node & { selected?: boolean; dragging?: boolean };
+          if (draggingNode) {
+            // 拖拽中：沿用本地 position（远端对此节点的写入等拖完再说）
+            const local = prevById.get(n.id)!;
+            out.position = local.position;
+          }
           // 剥掉 yjs 残留的 UI 态字段
           delete out.selected;
           delete out.dragging;
@@ -458,7 +463,16 @@ export function useBoardCanvas({
             if (e.source === c.id || e.target === c.id) edgesMap.delete(e.id);
           }
         }
-      } else if (c.type === "position" || c.type === "dimensions") {
+      } else if (c.type === "position") {
+        // 拖拽位置只更新本地 state，不写 yjs——dragStop 时一次写入最终值。
+        // 每帧写 yjs 会让 CRDT 历史爆炸（一次拖拽几十上百条 update，实测 5 节点看板
+        // 堆到 21MB）。本地 state 由下方 setNodes 同步，跟手不受影响。
+        const n = next.find((x) => x.id === c.id);
+        if (n) {
+          // 只改 position，保留本地 data/selected/dragging（yjs data 可能滞后）
+          setNodes((prev) => prev.map((x) => (x.id === c.id ? { ...x, position: n.position } : x)));
+        }
+      } else if (c.type === "dimensions") {
         const n = next.find((x) => x.id === c.id);
         if (n) {
           // 剥掉 dragging（UI 态，不落文档；RF 拖拽态由本地 store 管）
@@ -667,6 +681,34 @@ export function useBoardCanvas({
     nodesMap.set(id, { ...cur, ...patch });
   }, []);
 
+  // 防抖更新：表单连续输入（打字）时合并多次 patch，窗口结束后一次写 yjs。
+  // 避免每字符一条 CRDT 历史（与拖拽每帧写同源，历史爆炸元凶之一）。
+  const pendingNodePatchesRef = useRef<Map<string, Partial<Node>>>(new Map());
+  const pendingNodeTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const updateNodeDebounced = useCallback((id: string, patch: Partial<Node>, delay = 400) => {
+    const nodesMap = nodesMapRef.current;
+    if (!nodesMap || !nodesMap.has(id)) return;
+    // 合并窗口内的多次 patch（data 深合并，position 等顶层覆盖）
+    const prev = pendingNodePatchesRef.current.get(id) ?? {};
+    const merged: Partial<Node> = {
+      ...prev,
+      ...patch,
+      data: { ...(prev.data as object), ...(patch.data as object) },
+    };
+    pendingNodePatchesRef.current.set(id, merged);
+    const timer = pendingNodeTimerRef.current.get(id);
+    if (timer) clearTimeout(timer);
+    pendingNodeTimerRef.current.set(
+      id,
+      setTimeout(() => {
+        const p = pendingNodePatchesRef.current.get(id);
+        pendingNodePatchesRef.current.delete(id);
+        pendingNodeTimerRef.current.delete(id);
+        if (p) updateNode(id, p);
+      }, delay),
+    );
+  }, [updateNode]);
+
   /**
    * 规范化节点 id：新建任务卡派发成功后，把随机 UUID 节点 id 改成确定性 `task-<cardId>`，
    * 避免与后端 reconcile 补出的 task-<cardId> 节点并存（重复卡）。yjs 删旧建新 + 级联更新边端点。
@@ -761,6 +803,7 @@ export function useBoardCanvas({
       addNewSessionCard,
       deleteNodeWithConfirm,
       updateNode,
+      updateNodeDebounced,
       normalizeNodeId,
       addEdge,
       addNode,
@@ -771,7 +814,7 @@ export function useBoardCanvas({
       undo,
       redo,
     }),
-    [board, loading, error, running, nodes, edges, viewport, saveViewport, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, registerVisibleTaskCard, unregisterVisibleTaskCard, undo, redo],
+    [board, loading, error, running, nodes, edges, viewport, saveViewport, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, updateNodeDebounced, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, registerVisibleTaskCard, unregisterVisibleTaskCard, undo, redo],
   );
 }
 

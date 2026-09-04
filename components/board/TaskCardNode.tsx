@@ -73,7 +73,7 @@ const COLLAPSED_MIN_H = 240;
 
 function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { data: TaskCardData }) {
   const { getNodes } = useReactFlow();
-  const { updateNode, deleteNode, normalizeNodeId, setSnapLines } = useBoardCanvasOps();
+  const { updateNode, updateNodeDebounced, deleteNode, normalizeNodeId, setSnapLines } = useBoardCanvasOps();
   const w = width ?? data.w ?? FORM_W;
   const h = height ?? data.h ?? FORM_H;
   const expanded = Boolean(data.expanded);
@@ -165,11 +165,13 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
   const rootRef = useRef<HTMLDivElement>(null);
 
   // 编辑实时写回节点 data（CRDT 广播到多端 + 持久化）
+  // 表单字符输入走防抖（400ms 窗口合并），避免每字符一条 yjs 历史；
+  // 非文本字段（priority 等）仍即时写（低频）。
   const set = <K extends keyof TaskCard>(key: K, value: TaskCard[K]) => {
     setDraft((d) => {
       const next = d ? { ...d, [key]: value } : d;
       if (next && (key === "name" || key === "description")) {
-        updateNode(id, { data: { ...data, name: key === "name" ? (value as string) : next.name, description: key === "description" ? (value as string) : next.description ?? "" } });
+        updateNodeDebounced(id, { data: { ...data, name: key === "name" ? (value as string) : next.name, description: key === "description" ? (value as string) : next.description ?? "" } });
       }
       return next;
     });

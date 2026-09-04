@@ -11,6 +11,8 @@ import type { SnapResult } from "@/lib/board-align";
 export interface BoardCanvasOps {
   /** 更新节点（部分 data/style/position） */
   updateNode: (id: string, patch: Partial<Node>) => void;
+  /** 防抖更新节点（表单连续输入用；窗口内合并多次 patch，400ms 一次写 yjs） */
+  updateNodeDebounced: (id: string, patch: Partial<Node>, delay?: number) => void;
   /** 删除节点（确认制由调用方处理） */
   deleteNode: (id: string) => void;
   /** 规范化节点 id（新建任务卡派发后改用确定性 task-<cardId>，避免与 reconcile 重复） */
@@ -37,6 +39,6 @@ export function BoardCanvasProvider({ value, children }: { value: BoardCanvasOps
 
 export function useBoardCanvasOps(): BoardCanvasOps {
   const ctx = useContext(BoardCanvasContext);
-  if (!ctx) return { updateNode: () => {}, deleteNode: () => {}, normalizeNodeId: () => {}, deleteEdge: () => {}, addEdge: () => {}, addNode: () => {}, setSnapLines: () => {}, boardId: null, isTaskBoard: false };
+  if (!ctx) return { updateNode: () => {}, updateNodeDebounced: () => {}, deleteNode: () => {}, normalizeNodeId: () => {}, deleteEdge: () => {}, addEdge: () => {}, addNode: () => {}, setSnapLines: () => {}, boardId: null, isTaskBoard: false };
   return ctx;
 }

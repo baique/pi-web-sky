@@ -51,6 +51,9 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     updateNode: (id, patch) => {
       board.updateNode?.(id, patch);
     },
+    updateNodeDebounced: (id, patch, delay) => {
+      board.updateNodeDebounced?.(id, patch, delay);
+    },
     deleteNode: (id) => {
       // 传完整 node 给确认制（识别类型决定删会话/任务卡/便笺），不能只传 id
       const full = board.nodes.find((n) => n.id === id);
@@ -212,11 +215,11 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     (_: MouseEvent | TouchEvent, node: Node) => {
       draggingRef.current = false;
       const snap = computeSnap(node.id, node.position, getNodes());
-      if (snap.snapX !== null || snap.snapY !== null) {
-        board.updateNode?.(node.id, {
-          position: { x: snap.snapX ?? node.position.x, y: snap.snapY ?? node.position.y },
-        });
-      }
+      // 拖拽期间 position 只更新本地 state（见 useBoardCanvas onNodesChange position 分支），
+      // 松手时一次性写入 yjs 最终位置（含吸附修正）——避免每帧写导致 CRDT 历史爆炸。
+      board.updateNode?.(node.id, {
+        position: { x: snap.snapX ?? node.position.x, y: snap.snapY ?? node.position.y },
+      });
       setSnapLines([]);
       // 吸附修正后 yjs 同步可能再次触发 onNodeDrag（见 draggingRef 注释），
       // rAF 兜底再清一次，确保参考线在本次事件循环后一定消失。
