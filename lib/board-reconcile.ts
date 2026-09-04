@@ -125,25 +125,23 @@ export async function reconcileBoard(boardId: string): Promise<void> {
     const nodes = Array.from(nodesMap.values()) as unknown as DocNode[];
 
     // ---- 1) 会话卡：缺补、孤儿删 ----
-    const existingSessionBySid = new Map(); // sid -> node（转正卡）
-    const pendingSids = new Set(); // 新建中占位卡（cwd 非空）的 sid——视为「该 sid 已有卡，不补、不孤儿删」
+    // 画布上所有会话卡 sid（无论临时/正式）——补卡判据：画布已有同 sid 卡（含未就绪
+    // 新建临时卡）就不补，天然豁免“新建会话转正”窗口，无需额外豁免逻辑。
+    const canvasSids = new Set();
+    const existingSessionBySid = new Map(); // sid -> node（仅正式卡：孤儿删检测集合）
     for (const n of nodes) {
       if (n?.type !== "session-card") continue;
       const sid = n.data?.sessionId;
       if (!sid) continue;
-      // 新建中占位卡（cwd 非空）：不参与转正卡 map，也不做孤儿删；
-      // 但它的 sid 要进 pendingSids——窗口期（服务端已 assign、前端尚未转正清 cwd）
-      // 补卡循环应把该 sid 视为「已覆盖」，否则会补出第二张确定性 session-<sid> 卡。
-      if (isPendingNewSession(n)) {
-        pendingSids.add(sid);
-        continue;
-      }
+      canvasSids.add(sid);
+      // 新建中占位卡（cwd 非空）不参与孤儿删检测（未就绪不判死）；
+      // 但它的 sid 已在 canvasSids——补卡循环视为「已有卡」，不会补第二张。
+      if (isPendingNewSession(n)) continue;
       existingSessionBySid.set(sid, n);
     }
-    // 孤儿删：画布有、业务表没有的会话卡（非新会话卡）→ 删（仅任务看板）
+    // 孤儿删：画布有、业务表没有的正式卡（非新会话卡）→ 删（仅任务看板）
     // 判据只信业务表集合（allSessionIds）——不再有 data.taskId 豁免：拖入会话已改为
-    // “先写 session_meta 归属、成功才落卡”，不存在“卡已落、归属未到”的窗口；
-    // 新建临时卡（cwd 非空）仍由上方 pendingSids 豁免（未就绪不参与检测）。
+    // “先写 session_meta 归属、成功才落卡”，不存在“卡已落、归属未到”的窗口。
     // 普通看板不删会话卡：会话卡由用户自由拖入/新建管理，不在本模块派生范围。
     const orphanIds = [];
     if (isTaskBoard) {
@@ -161,14 +159,12 @@ export async function reconcileBoard(boardId: string): Promise<void> {
     }
     // 缺卡补：业务表有、画布没有的会话卡 → 补（确定性 id，4 列布局落点）
     // 补全 allSessionIds（任务根会话 + 任务卡执行会话）——exec 线目标会话卡必须有节点。
-    // 注意：不能因画布存在「新建中占位卡」（pendingNew，cwd 非空）就跳过补卡——
-    // 那会让任务卡执行会话卡永远不补、exec 线断（历史 bug）。补卡 id 为确定性 session-<sid>，
-    // 与随机 id 的占位卡不冲突、幂等。
+    // 判据只看 canvasSids（画布是否存在同 sid 卡，无论临时/正式）：
+    // 新建会话转正（画布已有同 sid 卡）天然豁免，不补第二张。
     {
       const remaining = Array.from(nodesMap.values());
       for (const sid of allSessionIds) {
-        // 已有转正卡 或 存在同 sid 新建中占位卡（窗口期视为已覆盖）→ 不补
-        if (existingSessionBySid.has(sid) || pendingSids.has(sid)) continue;
+        if (canvasSids.has(sid)) continue; // 画布已有（临时或正式）→ 不补
         const id = `session-${sid}`;
         const spot = findFreeSpot(remaining);
         nodesMap.set(id, {
