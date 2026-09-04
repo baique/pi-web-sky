@@ -7,6 +7,7 @@ import {
   SettingsManager,
   type SessionMessageEntry,
 } from "@earendil-works/pi-coding-agent";
+import { open } from "node:fs/promises";
 import { resolveSessionPath } from "./session-reader";
 
 // ============================================================================
@@ -79,6 +80,53 @@ export interface SessionAuditSnapshot {
   recentText: string;
   /** 最后一条消息时间（ms epoch）；0=未知（阻塞检测用） */
   lastActivityMs: number;
+  /** 最后一条是否为命令发起（bash toolCall 未见返回）——阻塞巡检硬条件 */
+  lastIsCommand: boolean;
+  /** 最后一条命令发起时间（ms epoch）；0=非命令发起（阻塞巡检判定用） */
+  lastCommandAtMs: number;
+}
+
+/** 命令类工具：命令发起后未见 toolResult = 命令仍在执行（阻塞巡检只关心这类）。 */
+const COMMAND_TOOLS = new Set(["bash"]);
+
+/**
+ * 尾部反读会话文件最后几条消息。绝不解析整个文件（大会话几百 KB~MB 级
+ * 全量解析会同步阻塞事件循环——这是当初停用审核/巡检的直接原因）。
+ * 起始读最后 128KB，不足 4 条 message 时翻倍扩大，上限 1MB（防御巨单行）。
+ */
+async function readSessionTail(sessionId: string): Promise<SessionMessageEntry[] | null> {
+  const filePath = await resolveSessionPath(sessionId);
+  if (!filePath) return null;
+  let tailBytes = 128 * 1024;
+  while (tailBytes <= 1024 * 1024) {
+    const fh = await open(filePath, "r");
+    try {
+      const { size } = await fh.stat();
+      const start = Math.max(0, size - tailBytes);
+      const buf = Buffer.alloc(size - start);
+      if (buf.length > 0) await fh.read(buf, 0, buf.length, start);
+      const text = buf.toString("utf8");
+      const lines = text.split("\n");
+      // 首行可能是从中间切断的半行，丢弃（仅当不是从文件头开始读时）
+      const rows = start > 0 ? lines.slice(1) : lines;
+      const entries: SessionMessageEntry[] = [];
+      for (let i = rows.length - 1; i >= 0 && entries.length < 8; i--) {
+        const line = rows[i].trim();
+        if (!line) continue;
+        try {
+          const obj = JSON.parse(line) as SessionMessageEntry;
+          if (obj?.type === "message") entries.unshift(obj);
+        } catch {
+          // 坏行跳过（尾部读取容忍脏数据）
+        }
+      }
+      if (entries.length >= 4 || tailBytes >= 1024 * 1024 || size <= tailBytes) return entries;
+    } finally {
+      await fh.close();
+    }
+    tailBytes *= 2;
+  }
+  return null;
 }
 
 function textOfContent(content: unknown): string {
@@ -92,16 +140,38 @@ function textOfContent(content: unknown): string {
   return "";
 }
 
-/** 读执行会话文件：程序判定失败 + 最近消息文本 + 最后活动时间。文件缺失返回 null。 */
+/** 最后一条 assistant 消息里是否有命令发起（toolCall name ∈ COMMAND_TOOLS）。 */
+function lastMessageIsCommand(m: SessionMessageEntry["message"]): boolean {
+  if (m.role !== "assistant" || !Array.isArray(m.content)) return false;
+  return m.content.some(
+    (b): boolean =>
+      Boolean(b) &&
+      typeof b === "object" &&
+      (b as { type?: string; name?: string }).type === "toolCall" &&
+      COMMAND_TOOLS.has((b as { name: string }).name),
+  );
+}
+
+/** 读执行会话文件（尾部反读）：程序判定失败 + 最近消息文本 + 最后活动时间。文件缺失返回 null。 */
 export async function readSessionAuditSnapshot(sessionId: string): Promise<SessionAuditSnapshot | null> {
   try {
-    const filePath = await resolveSessionPath(sessionId);
-    if (!filePath) return null;
-    const manager = SessionManager.open(filePath);
-    const messages = manager.getEntries().filter((e): e is SessionMessageEntry => e.type === "message");
+    const entries = await readSessionTail(sessionId);
+    if (!entries) return null;
+    const messages = entries.filter((e): e is SessionMessageEntry => e.type === "message");
     let failure = false;
     let lastActivityMs = 0;
     const recent: string[] = [];
+    // 仅「最后一条」参与命令判定（阻塞巡检硬条件：最后一条必须是命令发起）；
+    // 失败迹象/最近文本扫描最后 4 条（AI 判定需要稍多上下文）。
+    const last = messages[messages.length - 1];
+    const lastIsCommand = last ? lastMessageIsCommand(last.message) : false;
+    const lastTs =
+      last && typeof last.message.timestamp === "number"
+        ? last.message.timestamp
+        : last
+          ? new Date(last.timestamp).getTime()
+          : 0;
+    const lastCommandAtMs = lastIsCommand && !Number.isNaN(lastTs) ? lastTs : 0;
     for (const e of messages.slice(-4)) {
       const m = e.message;
       const ts = typeof m.timestamp === "number" ? m.timestamp : new Date(e.timestamp).getTime();
@@ -121,7 +191,7 @@ export async function readSessionAuditSnapshot(sessionId: string): Promise<Sessi
         if (text) recent.push(`用户: ${text.slice(0, 300)}`);
       }
     }
-    return { failure, recentText: recent.join("\n").slice(0, 4000), lastActivityMs };
+    return { failure, recentText: recent.join("\n").slice(0, 4000), lastActivityMs, lastIsCommand, lastCommandAtMs };
   } catch (error) {
     console.error(
       `[task-scheduler] 读会话快照失败 ${sessionId}:`,

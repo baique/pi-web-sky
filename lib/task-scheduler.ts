@@ -2,7 +2,7 @@ import { existsSync } from "fs";
 import { randomUUID } from "crypto";
 import { getBoard } from "./board-store";
 import { reconcileBoard } from "./board-reconcile";
-import { startRpcSession, getRunningRpcSessionIds } from "./rpc-manager";
+import { startRpcSession, getRunningRpcSessionIds, getRpcSession } from "./rpc-manager";
 import { resolveSessionPath } from "./session-reader";
 import { assignSessionToTask } from "./task-store";
 import { PRESET_FULL } from "./tool-presets";
@@ -250,19 +250,53 @@ export async function reconcileEndedRunningCards(): Promise<number> {
   return flipped;
 }
 
+/**
+ * 会话状态镜像（tick 第 0 段）：卡状态 ← 关联会话真实状态。
+ * 兼容「用户直接打开执行会话交流」：不区分消息由调度器还是用户发起，
+ * 只认会话真实状态——会话在跑 → running；会话挂起等用户输入 → waiting_reply。
+ *
+ * 只对非终态（not_started/running/review/waiting_reply）生效：
+ * done/failed/abandoned 是审核/人工结论，会话复活不拉回（用户重开会话聊天不影响结论）。
+ * 会话不在本进程 registry（多实例/已销毁）→ 保持现状，交审核/巡检兜底。
+ * 返回本轮状态变更数。
+ */
+export async function mirrorCardStatusFromSessions(): Promise<number> {
+  let changed = 0;
+  const cards = listCardsByExecStatus(["not_started", "running", "review", "waiting_reply"]);
+  for (const card of cards) {
+    if (!card.sessionId) continue;
+    const session = getRpcSession(card.sessionId);
+    if (!session) continue; // 不在本进程（多实例 leader 切换）→ 交审核/巡检
+    if (session.isRunning()) {
+      if (card.execStatus !== "running") {
+        updateCard(card.id, { execStatus: "running" });
+        changed += 1;
+      }
+    } else if (session.hasPendingUiRequest()) {
+      // AI 提问挂起等用户输入（waiting_input）→ 卡转 waiting_reply（无论谁开启的）
+      if (card.execStatus !== "waiting_reply") {
+        updateCard(card.id, { execStatus: "waiting_reply" });
+        changed += 1;
+      }
+    }
+    // 会话 idle（不在跑、无挂起输入）→ 保持现状，交后面的结束巡检/审核
+  }
+  return changed;
+}
+
 /** 单轮调度：并发闸门未满才派发；最多补满到全局上限。返回本轮派发数。 */
 export async function runSchedulerTick(): Promise<number> {
+  // 第 0 段：会话状态镜像——会话真实状态为准，拉回/拉正卡状态（防审核误判运行中任务）。
+  await mirrorCardStatusFromSessions();
+
   // 恢复自愈 + 结束巡检：running 卡状态防 stale（会话真结束了要流转到 review 待审）。
   await restoreRunningReviewCards();
   await reconcileEndedRunningCards();
 
-  // 以下三段继续停用：
-  // - processReplyQueue：回复队列功能未完成（TODO），暂不复用
-  // - processReviewCards + checkRunningCardsBlocked：审查/阻塞巡检（AI 审核烧模型）
-  //   TODO(审查器重设计)：恢复时改为尾部反向读取会话文件，避免全量解析阻塞事件循环。
-  // await processReplyQueue();
-  // await processReviewCards();
-  // await checkRunningCardsBlocked();
+  // 以下三段按序恢复：审核 → 回复队列 → 阻塞巡检（全部跑在尾部快照上，不阻塞事件循环）。
+  await processReviewCards();
+  await processReplyQueue();
+  await checkRunningCardsBlocked();
 
   let dispatched = 0;
   const running = countRunningDispatched();
@@ -408,7 +442,11 @@ export async function processReviewCards(): Promise<number> {
   return processed;
 }
 
-/** running 卡阻塞巡检：最后消息 > BLOCK_IDLE_MS 无进展 → AI 判定阻塞类型 → 处置。 */
+/**
+ * running 卡阻塞巡检（严格版）：只有「最后一条是命令发起、且该命令已执行超过
+ * BLOCK_IDLE_MS 无新消息」才触发 AI 判定——绝不误杀长任务/正常等待。
+ * AI 判定确认挂起（sync_server/infinite_loop）才 abort + 引导；其余退避/转态。
+ */
 export async function checkRunningCardsBlocked(): Promise<number> {
   const now = Date.now();
   let handled = 0;
@@ -419,8 +457,10 @@ export async function checkRunningCardsBlocked(): Promise<number> {
     if (now - last < BLOCK_COOLDOWN_MS) continue;
     const snapshot = await readSessionAuditSnapshot(card.sessionId);
     if (!snapshot || snapshot.lastActivityMs === 0) continue;
-    // 5min 内还有进展 → 继续观察
-    if (now - snapshot.lastActivityMs < BLOCK_IDLE_MS) continue;
+    // 硬条件 1：最后一条必须是命令发起（bash toolCall 未见返回 = 命令仍在执行）
+    if (!snapshot.lastIsCommand) continue;
+    // 硬条件 2：该命令已执行超过 BLOCK_IDLE_MS 无新消息（命令发起后没有后续记录）
+    if (now - snapshot.lastCommandAtMs < BLOCK_IDLE_MS) continue;
     blockCheckAt.set(card.id, now);
     const cwd = resolveDispatchCwd(card);
     if (!cwd) continue;
