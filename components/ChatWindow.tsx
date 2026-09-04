@@ -26,6 +26,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { TodoItem } from "@/lib/types";
 import type { AppUpdateResponse } from "@/lib/api-types";
+import type { TurnIndexItem } from "@/lib/api-types";
 import {
   captureScrollDistance,
   getPromptAnchorSpacerHeight,
@@ -573,9 +574,57 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     return history.reverse();
   }, [messages]);
   const messageRefs = useMessageRefs(visibleMessages.length);
-  const revealHistoryForMinimap = useCallback(() => {
-    setVisibleCount((current) => Math.max(current, messages.length * 2));
-  }, [messages.length]);
+  // 全量 turn 索引（导航条）：桌面端拉取，随活动分支切换刷新。
+  const [turnIndex, setTurnIndex] = useState<TurnIndexItem[]>([]);
+  useEffect(() => {
+    const sid = session?.id ?? sessionIdRef.current;
+    if (!sid || isMobile) return;
+    let cancelled = false;
+    const params = new URLSearchParams();
+    if (activeLeafId) params.set("leafId", activeLeafId);
+    fetch(`/api/sessions/${encodeURIComponent(sid)}/minimap?${params}`)
+      .then((r) => (r.ok ? r.json() as Promise<{ turns: TurnIndexItem[]; leafId: string | null }> : null))
+      .then((d) => {
+        if (!cancelled && d) setTurnIndex(d.turns);
+      })
+      .catch(() => { /* 导航条为增强能力，失败静默降级为窗口内导航 */ });
+    return () => { cancelled = true; };
+  }, [session?.id, sessionIdRef, activeLeafId, isMobile]);
+
+  const entryIdsRef = useRef(entryIds);
+  entryIdsRef.current = entryIds;
+  const hasOlderChatRef = useRef(hasOlderChat);
+  hasOlderChatRef.current = hasOlderChat;
+  // 导航条点击窗口外回合：循环分页（tail=1000 大页）直到目标 entry 进入
+  // 已加载集合，随后由 ChatMinimap 的 pendingNavigation 机制滚动定位。
+  const revealHistoryForMinimap = useCallback(async (entryId: string) => {
+    const sid = session?.id ?? sessionIdRef.current;
+    if (!sid || !entryId) return;
+    // 让进行中的滚动加载（sentinel）先完成：同一 before 双请求会重复 prepend。
+    for (let spin = 0; spin < 20 && loadingOlderRef.current; spin++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    try {
+      let loadedIds = [...entryIdsRef.current];
+      let hasMore = hasOlderChatRef.current;
+      let guard = 0;
+      while (!loadedIds.includes(entryId) && hasMore && guard < 30) {
+        guard += 1;
+        const before = loadedIds[0];
+        if (!before) break;
+        const result = await loadContext(sid, activeLeafId, before, 1000);
+        if (!result || result.entryIds.length === 0) break;
+        loadedIds = [...result.entryIds, ...loadedIds];
+        hasMore = result.hasMore;
+      }
+      // 渲染窗口至少覆盖已加载内容（现有 effect 也会自动提升）。
+      setVisibleCount((current) => Math.max(current, loadedIds.length));
+    } finally {
+      loadingOlderRef.current = false;
+    }
+  }, [session?.id, activeLeafId, loadContext, sessionIdRef]);
 
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
   const hasStreamingContent = Boolean(streamState.streamingMessage?.content.length);
@@ -1079,7 +1128,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 <>
                   {hasMore && (
                      <div ref={sentinelRef} className="py-3 text-center text-xs text-text-muted">
-                       {t("chat.loadEarlier", { count: startIndex })}
+                       {t("chat.loadEarlier")}
                     </div>
                   )}
                   {rendered.slice(startIndex)}
@@ -1170,6 +1219,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
         {isMobile ? null : (
           <ChatMinimap
             messages={messages}
+            entryIds={entryIds}
+            turnIndex={turnIndex}
             streamingMessage={streamState.streamingMessage}
             scrollContainer={scrollContainerRef}
             messageRefs={messageRefs}

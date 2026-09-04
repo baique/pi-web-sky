@@ -604,7 +604,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, []);
 
-  const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null) => {
+  const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null, tail?: number) => {
     try {
       const params = new URLSearchParams({ deferThinking: "1" });
       // Explicit null leaf: context is the empty root (rollback to session start).
@@ -614,6 +614,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // Page upward: ask the server for the `tail` ancestors preceding `before`,
       // then prepend them. Omitting `before` fetches the most-recent `tail`.
       if (before) params.set("before", before);
+      // 导航条跳转远端回合时一次拉大页，减少循环 RTT；tail=1000 为服务端 cap。
+      if (tail && tail > 0) params.set("tail", String(tail));
       const url = `/api/sessions/${encodeURIComponent(sid)}/context?${params}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -632,8 +634,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setParentIds(parentFallback(d.context.parentIds));
         setTodos(d.context.todos ?? []);
       }
+      return { entryIds: d.context.entryIds, hasMore: d.hasMore ?? false };
     } catch (e) {
       console.error("Failed to load context:", e);
+      return null;
     }
   }, []);
 

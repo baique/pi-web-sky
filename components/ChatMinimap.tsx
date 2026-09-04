@@ -9,14 +9,20 @@ import {
 } from "@/lib/markdown";
 import { splitFinalAssistantBlocks } from "@/lib/message-display";
 import type { AgentMessage, AssistantMessage, TextContent, UserMessage } from "@/lib/types";
+import type { TurnIndexItem } from "@/lib/api-types";
 import styles from "./ChatMinimap.module.css";
 
 interface Props {
   messages: AgentMessage[];
+  entryIds: string[];
+  /** 全量 turn 索引（/api/sessions/[id]/minimap）：导航条节点来源，
+   *  已加载窗口外的回合也能显示与跳转。 */
+  turnIndex: TurnIndexItem[];
   streamingMessage: Partial<AgentMessage> | null;
   scrollContainer: RefObject<HTMLDivElement | null>;
   messageRefs: RefObject<(HTMLDivElement | null)[]>;
-  onRevealHistory: () => void;
+  /** 目标回合不在已加载窗口时触发：加载历史直到覆盖 entryId 再回滚。 */
+  onRevealHistory: (entryId: string) => void;
 }
 
 const MINIMAP_WIDTH = 26;
@@ -35,9 +41,18 @@ interface AssistantPreview {
 }
 
 interface TurnInfo {
-  userMessage: UserMessage;
+  /** 该 turn 第一条 user message 的 entry id（与全量索引对齐，加载跳转锚点）。 */
+  entryId: string;
+  /** 已加载时为完整 user 消息，否则为 null（只有索引摘要）。 */
+  userMessage: UserMessage | null;
+  /** user 消息预览文本：已加载取全量，未加载取索引截断版。 */
+  userText: string;
   assistantPreviews: AssistantPreview[];
+  /** 未加载时该 turn 的 assistant 回复摘要文本（空串表示无助理回复）。 */
+  assistantPreviewText: string;
   scrollTop: number | null;
+  /** false = 窗口外，只有索引数据，点击后先加载再定位。 */
+  loaded: boolean;
 }
 
 interface NodeInfo {
@@ -232,6 +247,8 @@ function layoutNodes(allNodes: NodeInfo[], minimapHeight: number): NodeLayout {
 
 export function ChatMinimap({
   messages,
+  entryIds,
+  turnIndex,
   streamingMessage,
   scrollContainer,
   messageRefs,
@@ -268,6 +285,11 @@ export function ChatMinimap({
   );
   const allMessagesRef = useRef(allMessages);
   allMessagesRef.current = allMessages;
+  // 索引与已加载 entry ids：measureNodes 内部读最新值，避免 effect 重跑。
+  const turnIndexRef = useRef(turnIndex);
+  turnIndexRef.current = turnIndex;
+  const entryIdsRef = useRef(entryIds);
+  entryIdsRef.current = entryIds;
 
   const nodeLayout = useMemo(
     () => layoutNodes(allNodes, minimapHeight),
@@ -327,36 +349,99 @@ export function ChatMinimap({
 
       const refs = messageRefs.current;
       const containerRect = scrollEl.getBoundingClientRect();
-      const turns: TurnInfo[] = [];
+      const indexItems = turnIndexRef.current;
+
+      // entryId → messageRefs 下标（只对 user/assistant 计数，与已加载消息同序）。
+      const entryRefIndex = new Map<string, number>();
       let refIndex = 0;
-      let currentTurn: TurnInfo | null = null;
+      allMessagesRef.current.forEach((msg, msgIdx) => {
+        if (msg.role !== "user" && msg.role !== "assistant") return;
+        const entryId = entryIdsRef.current[msgIdx];
+        if (entryId) entryRefIndex.set(entryId, refIndex);
+        refIndex += 1;
+      });
 
-      for (const message of allMessagesRef.current) {
-        if (message.role !== "user" && message.role !== "assistant") continue;
-        const element = refs?.[refIndex];
-        refIndex++;
-
-        if (message.role === "user") {
-          currentTurn = null;
-          const elementRect = element?.getBoundingClientRect();
-          currentTurn = {
-            userMessage: message as UserMessage,
-            assistantPreviews: [],
-            scrollTop: elementRect
-              ? elementRect.top - containerRect.top + scrollEl.scrollTop
+      const turns: TurnInfo[] = [];
+      if (indexItems.length > 0) {
+        // 索引驱动：全量回合。已加载窗口内用 DOM 测量（精确位置/完整预览），
+        // 窗口外只有索引摘要（scrollTop=null，点击后先加载再定位）。
+        for (const item of indexItems) {
+          const userRefIdx = entryRefIndex.get(item.entryId);
+          if (userRefIdx === undefined) {
+            turns.push({
+              entryId: item.entryId,
+              userMessage: null,
+              userText: item.userText,
+              assistantPreviews: [],
+              assistantPreviewText: item.assistantPreview,
+              scrollTop: null,
+              loaded: false,
+            });
+            continue;
+          }
+          const userMessage = allMessagesRef.current[userRefIdx] as UserMessage | undefined;
+          const userElement = refs?.[userRefIdx];
+          const assistantPreviews: AssistantPreview[] = [];
+          for (let msgIdx = userRefIdx + 1; msgIdx < allMessagesRef.current.length; msgIdx++) {
+            const m = allMessagesRef.current[msgIdx];
+            if (m.role === "user") break;
+            if (m.role !== "assistant") continue;
+            const answerMarkdown = getAssistantAnswerMarkdown(m);
+            if (!answerMarkdown) continue;
+            const aEntryId = entryIdsRef.current[msgIdx];
+            const aRefIdx = aEntryId ? entryRefIndex.get(aEntryId) : undefined;
+            assistantPreviews.push({
+              markdown: answerMarkdown,
+              element: aRefIdx !== undefined && refs ? refs[aRefIdx] ?? null : null,
+            });
+          }
+          turns.push({
+            entryId: item.entryId,
+            userMessage: userMessage ?? null,
+            userText: userMessage ? getUserPreview(userMessage) : item.userText,
+            assistantPreviews,
+            assistantPreviewText: item.assistantPreview,
+            scrollTop: userElement
+              ? userElement.getBoundingClientRect().top - containerRect.top + scrollEl.scrollTop
               : null,
-          };
-          turns.push(currentTurn);
-          continue;
-        }
-
-        if (!currentTurn) continue;
-        const answerMarkdown = getAssistantAnswerMarkdown(message);
-        if (answerMarkdown) {
-          currentTurn.assistantPreviews.push({
-            markdown: answerMarkdown,
-            element,
+            loaded: true,
           });
+        }
+      } else {
+        // fallback：索引未就绪/接口失败时沿用旧行为，只显示已加载窗口。
+        let currentTurn: TurnInfo | null = null;
+        let fallbackRefIndex = 0;
+        for (let msgIdx = 0; msgIdx < allMessagesRef.current.length; msgIdx++) {
+          const message = allMessagesRef.current[msgIdx];
+          if (message.role !== "user" && message.role !== "assistant") continue;
+          const element = refs?.[fallbackRefIndex];
+          fallbackRefIndex += 1;
+
+          if (message.role === "user") {
+            const elementRect = element?.getBoundingClientRect();
+            currentTurn = {
+              entryId: entryIdsRef.current[msgIdx] ?? "",
+              userMessage: message as UserMessage,
+              userText: getUserPreview(message as UserMessage),
+              assistantPreviews: [],
+              assistantPreviewText: "",
+              scrollTop: elementRect
+                ? elementRect.top - containerRect.top + scrollEl.scrollTop
+                : null,
+              loaded: true,
+            };
+            turns.push(currentTurn);
+            continue;
+          }
+
+          if (!currentTurn) continue;
+          const answerMarkdown = getAssistantAnswerMarkdown(message);
+          if (answerMarkdown) {
+            currentTurn.assistantPreviews.push({
+              markdown: answerMarkdown,
+              element,
+            });
+          }
         }
       }
 
@@ -377,7 +462,7 @@ export function ChatMinimap({
       setMinimapHeight(targetHeight);
       allNodesRef.current = nextNodes;
       setAllNodes(nextNodes);
-      setVisible(scrollEl.scrollHeight - scrollEl.clientHeight > 20);
+      setVisible(turns.length > 0 && scrollEl.scrollHeight - scrollEl.clientHeight > 20);
       syncActiveNode(scrollEl, nextNodes);
 
       const pendingNavigation = pendingNavigationRef.current;
@@ -451,13 +536,19 @@ export function ChatMinimap({
     return () => clearTimeout(timeout);
   }, [messages.length, measureNodes, updateScroll]);
 
+  // 全量索引就绪后重建节点（从只显示已加载窗口切换到全量导航）。
+  useEffect(() => {
+    measureNodes();
+    updateScroll();
+  }, [turnIndex, measureNodes, updateScroll]);
+
   const scrollToNode = useCallback((node: NodeInfo, behavior: ScrollBehavior) => {
     const scrollEl = scrollContainer.current;
     if (!scrollEl) return;
     lockActiveNode(node.index);
     if (node.targetTurn.scrollTop === null) {
       pendingNavigationRef.current = { nodeIndex: node.index, target: "user" };
-      onRevealHistory();
+      onRevealHistory(node.targetTurn.entryId);
       return;
     }
     const targetTop = Math.max(
@@ -477,7 +568,7 @@ export function ChatMinimap({
         target: "assistant",
         assistantIndex,
       };
-      onRevealHistory();
+      onRevealHistory(node.targetTurn.entryId);
       return;
     }
     const containerRect = scrollEl.getBoundingClientRect();
@@ -526,7 +617,7 @@ export function ChatMinimap({
         assistantIndex,
         headingIndex,
       };
-      onRevealHistory();
+      onRevealHistory(node.targetTurn.entryId);
       return;
     }
     const heading = answerElement.querySelectorAll<HTMLElement>("h1, h2, h3").item(headingIndex);
@@ -737,34 +828,48 @@ export function ChatMinimap({
                     }}
                   >
                     <span className={styles.userText}>
-                      {getUserPreview(node.targetTurn.userMessage)}
+                      {node.targetTurn.userText}
                     </span>
                   </button>
 
-                  {node.targetTurn.assistantPreviews.map((assistant, assistantIndex) => (
-                    <div
-                      key={assistantIndex}
-                      className={styles.assistant}
-                    >
+                  {node.targetTurn.loaded ? (
+                    node.targetTurn.assistantPreviews.map((assistant, assistantIndex) => (
+                      <div
+                        key={assistantIndex}
+                        className={styles.assistant}
+                      >
+                        <button
+                          type="button"
+                          className={styles.assistantJump}
+                          data-minimap-preview-assistant={`${node.index}-${assistantIndex}`}
+                          onClick={() => scrollToAssistant(node, assistantIndex)}
+                          aria-label="Locate assistant message"
+                          title="Locate assistant message"
+                        >
+                          A
+                        </button>
+                        <AssistantOutline
+                          markdown={assistant.markdown}
+                          onAnswerClick={() => scrollToAssistant(node, assistantIndex)}
+                          onHeadingClick={(headingIndex) => (
+                            scrollToHeading(node, assistantIndex, headingIndex)
+                          )}
+                        />
+                      </div>
+                    ))
+                  ) : node.targetTurn.assistantPreviewText ? (
+                    /* 窗口外的回合：显示索引摘要，点击加载历史并定位。 */
+                    <div className={styles.assistant}>
                       <button
                         type="button"
-                        className={styles.assistantJump}
-                        data-minimap-preview-assistant={`${node.index}-${assistantIndex}`}
-                        onClick={() => scrollToAssistant(node, assistantIndex)}
-                        aria-label="Locate assistant message"
-                        title="Locate assistant message"
+                        className={styles.paragraph}
+                        data-minimap-preview-assistant-text={node.index}
+                        onClick={() => scrollToNode(node, "smooth")}
                       >
-                        A
+                        {node.targetTurn.assistantPreviewText}
                       </button>
-                      <AssistantOutline
-                        markdown={assistant.markdown}
-                        onAnswerClick={() => scrollToAssistant(node, assistantIndex)}
-                        onHeadingClick={(headingIndex) => (
-                          scrollToHeading(node, assistantIndex, headingIndex)
-                        )}
-                      />
                     </div>
-                  ))}
+                  ) : null}
                 </div>
               </div>
             );

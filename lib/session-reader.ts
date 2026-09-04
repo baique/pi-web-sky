@@ -15,6 +15,7 @@ import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
 import { scanSessionFiles, scanSessionFileMeta, scanOneSessionFile, sessionScanner } from "./session-scanner";
+import type { TurnIndexItem } from "./api-types";
 
 export { getAgentDir };
 
@@ -729,4 +730,71 @@ function entryToUiMessage(
     default:
       return null;
   }
+}
+
+/**
+ * 轻量 turn 索引：活动分支上每个 user/assistant 回合的文本摘要（预览/导航用，
+ * 不含完整 content）。O(chain) 单遍扫描，只提取纯文本。
+ */
+const TURN_INDEX_USER_TEXT_MAX = 120;
+const TURN_INDEX_PREVIEW_MAX = 140;
+
+function truncateForTurnIndex(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/** 提取 user 消息纯文本预览（string 或 text blocks；纯附件消息给占位文案）。 */
+function extractUserPreview(content: string | Array<{ type: string; text?: string }>): string {
+  if (typeof content === "string") return truncateForTurnIndex(content.trim(), TURN_INDEX_USER_TEXT_MAX);
+  const text = content
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("\n")
+    .trim();
+  if (text) return truncateForTurnIndex(text, TURN_INDEX_USER_TEXT_MAX);
+  return content.length > 0 ? "[attachment]" : "";
+}
+
+/** 提取 assistant 回复纯文本预览（所有 text blocks 拼接；thinking/toolCall 不参与）。 */
+function extractAssistantPreview(content: Array<{ type: string; text?: string }>): string {
+  const text = content
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("\n\n")
+    .trim();
+  return text ? truncateForTurnIndex(text, TURN_INDEX_PREVIEW_MAX) : "";
+}
+
+/**
+ * 活动分支全量 turn 索引：从 leaf 沿 parentId 回溯到根，单遍收集 user/
+ * assistant 回合的文本摘要。O(chain)，不 cap —— 导航条需要「尽可能多」。
+ */
+export function extractTurnIndex(entries: SessionEntry[], leafId: string | null): TurnIndexItem[] {
+  const byId = new Map<string, SessionEntry>();
+  for (const e of entries) byId.set(e.id, e);
+
+  const leaf = leafId ? byId.get(leafId) : entries[entries.length - 1];
+  if (!leaf) return [];
+  const chain: SessionEntry[] = [];
+  let cur: SessionEntry | undefined = leaf;
+  while (cur) {
+    chain.push(cur);
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+  }
+  chain.reverse();
+
+  const turns: TurnIndexItem[] = [];
+  let current: TurnIndexItem | null = null;
+  for (const entry of chain) {
+    if (entry.type !== "message") continue;
+    const message = entry.message;
+    if (message.role === "user") {
+      current = { entryId: entry.id, userText: extractUserPreview(message.content), assistantPreview: "" };
+      turns.push(current);
+    } else if (message.role === "assistant" && current) {
+      const preview = extractAssistantPreview(message.content);
+      if (preview) current.assistantPreview = preview;
+    }
+  }
+  return turns;
 }
