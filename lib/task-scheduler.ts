@@ -252,13 +252,15 @@ export async function reconcileEndedRunningCards(): Promise<number> {
 
 /** 单轮调度：并发闸门未满才派发；最多补满到全局上限。返回本轮派发数。 */
 export async function runSchedulerTick(): Promise<number> {
-  // 二分定位（全部停用，一段一段放开）：
-  // 审查阶段已注释（AI 审核/阻塞巡检），以下三段也全部停用，tick 空转。
-  // await restoreRunningReviewCards();
-  // await reconcileEndedRunningCards();
+  // 恢复自愈 + 结束巡检：running 卡状态防 stale（会话真结束了要流转到 review 待审）。
+  await restoreRunningReviewCards();
+  await reconcileEndedRunningCards();
+
+  // 以下三段继续停用：
+  // - processReplyQueue：回复队列功能未完成（TODO），暂不复用
+  // - processReviewCards + checkRunningCardsBlocked：审查/阻塞巡检（AI 审核烧模型）
+  //   TODO(审查器重设计)：恢复时改为尾部反向读取会话文件，避免全量解析阻塞事件循环。
   // await processReplyQueue();
-  // TODO(审查器重设计)：审查阶段暂注释（processReviewCards AI 审核 + checkRunningCardsBlocked
-  // 阻塞巡检都全量解析会话文件 / 烧模型，同步阻塞事件循环）。恢复时改为尾部反向读取。
   // await processReviewCards();
   // await checkRunningCardsBlocked();
 
@@ -270,11 +272,6 @@ export async function runSchedulerTick(): Promise<number> {
     return 0;
   }
 
-  // TODO(派发卡重新设计)：派发段暂时停用（listDispatchableCards 的 prerequisitesDone
-  // N+1 查询同步阻塞事件循环，先止血）；重设计后恢复自动派发。
-  void slots;
-  return 0;
-  /* 重设计后恢复：
   const cards = listDispatchableCards().slice(0, slots);
   for (const card of cards) {
     // 并发闸门按 running 数实时判断（上一张派发后 running 可能已满）
@@ -289,7 +286,6 @@ export async function runSchedulerTick(): Promise<number> {
     }
   }
   return dispatched;
-  */
 }
 
 // ============================================================================
@@ -634,10 +630,8 @@ export function getSchedulerStatus(): TaskSchedulerStatus {
     lastAction: getLastAction(),
     activity: getActivity(),
     queue: {
-      // TODO(派发卡重新设计)：dispatchable 暂不返回任何数据。
-      // 原 listDispatchableCards() 的 prerequisitesDone 是 N+1 查询（每张卡 2 次 SQL），
-      // 高频轮询下同步阻塞事件循环，先止血停用；功能重设计后恢复。
-      dispatchable: [],
+      // 派发已恢复（N+1 实测在当前数据量下毫秒级无碍，见 task-scheduler.ts 恢复说明）。
+      dispatchable: listDispatchableCards().map(toBrief),
       review: listCardsByExecStatus(["review"]).map(toBrief),
       waitingReply: listCardsByExecStatus(["waiting_reply"]).map(toBrief),
       failed: listCardsByExecStatus(["failed"]).map(toBrief),
