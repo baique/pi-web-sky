@@ -102,6 +102,8 @@ interface Props {
   onExplorerRefresh?: () => void;
   /** 左上角「刷新」按钮：触发父级全量刷新（会话/任务/看板同源信号 refreshKey） */
   onRefresh?: () => void;
+  /** loadSessions 成功拿到全量列表后回调（供父级 hydrate 等复用，避免重复拉全量）。 */
+  onSessionsLoaded?: (sessions: SessionInfo[]) => void;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onAtMentions?: (relativePaths: string[]) => void;
   /** Fired when a session that is not currently selected finishes running.
@@ -349,7 +351,7 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onRefresh, onSessionsLoaded, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   /** 聊天区会话分页（服务端两阶段：置顶全量 + 非置顶 offset/limit）。
@@ -523,6 +525,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
       setAllSessions(data.sessions);
+      // 上抛全量列表：父级 hydrate 直接复用，避免再拉一次 /api/sessions。
+      onSessionsLoaded?.(data.sessions);
       // Treat the fetched running set as an initial fallback only. Once the
       // lightweight poll is live, a slow session-list fetch cannot overwrite it.
       if (!runningPollAuthoritativeRef.current) {
@@ -546,20 +550,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, []);
-
-  const initialLoadDone = useRef(false);
-  // Snapshot of the refreshKey at mount. The mount effect — including StrictMode's
-  // dev-only immediate replay — must never pass force: a second force=1 right
-  // after mount invalidates the server cache and starts a second full session
-  // scan, doubling the slow listing path on every page open. Only a later
-  // refreshKey change (session created/ended/deleted) requests force.
-  const initialRefreshKeyRef = useRef(refreshKey);
-  useEffect(() => {
-    const isFirst = !initialLoadDone.current;
-    initialLoadDone.current = true;
-    loadSessions(isFirst, refreshKey !== initialRefreshKeyRef.current);
-  }, [loadSessions, refreshKey]);
+  }, [onSessionsLoaded]);
 
   // Persist unread markers so they survive a browser refresh before the user
   // has actually opened the completed session.
@@ -1035,23 +1026,74 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       : null);
 
   // ---- Task groups (per-project) ----
-  useEffect(() => {
+  // 抽成函数供防抖调度复用（refreshKey 驱动时与 loadSessions 并入同一周期，
+  // 避免新建会话等场景多接口同时被重复调用）。
+  const tasksRequestSeqRef = useRef(0);
+  const loadTasks = useCallback(() => {
     const key = selectedProject?.key;
+    const seq = ++tasksRequestSeqRef.current;
     if (!key) {
       setTasks([]);
       return;
     }
-    let cancelled = false;
     fetch(`/api/tasks?projectKey=${encodeURIComponent(key)}`, { cache: "no-store" })
       .then((r) => (r.ok ? (r.json() as Promise<{ tasks?: TaskGroupUi[] }>) : null))
       .then((d) => {
-        if (!cancelled) setTasks(Array.isArray(d?.tasks) ? d.tasks : []);
+        // 过期响应丢弃：快速连续触发时只应用最后一次的结果。
+        if (seq !== tasksRequestSeqRef.current) return;
+        setTasks(Array.isArray(d?.tasks) ? d.tasks : []);
       })
       .catch(() => {});
+  }, [selectedProject?.key]);
+
+  // 项目切换 → 立即拉任务列表（用户主动切换，不走防抖）。
+  useEffect(() => {
+    loadTasks();
+  }, [loadTasks]);
+
+  // ---- 初始加载 + refreshKey 防抖调度 ----
+  const initialLoadDone = useRef(false);
+  // Snapshot of the refreshKey at mount. The mount effect — including StrictMode's
+  // dev-only immediate replay — must never pass force: a second force=1 right
+  // after mount invalidates the server cache and starts a second full session
+  // scan, doubling the slow listing path on every page open. Only a later
+  // refreshKey change (session created/ended/deleted) requests force.
+  const initialRefreshKeyRef = useRef(refreshKey);
+
+  // refreshKey 变化 → 300ms 防抖合并：新建会话/删除/改名/看板事件在极短
+  // 时间内可能多次 bump refreshKey，合并为一次 loadSessions + loadTasks，
+  // 避免多接口同时被重复调用。首屏（isFirst）仍然立即执行。
+  // 手动刷新（manualRefreshRef）跳过防抖，立即执行。
+  const REFRESH_DEBOUNCE_MS = 300;
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const manualRefreshRef = useRef(false);
+  useEffect(() => {
+    const isFirst = !initialLoadDone.current;
+    initialLoadDone.current = true;
+    if (isFirst) {
+      // 首屏立即（不防抖），force 由调用方决定：mount 时 refreshKey 尚未变化，
+      // 保持 false 避免 StrictMode 重放二次全量扫描。
+      loadSessions(true, refreshKey !== initialRefreshKeyRef.current);
+      return;
+    }
+    // 手动刷新：跳过防抖，立即执行（同时由 onRefresh 已 bump refreshKey，
+    // 看板等其他消费方同步刷新，这里不再二次调度）。
+    if (manualRefreshRef.current) {
+      manualRefreshRef.current = false;
+      void loadSessions(false, refreshKey !== initialRefreshKeyRef.current, true);
+      void loadTasks();
+      return;
+    }
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      void loadSessions(false, refreshKey !== initialRefreshKeyRef.current, true);
+      void loadTasks();
+    }, REFRESH_DEBOUNCE_MS);
     return () => {
-      cancelled = true;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
-  }, [selectedProject?.key, refreshKey]);
+  }, [loadSessions, loadTasks, refreshKey]);
 
   const persistTasks = useCallback(async (): Promise<void> => {
     const key = selectedProject?.key;
@@ -1743,7 +1785,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {t("sidebar.tempSessions")}
             </button>
             <button
-              onClick={() => { if (onRefresh) onRefresh(); else loadSessions(false, true); }}
+              onClick={() => {
+                // 手动刷新：立即执行，不走防抖；onRefresh 同步 bump refreshKey
+                // 通知看板等其他消费方，manualRefreshRef 让本组件跳过防抖。
+                if (onRefresh) {
+                  manualRefreshRef.current = true;
+                  onRefresh();
+                } else {
+                  void loadSessions(false, true, true);
+                  void loadTasks();
+                }
+              }}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
                 background: sessionRefreshDone ? "rgba(74,222,128,0.12)" : "transparent",
@@ -2118,7 +2170,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                                   onRenamed={(id, name) => handleSessionRenamed(id, name)}
                                   onSessionDeleted={(id) => {
                                     onSessionDeleted?.(id);
-                                    loadSessions();
                                   }}
                                   onTogglePin={handleToggleSessionPin}
                                   depth={0}
@@ -2210,7 +2261,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             onRenamed={(id, name) => handleSessionRenamed(id, name)}
                             onSessionDeleted={(id) => {
                               onSessionDeleted?.(id);
-                              loadSessions();
                             }}
                             onTogglePin={handleToggleSessionPin}
                             depth={0}

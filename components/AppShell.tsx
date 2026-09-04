@@ -1097,19 +1097,37 @@ export function AppShell() {
   // server-computed projectKey, which the same-project check in
   // handleCwdChange relies on. Hydrate it from the session list so switching
   // worktrees right after creating a session doesn't close the chat.
+  // 不再独立 fetch /api/sessions：SessionSidebar 的 loadSessions（已防抖）成功
+  // 后会上抛全量列表（onSessionsLoaded），此处直接复用，避免多接口重复调用。
+  const latestSessionsRef = useRef<SessionInfo[]>([]);
+  const pendingHydrateSessionIdRef = useRef<string | null>(null);
   const hydrateSelectedSession = useCallback((sessionId: string) => {
-    void fetch("/api/sessions", { cache: "no-store" })
-      .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
-      .then((d) => {
-        const full = d?.sessions.find((s) => s.id === sessionId);
-        if (!full) return;
-        setSelectedSession((prev) => (
-          prev?.id === sessionId
-            ? { ...prev, ...full, transient: full.transient ?? false }
-            : prev
-        ));
-      })
-      .catch(() => {});
+    const full = latestSessionsRef.current.find((s) => s.id === sessionId);
+    if (full) {
+      setSelectedSession((prev) => (
+        prev?.id === sessionId
+          ? { ...prev, ...full, transient: full.transient ?? false }
+          : prev
+      ));
+      return;
+    }
+    // 列表尚未包含（新建会话刚转正，防抖刷新未完成）→ 挂起等下一次全量列表。
+    pendingHydrateSessionIdRef.current = sessionId;
+  }, []);
+
+  // SessionSidebar 全量列表就绪 → 刷新缓存并补挂起的 hydrate。
+  const handleSessionsLoaded = useCallback((sessions: SessionInfo[]) => {
+    latestSessionsRef.current = sessions;
+    const pendingId = pendingHydrateSessionIdRef.current;
+    if (!pendingId) return;
+    const full = sessions.find((s) => s.id === pendingId);
+    if (!full) return;
+    pendingHydrateSessionIdRef.current = null;
+    setSelectedSession((prev) => (
+      prev?.id === pendingId
+        ? { ...prev, ...full, transient: full.transient ?? false }
+        : prev
+    ));
   }, []);
 
   // Called by ChatWindow when a new session gets its real id from pi
@@ -1491,6 +1509,7 @@ export function AppShell() {
         explorerRefreshKey={explorerRefreshKey}
         onExplorerRefresh={handleExplorerRefresh}
         onRefresh={() => setRefreshKey((k) => k + 1)}
+        onSessionsLoaded={handleSessionsLoaded}
         onAtMention={handleAtMention}
         onAtMentions={handleAtMentions}
         onBackgroundTaskDone={handleBackgroundTaskDone}

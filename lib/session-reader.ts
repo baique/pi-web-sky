@@ -250,10 +250,17 @@ export async function loadTaskSessionsPageWithIndex(
   const rootIds = listTaskSessionIds(taskId);
   const pinnedSessionIds = listPinnedTaskSessionIds(taskId);
   const pinnedSet = new Set(pinnedSessionIds);
-  const nonPinnedRoots = rootIds.filter((id) => !pinnedSet.has(id));
+
+  // 任务区根会话排序：按文件 mtime（最后写入时间）降序——活跃会话必然
+  // 最新写入，排最前。session_meta.updated 只是归属/置顶时间，切页用它
+  // 会把活跃会话切到后页（前端只能重排已加载页，够不着它）。
+  const modifiedOf = (id: string): number => metaById.get(id)?.modified.getTime() ?? 0;
+  const byMtimeDesc = (a: string, b: string) => modifiedOf(b) - modifiedOf(a);
+  const pinnedRoots = [...pinnedSessionIds].sort(byMtimeDesc);
+  const nonPinnedRoots = rootIds.filter((id) => !pinnedSet.has(id)).sort(byMtimeDesc);
 
   // 当前页根 = 置顶全量 + 非置顶 slice(offset, offset+limit)；子树跟随根。
-  const pageRootIds = [...pinnedSessionIds, ...nonPinnedRoots.slice(offset, offset + limit)];
+  const pageRootIds = [...pinnedRoots, ...nonPinnedRoots.slice(offset, offset + limit)];
   const wantedIds = new Set<string>();
   for (const rid of pageRootIds) {
     for (const id of collectSubtree(rid)) wantedIds.add(id);

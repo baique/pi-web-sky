@@ -63,8 +63,9 @@ test("offers the downstream context-menu hook only on a normal session row", () 
 test("manual and lifecycle refreshes bypass the server session-list cache", () => {
   assert.match(source, /force \? "\/api\/sessions\?force=1" : "\/api\/sessions"/);
   assert.match(source, /cache: "no-store"/);
-  assert.match(source, /loadSessions\(isFirst, refreshKey !== initialRefreshKeyRef\.current\)/);
-  assert.match(source, /onClick=\{\(\) => \{ if \(onRefresh\) onRefresh\(\); else loadSessions\(false, true\); \}\}/);
+  assert.match(source, /loadSessions\(true, refreshKey !== initialRefreshKeyRef\.current\)/);
+  // 手动刷新：跳过防抖立即执行，并同步 bump refreshKey（看板等其他消费方）。
+  assert.match(source, /if \(onRefresh\) \{\n\s*manualRefreshRef\.current = true;/);
   assert.match(source, /loadSessions\(false, true, false\);\n\s*\}[\s\S]*?onBackgroundTaskDone/);
 });
 
