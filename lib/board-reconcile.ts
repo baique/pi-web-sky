@@ -201,15 +201,14 @@ export async function reconcileBoard(boardId: string): Promise<void> {
     // ---- 1.5) 任务卡节点补齐：业务表存在、画布无对应节点 → 补（exec 线锚点）----
     // 任务卡由用户从工具栏拖出创建；业务表已存在的卡（外部建卡/历史数据）自动入板。
     // 确定性 id（task-<cardId>）→ 幂等；孤儿任务卡节点（业务表已删）→ 删。
-    const existingCardByCardId = new Map(); // cardId -> node
-    for (const n of nodes) {
-      if (n?.type === "task-card" && n.data?.cardId) existingCardByCardId.set(n.data.cardId, n);
-    }
     // 孤儿任务卡：画布有 cardId 但业务表没有 → 删节点（级联删边）
     const knownCardIds = new Set(cards.map((c) => c.id));
-    const orphanCardIds = [];
-    for (const [cid, n] of existingCardByCardId) {
-      if (!knownCardIds.has(cid)) orphanCardIds.push(n.id);
+    const orphanCardIds: string[] = [];
+    for (const n of nodes) {
+      if (n?.type !== "task-card") continue;
+      const cardId = n.data?.cardId;
+      if (typeof cardId !== "string" || !cardId) continue;
+      if (!knownCardIds.has(cardId)) orphanCardIds.push(n.id);
     }
     for (const id of orphanCardIds) {
       nodesMap.delete(id);
@@ -221,7 +220,7 @@ export async function reconcileBoard(boardId: string): Promise<void> {
     {
       const remaining = Array.from(nodesMap.values()) as unknown as DocNode[];
       for (const card of cards) {
-        if (existingCardByCardId.has(card.id)) continue;
+        if (nodesMap.has(`task-${card.id}`)) continue;
         const id = `task-${card.id}`;
         const spot = findFreeSpot(remaining, TASK_CARD_W, TASK_CARD_H);
         nodesMap.set(id, {

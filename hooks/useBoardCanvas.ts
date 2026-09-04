@@ -511,7 +511,9 @@ export function useBoardCanvas({
     const w = NEW_SESSION_CARD_W;
     const h = NEW_SESSION_CARD_H;
     const sessionId = crypto.randomUUID();
-    const id = crypto.randomUUID();
+    // 统一节点 id 锚：新会话卡出生即确定性 id（与拖入/补卡/转正一致），
+    // reconcile 补卡/幂等/exec 线 target 全部依赖该锚，不再有随机 id 分裂。
+    const id = `session-${sessionId}`;
     // 落点：传入的 flowPos 视为卡片【中心】坐标（NewSessionButton 传视口中心）→
     // position 是左上角，需减去卡片宽高的一半让卡片居中。未传则画布原点附近 + 级联偏移。
     const cx = flowPos?.x ?? 60;
