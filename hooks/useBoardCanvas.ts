@@ -147,16 +147,6 @@ export function useBoardCanvas({
       // yjs 铁律：changes 只能在 observe 回调同步阶段访问（事务结束后抛错），
       // 必须在这里先取出变化的 key 集合，再传给异步的 setNodes reducer。
       const changedIds = changes ? new Set(Array.from(changes.keys.keys())) : null;
-      // 父节点（分组容器）变化时，其子节点也要强制重建：RF adoptUserNodes 的
-      // checkEquality 优化复用「引用未变」节点的旧 internals（含 positionAbsolute），
-      // 父节点移动后子节点绝对位置不重算 → 拖 group 子节点不跟随。子节点新引用
-      // 迫使 RF updateChildNode 重算绝对位置。
-      const forcedChildIds = new Set<string>();
-      if (changedIds) {
-        for (const n of Array.from(nodesMap.values())) {
-          if (n.parentId && changedIds.has(n.parentId)) forcedChildIds.add(n.id);
-        }
-      }
       // 任务会话补卡就绪 → 触发一次左侧刷新：
       // 后端 reconcile 补执行会话卡（业务表已有、画布新增）时，左侧会话树不会自动感知，
       // 这里在 synced 之后监听 yjs 新增的正式会话卡（cwd 空 = 就绪），dispatch 事件桥让 AppShell 刷新。
@@ -189,30 +179,10 @@ export function useBoardCanvas({
         // 不用 nodes 上的 dragging 字段——RF 受控 prop 不携带该标志（内部态）。
         const draggingNow = draggingNodeIdsRef.current;
         const prevById = new Map(prev.map((n) => [n.id, n]));
-        // RF 要求父节点（分组容器）在子节点之前出现在 nodes 数组中，否则
-        // adoptUserNodes 找不到 parent → 子节点绝对位置不计算 + console 警告。
-        // yjs Map 按插入序，group 最后创建 → 天然在子节点之后，必须显式排序。
-        const allNodes = Array.from(nodesMap.values());
-        const byId = new Map(allNodes.map((n) => [n.id, n]));
-        const sorted: Array<Node & { parentId?: string }> = [];
-        const seen = new Set<string>();
-        const visit = (n: Node & { parentId?: string }) => {
-          if (seen.has(n.id)) return;
-          seen.add(n.id);
-          // 先父后子（父节点也可能有父——分组不嵌套，但按层级递归最稳）
-          if (n.parentId) {
-            const parent = byId.get(n.parentId);
-            if (parent) visit(parent as Node & { parentId?: string });
-          }
-          sorted.push(n);
-        };
-        for (const n of allNodes) visit(n as Node & { parentId?: string });
-        return sorted.map((n) => {
-          // 未变且父节点未变的节点：整对象复用（含 selected/dragging/引用），
-          // 避免每次 yjs 回灌全量重建 internals 拖垮性能。
-          if (changedIds && !changedIds.has(n.id) && !forcedChildIds.has(n.id)) {
+        return Array.from(nodesMap.values()).map((n) => {
+          if (changedIds && !changedIds.has(n.id)) {
             const old = prevById.get(n.id);
-            if (old) return old;
+            if (old) return old; // 未变：整对象复用（含 selected/dragging/引用）
           }
           const out = { ...n } as Node & { selected?: boolean; dragging?: boolean };
           if (draggingNow.has(n.id)) {
@@ -727,18 +697,6 @@ export function useBoardCanvas({
       fetch(`/api/task-cards/${encodeURIComponent(d.cardId)}`, { method: "DELETE" }).catch((e) =>
         console.warn(`[board] 删除任务卡 ${d.cardId} 异常`, e),
       );
-    } else if (node.type === "group-node") {
-      // 分组容器删除：先解除子节点分组（parentId 清空 + 坐标转绝对），再删容器
-      const children = Array.from(nodesMap.values()).filter((n) => n.parentId === node.id);
-      for (const child of children) {
-        nodesMap.set(child.id, {
-          ...child,
-          parentId: undefined,
-          position: { x: (node.position?.x ?? 0) + (child.position?.x ?? 0), y: (node.position?.y ?? 0) + (child.position?.y ?? 0) },
-          extent: undefined,
-        });
-      }
-      nodesMap.delete(node.id);
     } else {
       // 便笺/文本/图片：直接删
       nodesMap.delete(node.id);
@@ -816,19 +774,6 @@ export function useBoardCanvas({
     nodesMap.set(node.id, node);
   }, []);
 
-  /** 直接删除 yjs 节点（不走确认制/不解除分组）——供分组取消等场景，调用方需自行处理子节点 */
-  const deleteNodeDirect = useCallback((id: string) => {
-    const nodesMap = nodesMapRef.current;
-    const edgesMap = edgesMapRef.current;
-    if (!nodesMap) return;
-    nodesMap.delete(id);
-    if (edgesMap) {
-      for (const e of Array.from(edgesMap.values())) {
-        if (e.source === id || e.target === id) edgesMap.delete(e.id);
-      }
-    }
-  }, []);
-
   // ---- 清空画布 ----
   const clearBoard = useCallback(async () => {
     const nodesMap = nodesMapRef.current;
@@ -893,7 +838,6 @@ export function useBoardCanvas({
       normalizeNodeId,
       addEdge,
       addNode,
-      deleteNodeDirect,
       clearBoard,
       sessionTitles,
       loadSessionSummaries,
@@ -901,7 +845,7 @@ export function useBoardCanvas({
       undo,
       redo,
     }),
-    [board, loading, error, running, nodes, edges, viewport, saveViewport, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, updateNodeDebounced, normalizeNodeId, addEdge, addNode, deleteNodeDirect, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, registerVisibleTaskCard, unregisterVisibleTaskCard, undo, redo],
+    [board, loading, error, running, nodes, edges, viewport, saveViewport, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, updateNodeDebounced, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, registerVisibleTaskCard, unregisterVisibleTaskCard, undo, redo],
   );
 }
 

@@ -1,24 +1,32 @@
 "use client";
 
 /**
- * 手写体文字节点（RF 版，替代 tldraw text shape）。
+ * 手写体文字节点（RF 版）。
  *
- * 类似 excalidraw 的文字：无卡片背景，只有文字本身，手写字体渲染。
+ * 类似 excalidraw 的文字：无卡片背景，只有文字本身，手写字体渲染（霞鹜文楷，全量中文字体）。
  * - 双击进入编辑：textarea 自适应高度，失焦/Ctrl+Enter 保存，Esc 取消
- * - 非编辑态：纯文字 + 手写体（--font-hand），选中态显示虚线描边
- * - 尺寸自适应：编辑态 textarea 撑开，预览态由内容决定（RF measured）
+ * - 非编辑态：纯文字 + 手写体（--font-hand，粗体 700），选中态虚线描边随内容自适应
+ * - 拖拽缩放（NodeResizer）：像 excalidraw 一样拖角缩放，按比例调整字号
  * - 空白文字：创建后默认进入编辑态（autofocus）
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { NodeResizer, Handle, Position, type NodeProps } from "@xyflow/react";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { memoBoardNode } from "./memoNode";
+
+/** 默认字号（px） */
+export const TEXT_NODE_DEFAULT_FS = 18;
+/** 默认字重（加粗，手写观感更接近 excalidraw） */
+export const TEXT_NODE_FONT_WEIGHT = 700;
+/** 字号缩放 clamp 范围 */
+const FS_MIN = 10;
+const FS_MAX = 120;
 
 export interface TextNodeData extends Record<string, unknown> {
   /** 纯文本内容（无 markdown，所见即所得） */
   text: string;
-  /** 手写体字号（px），默认 20 */
+  /** 手写体字号（px），默认 18 */
   fontSize?: number;
   /** 文字颜色（CSS 颜色），默认主题色 */
   color?: string;
@@ -26,10 +34,10 @@ export interface TextNodeData extends Record<string, unknown> {
   autofocus?: boolean;
 }
 
-function TextNodeImpl({ id, data, selected }: NodeProps & { data: TextNodeData }) {
+function TextNodeImpl({ id, data, selected, width }: NodeProps & { data: TextNodeData }) {
   const { updateNode } = useBoardCanvasOps();
   const text = data.text ?? "";
-  const fontSize = data.fontSize ?? 20;
+  const fontSize = data.fontSize ?? TEXT_NODE_DEFAULT_FS;
   const color = data.color ?? "var(--text)";
 
   const [editing, setEditing] = useState(Boolean(data.autofocus));
@@ -121,8 +129,44 @@ function TextNodeImpl({ id, data, selected }: NodeProps & { data: TextNodeData }
     autoGrow(e.target);
   }, [autoGrow]);
 
+  // ---- 拖拽缩放：像 excalidraw 一样，resize 按比例调整字号 ----
+  // resize 起点快照（宽度基准：字重随宽度同比缩放，保持文字观感比例）
+  const resizeStartRef = useRef<{ w: number; fs: number } | null>(null);
+  const onResizeStart = useCallback(() => {
+    resizeStartRef.current = { w: width ?? 200, fs: fontSize };
+  }, [width, fontSize]);
+  const onResize = useCallback(
+    (_: unknown, params: { width: number; height: number }) => {
+      const start = resizeStartRef.current;
+      if (!start || start.w <= 0) return;
+      const scale = params.width / start.w;
+      const nextFs = Math.round(Math.min(FS_MAX, Math.max(FS_MIN, start.fs * scale)));
+      // 更新样式尺寸 + 字号（字号写进 data，换端/刷新保持）
+      updateNode(id, {
+        style: { width: Math.max(params.width, 40), height: Math.max(params.height, 24) },
+        data: { ...data, fontSize: nextFs },
+      });
+    },
+    [id, data, updateNode],
+  );
+  const onResizeEnd = useCallback(() => {
+    resizeStartRef.current = null;
+  }, []);
+
   return (
     <>
+      {/* 缩放手柄 + 连线 Handle 挂在卡根外（与便笺同款布局） */}
+      <NodeResizer
+        isVisible={selected && !editing}
+        minWidth={40}
+        minHeight={24}
+        onResizeStart={onResizeStart}
+        onResize={onResize}
+        onResizeEnd={onResizeEnd}
+        color="var(--accent)"
+        handleStyle={{ width: 8, height: 8, borderRadius: 2, border: "1px solid var(--bg-panel)", background: "var(--accent)" }}
+        lineStyle={{ borderColor: "color-mix(in srgb, var(--accent) 50%, transparent)" }}
+      />
       <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <div
@@ -133,8 +177,11 @@ function TextNodeImpl({ id, data, selected }: NodeProps & { data: TextNodeData }
         onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
         style={{
           position: "relative",
+          width: "100%",
+          height: "100%",
           minWidth: 40,
-          minHeight: 30,
+          minHeight: 24,
+          boxSizing: "border-box",
           // 选中/编辑态：虚线描边（类似 excalidraw 选中框）；非选中无边框无背景
           outline: selected || editing ? "1.5px dashed color-mix(in srgb, var(--accent) 65%, transparent)" : "none",
           outlineOffset: 4,
@@ -143,11 +190,13 @@ function TextNodeImpl({ id, data, selected }: NodeProps & { data: TextNodeData }
           color,
           fontFamily: "var(--font-hand)",
           fontSize,
+          fontWeight: TEXT_NODE_FONT_WEIGHT,
           lineHeight: 1.35,
           cursor: "default",
           userSelect: editing ? "text" : "none",
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
+          overflow: "hidden",
         }}
       >
         {editing ? (
@@ -164,7 +213,7 @@ function TextNodeImpl({ id, data, selected }: NodeProps & { data: TextNodeData }
             style={{
               display: "block",
               width: "100%",
-              minWidth: 200,
+              minWidth: 160,
               minHeight: 24,
               border: "none",
               outline: "none",
@@ -172,6 +221,7 @@ function TextNodeImpl({ id, data, selected }: NodeProps & { data: TextNodeData }
               color: "inherit",
               fontFamily: "inherit",
               fontSize: "inherit",
+              fontWeight: "inherit",
               lineHeight: "inherit",
               resize: "none",
               overflow: "hidden",

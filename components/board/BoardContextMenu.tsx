@@ -2,13 +2,12 @@
 
 /**
  * 看板右键菜单（玻璃配方）—— 替代 tldraw SyncedContextMenu。
- * - 节点右键：删除（会话/任务卡走确认制，便笺/文字/图片/分组直接删）
+ * - 节点右键：删除（会话/任务卡走确认制，便笺/文字/图片直接删）
  * - 派生边右键：只读提示（exec/依赖线由后端 reconcile 权威维护，不可删）
- * - 空白右键：新建便笺 / 新建任务卡 / 新建文字 / 新建图片 / 创建分组（多选时）
+ * - 空白右键：新建便笺 / 新建任务卡 / 新建文字 / 新建图片
  */
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { Node } from "@xyflow/react";
-import { useReactFlow } from "@xyflow/react";
 import { useBoardCanvasOps } from "@/components/board/BoardCanvasContext";
 
 export interface BoardMenuState {
@@ -22,7 +21,6 @@ export interface BoardMenuState {
 
 export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onClose: () => void }) {
   const ops = useBoardCanvasOps();
-  const { getNodes } = useReactFlow();
   const { node, edgeId, x, y, edgeDerived } = menu;
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -96,33 +94,7 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
     onClose();
   }, [ops, x, y, onClose]);
 
-  // ---- 分组（次级）：多选节点 → 创建分组 / 取消分组 ----
-  // 当前选中集合（RF store，含刚右键的节点）
-  const selectedNodes = useMemo(() => {
-    const nodes = getNodes() as Array<Node & { selected?: boolean }>;
-    return nodes.filter((n) => n.selected);
-  }, [getNodes]);
-  const multiSelect = selectedNodes.length > 1;
-  // 右键的是 group 容器 → 提供「取消分组」
-  const isGroup = node?.type === "group-node";
-  // 选中集合里含 group 且不全是 group → 提供「取消分组（选中）」
-  const selHasGroup = selectedNodes.some((n) => n.type === "group-node") && !selectedNodes.every((n) => n.type === "group-node");
-
-  const createGroup = useCallback(() => {
-    onClose();
-    // 交由 CanvasStage 的统一分组逻辑处理（需要 RF 全节点包围盒计算）
-    window.dispatchEvent(new CustomEvent("pi:board-create-group"));
-  }, [onClose]);
-
-  const ungroup = useCallback(() => {
-    onClose();
-    if (isGroup && node) {
-      window.dispatchEvent(new CustomEvent("pi:board-ungroup", { detail: { groupId: node.id } }));
-      return;
-    }
-    window.dispatchEvent(new CustomEvent("pi:board-ungroup-selected"));
-  }, [onClose, isGroup, node]);
-
+  // ---- 分组相关（已移除）：多选创建分组 / 取消分组不再支持 ----
   // 节点类型判断
   const nodeType = node?.type ?? null;
   const isSession = nodeType === "session-card";
@@ -135,7 +107,6 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
   const deleteLabel = isSession
     ? (ops.isTaskBoard ? "删除会话" : "移除会话卡片")
     : isTask ? "删除任务卡"
-    : isGroup ? "删除分组"
     : isFreeElement ? "删除"
     : "删除";
 
@@ -172,15 +143,6 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
           danger
           onClick={handleDeleteNode}
         />
-      )}
-      {node && isGroup && (
-        <MenuItem label="取消分组" onClick={ungroup} />
-      )}
-      {!node && !edgeId && multiSelect && (
-        <>
-          <MenuItem label="创建分组" onClick={createGroup} />
-          {selHasGroup && <MenuItem label="取消分组（选中）" onClick={ungroup} />}
-        </>
       )}
       {!node && !edgeId && (
         <>

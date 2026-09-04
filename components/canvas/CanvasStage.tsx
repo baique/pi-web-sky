@@ -11,7 +11,6 @@ import { StickyNoteNode } from "@/components/board/StickyNoteNode";
 import { TaskCardNode } from "@/components/board/TaskCardNode";
 import { TextNode } from "@/components/board/TextNode";
 import { ImageNode } from "@/components/board/ImageNode";
-import { GroupNode } from "@/components/board/GroupNode";
 import { BoardCanvasProvider, type BoardCanvasOps } from "@/components/board/BoardCanvasContext";
 import { BoardContextMenu, type BoardMenuState } from "@/components/board/BoardContextMenu";
 import { BoardLoading } from "./BoardLoading";
@@ -31,7 +30,6 @@ const nodeTypes: NodeTypes = {
   text: StickyNoteNode, // 旧 tldraw text shape 降级为便笺渲染（data.text）
   "text-node": TextNode,
   "image-node": ImageNode,
-  "group-node": GroupNode,
 };
 
 // 工具栏可创建的「自由元素」类型（无业务表依赖，纯画布内容）
@@ -314,25 +312,14 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
 
   // ---- 复制/粘贴（除会话卡外）：Ctrl+C / Ctrl+V ----
   // 复制：选中的非会话卡节点序列化为 JSON（含类型/data/style，剥 UI 态）。
-  // 分组子节点连带复制：选中 group 容器时自动带上其直属子节点（复制后仍是分组）。
+  // 任务卡只复制表单内容，不复制业务标识（cardId/number/状态）→ 粘贴生成新待派发卡。
   const copySelected = useCallback(async () => {
-    const allNodes = board.nodes as Array<Node & { selected?: boolean; parentId?: string }>;
-    const selected = allNodes.filter((n) => n.selected && n.type !== "session-card");
+    const selected = board.nodes.filter((n) => (n as Node & { selected?: boolean }).selected && n.type !== "session-card");
     if (selected.length === 0) return false;
-    // 选中集合（含 group 的子节点）：group 容器选中 → 自动包含直属子节点
-    const groupIds = new Set(selected.filter((n) => n.type === "group-node").map((n) => n.id));
-    const ids = new Set(selected.map((n) => n.id));
-    for (const n of allNodes) {
-      if (n.parentId && groupIds.has(n.parentId) && !ids.has(n.id)) ids.add(n.id);
-    }
-    const nodesToCopy = allNodes.filter((n) => ids.has(n.id));
-    const payload = nodesToCopy.map((n) => ({
-      id: n.id, // 保留原 id 供 parentId 映射
+    const payload = selected.map((n) => ({
       type: n.type,
       data: n.data,
       style: n.style,
-      position: { ...n.position }, // 分组子节点是相对坐标，粘贴时需保留
-      parentId: n.parentId,
       width: n.measured?.width ?? (n.style as { width?: number } | undefined)?.width,
       height: n.measured?.height ?? (n.style as { height?: number } | undefined)?.height,
     }));
@@ -344,7 +331,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     }
   }, [board.nodes]);
 
-  // 粘贴：读剪贴板 JSON → 按落点偏移重建节点（新 id）。图片节点 src 复用 URL（资产已持久化）。
+  // 粘贴：读剪贴板 JSON → 按落点偏移重建节点（新 id，新业务标识）。图片节点 src 复用 URL（资产已持久化）。
   const pasteNodes = useCallback(async (flowPos?: { x: number; y: number }) => {
     let raw = "";
     try {
@@ -352,7 +339,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     } catch {
       return false;
     }
-    let parsed: { app?: string; nodes?: Array<{ id?: string; type?: string; data?: Record<string, unknown>; style?: unknown; position?: { x: number; y: number }; parentId?: string; width?: number; height?: number }> };
+    let parsed: { app?: string; nodes?: Array<{ type?: string; data?: Record<string, unknown>; style?: unknown; width?: number; height?: number }> };
     try {
       parsed = JSON.parse(raw);
     } catch {
@@ -368,26 +355,13 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
       const cy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
       base = screenToFlowPosition({ x: cx, y: cy });
     }
-    // 旧 id → 新 id 映射（parentId 重建用）
-    const idMap = new Map<string, string>();
-    for (const n of parsed.nodes) {
-      if (n.id) idMap.set(n.id, crypto.randomUUID());
-    }
-    // 落点基准：粘贴内容包围盒左上角应落在 base 附近；有分组的用 group 落点
-    // 普通（非分组子节点）按包围盒居中偏移；分组子节点保持原相对坐标（RF 跟随新 group）
-    let offsetX = base.x;
-    let offsetY = base.y;
-    // 无分组子节点时按包围盒居中；有分组时 group 本身占落点，子节点相对不动
-    const hasGroup = parsed.nodes.some((n) => n.type === "group-node");
-    if (!hasGroup) {
-      const widths = parsed.nodes.map((n) => n.width ?? 0);
-      const heights = parsed.nodes.map((n) => n.height ?? 0);
-      const totalW = Math.max(0, ...widths);
-      const totalH = Math.max(0, ...heights);
-      offsetX = base.x - totalW / 2;
-      offsetY = base.y - totalH / 2;
-    }
-    let placed = 0; // 已落位节点计数（非分组节点级联偏移）
+    // 复制节点包围盒居中到落点（多节点粘贴不叠在鼠标上）
+    const widths = parsed.nodes.map((n) => n.width ?? 0);
+    const heights = parsed.nodes.map((n) => n.height ?? 0);
+    const totalW = Math.max(0, ...widths);
+    const totalH = Math.max(0, ...heights);
+    let offsetX = base.x - totalW / 2;
+    let offsetY = base.y - totalH / 2;
     for (const n of parsed.nodes) {
       if (!n.type) continue;
       // 剥 UI 态字段（selected/dragging）与 autofocus（粘贴不自动进编辑）
@@ -395,37 +369,33 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
       delete clean.selected;
       delete clean.dragging;
       delete clean.autofocus;
-      const nodeId = n.id ? idMap.get(n.id)! : crypto.randomUUID();
-      // 分组子节点：保留相对坐标（parentId 映射到新 group，RF 自动跟随）
-      let pos = n.position ? { ...n.position } : { x: offsetX, y: offsetY };
-      if (n.parentId) {
-        const newParentId = idMap.get(n.parentId);
-        if (newParentId) {
-          // 子节点 position 是相对坐标，原样保留
-          pos = n.position ? { ...n.position } : { x: 0, y: 0 };
-          const newNode: Node = {
-            id: nodeId,
-            type: n.type,
-            position: pos,
-            style: (n.style as Record<string, unknown> | undefined) ?? {},
-            data: clean,
-            parentId: newParentId,
-            extent: "parent" as const,
-          };
-          board.addNode?.(newNode);
-          continue;
-        }
+      // 任务卡：清掉业务标识（cardId/number/状态），粘贴 = 新的待派发草稿卡，
+      // 内容（名称/描述/优先级等）沿用被复制卡。避免新旧卡共享 cardId 导致
+      // 删除一张连带另一张（画布 reconcile 按 cardId 判定孤儿）。
+      if (n.type === "task-card") {
+        delete clean.cardId;
+        clean.number = 0;
+        clean.name = (clean.name as string | undefined) ?? "新建任务";
+        clean.description = (clean.description as string | undefined) ?? "";
+        clean.readyStatus = "draft";
+        clean.priority = (clean.priority as number | undefined) ?? 0;
+        clean.expanded = false;
+        clean.w = (clean.w as number | undefined) ?? 380;
+        clean.h = (clean.h as number | undefined) ?? 270;
+        clean.expandedW = 0;
+        clean.expandedH = 0;
+        clean.collapsedW = 0;
+        clean.collapsedH = 0;
       }
-      // 普通节点 / group 容器：落点 + 级联偏移
-      const newNode: Node = {
-        id: nodeId,
+      board.addNode?.({
+        id: crypto.randomUUID(),
         type: n.type,
-        position: { x: offsetX + placed * 24, y: offsetY + placed * 24 },
+        position: { x: offsetX, y: offsetY },
         style: (n.style as Record<string, unknown> | undefined) ?? {},
         data: clean,
-      };
-      board.addNode?.(newNode);
-      placed += 1;
+      });
+      offsetX += 24;
+      offsetY += 24;
     }
     return true;
   }, [board, screenToFlowPosition]);
@@ -487,92 +457,12 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     addImageFromFile(file, screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }));
   }, [addImageFromFile, screenToFlowPosition]);
 
-  // ---- 分组：创建分组（把选中的自由节点收进 group 容器）----
-  const createGroupFromSelection = useCallback(() => {
-    const selected = board.nodes.filter((n) => (n as Node & { selected?: boolean }).selected && n.type !== "group-node");
-    if (selected.length === 0) return;
-    // 排除已分组的节点（parentId 已挂 group）——分组不嵌套
-    const free = selected.filter((n) => !(n as Node & { parentId?: string }).parentId);
-    if (free.length === 0) return;
-    // 包围盒（含 padding）
-    const pad = 32;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const n of free) {
-      const w = n.measured?.width ?? (n.style as { width?: number } | undefined)?.width ?? 100;
-      const h = n.measured?.height ?? (n.style as { height?: number } | undefined)?.height ?? 60;
-      minX = Math.min(minX, n.position.x);
-      minY = Math.min(minY, n.position.y);
-      maxX = Math.max(maxX, n.position.x + w);
-      maxY = Math.max(maxY, n.position.y + h);
-    }
-    const gx = minX - pad;
-    const gy = minY - pad;
-    const gw = maxX - minX + pad * 2;
-    const gh = maxY - minY + pad * 2;
-    const groupId = `group-${crypto.randomUUID()}`;
-    // 1) 建 group 容器
-    board.addNode?.({
-      id: groupId,
-      type: "group-node",
-      position: { x: gx, y: gy },
-      style: { width: gw, height: gh },
-      data: { label: "" },
-    });
-    // 2) 子节点挂 parentId + 转相对坐标（RF 原生跟随父节点移动）
-    for (const n of free) {
-      board.updateNode?.(n.id, {
-        parentId: groupId,
-        position: { x: n.position.x - gx, y: n.position.y - gy },
-        extent: "parent" as const,
-      });
-    }
-  }, [board]);
-
-  /** 取消分组：group 的所有子节点脱离（parentId 清空 + 坐标转绝对）。
-   *  脱离完成后若 group 无子节点，连容器一起删除（不留空壳）。 */
-  const ungroup = useCallback((groupId: string) => {
-    const group = board.nodes.find((n) => n.id === groupId);
-    if (!group) return;
-    const children = board.nodes.filter((n) => (n as Node & { parentId?: string }).parentId === groupId);
-    for (const child of children) {
-      board.updateNode?.(child.id, {
-        parentId: undefined,
-        // 相对坐标 → 绝对坐标（RF 渲染用 positionAbsolute，但 yjs 存 position；
-        // 脱离父节点后 position 需为绝对坐标，才能不跳动）
-        position: { x: group.position.x + (child.position as unknown as { x: number }).x, y: group.position.y + (child.position as unknown as { y: number }).y },
-        extent: undefined,
-      });
-    }
-    // 全部子节点脱离后删除容器（直接删 yjs，不弹确认——取消分组的语义）
-    board.deleteNodeDirect?.(groupId);
-  }, [board]);
-
-  /** 取消选中集合里所有 group 的分组（右键菜单「取消分组（选中）」） */
-  const ungroupSelectedGroups = useCallback(() => {
-    const groups = board.nodes.filter((n) => (n as Node & { selected?: boolean }).selected && n.type === "group-node");
-    for (const g of groups) ungroup(g.id);
-  }, [board, ungroup]);
-
-  // 右键菜单跨组件事件（BoardContextMenu 发起）：新建图片 / 创建分组 / 取消分组
+  // 右键菜单跨组件事件（BoardContextMenu 发起）：新建图片
   useEffect(() => {
     const onPickImage = () => fileInputRef.current?.click();
-    const onCreateGroup = () => createGroupFromSelection();
-    const onUngroup = (e: Event) => {
-      const groupId = (e as CustomEvent<{ groupId?: string }>).detail?.groupId;
-      if (groupId) ungroup(groupId);
-    };
-    const onUngroupSelected = () => ungroupSelectedGroups();
     window.addEventListener("pi:board-pick-image", onPickImage);
-    window.addEventListener("pi:board-create-group", onCreateGroup);
-    window.addEventListener("pi:board-ungroup", onUngroup as EventListener);
-    window.addEventListener("pi:board-ungroup-selected", onUngroupSelected);
-    return () => {
-      window.removeEventListener("pi:board-pick-image", onPickImage);
-      window.removeEventListener("pi:board-create-group", onCreateGroup);
-      window.removeEventListener("pi:board-ungroup", onUngroup as EventListener);
-      window.removeEventListener("pi:board-ungroup-selected", onUngroupSelected);
-    };
-  }, [createGroupFromSelection, ungroup, ungroupSelectedGroups]);
+    return () => window.removeEventListener("pi:board-pick-image", onPickImage);
+  }, []);
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
