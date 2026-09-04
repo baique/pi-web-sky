@@ -612,9 +612,11 @@ function MarkdownField({
   // 只要点击来自 wrap 内部（无论编辑器内部还是空白），都确保编辑器聚焦。
   const handleWrapMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if (editor) {
-        editor.commands.focus("end");
-      }
+      if (!editor) return;
+      // 点击编辑器内部 → 交给 ProseMirror 原生定位，避免 focus("end") 把光标冲到末尾
+      if (editor.view.dom.contains(e.target as Node)) return;
+      // 空内容时编辑器只占一行，点击下方空白区域 → 聚焦编辑器
+      editor.commands.focus("end");
     },
     [editor],
   );
