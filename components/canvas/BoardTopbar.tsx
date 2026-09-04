@@ -10,7 +10,7 @@
  * 必须在 ReactFlowProvider + BoardSearchProvider 内渲染（useReactFlow / setHighlight）。
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactFlow } from "@xyflow/react";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
 import { useBoardSearch } from "./BoardSearchContext";
@@ -53,6 +53,19 @@ export function BoardTopbar({
   const { setHighlight } = useBoardSearch();
   const [scrimOpen, setScrimOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
+
+  // 主胶囊宽度测量：弹出面板宽度跟随主胶囊对齐（看板名长度变化时同步）
+  const capsuleRef = useRef<HTMLDivElement | null>(null);
+  const [capsuleWidth, setCapsuleWidth] = useState(0);
+  useEffect(() => {
+    const el = capsuleRef.current;
+    if (!el) return;
+    const measure = () => setCapsuleWidth(el.getBoundingClientRect().width);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   /** 运行中：画面中 phase ∈ 运行中的会话卡。 */
   const runningItems = useMemo<RunningItem[]>(() => {
@@ -116,7 +129,7 @@ export function BoardTopbar({
   return (
     <div style={{ position: "absolute", top: 12, left: 12, zIndex: 40, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, maxWidth: "min(420px, calc(100% - 320px))" }}>
       {/* 主胶囊：看板名 + 刷新 + 新建/磨砂/清空 + 展开（执行队列） */}
-      <div style={{
+      <div ref={capsuleRef} style={{
         display: "flex", alignItems: "center", gap: 4, height: 36,
         padding: "0 6px 0 12px", borderRadius: 999,
         background: "var(--board-card-glass)",
@@ -132,7 +145,7 @@ export function BoardTopbar({
           <rect x="3" y="14" width="7" height="7" rx="1.5" />
           <rect x="14" y="14" width="7" height="7" rx="1.5" />
         </svg>
-        <span title={boardName} style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 150 }}>
+        <span title={boardName} style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 220 }}>
           {boardName || "看板"}
         </span>
         <button
@@ -257,19 +270,13 @@ export function BoardTopbar({
 
       {/* 进行中（展开时显示）：运行中 + 工作中（展开态）的会话卡，点击定位 */}
       {queueOpen && (
-        <div style={{ ...panelStyle, maxHeight: 360, overflowY: "auto", padding: 6, width: 300 }}>
-          <div style={{ padding: "6px 10px 4px", fontSize: 11, fontWeight: 700, color: "var(--text)", letterSpacing: 0.2 }}>
-            进行中
-            <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: "var(--text-meta)" }}>
-              {totalCount} 个会话
-            </span>
-          </div>
+        <div style={{ ...panelStyle, maxHeight: 360, overflowY: "auto", padding: 6, width: capsuleWidth || 300 }}>
           {totalCount === 0 ? (
             <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-muted)" }}>画面中没有运行中或展开的会话</div>
           ) : (
             <>
               {runningItems.length > 0 && (
-                <div style={{ padding: "8px 10px 2px", fontSize: 10, fontWeight: 600, color: "var(--text-dim)", letterSpacing: 0.2 }}>
+                <div style={{ padding: "4px 10px 2px", fontSize: 10.5, fontWeight: 600, color: "var(--text-dim)", letterSpacing: 0.2 }}>
                   运行中 · {runningItems.length}
                 </div>
               )}
@@ -291,7 +298,7 @@ export function BoardTopbar({
                 </button>
               ))}
               {expandedItems.length > 0 && (
-                <div style={{ padding: "8px 10px 2px", fontSize: 10, fontWeight: 600, color: "var(--text-dim)", letterSpacing: 0.2 }}>
+                <div style={{ padding: "4px 10px 2px", fontSize: 10.5, fontWeight: 600, color: "var(--text-dim)", letterSpacing: 0.2 }}>
                   工作中 · {expandedItems.length}
                 </div>
               )}
