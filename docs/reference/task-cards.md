@@ -58,6 +58,28 @@ task_card_questions  待回答队列（S3 用）
   逻辑不再读写）；`dispatch_token` 保留作 leader 切换瞬间的派发双保险。
 - 调度状态 API 返回 `leader` 字段，面板对非 leader 实例显示「跟随」。
 
+## 调度器状态机（每 10s tick，一镜像 + 五段）
+
+`runSchedulerTick` 按序执行（前段结果影响后段）：
+
+1. **会话状态镜像**（`mirrorCardStatusFromSessions`）：卡状态 ← 关联会话真实状态。
+   不区分消息由调度器还是用户发起——会话在跑 → `running`；会话挂起等用户输入
+   （waiting_input）→ `waiting_reply`。只动非终态（not_started/running/review/waiting_reply），
+   done/failed/abandoned 不拉回。兼容「用户直接打开执行会话交流」。
+2. **自愈**（`restoreRunningReviewCards`）：review 卡但会话在跑 → 拉回 running。
+3. **结束巡检**（`reconcileEndedRunningCards`）：running 卡会话已静默结束 → review。
+4. **审核**（`processReviewCards`）：review → 程序检测失败→failed 重试；无内容→done；
+   否则 AI 判定 → done/failed/waiting_reply，冷却 `AUDIT_COOLDOWN_MS=5min`。
+5. **回复队列**（`processReplyQueue`）：waiting_reply + answered 问题 → 续会话 → running，走并发闸门。
+6. **阻塞巡检**（`checkRunningCardsBlocked`，严格版）：仅当**最后一条是命令发起**
+   （bash toolCall 未见返回）且命令已执行超 `BLOCK_IDLE_MS=5min` 才交 AI 判定；
+   确认挂起（sync_server/infinite_loop）→ abort + tmux 引导重发；rate_limit 退避；
+   asking → waiting_reply；error → review。每卡冷却 `BLOCK_COOLDOWN_MS=10min`。
+
+**性能铁律**：审核/巡检/镜像一律走 `readSessionAuditSnapshot` **尾部反读**（最后 128KB，
+不足 4 条翻倍，上限 1MB）——绝不 `SessionManager.open().getEntries()` 全量解析会话文件
+（大会话会同步阻塞事件循环，这是历史上停用审核/巡检的直接原因）。
+
 ## 删除（确认制 + 事务）
 
 - 删除拦截 toast 已废除（无 `boards.deleteBlocked`）；删除走**确认弹窗**（提示关联关系）→ 事务删除。
