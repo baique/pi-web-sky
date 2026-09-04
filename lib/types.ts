@@ -326,11 +326,8 @@ export interface SessionInfo {
   transient?: boolean;
   /** Pinned by the user; sorts first inside its own region (task group or chat). */
   pinned?: boolean;
-  /** 归属任务 id（session_meta.task_id）；null/缺省 = 聊天区会话。
-   *  由服务端在列表构建时附加——会话自带归属，前端分组不再依赖 task.sessionIds 反查。 */
-  taskId?: string | null;
-  /** 归属任务名（tasks.name）：左侧任务分组标题 + 会话面板实时展示用（服务端附加）。 */
-  taskName?: string | null;
+  /** Live task ownership (sessionInfo panel reads it realtime to avoid stale snapshots). */
+  taskName?: string;
 }
 
 export interface TodoItem {
