@@ -702,8 +702,26 @@ button.extension-widget-trigger:focus-visible {
   background: var(--text-dim);
 }
 
+/* 手写体（看板文字节点）：Kalam 开源手写字体，本地化避免运行时依赖外网。
+   Kalam 不含中文 → 中文 fallback 到楷体系列（同手写观感）。 */
+@font-face {
+  font-family: 'Kalam';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/Kalam-Regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Kalam';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/Kalam-Bold.woff2') format('woff2');
+}
+
 :root {
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'PingFang SC', 'Microsoft YaHei', monospace;
+  --font-hand: 'Kalam', 'Kaiti SC', 'STKaiti', 'KaiTi', '楷体', 'PingFang SC', cursive;
 }
 
 pre, code {

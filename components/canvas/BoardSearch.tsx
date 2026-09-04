@@ -132,7 +132,7 @@ export function BoardSearch({
       if (n.type === "session-card") {
         const title = String((n.data as { title?: unknown }).title ?? "").trim();
         if (title) out.push({ nodeId: n.id, kind: "session-card", text: title });
-      } else if (n.type === "sticky-note" || n.type === "text") {
+      } else if (n.type === "sticky-note" || n.type === "text" || n.type === "text-node") {
         const text = String((n.data as { text?: unknown }).text ?? "").trim();
         if (text) out.push({ nodeId: n.id, kind: "sticky-note", text });
       }

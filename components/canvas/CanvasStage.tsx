@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReactFlow, Background, Controls, MiniMap, useReactFlow, type NodeTypes, type OnConnect, BackgroundVariant, type Node, type Viewport } from "@xyflow/react";
+import { ReactFlow, Controls, MiniMap, useReactFlow, type NodeTypes, type OnConnect, type Node, type Viewport } from "@xyflow/react";
 import { computeSnap, type SnapResult } from "@/lib/board-align";
 import "@xyflow/react/dist/style.css";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
@@ -9,9 +9,13 @@ import { useI18n } from "@/hooks/useI18n";
 import { SessionCardNode } from "@/components/board/SessionCardNode";
 import { StickyNoteNode } from "@/components/board/StickyNoteNode";
 import { TaskCardNode } from "@/components/board/TaskCardNode";
+import { TextNode } from "@/components/board/TextNode";
+import { ImageNode } from "@/components/board/ImageNode";
+import { GroupNode } from "@/components/board/GroupNode";
 import { BoardCanvasProvider, type BoardCanvasOps } from "@/components/board/BoardCanvasContext";
 import { BoardContextMenu, type BoardMenuState } from "@/components/board/BoardContextMenu";
 import { BoardLoading } from "./BoardLoading";
+import { uploadBoardImage } from "@/lib/board-assets";
 
 /**
  * React Flow 画布舞台：无限画布 + 工具行 + 拖放添加会话。
@@ -25,7 +29,16 @@ const nodeTypes: NodeTypes = {
   "task-card": TaskCardNode,
   "sticky-note": StickyNoteNode,
   text: StickyNoteNode, // 旧 tldraw text shape 降级为便笺渲染（data.text）
+  "text-node": TextNode,
+  "image-node": ImageNode,
+  "group-node": GroupNode,
 };
+
+// 工具栏可创建的「自由元素」类型（无业务表依赖，纯画布内容）
+export type FreeNodeType = "sticky-note" | "text-node" | "task-card" | "image-node";
+
+// 剪贴板数据标记：看板节点复制
+const BOARD_CLIP_MIME = "application/x-pi-board-nodes";
 
 export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; isDark: boolean }) {
   const { t } = useI18n();
@@ -37,6 +50,8 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   const [menu, setMenu] = useState<BoardMenuState | null>(null);
   // 对齐参考线
   const [snapLines, setSnapLines] = useState<SnapResult["lines"]>([]);
+  // 图片文件选择 input（工具栏「图片」按钮触发）
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 画布位置记忆：只在看板 ready（进入/切换）时恢复 yjs 记住的位置一次。
   // 不做持续覆盖（不监听 board.viewport 变化）——否则 running 轮询等 yjs 回灌
@@ -74,17 +89,45 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     setSnapLines: (lines) => setSnapLines(lines),
   }), [board]);
 
-  // 新建便笺/任务卡：拖放落点或点击视口中心（flow 坐标）
-  const addNodeAt = useCallback((type: "sticky-note" | "task-card", flowPos: { x: number; y: number }) => {
+  /** 新建自由元素（便笺/文字/任务卡/图片）：拖放落点或视口中心（flow 坐标） */
+  const addNodeAt = useCallback((type: FreeNodeType, flowPos: { x: number; y: number }, extra?: { src?: string; naturalW?: number; naturalH?: number; name?: string }) => {
+    const id = crypto.randomUUID();
     if (type === "sticky-note") {
-      ops.addNode({ id: crypto.randomUUID(), type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 280 }, data: { text: "", badge: "blue" } });
-    } else {
-      ops.addNode({ id: crypto.randomUUID(), type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 270 }, data: { cardId: "", number: 0, name: "新建任务", description: "", readyStatus: "draft", priority: 0, expanded: false, w: 380, h: 270, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0 } });
+      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 280 }, data: { text: "", badge: "blue" } });
+    } else if (type === "text-node") {
+      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 240, height: 60 }, data: { text: "", autofocus: true } });
+    } else if (type === "task-card") {
+      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 270 }, data: { cardId: "", number: 0, name: "新建任务", description: "", readyStatus: "draft", priority: 0, expanded: false, w: 380, h: 270, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0 } });
+    } else if (type === "image-node" && extra?.src) {
+      // 图片：有原始尺寸按等比（最长边 400）落位；无则默认 240x180
+      let w = 240;
+      let h = 180;
+      if (extra.naturalW && extra.naturalH) {
+        const maxSide = 400;
+        const ratio = Math.min(1, maxSide / Math.max(extra.naturalW, extra.naturalH));
+        w = Math.max(80, Math.round(extra.naturalW * ratio));
+        h = Math.max(80, Math.round(extra.naturalH * ratio));
+      }
+      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: w, height: h }, data: { src: extra.src, naturalW: extra.naturalW, naturalH: extra.naturalH, name: extra.name } });
     }
   }, [ops]);
 
-  // 点击工具栏按钮：节点出现在当前视口中心（方便用户继续调整位置）
-  const addNodeAtViewportCenter = useCallback((type: "sticky-note" | "task-card") => {
+  /** 图片上传 + 落点建卡（工具栏按钮/拖放文件/粘贴共用） */
+  const addImageFromFile = useCallback(async (file: File, flowPos: { x: number; y: number }) => {
+    const src = await uploadBoardImage(file);
+    if (!src) return;
+    // 预读原始尺寸（等比落位）
+    const natural: { naturalW?: number; naturalH?: number } = await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ naturalW: img.naturalWidth, naturalH: img.naturalHeight });
+      img.onerror = () => resolve({});
+      img.src = src;
+    });
+    addNodeAt("image-node", flowPos, { src, name: file.name, ...natural });
+  }, [addNodeAt]);
+
+  /** 点击工具栏按钮：节点出现在当前视口中心（方便用户继续调整位置） */
+  const addNodeAtViewportCenter = useCallback((type: FreeNodeType) => {
     const pane = document.querySelector(".react-flow__pane");
     const rect = pane?.getBoundingClientRect();
     const cx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
@@ -108,12 +151,13 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     if (!el) return;
     const onDragOver = (e: DragEvent) => {
       const types = e.dataTransfer?.types ?? [];
-      if (!types.includes("text/session-id") && !types.includes("text/board-tool")) return;
+      const hasFileImage = Array.from(e.dataTransfer?.files ?? []).some((f) => f.type.startsWith("image/"));
+      if (!types.includes("text/session-id") && !types.includes("text/board-tool") && !hasFileImage) return;
       e.preventDefault();
       if (e.dataTransfer) {
         // dropEffect 必须与拖拽源的 effectAllowed 匹配，否则浏览器会取消 drop（dragend 无 drop）：
-        // 会话源声明 move、工具栏工具源声明 copy，各自匹配，不能一刀切成 move。
-        e.dataTransfer.dropEffect = types.includes("text/board-tool") ? "copy" : "move";
+        // 会话源声明 move、工具栏工具源声明 copy、文件复制 copy，各自匹配，不能一刀切成 move。
+        e.dataTransfer.dropEffect = hasFileImage || types.includes("text/board-tool") ? "copy" : "move";
       }
       setDragOver(true);
     };
@@ -129,13 +173,22 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     const onDragEnd = () => setDragOver(false);
     const onDrop = (e: DragEvent) => {
       const types = e.dataTransfer?.types ?? [];
-      if (!types.includes("text/session-id") && !types.includes("text/board-tool")) return;
+      const dt = e.dataTransfer;
+      const hasFileImage = Array.from(dt?.files ?? []).some((f) => f.type.startsWith("image/"));
+      if (!types.includes("text/session-id") && !types.includes("text/board-tool") && !hasFileImage) return;
       e.preventDefault();
       e.stopPropagation();
       setDragOver(false);
-      const dt = e.dataTransfer;
       if (!dt) return;
       const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      // 图片文件：上传并贴图
+      const images = Array.from(dt.files ?? []).filter((f) => f.type.startsWith("image/"));
+      if (images.length > 0) {
+        images.forEach((f, i) => {
+          void addImageFromFile(f, { x: pos.x + i * 20, y: pos.y + i * 20 });
+        });
+        return;
+      }
       const sid = dt.getData("text/session-id");
       if (sid) {
         // 任务看板拖入 = 加入任务：addSessionNode 内部先写 session_meta 归属、成功才落卡
@@ -145,7 +198,14 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
       }
       const tool = dt.getData("text/board-tool");
       if (tool === "sticky-note") addNodeAt("sticky-note", pos);
+      else if (tool === "text-node") addNodeAt("text-node", pos);
       else if (tool === "task-card") addNodeAt("task-card", pos);
+      else if (tool === "image-node") {
+        // 图片工具按钮拖拽：打开文件选择（拖拽本身不携带文件）
+        fileInputRef.current?.click();
+      } else if (tool === "session-card") {
+        board.addNewSessionCard(pos);
+      }
     };
     el.addEventListener("dragover", onDragOver, true);
     el.addEventListener("dragleave", onDragLeave, true);
@@ -157,7 +217,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
       el.removeEventListener("dragend", onDragEnd, true);
       el.removeEventListener("drop", onDrop, true);
     };
-  }, [board, screenToFlowPosition, addNodeAt]);
+  }, [board, screenToFlowPosition, addNodeAt, addImageFromFile]);
 
   // 删除：Delete/Backspace → 确认制（按节点类型）
   const onBeforeDelete = useCallback(async ({ nodes }: { nodes: Array<{ id: string }> }): Promise<boolean> => {
@@ -169,7 +229,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     return false; // 阻止 RF 默认删除，由我们处理
   }, [board]);
 
-  // 双击空白 → 添加便笺（替代 RF 默认双击缩放）。
+  // 双击空白 → 添加文字（替代 RF 默认双击缩放 / 旧逻辑的便笺）。
   // RF 12 无 onPaneDoubleClick，用 onPaneClick 手动判连续两次快速点击（只在空白触发，天然排除节点）。
   const lastPaneClickRef = useRef<{ t: number } | null>(null);
   const onPaneClick = useCallback((e: React.MouseEvent) => {
@@ -179,7 +239,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     if (last && now - last.t < 320) {
       lastPaneClickRef.current = null;
       const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      addNodeAt("sticky-note", pos);
+      addNodeAt("text-node", pos);
       return;
     }
     lastPaneClickRef.current = { t: now };
@@ -203,7 +263,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   // draggingRef：守卫 onNodeDrag——拖拽停止后（含吸附修正引发的受控位置更新）
   // 迟到的 onNodeDrag 不得再画线，否则会把刚清空的参考线又画回来（抬起不消失）。
   const draggingRef = useRef(false);
-  const onNodeDragStart = useCallback((_: MouseEvent | TouchEvent, node: Node) => {
+  const onNodeDragStart = useCallback(() => {
     draggingRef.current = true;
     setSnapLines([]);
   }, []);
@@ -238,17 +298,151 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     setMenu({ x: e.clientX, y: e.clientY, node: null, edgeId: full?.id ?? null, edgeDerived: Boolean(d?.execLink || d?.taskLink) });
   }, [board.edges]);
 
-  // 工具栏：新建便笺/任务（去掉文本工具）—— 点击=当前视口中心创建，拖拽=拖放进画布落点创建
-  const addNodeAtViewport = useCallback((type: "sticky-note" | "task-card") => {
+  // 工具栏：新建便笺/任务/文字/图片/会话 —— 点击=当前视口中心创建，拖拽=拖放进画布落点创建
+  const addNodeAtViewport = useCallback((type: FreeNodeType) => {
     addNodeAtViewportCenter(type);
   }, [addNodeAtViewportCenter]);
 
-  // Undo/Redo 键盘快捷键：Ctrl+Z / Ctrl+Shift+Z（仅在画布聚焦时生效）
+  // 会话：点击=视口中心新建会话卡（复用 BoardTopbar 同款视口中心换算）
+  const addSessionAtViewportCenter = useCallback(() => {
+    const pane = document.querySelector(".react-flow__pane");
+    const rect = pane?.getBoundingClientRect();
+    if (!rect) return;
+    const flowPos = screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    board.addNewSessionCard(flowPos);
+  }, [board, screenToFlowPosition]);
+
+  // ---- 复制/粘贴（除会话卡外）：Ctrl+C / Ctrl+V ----
+  // 复制：选中的非会话卡节点序列化为 JSON（含类型/data/style，剥 UI 态）。
+  // 分组子节点连带复制：选中 group 容器时自动带上其直属子节点（复制后仍是分组）。
+  const copySelected = useCallback(async () => {
+    const allNodes = board.nodes as Array<Node & { selected?: boolean; parentId?: string }>;
+    const selected = allNodes.filter((n) => n.selected && n.type !== "session-card");
+    if (selected.length === 0) return false;
+    // 选中集合（含 group 的子节点）：group 容器选中 → 自动包含直属子节点
+    const groupIds = new Set(selected.filter((n) => n.type === "group-node").map((n) => n.id));
+    const ids = new Set(selected.map((n) => n.id));
+    for (const n of allNodes) {
+      if (n.parentId && groupIds.has(n.parentId) && !ids.has(n.id)) ids.add(n.id);
+    }
+    const nodesToCopy = allNodes.filter((n) => ids.has(n.id));
+    const payload = nodesToCopy.map((n) => ({
+      id: n.id, // 保留原 id 供 parentId 映射
+      type: n.type,
+      data: n.data,
+      style: n.style,
+      position: { ...n.position }, // 分组子节点是相对坐标，粘贴时需保留
+      parentId: n.parentId,
+      width: n.measured?.width ?? (n.style as { width?: number } | undefined)?.width,
+      height: n.measured?.height ?? (n.style as { height?: number } | undefined)?.height,
+    }));
+    try {
+      await navigator.clipboard.writeText(JSON.stringify({ app: BOARD_CLIP_MIME, nodes: payload }));
+      return true;
+    } catch {
+      return false;
+    }
+  }, [board.nodes]);
+
+  // 粘贴：读剪贴板 JSON → 按落点偏移重建节点（新 id）。图片节点 src 复用 URL（资产已持久化）。
+  const pasteNodes = useCallback(async (flowPos?: { x: number; y: number }) => {
+    let raw = "";
+    try {
+      raw = await navigator.clipboard.readText();
+    } catch {
+      return false;
+    }
+    let parsed: { app?: string; nodes?: Array<{ id?: string; type?: string; data?: Record<string, unknown>; style?: unknown; position?: { x: number; y: number }; parentId?: string; width?: number; height?: number }> };
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return false;
+    }
+    if (parsed?.app !== BOARD_CLIP_MIME || !Array.isArray(parsed.nodes) || parsed.nodes.length === 0) return false;
+    // 落点：传入 flowPos（鼠标/视口中心），否则视口中心
+    let base = flowPos;
+    if (!base) {
+      const pane = document.querySelector(".react-flow__pane");
+      const rect = pane?.getBoundingClientRect();
+      const cx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+      const cy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+      base = screenToFlowPosition({ x: cx, y: cy });
+    }
+    // 旧 id → 新 id 映射（parentId 重建用）
+    const idMap = new Map<string, string>();
+    for (const n of parsed.nodes) {
+      if (n.id) idMap.set(n.id, crypto.randomUUID());
+    }
+    // 落点基准：粘贴内容包围盒左上角应落在 base 附近；有分组的用 group 落点
+    // 普通（非分组子节点）按包围盒居中偏移；分组子节点保持原相对坐标（RF 跟随新 group）
+    let offsetX = base.x;
+    let offsetY = base.y;
+    // 无分组子节点时按包围盒居中；有分组时 group 本身占落点，子节点相对不动
+    const hasGroup = parsed.nodes.some((n) => n.type === "group-node");
+    if (!hasGroup) {
+      const widths = parsed.nodes.map((n) => n.width ?? 0);
+      const heights = parsed.nodes.map((n) => n.height ?? 0);
+      const totalW = Math.max(0, ...widths);
+      const totalH = Math.max(0, ...heights);
+      offsetX = base.x - totalW / 2;
+      offsetY = base.y - totalH / 2;
+    }
+    let placed = 0; // 已落位节点计数（非分组节点级联偏移）
+    for (const n of parsed.nodes) {
+      if (!n.type) continue;
+      // 剥 UI 态字段（selected/dragging）与 autofocus（粘贴不自动进编辑）
+      const clean = { ...(n.data ?? {}) } as Record<string, unknown>;
+      delete clean.selected;
+      delete clean.dragging;
+      delete clean.autofocus;
+      const nodeId = n.id ? idMap.get(n.id)! : crypto.randomUUID();
+      // 分组子节点：保留相对坐标（parentId 映射到新 group，RF 自动跟随）
+      let pos = n.position ? { ...n.position } : { x: offsetX, y: offsetY };
+      if (n.parentId) {
+        const newParentId = idMap.get(n.parentId);
+        if (newParentId) {
+          // 子节点 position 是相对坐标，原样保留
+          pos = n.position ? { ...n.position } : { x: 0, y: 0 };
+          const newNode: Node = {
+            id: nodeId,
+            type: n.type,
+            position: pos,
+            style: (n.style as Record<string, unknown> | undefined) ?? {},
+            data: clean,
+            parentId: newParentId,
+            extent: "parent" as const,
+          };
+          board.addNode?.(newNode);
+          continue;
+        }
+      }
+      // 普通节点 / group 容器：落点 + 级联偏移
+      const newNode: Node = {
+        id: nodeId,
+        type: n.type,
+        position: { x: offsetX + placed * 24, y: offsetY + placed * 24 },
+        style: (n.style as Record<string, unknown> | undefined) ?? {},
+        data: clean,
+      };
+      board.addNode?.(newNode);
+      placed += 1;
+    }
+    return true;
+  }, [board, screenToFlowPosition]);
+
+  // 键盘：复制/粘贴/撤销/重做（画布聚焦时生效；输入框内不拦截）
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       const key = e.key.toLowerCase();
-      if (key === "z" && !e.shiftKey) {
+      // 输入框/编辑态（textarea、input、contenteditable）不拦截——原生复制粘贴照常
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return;
+      if (key === "c") {
+        void copySelected();
+      } else if (key === "v") {
+        void pasteNodes();
+      } else if (key === "z" && !e.shiftKey) {
         e.preventDefault();
         board.undo?.();
       } else if ((key === "z" && e.shiftKey) || key === "y") {
@@ -258,7 +452,127 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [board, copySelected, pasteNodes]);
+
+  // 剪贴板粘贴外部图片（Ctrl+V）：非输入框焦点时拦截 paste，检测到图片文件 → 上传贴图。
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      // 输入框/编辑态不拦截（原生粘贴文字/图片到编辑器）
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return;
+      const files = Array.from(e.clipboardData?.items ?? [])
+        .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
+        .map((it) => it.getAsFile())
+        .filter((f): f is File => Boolean(f));
+      if (files.length === 0) return;
+      e.preventDefault();
+      const pane = document.querySelector(".react-flow__pane");
+      const rect = pane?.getBoundingClientRect();
+      const cx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+      const cy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+      const pos = screenToFlowPosition({ x: cx, y: cy });
+      files.forEach((f, i) => {
+        void addImageFromFile(f, { x: pos.x + i * 20, y: pos.y + i * 20 });
+      });
+    };
+    window.addEventListener("paste", onPaste, true);
+    return () => window.removeEventListener("paste", onPaste, true);
+  }, [addImageFromFile, screenToFlowPosition]);
+
+  // 工具栏图片按钮：文件选择 → 上传 → 视口中心贴图
+  const onFileSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // 允许连续选同一文件
+    if (!file) return;
+    addImageFromFile(file, screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }));
+  }, [addImageFromFile, screenToFlowPosition]);
+
+  // ---- 分组：创建分组（把选中的自由节点收进 group 容器）----
+  const createGroupFromSelection = useCallback(() => {
+    const selected = board.nodes.filter((n) => (n as Node & { selected?: boolean }).selected && n.type !== "group-node");
+    if (selected.length === 0) return;
+    // 排除已分组的节点（parentId 已挂 group）——分组不嵌套
+    const free = selected.filter((n) => !(n as Node & { parentId?: string }).parentId);
+    if (free.length === 0) return;
+    // 包围盒（含 padding）
+    const pad = 32;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of free) {
+      const w = n.measured?.width ?? (n.style as { width?: number } | undefined)?.width ?? 100;
+      const h = n.measured?.height ?? (n.style as { height?: number } | undefined)?.height ?? 60;
+      minX = Math.min(minX, n.position.x);
+      minY = Math.min(minY, n.position.y);
+      maxX = Math.max(maxX, n.position.x + w);
+      maxY = Math.max(maxY, n.position.y + h);
+    }
+    const gx = minX - pad;
+    const gy = minY - pad;
+    const gw = maxX - minX + pad * 2;
+    const gh = maxY - minY + pad * 2;
+    const groupId = `group-${crypto.randomUUID()}`;
+    // 1) 建 group 容器
+    board.addNode?.({
+      id: groupId,
+      type: "group-node",
+      position: { x: gx, y: gy },
+      style: { width: gw, height: gh },
+      data: { label: "" },
+    });
+    // 2) 子节点挂 parentId + 转相对坐标（RF 原生跟随父节点移动）
+    for (const n of free) {
+      board.updateNode?.(n.id, {
+        parentId: groupId,
+        position: { x: n.position.x - gx, y: n.position.y - gy },
+        extent: "parent" as const,
+      });
+    }
   }, [board]);
+
+  /** 取消分组：group 的所有子节点脱离（parentId 清空 + 坐标转绝对）。
+   *  脱离完成后若 group 无子节点，连容器一起删除（不留空壳）。 */
+  const ungroup = useCallback((groupId: string) => {
+    const group = board.nodes.find((n) => n.id === groupId);
+    if (!group) return;
+    const children = board.nodes.filter((n) => (n as Node & { parentId?: string }).parentId === groupId);
+    for (const child of children) {
+      board.updateNode?.(child.id, {
+        parentId: undefined,
+        // 相对坐标 → 绝对坐标（RF 渲染用 positionAbsolute，但 yjs 存 position；
+        // 脱离父节点后 position 需为绝对坐标，才能不跳动）
+        position: { x: group.position.x + (child.position as unknown as { x: number }).x, y: group.position.y + (child.position as unknown as { y: number }).y },
+        extent: undefined,
+      });
+    }
+    // 全部子节点脱离后删除容器（直接删 yjs，不弹确认——取消分组的语义）
+    board.deleteNodeDirect?.(groupId);
+  }, [board]);
+
+  /** 取消选中集合里所有 group 的分组（右键菜单「取消分组（选中）」） */
+  const ungroupSelectedGroups = useCallback(() => {
+    const groups = board.nodes.filter((n) => (n as Node & { selected?: boolean }).selected && n.type === "group-node");
+    for (const g of groups) ungroup(g.id);
+  }, [board, ungroup]);
+
+  // 右键菜单跨组件事件（BoardContextMenu 发起）：新建图片 / 创建分组 / 取消分组
+  useEffect(() => {
+    const onPickImage = () => fileInputRef.current?.click();
+    const onCreateGroup = () => createGroupFromSelection();
+    const onUngroup = (e: Event) => {
+      const groupId = (e as CustomEvent<{ groupId?: string }>).detail?.groupId;
+      if (groupId) ungroup(groupId);
+    };
+    const onUngroupSelected = () => ungroupSelectedGroups();
+    window.addEventListener("pi:board-pick-image", onPickImage);
+    window.addEventListener("pi:board-create-group", onCreateGroup);
+    window.addEventListener("pi:board-ungroup", onUngroup as EventListener);
+    window.addEventListener("pi:board-ungroup-selected", onUngroupSelected);
+    return () => {
+      window.removeEventListener("pi:board-pick-image", onPickImage);
+      window.removeEventListener("pi:board-create-group", onCreateGroup);
+      window.removeEventListener("pi:board-ungroup", onUngroup as EventListener);
+      window.removeEventListener("pi:board-ungroup-selected", onUngroupSelected);
+    };
+  }, [createGroupFromSelection, ungroup, ungroupSelectedGroups]);
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
@@ -352,14 +666,29 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               })()}
             </ReactFlow>
             {menu && <BoardContextMenu menu={menu} onClose={() => setMenu(null)} />}
-            {/* 工具栏：便笺/任务（底部居中玻璃浮层）。点击=当前视口中心创建；拖拽=拖放进画布落点创建 */}
+            {/* 工具栏：会话/便笺/任务/文字/图片（底部居中玻璃浮层）。点击=当前视口中心创建；拖拽=拖放进画布落点创建 */}
             <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 16, zIndex: 30, display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "var(--board-card-glass)", backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)" }}>
+              <ToolbarBtn label="会话" onClick={addSessionAtViewportCenter} onDragStart={(e) => onToolDragStart(e, "session-card")} />
+              <span style={{ width: 1, height: 18, background: "color-mix(in srgb, var(--border) 70%, transparent)", margin: "0 2px" }} />
               <ToolbarBtn label="便笺" onClick={() => addNodeAtViewport("sticky-note")} onDragStart={(e) => onToolDragStart(e, "sticky-note")} />
               <ToolbarBtn label="任务" onClick={() => addNodeAtViewport("task-card")} onDragStart={(e) => onToolDragStart(e, "task-card")} />
+              <ToolbarBtn label="文字" onClick={() => addNodeAtViewport("text-node")} onDragStart={(e) => onToolDragStart(e, "text-node")} />
+              <ToolbarBtn label="图片" onClick={() => fileInputRef.current?.click()} onDragStart={(e) => onToolDragStart(e, "image-node")} />
               <span style={{ width: 1, height: 18, background: "color-mix(in srgb, var(--border) 70%, transparent)", margin: "0 2px" }} />
               <ToolbarBtn label="撤销" onClick={() => board.undo?.()} draggable={false} />
               <ToolbarBtn label="重做" onClick={() => board.redo?.()} draggable={false} />
             </div>
+            {/* 图片文件选择（隐藏 input，工具栏「图片」/拖拽触发） */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple={false}
+              onChange={onFileSelected}
+              style={{ display: "none" }}
+              aria-hidden
+              tabIndex={-1}
+            />
           </BoardCanvasProvider>
         )}
       </div>
