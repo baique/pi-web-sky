@@ -29,9 +29,23 @@ test("search route returns well-formed results for a query (shape-only)", async 
   assert.ok(body.results.length <= 30);
   assert.equal(typeof body.indexing, "boolean");
   for (const r of body.results) {
-    assert.equal(typeof r.session.id, "string");
-    assert.equal(typeof r.session.cwd, "string");
-    assert.equal(typeof r.titleMatch, "boolean");
-    assert.equal(typeof r.snippet, "string");
+    assert.equal(typeof r.kind, "string");
+    if (r.kind === "session") {
+      assert.equal(typeof r.result.session.id, "string");
+      assert.equal(typeof r.result.session.cwd, "string");
+      assert.equal(typeof r.result.titleMatch, "boolean");
+      assert.equal(typeof r.result.snippet, "string");
+    } else if (r.kind === "task-card") {
+      assert.equal(typeof r.card.id, "string");
+    }
   }
+});
+
+test("search route passes sessionIds filter through", async () => {
+  setDbForTesting(new DatabaseSync(":memory:"));
+  const res = await searchRoute(new Request("http://localhost/api/search?q=pi&sessionIds=abc,def"));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(typeof body.indexing, "boolean");
+  assert.ok(Array.isArray(body.results));
 });

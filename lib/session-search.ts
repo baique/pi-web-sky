@@ -217,6 +217,7 @@ export async function searchSessions(
   q: string,
   limit = 30,
   sessionsOverride?: SessionInfo[],
+  sessionIds?: string[],
 ): Promise<{ indexing: boolean; results: SearchResult[] }> {
   const query = q.trim();
   if (!query) return { indexing: false, results: [] };
@@ -226,6 +227,9 @@ export async function searchSessions(
   const cap = Math.min(Math.max(limit, 1), 50);
   const db = getDb();
   const sessionsById = new Map(sessions.map((s) => [s.id, s]));
+  // 限定搜索范围到指定会话（看板正文搜索传当前看板 sessionId 集合）。
+  const sidClause = sessionIds?.length ? ` AND session_id IN (${sessionIds.map(() => "?").join(",")})` : "";
+  const sidParams = sessionIds?.length ? sessionIds : [];
 
   let rows: SearchRow[];
   const titleIds = new Set<string>();
@@ -239,10 +243,10 @@ export async function searchSessions(
     rows = db
       .prepare(
         "SELECT session_id, ifnull(snippet(session_search, 2, '[', ']', '…', 12), '') AS snip " +
-          "FROM session_search WHERE session_search MATCH ? LIMIT ?",
+          `FROM session_search WHERE session_search MATCH ?${sidClause} LIMIT ?`,
       )
-      .all(phrase, cap) as unknown as SearchRow[];
-    for (const r of db.prepare("SELECT session_id FROM session_search WHERE title MATCH ?").all(phrase) as { session_id: string }[]) {
+      .all(phrase, ...sidParams, cap) as unknown as SearchRow[];
+    for (const r of db.prepare(`SELECT session_id FROM session_search WHERE title MATCH ?${sidClause}`).all(phrase, ...sidParams) as { session_id: string }[]) {
       titleIds.add(r.session_id);
     }
   } else {
@@ -250,11 +254,11 @@ export async function searchSessions(
     const where = terms.map(() => "(title LIKE ? OR body LIKE ?)").join(" AND ");
     const params = terms.flatMap((term) => [`%${term}%`, `%${term}%`]);
     rows = db
-      .prepare(`SELECT session_id, '' AS snip FROM session_search WHERE ${where} LIMIT ?`)
-      .all(...params, cap) as unknown as SearchRow[];
+      .prepare(`SELECT session_id, '' AS snip FROM session_search WHERE ${where}${sidClause} LIMIT ?`)
+      .all(...params, ...sidParams, cap) as unknown as SearchRow[];
     const titleWhere = terms.map(() => "title LIKE ?").join(" AND ");
     const titleParams = terms.map((term) => `%${term}%`);
-    for (const r of db.prepare(`SELECT session_id FROM session_search WHERE ${titleWhere}`).all(...titleParams) as { session_id: string }[]) {
+    for (const r of db.prepare(`SELECT session_id FROM session_search WHERE ${titleWhere}${sidClause}`).all(...titleParams, ...sidParams) as { session_id: string }[]) {
       titleIds.add(r.session_id);
     }
   }

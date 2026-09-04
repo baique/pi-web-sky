@@ -190,13 +190,23 @@ export async function loadTaskSessionsPage(
   offset = 0,
   limit = 5,
 ): Promise<{ sessions: SessionInfo[]; rootTotal: number; sessionTotal: number; pinnedSessionIds: string[] }> {
+  return loadTaskSessionsPageWithIndex(taskId, await buildTaskSessionIndex(), offset, limit);
+}
+
+/** 任务会话索引：全量 id+path+mtime（readdir/stat，不读内容）+ 父链（读 header 首行）。
+ *  一次构建供多个任务复用——/api/tasks 列表对每个任务都调 loadTaskSessionsPage，
+ *  若各自全量扫文件会随任务数线性变慢（N 任务 = N 次全量 readdir+header）。 */
+export async function buildTaskSessionIndex(): Promise<{
+  metaById: Map<string, { path: string; id: string; modified: Date }>;
+  childrenOf: Map<string, string[]>;
+}> {
   // 阶段一：全量 id+path+mtime（readdir+stat，不读内容）。
   const metas = await scanSessionFileMeta();
   const metaById = new Map(metas.map((m) => [m.id, m]));
   const metaByPath = new Map(metas.map((m) => [sessionPathKey(m.path), m]));
 
   // 父链索引（只读每个文件 header 首行——比 scanOneSessionFile 便宜，
-  // 不需要尾部反向分块）：childId -> parentId + parentId -> [childId]。
+  // 不需要尾部反向分块）：childId -> parentId（childrenOf: parentId -> [childId]）。
   const childrenOf = new Map<string, string[]>();
   for (const m of metas) {
     let parentPath: string | undefined;
@@ -212,6 +222,17 @@ export async function loadTaskSessionsPage(
     arr.push(m.id);
     childrenOf.set(parentMeta.id, arr);
   }
+  return { metaById, childrenOf };
+}
+
+/** 加载单个任务会话详情分页（复用外部已构建的任务索引，避免重复全量扫）。 */
+export async function loadTaskSessionsPageWithIndex(
+  taskId: string,
+  index: { metaById: Map<string, { path: string; id: string; modified: Date }>; childrenOf: Map<string, string[]> },
+  offset = 0,
+  limit = 5,
+): Promise<{ sessions: SessionInfo[]; rootTotal: number; sessionTotal: number; pinnedSessionIds: string[] }> {
+  const { metaById, childrenOf } = index;
   const collectSubtree = (rootId: string): string[] => {
     const out = [rootId];
     const queue = [rootId];

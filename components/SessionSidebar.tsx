@@ -1049,20 +1049,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setTasks(Array.isArray(d.tasks) ? d.tasks : []);
   }, [selectedProject?.key]);
 
-  // 任务区“加载更多”（#15 服务端分页）：按 offset 追加下一页根会话（含子树）。
+  // 任务区“加载更多”（#15 服务端分页）：只请求当前任务下一页，只更新该任务。
   // offset 语义 = 已加载的非置顶根数（服务端对 nonPinnedRoots slice）；
   // 去重基准 = 已加载的 sessions（不是全量 sessionIds——那是服务端 Task 的全量根 id，
   // 用它会把所有新页会话全部滤掉，加载更多恒无效）。
   const handleLoadMoreTaskSessions = useCallback(async (taskId: string, offset: number): Promise<void> => {
-    const key = selectedProject?.key;
-    if (!key) return;
     try {
-      const res = await fetch(`/api/tasks?projectKey=${encodeURIComponent(key)}&offset=${offset}`, {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}?offset=${offset}`, {
         cache: "no-store",
       });
       if (!res.ok) return;
-      const d = (await res.json()) as { tasks?: TaskGroupUi[] };
-      const more = d.tasks?.find((t) => t.id === taskId);
+      const d = (await res.json()) as { task?: TaskGroupUi | null };
+      const more = d.task;
       if (!more) return;
       setTasks((prev) => prev.map((t) => {
         if (t.id !== taskId) return t;
@@ -1080,7 +1078,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     } catch {
       // 静默失败：下次点击重试
     }
-  }, [selectedProject?.key]);
+  }, []);
 
   // Pin / unpin a session inside its region (task group or chat). Optimistic:
   // reorder immediately, persist in the background — no full re-scan.

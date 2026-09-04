@@ -399,10 +399,16 @@ export function TerminalPanel({
 
   // Light poll while VISIBLE — keeps running/exit state honest without
   // extra SSE. Paused while hidden (panel itself is the only consumer).
+  // 链式调度：上一次完成后再排下一次（响应慢自动降频，绝不叠加堆积）。
   useEffect(() => {
     if (hidden) return;
-    const iv = setInterval(() => void refreshList(), 5000);
-    return () => clearInterval(iv);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const loop = async () => {
+      await refreshList();
+      if (!hidden) timer = setTimeout(loop, 5000);
+    };
+    void loop();
+    return () => { if (timer) clearTimeout(timer); };
   }, [refreshList, hidden]);
 
   // Prune client attachments for sessions the server no longer knows.

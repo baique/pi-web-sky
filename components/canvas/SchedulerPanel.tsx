@@ -70,9 +70,11 @@ export function SchedulerPanel({ nodes }: {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // 轮询调度器状态（工作中/休眠 + 队列）—— 数据全局，任何看板一致
+  // 轮询调度器状态（工作中/休眠 + 队列）—— 数据全局，任何看板一致。
+  // 链式调度：上一次完成后再排下一次（响应慢自动降频，绝不叠加堆积）。
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const load = async () => {
       try {
         const res = await fetch("/api/task-scheduler/status", { cache: "no-store" });
@@ -81,9 +83,12 @@ export function SchedulerPanel({ nodes }: {
         if (!cancelled) setStatus(d.status);
       } catch { /* 静默 */ }
     };
-    void load();
-    const timer = setInterval(load, POLL_MS);
-    return () => { cancelled = true; clearInterval(timer); };
+    const loop = async () => {
+      await load();
+      if (!cancelled) timer = setTimeout(loop, POLL_MS);
+    };
+    void loop();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, []);
 
   // 点击外部关闭

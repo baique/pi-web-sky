@@ -400,6 +400,10 @@ function prerequisitesDone(card: TaskCard): boolean {
  * 可派发卡：就绪=todo & (未开始 | 失败且重试未超上限) & 无前置或前置均 done。
  * 按优先级降序、编号升序（高优先级先调度）。
  * 排除 dispatch_token 非空的卡（另一实例正在派发中，等它完成/释放）。
+ *
+ * TODO(派发卡重新设计)：本函数与 prerequisitesDone 的 N+1 查询（每张卡 2 次 SQL）
+ * 同步阻塞事件循环，高频轮询下是接口慢的元凶之一。当前已停用（见 task-scheduler.ts），
+ * 重设计时改为批量查询前置依赖。
  */
 export function listDispatchableCards(): TaskCard[] {
   const rows = getDb()

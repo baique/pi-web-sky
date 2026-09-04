@@ -27,6 +27,7 @@ export type SearchHit =
 export async function searchTaskCardsAndSessions(
   query: string,
   limit = 20,
+  sessionIds?: string[],
 ): Promise<{ indexing: boolean; results: SearchHit[] }> {
   const q = query.trim();
   if (!q) return { indexing: false, results: [] };
@@ -78,8 +79,8 @@ export async function searchTaskCardsAndSessions(
     });
   }
 
-  // 搜索会话（复用 session_search FTS5）
-  const { indexing, results: sessionResults } = await searchSessions(q, sessionLimit);
+  // 搜索会话（复用 session_search FTS5）；传 sessionIds 时限定到指定会话（看板正文搜索）
+  const { indexing, results: sessionResults } = await searchSessions(q, sessionLimit, undefined, sessionIds);
   for (const r of sessionResults) {
     results.push({ kind: "session", result: r });
   }

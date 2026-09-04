@@ -32,10 +32,20 @@ function toTaskCardState(c: {
 //     返回前端画布正在展示、需刷新徽章的卡。cardIds 上限保护，防恶意大查询。
 const MAX_CARD_IDS = 500;
 
+// 临时诊断：/api/agent/running 各阶段耗时（排查 6~8s 慢响应，定位后移除）
+function diag(label: string, t0: number): number {
+  const now = performance.now();
+  console.log(`[running-diag] ${label} +${(now - t0).toFixed(1)}ms`);
+  return now;
+}
+
 export async function GET(req: Request) {
+  let t = performance.now();
+  t = diag("entry", t);
   const { searchParams } = new URL(req.url);
   const boardId = searchParams.get("boardId");
   const cardIdsParam = searchParams.get("cardIds");
+  t = diag("parse-params", t);
 
   let taskCards: TaskCardRunningState[];
   if (boardId && cardIdsParam) {
@@ -47,15 +57,23 @@ export async function GET(req: Request) {
     taskCards = listCardsByIds(cardIds)
       .filter((c) => c.boardId === boardId) // 防越板：只认本板卡
       .map(toTaskCardState);
+    t = diag(`listCardsByIds(n=${cardIds.length})`, t);
   } else {
     // 无参：活跃态卡（原语义）
     taskCards = listCardsByExecStatus(["running", "review", "waiting_reply"]).map(toTaskCardState);
+    t = diag("listCardsByExecStatus", t);
   }
 
+  const runningIds = getRunningRpcSessionIds();
+  t = diag(`getRunningRpcSessionIds(n=${runningIds.length})`, t);
+  const states = getRunningSessionStates();
+  t = diag(`getRunningSessionStates(n=${Object.keys(states).length})`, t);
+
   const snapshot: RunningSnapshot = {
-    runningSessionIds: getRunningRpcSessionIds(),
-    states: getRunningSessionStates(),
+    runningSessionIds: runningIds,
+    states,
     taskCards,
   };
+  t = diag("json-assemble", t);
   return NextResponse.json(snapshot, { headers: { "Cache-Control": "no-store" } });
 }
