@@ -6,7 +6,7 @@ import * as Y from "yjs";
 import type { Node, Edge, NodeChange, EdgeChange } from "@xyflow/react";
 import { applyNodeChanges, applyEdgeChanges } from "@xyflow/react";
 import type { BoardInfo, RunningSnapshot, TaskCardRunningState } from "@/lib/board-types";
-import { dispatchBoardSessionCreated } from "@/lib/board-events";
+import { dispatchBoardSessionCreated, dispatchBoardSessionDeleted } from "@/lib/board-events";
 import { confirm } from "@/components/canvas/ConfirmDialog";
 
 // ============================================================================
@@ -536,7 +536,9 @@ export function useBoardCanvas({
         stale: false,
         expanded: true,
         cwd: newSessionCwdRef.current ?? "",
-        taskId: taskIdRef.current ?? "",
+        // 任务看板：taskId 兜底取看板元信息（数据库恒有）——URL 直达/刷新时
+        // activeTaskId（prop）可能为 null，不能作为归属依据（否则会话不归属任务）。
+        taskId: taskIdRef.current ?? boardRef.current?.taskId ?? "",
         w, h, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0,
       },
     });
@@ -544,20 +546,40 @@ export function useBoardCanvas({
 
   // ---- 拖入会话（看板）----
   /**
-   * 拖入会话卡。任务看板：拖入 = 加入当前任务 —— 先落卡（用户立即可见），再异步归属任务，
-   * 否则 10s reconcile 会把非任务会话当孤儿删（board-reconcile allSessionIds 只含任务会话）。
-   * 普通看板：直接落卡（无派生 reconcile，不删）。
-   * 注意：落卡在前，归属在后 —— 归属是网络请求，若先 await 会阻塞落卡（拖入无反应假象）。
+   * 拖入会话卡。
+   * - 任务看板：拖入 = 加入当前任务 —— 先写归属（session_meta），成功才落卡。
+   *   落卡时业务表已存在该会话（reconcile 按业务表判据放行），不产生“卡已落、
+   *   归属未到”的窗口，无需任何豁免字段。
+   * - 普通看板：直接落卡（无派生 reconcile，不删）。
    */
-  const addSessionNode = useCallback((sessionId: string, x: number, y: number) => {
+  const addSessionNode = useCallback(async (sessionId: string, x: number, y: number) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
-    // 先落卡（同步，用户松手立即看到卡）
+    const taskId = taskIdRef.current ?? boardRef.current?.taskId ?? null;
+    // 任务看板：先写 session_meta 归属，成功才落卡（失败不落卡，不留无保护卡）
+    if (taskId) {
+      try {
+        const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
+        const d = (await res.json()) as { task?: { sessionIds?: string[] } };
+        const sessionIds = d.task?.sessionIds ?? [];
+        if (!sessionIds.includes(sessionId)) {
+          const patch = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionIds: [...sessionIds, sessionId] }),
+          });
+          if (!patch.ok) throw new Error(`HTTP ${patch.status}`);
+        }
+      } catch (error) {
+        console.warn(`[board] 拖入会话归属任务失败，未落卡 ${sessionId}:`, error instanceof Error ? error.message : error);
+        return; // 归属失败：不落卡（reconcile 按业务表判据，不会有无保护窗口卡）
+      }
+      // 归属成功 → 通知侧栏刷新：会话从游离区移入该任务分组下
+      dispatchBoardSessionCreated(sessionId);
+    }
+    // 落卡（任务看板：归属已落库；普通看板：直接落）
     const summary = sessionTitlesRef.current[sessionId];
     const id = `session-${sessionId}`;
-    // 归属目标：任务看板拖入 = 加入本任务。落卡即写 data.taskId——reconcile 孤儿删放行它
-    // （归属异步完成前不把卡当孤儿删）；普通看板 taskId 为空。
-    const taskId = taskIdRef.current ?? boardRef.current?.taskId ?? null;
     nodesMap.set(id, {
       id,
       type: "session-card",
@@ -579,38 +601,6 @@ export function useBoardCanvas({
         w: CARD_W, h: CARD_H, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0,
       },
     });
-    // 任务看板：归属到任务（避免 reconcile 孤儿删）—— 异步后台做，不阻塞落卡
-    if (taskId) {
-      void (async () => {
-        try {
-          const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
-          const d = (await res.json()) as { task?: { sessionIds?: string[] } };
-          const sessionIds = d.task?.sessionIds ?? [];
-          if (!sessionIds.includes(sessionId)) {
-            await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ sessionIds: [...sessionIds, sessionId] }),
-            });
-            // 归属成功 → 通知侧栏刷新：会话从游离区移入该任务分组下
-            dispatchBoardSessionCreated(sessionId);
-          }
-        } catch (error) {
-          console.warn(`[board] 拖入会话归属任务失败 ${sessionId}:`, error instanceof Error ? error.message : error);
-        } finally {
-          // 归属 settle（成败皆清）：撤掉落卡时的 taskId 声明。
-          // 成功后会话已入本任务 sessionIds（reconcile 不再当孤儿）；
-          // 失败后卡回到无保护态，下轮 reconcile 正确按成员关系清理（与 WIP 注释一致）。
-          const nodesMap = nodesMapRef.current;
-          if (nodesMap?.has(id)) {
-            const cur = nodesMap.get(id);
-            if (cur && (cur.data as Record<string, unknown>)?.taskId) {
-              nodesMap.set(id, { ...cur, data: { ...cur.data, taskId: "" } });
-            }
-          }
-        }
-      })();
-    }
   }, []);
 
   // ---- 删除（确认制）：删会话/任务卡 → 确认 → 删 Y.Doc 节点 + 调删除 API ----
@@ -628,8 +618,19 @@ export function useBoardCanvas({
         }
         return;
       }
-      const ok = await confirm({ message: "移除该会话卡片？\n会话本身将保留在会话列表中，可随时重新拖入。" });
-      if (!ok) return;
+      const isTaskBoard = Boolean(taskIdRef.current ?? boardRef.current?.taskId);
+      if (isTaskBoard) {
+        // 任务看板：会话属于任务，删卡 = 先删会话本体，再删画布卡（reconcile 不再补回）
+        const ok = await confirm({ message: "删除该会话？\n将同时删除会话文件并移除画布卡片。此操作不可撤销。" });
+        if (!ok) return;
+        await fetch(`/api/sessions/${encodeURIComponent(d.sessionId)}`, { method: "DELETE" })
+          .then(() => dispatchBoardSessionDeleted(d.sessionId!))
+          .catch((e) => console.warn(`[board] 删除会话 ${d.sessionId} 异常`, e));
+      } else {
+        // 普通看板：卡片是引用，只删卡不删会话
+        const ok = await confirm({ message: "移除该会话卡片？\n会话本身将保留在会话列表中，可随时重新拖入。" });
+        if (!ok) return;
+      }
       nodesMap.delete(node.id);
       for (const e of Array.from(edgesMap.values())) {
         if (e.source === node.id || e.target === node.id) edgesMap.delete(e.id);

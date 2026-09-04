@@ -739,6 +739,10 @@ export function removeSessionFromBoards(sessionId: string): RemoveSessionFromBoa
   const sessionNodes = db
     .prepare("SELECT id, board_id AS boardId FROM board_nodes WHERE kind = 'session' AND ref_id = ?")
     .all(sessionId) as Array<{ id: string; boardId: string }>;
+
+  // 待答队列清理与画布节点无关：即使画布无该会话卡（提前 return），
+  // 业务表引用也必须清掉（执行会话被删 → 卡待答记录失效），保证幂等闭环。
+  db.prepare("DELETE FROM task_card_questions WHERE session_id = ?").run(sessionId);
   if (sessionNodes.length === 0) return { removedNodes: 0, boards: [] };
 
   const ts = now();

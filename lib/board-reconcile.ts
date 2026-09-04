@@ -141,15 +141,14 @@ export async function reconcileBoard(boardId: string): Promise<void> {
       existingSessionBySid.set(sid, n);
     }
     // 孤儿删：画布有、业务表没有的会话卡（非新会话卡）→ 删（仅任务看板）
-    // 例外：卡声明归属本板任务（data.taskId === 本板 taskId，拖入已存在会话时前端先落卡
-    // 异步归属，归属完成前本板 reconcile 不能把它当孤儿删——否则用户刚拖的卡消失）
+    // 判据只信业务表集合（allSessionIds）——不再有 data.taskId 豁免：拖入会话已改为
+    // “先写 session_meta 归属、成功才落卡”，不存在“卡已落、归属未到”的窗口；
+    // 新建临时卡（cwd 非空）仍由上方 pendingSids 豁免（未就绪不参与检测）。
     // 普通看板不删会话卡：会话卡由用户自由拖入/新建管理，不在本模块派生范围。
     const orphanIds = [];
     if (isTaskBoard) {
-      const taskId = board.taskId!;
       for (const [sid, n] of existingSessionBySid) {
         if (allSessionIds.has(sid)) continue;
-        if (n.data?.taskId === taskId) continue;
         orphanIds.push(n.id);
       }
     }

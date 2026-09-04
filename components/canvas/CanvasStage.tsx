@@ -131,8 +131,9 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
       const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       const sid = dt.getData("text/session-id");
       if (sid) {
-        // 任务看板拖入 = 加入任务：addSessionNode 内部先落卡再异步归属（防 reconcile 当孤儿删）
-        board.addSessionNode(sid, pos.x, pos.y);
+        // 任务看板拖入 = 加入任务：addSessionNode 内部先写 session_meta 归属、成功才落卡
+        // （失败不落卡，不留无保护窗口卡）
+        void board.addSessionNode(sid, pos.x, pos.y);
         return;
       }
       const tool = dt.getData("text/board-tool");

@@ -132,10 +132,12 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
     updateNode(id, { data: { ...dataRef.current, w: finalW, h: finalH } });
   }, [id, updateNode, setSnapLines, getNodes]);
 
-  // 新会话卡转正：清 cwd 字段（写 Y.Doc → CRDT 广播）
+  // 新会话卡转正：清 cwd 字段（写 Y.Doc → CRDT 广播）。
+  // 只清 cwd（未就绪标记）：taskId 是卡的任务归属信息，保留——
+  // 孤儿删判据已改为只看 session_meta，不再依赖/清空卡上 taskId。
   const handlePromote = useCallback(() => {
     const d = dataRef.current;
-    updateNode(id, { data: { ...d, cwd: "", taskId: "" } });
+    updateNode(id, { data: { ...d, cwd: "" } });
   }, [id, updateNode]);
 
   const meta = phaseMeta[phase] ?? phaseMeta.idle;
