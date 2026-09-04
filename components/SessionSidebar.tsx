@@ -353,9 +353,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   /** 聊天区会话分页（服务端两阶段：置顶全量 + 非置顶 offset/limit）。
-   *  pinned 全量 + 已加载的非置顶页；total 为非置顶总数（滚动加载游标）。 */
+   *  pinned 全量 + 已加载的非置顶页；total 为非置顶总数（滚动加载游标）。
+   *  chatSessions 只存磁盘会话页（offset/total 语义干净）；运行时会话单列
+   *  chatRuntime（每页附带的附加展示，不参与分页游标）。 */
   const [chatPinned, setChatPinned] = useState<SessionInfo[]>([]);
   const [chatSessions, setChatSessions] = useState<SessionInfo[]>([]);
+  const [chatRuntime, setChatRuntime] = useState<SessionInfo[]>([]);
   const [chatTotal, setChatTotal] = useState(0);
   const [chatLoading, setChatLoading] = useState(false);
   const chatOffsetRef = useRef(0);
@@ -433,10 +436,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         { cache: "no-store" },
       );
       if (!res.ok) return;
-      const data = await res.json() as { pinned?: SessionInfo[]; sessions?: SessionInfo[]; total?: number };
+      const data = await res.json() as { pinned?: SessionInfo[]; sessions?: SessionInfo[]; runtime?: SessionInfo[]; total?: number };
       if (force) {
         setChatPinned(data.pinned ?? []);
         setChatSessions(data.sessions ?? []);
+        setChatRuntime(data.runtime ?? []);
         setChatTotal(data.total ?? 0);
         chatOffsetRef.current = (data.sessions ?? []).length;
       } else {
@@ -450,6 +454,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           const merged = [...prev, ...(data.sessions ?? []).filter((s) => !seen.has(s.id))];
           chatOffsetRef.current = merged.length;
           return merged;
+        });
+        setChatRuntime((prev) => {
+          const seen = new Set(prev.map((s) => s.id));
+          return [...prev, ...(data.runtime ?? []).filter((s) => !seen.has(s.id))];
         });
         if (typeof data.total === "number") setChatTotal(data.total);
       }
@@ -466,7 +474,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     try {
       const res = await fetch(`/api/sessions?offset=${chatOffsetRef.current}&limit=20`, { cache: "no-store" });
       if (!res.ok) return;
-      const data = await res.json() as { sessions?: SessionInfo[]; total?: number };
+      const data = await res.json() as { sessions?: SessionInfo[]; runtime?: SessionInfo[]; total?: number };
       // 去重：置顶区与页间可能重叠（置顶会话也在非置顶页时服务端已过滤，
       // 这里仅防运行时会话与磁盘扫描重叠）。
       setChatSessions((prev) => {
@@ -474,6 +482,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         const extra = (data.sessions ?? []).filter((s) => !seen.has(s.id));
         chatOffsetRef.current = prev.length + extra.length;
         return [...prev, ...extra];
+      });
+      setChatRuntime((prev) => {
+        const seen = new Set(prev.map((s) => s.id));
+        return [...prev, ...(data.runtime ?? []).filter((s) => !seen.has(s.id))];
       });
       if (typeof data.total === "number") setChatTotal(data.total);
     } catch {
@@ -1093,6 +1105,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       s.id === sessionId ? { ...s, pinned: nextPinned ? true : undefined } : s;
     setChatPinned((prev) => prev.map(flipPinned));
     setChatSessions((prev) => prev.map(flipPinned));
+    setChatRuntime((prev) => prev.map(flipPinned));
     setTasks((prev) => prev.map((t) => {
       if (!t.sessionIds.includes(sessionId)) return t;
       const pinnedSet = new Set(t.pinnedSessionIds ?? []);
@@ -1301,10 +1314,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // #14 服务端分页：置顶全量 + 非置顶已加载页——服务端已过滤任务会话，
   // 聊天区不再需要从 sessionTree 排除任务组（服务端分流，前端零归属判断）。
   const chatNodes = useMemo(() => {
-    const tree = orderPinnedFirst(buildSessionTree([...chatPinned, ...chatSessions]));
+    const tree = orderPinnedFirst(buildSessionTree([...chatPinned, ...chatSessions, ...chatRuntime]));
     // 树内按置顶段/非置顶段渲染；会话若已置顶则整棵子树留在置顶区。
     return tree;
-  }, [chatPinned, chatSessions]);
+  }, [chatPinned, chatSessions, chatRuntime]);
 
   // Worktree switcher — moved out of the header into the files tab.
   const worktreeSection = (
@@ -2080,7 +2093,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                           // offset 语义 = 已加载的非置顶根数（服务端对 nonPinnedRoots slice）。
                           hasMore: rootTotal > loadedRoots,
                           remainingCount: Math.max(0, rootTotal - loadedRoots),
-                          onLoadMore: () => void handleLoadMoreTaskSessions(task.id, loadedRoots - pinnedCount),
+                          onLoadMore: () => handleLoadMoreTaskSessions(task.id, loadedRoots - pinnedCount),
                           content: () => {
                             const pinnedSet = new Set(task.pinnedSessionIds ?? []);
                             const out: ReactNode[] = [];
