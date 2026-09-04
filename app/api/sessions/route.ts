@@ -23,7 +23,7 @@ export async function GET(req: Request) {
     const paginated = search.has("offset") && search.has("limit") && Number.isFinite(rawOffset) && Number.isFinite(rawLimit);
 
     if (paginated) {
-      const { pinned, sessions, total } = await loadChatSessionsPage({
+      const { pinned, sessions, total, sessionIds } = await loadChatSessionsPage({
         offset: rawOffset,
         limit: rawLimit,
       });
@@ -40,12 +40,14 @@ export async function GET(req: Request) {
         (s) => !taskSessionIds.has(s.id) && !pinnedIds.has(s.id) && !pageIds.has(s.id),
       );
       // 置顶区独立全量返回，客户端滚动分页只作用于非置顶区。
+      // sessionIds：全量聊天区会话 id（含置顶），供前端增量合并剔除已删/移出会话。
       return NextResponse.json(
         {
           pinned,
           sessions,
           runtime: extraRuntime,
           total,
+          sessionIds,
           offset: rawOffset,
           limit: rawLimit,
           runningSessionIds: getRunningRpcSessionIds(),

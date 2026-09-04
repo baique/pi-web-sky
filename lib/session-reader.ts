@@ -98,12 +98,13 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
  *  阶段二：只对「置顶全量 + 当前页」子集 scanOneSessionFile 读详情——列表
  *  加载不再随会话总量线性变慢。
  *
- *  返回：pinned（置顶全量，不分页）+ sessions（当前页非置顶）+ total（非置顶总数）。
+ *  返回：pinned（置顶全量，不分页）+ sessions（当前页非置顶）+ total（非置顶总数）
+ *  + sessionIds（全部聊天区会话 id，轻量：供前端增量合并时剔除已删除/移出聊天区的会话）。
  */
 export async function loadChatSessionsPage(options: {
   offset?: number;
   limit?: number;
-} = {}): Promise<{ pinned: SessionInfo[]; sessions: SessionInfo[]; total: number }> {
+} = {}): Promise<{ pinned: SessionInfo[]; sessions: SessionInfo[]; total: number; sessionIds: string[] }> {
   const offset = Math.max(0, Math.floor(options.offset ?? 0));
   const limit = Math.max(1, Math.floor(options.limit ?? 20));
 
@@ -134,7 +135,7 @@ export async function loadChatSessionsPage(options: {
   const pageSessions = scanned.slice(pinnedCount);
   const pinned = await attachSessionProjectInfo(pinnedSessions);
   const sessions = await attachSessionProjectInfo(pageSessions);
-  return { pinned, sessions, total: nonPinnedMetas.length };
+  return { pinned, sessions, total: nonPinnedMetas.length, sessionIds: chatMetas.map((m) => m.id) };
 }
 
 /** 阶段二：批量读详情（只读需要的子集）。返回顺序与入参一致。 */
