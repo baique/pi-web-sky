@@ -287,7 +287,6 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
         {stale && (
           <span style={{ flexShrink: 0, fontSize: 9.5, color: "var(--text-dim)", border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)", borderRadius: 4, padding: "0 4px" }}>stale</span>
         )}
-        <div style={{ flex: 1 }} />
         {/* 右侧操作区最左：会话标题编辑（历史按钮左侧） */}
         {!isNewSession && !renaming && (
           <button type="button" onClick={startRename} title="Rename" aria-label="Rename" className="nodrag" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: "var(--text-dim)", cursor: "pointer", opacity: 0.65 }}>
