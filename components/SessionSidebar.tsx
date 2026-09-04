@@ -483,6 +483,22 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, [chatLoading, chatTotal]);
 
+  // 聊天区滚动分页哨兵：IntersectionObserver 观察列表底部，进入视口 → 追加下一页。
+  // 不依赖具体滚动容器（外层面板才是真滚动者，内层聊天容器从不溢出，onScroll 永不触发）。
+  const chatSentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = chatSentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) void loadMoreChatSessions();
+      },
+      { rootMargin: "120px 0px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadMoreChatSessions, chatSessions.length, chatPinned.length]);
+
   const loadSessions = useCallback(async (showLoading = false, force = false, resetChat = force) => {
     try {
       if (showLoading) setLoading(true);
@@ -1033,8 +1049,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setTasks(Array.isArray(d.tasks) ? d.tasks : []);
   }, [selectedProject?.key]);
 
-  // 任务区“加载更多”（#15 服务端分页）：按 offset 追加下一页根会话（含子树），
-  // 去重合并回 task.sessions/sessionIds；rootTotal 由服务端返回覆盖。
+  // 任务区“加载更多”（#15 服务端分页）：按 offset 追加下一页根会话（含子树）。
+  // offset 语义 = 已加载的非置顶根数（服务端对 nonPinnedRoots slice）；
+  // 去重基准 = 已加载的 sessions（不是全量 sessionIds——那是服务端 Task 的全量根 id，
+  // 用它会把所有新页会话全部滤掉，加载更多恒无效）。
   const handleLoadMoreTaskSessions = useCallback(async (taskId: string, offset: number) => {
     const key = selectedProject?.key;
     if (!key) return;
@@ -1048,11 +1066,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       if (!more) return;
       setTasks((prev) => prev.map((t) => {
         if (t.id !== taskId) return t;
-        const seen = new Set(t.sessionIds);
+        const loaded = t.sessions ?? [];
+        const seen = new Set(loaded.map((s) => s.id));
         const extra = (more.sessions ?? []).filter((s) => !seen.has(s.id));
         return {
           ...t,
-          sessions: [...(t.sessions ?? []), ...extra],
+          sessions: [...loaded, ...extra],
           sessionIds: [...t.sessionIds, ...extra.map((s) => s.id)],
           rootTotal: more.rootTotal ?? t.rootTotal,
           sessionTotal: more.sessionTotal ?? t.sessionTotal,
@@ -1066,18 +1085,31 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Pin / unpin a session inside its region (task group or chat). Optimistic:
   // reorder immediately, persist in the background — no full re-scan.
   const handleToggleSessionPin = useCallback((sessionId: string, nextPinned: boolean) => {
+    // 三个渲染源同步乐观更新：全量列表（运行检测/未读清理）、聊天分页态
+    // （chatNodes 由 chatPinned+chatSessions 构建）、任务区 task.sessions
+    // （taskGroups 由 task.sessions 建树）。漏任何一个，置顶后该区不刷新。
     setAllSessions((prev) => prev.map((s) => (
       s.id === sessionId ? { ...s, pinned: nextPinned ? true : undefined } : s
     )));
-    // If the session belongs to a task, move it to the pinned head of that
-    // task's sessionIds immediately (same order the server would return).
+    const flipPinned = (s: SessionInfo) =>
+      s.id === sessionId ? { ...s, pinned: nextPinned ? true : undefined } : s;
+    setChatPinned((prev) => prev.map(flipPinned));
+    setChatSessions((prev) => prev.map(flipPinned));
     setTasks((prev) => prev.map((t) => {
       if (!t.sessionIds.includes(sessionId)) return t;
       const pinnedSet = new Set(t.pinnedSessionIds ?? []);
       if (nextPinned) pinnedSet.add(sessionId); else pinnedSet.delete(sessionId);
       const pinned = new Set(t.sessionIds.filter((id) => pinnedSet.has(id)));
       const rest = t.sessionIds.filter((id) => !pinnedSet.has(id));
-      return { ...t, pinnedSessionIds: [...pinnedSet], sessionIds: [...pinned, ...rest] };
+      return {
+        ...t,
+        pinnedSessionIds: [...pinnedSet],
+        sessionIds: [...pinned, ...rest],
+        // 任务区渲染源同步：sessions 里该会话置顶标记翻转，orderPinnedFirst 自动前排
+        sessions: (t.sessions ?? []).map((s) =>
+          s.id === sessionId ? { ...s, pinned: nextPinned ? true : undefined } : s,
+        ),
+      };
     }));
     void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
       method: "PATCH",
@@ -1085,8 +1117,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       body: JSON.stringify({ pinned: nextPinned }),
     })
       .catch(() => {})
-      .then(() => persistTasks());
-  }, [persistTasks]);
+      .then(() => {
+        persistTasks();
+        // 服务端已 invalidateSessionListCache → 重拉聊天分页，置顶会话按新序返回
+        void loadChatPage(true);
+      });
+  }, [persistTasks, loadChatPage]);
 
   // Pin / unpin a task in the tasks region. Optimistic: flip + reorder
   // pinned-first immediately, persist in the background.
@@ -2043,9 +2079,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                           sessionTotal,
                           // 服务端已按需下发当前页（置顶全量 + 非置顶前 N）；
                           // 剩余根数 > 0 才显示“加载更多”（#15 服务端分页）。
+                          // offset 语义 = 已加载的非置顶根数（服务端对 nonPinnedRoots slice）。
                           hasMore: rootTotal > loadedRoots,
                           remainingCount: Math.max(0, rootTotal - loadedRoots),
-                          onLoadMore: () => void handleLoadMoreTaskSessions(task.id, loadedRoots),
+                          onLoadMore: () => void handleLoadMoreTaskSessions(task.id, loadedRoots - pinnedCount),
                           content: () => {
                             const pinnedSet = new Set(task.pinnedSessionIds ?? []);
                             const out: ReactNode[] = [];
@@ -2144,13 +2181,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden",
                       background: tempDragOver ? "color-mix(in srgb, var(--accent) 8%, transparent)" : "transparent",
                     }}
-                    onScroll={(e) => {
-                      // 滚动到底部附近（<80px）→ 追加下一页（#14 服务端分页）。
-                      const el = e.currentTarget;
-                      if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
-                        void loadMoreChatSessions();
-                      }
-                    }}
                   >
                     {chatNodes.map((node, i) => {
                       const isPin = Boolean(node.session.pinned);
@@ -2181,6 +2211,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
                         {t("sidebar.noSessions")}
                       </div>
+                    )}
+                    {/* 滚动分页哨兵：进入视口 → 追加下一页（#14）。 */}
+                    {chatNodes.length > 0 && (
+                      <div ref={chatSentinelRef} style={{ height: 1 }} aria-hidden />
                     )}
                   </div>
                 )}
