@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, typ
 import type { SessionInfo } from "@/lib/types";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
-import { getProjectActivity, getRecentProjects, sessionsForProject } from "@/lib/project-groups";
+import { getProjectActivity, getRecentProjects } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { useI18n } from "@/hooks/useI18n";
 import { AnimatedDropdown } from "./AnimatedDropdown";
@@ -265,6 +265,62 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 
 const SCRAMBLE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
 
+/**
+ * 聊天区增量合并：保留已加载页（滚动分页不清空），与第一页去重，按 mtime
+ * 降序排序（新会话浮到顶部）。aliveIds 为服务端全量聊天区会话 id 集合——
+ * 传入时用于剔除已删除 / 移出聊天区（归属任务）的本地残留；undefined（运行
+ * 时会话等不属于磁盘全集的情况）则只增不减。
+ */
+function mergeChatSessions(
+  prev: SessionInfo[],
+  incoming: SessionInfo[],
+  aliveIds?: Set<string>,
+): SessionInfo[] {
+  const byId = new Map<string, SessionInfo>();
+  for (const s of prev) {
+    if (aliveIds && !aliveIds.has(s.id)) continue;
+    byId.set(s.id, s);
+  }
+  for (const s of incoming) byId.set(s.id, s);
+  return [...byId.values()].sort((a, b) => b.modified.localeCompare(a.modified));
+}
+
+/**
+ * 任务区增量合并：以服务端返回的任务列表为骨架（任务增删/排序以服务端为准），
+ * 对每个任务保留本地已加载的额外会话页（加载更多），并用服务端全量根 id
+ * （sessionIds）剔除已移出该任务的会话及其子树（unassign/删除后不残留）。
+ */
+function mergeTaskGroups(prev: TaskGroupUi[], incoming: TaskGroupUi[]): TaskGroupUi[] {
+  const prevById = new Map(prev.map((t) => [t.id, t]));
+  return incoming.map((task) => {
+    const prevTask = prevById.get(task.id);
+    if (!prevTask) return task;
+    // 服务端根 id 全集 = 权威归属；本地已加载详情中根仍在此集合的才保留（子树随根）。
+    const rootIds = new Set(task.sessionIds);
+    const parentOf = new Map((prevTask.sessions ?? []).map((s) => [s.id, s.parentSessionId]));
+    const rootInTask = (s: SessionInfo): boolean => {
+      if (rootIds.has(s.id)) return true;
+      let cur = s.parentSessionId;
+      const visited = new Set<string>();
+      while (cur && !visited.has(cur)) {
+        visited.add(cur);
+        if (rootIds.has(cur)) return true;
+        cur = parentOf.get(cur) ?? undefined;
+      }
+      return false;
+    };
+    const seen = new Set((task.sessions ?? []).map((s) => s.id));
+    const extra = (prevTask.sessions ?? []).filter((s) => !seen.has(s.id) && rootInTask(s));
+    return {
+      ...task,
+      sessions: [...(task.sessions ?? []), ...extra],
+      pinnedSessionIds: task.pinnedSessionIds ?? prevTask.pinnedSessionIds,
+      rootTotal: task.rootTotal ?? prevTask.rootTotal,
+      sessionTotal: task.sessionTotal ?? prevTask.sessionTotal,
+    };
+  });
+}
+
 function useScramble(target: string, running: boolean): string {
   const [display, setDisplay] = useState(target);
   const frameRef = useRef<number | null>(null);
@@ -364,7 +420,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [chatTotal, setChatTotal] = useState(0);
   const [chatLoading, setChatLoading] = useState(false);
   const chatOffsetRef = useRef(0);
-  const CHAT_PAGE_SIZE = 20;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
@@ -428,41 +483,25 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const fileExplorerRef = useRef<FileExplorerHandle>(null);
 
   // 聊天区分页（#14）：服务端两阶段——置顶全量 + 非置顶 20/页。
-  // 首屏/force 重置到第 1 页；非 force（运行轮询触发）增量合并第一页缺失会话，
-  // 不清用户已加载的页（否则每 2.5s 轮询把分页踢回起点）。
-  const loadChatPage = useCallback(async (force = false) => {
+  // 恒增量合并：保留用户已加载的分页数据（滚动加载的页不清空），新会话按
+  // mtime 排序浮到顶部；sessionIds（服务端全量聊天区 id）用于剔除已删除/
+  // 移出聊天区的本地残留。不再有 force 整体重置——所有刷新路径（首屏/事件/
+  // 轮询/手动）都走同一条增量合并，触发刷新不会再踢回第一页。
+  const loadChatPage = useCallback(async () => {
     setChatLoading(true);
     try {
-      const res = await fetch(
-        force ? "/api/sessions?offset=0&limit=20&force=1" : "/api/sessions?offset=0&limit=20",
-        { cache: "no-store" },
-      );
+      const res = await fetch("/api/sessions?offset=0&limit=20", { cache: "no-store" });
       if (!res.ok) return;
-      const data = await res.json() as { pinned?: SessionInfo[]; sessions?: SessionInfo[]; runtime?: SessionInfo[]; total?: number };
-      if (force) {
-        setChatPinned(data.pinned ?? []);
-        setChatSessions(data.sessions ?? []);
-        setChatRuntime(data.runtime ?? []);
-        setChatTotal(data.total ?? 0);
-        chatOffsetRef.current = (data.sessions ?? []).length;
-      } else {
-        // 增量合并：保留已加载页，仅补第一页的缺失会话（新创建/新归属回来）。
-        setChatPinned((prev) => {
-          const seen = new Set(prev.map((s) => s.id));
-          return [...prev, ...(data.pinned ?? []).filter((s) => !seen.has(s.id))];
-        });
-        setChatSessions((prev) => {
-          const seen = new Set(prev.map((s) => s.id));
-          const merged = [...prev, ...(data.sessions ?? []).filter((s) => !seen.has(s.id))];
-          chatOffsetRef.current = merged.length;
-          return merged;
-        });
-        setChatRuntime((prev) => {
-          const seen = new Set(prev.map((s) => s.id));
-          return [...prev, ...(data.runtime ?? []).filter((s) => !seen.has(s.id))];
-        });
-        if (typeof data.total === "number") setChatTotal(data.total);
-      }
+      const data = await res.json() as { pinned?: SessionInfo[]; sessions?: SessionInfo[]; runtime?: SessionInfo[]; total?: number; sessionIds?: string[] };
+      const aliveIds = Array.isArray(data.sessionIds) ? new Set(data.sessionIds) : undefined;
+      setChatPinned((prev) => mergeChatSessions(prev, data.pinned ?? [], aliveIds));
+      setChatSessions((prev) => {
+        const merged = mergeChatSessions(prev, data.sessions ?? [], aliveIds);
+        chatOffsetRef.current = merged.length;
+        return merged;
+      });
+      setChatRuntime((prev) => mergeChatSessions(prev, data.runtime ?? []));
+      if (typeof data.total === "number") setChatTotal(data.total);
     } catch {
       // keep last page; next scroll retries
     } finally {
@@ -513,13 +552,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     return () => observer.disconnect();
   }, [loadMoreChatSessions, chatSessions.length, chatPinned.length]);
 
-  const loadSessions = useCallback(async (showLoading = false, force = false, resetChat = force) => {
+  const loadSessions = useCallback(async (showLoading = false) => {
     try {
       if (showLoading) setLoading(true);
-      // 聊天区分页：首屏/用户主动刷新（resetChat）重置到第 1 页；
-      // 运行轮询（force 但 resetChat=false）只增量合并，不清已加载页。
-      await loadChatPage(resetChat);
-      const res = await fetch(force ? "/api/sessions?force=1" : "/api/sessions", {
+      // 聊天区恒增量合并：保留已加载页，新会话按 mtime 浮顶。
+      await loadChatPage();
+      // 全量列表（看板标题映射 / 会话恢复等消费方）：不再传 force=1——分页
+      // 路径本就无服务端缓存（阶段一轻量扫描），force 只对全量路径绕过 5min
+      // 缓存生效，而全量路径已被事件驱动刷新（invalidateSessionListCache）覆盖。
+      const res = await fetch("/api/sessions", {
         cache: "no-store",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -550,7 +591,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [onSessionsLoaded]);
+  }, [onSessionsLoaded, loadChatPage]);
 
   // Persist unread markers so they survive a browser refresh before the user
   // has actually opened the completed session.
@@ -644,8 +685,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       (id) => !allSessions.some((session) => session.id === id),
     );
     if (completedInBackground.length > 0 || hasUnlistedRunningSession) {
-      // force 全量列表刷新，但聊天分页不做 reset（运行轮询不清用户已加载的页）。
-      loadSessions(false, true, false);
+      // 运行轮询触发：增量刷新（不清用户已加载的分页）。
+      loadSessions(false);
     }
     if (completedInBackground.length > 0) {
       onBackgroundTaskDone?.(completedInBackground);
@@ -1041,7 +1082,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       .then((d) => {
         // 过期响应丢弃：快速连续触发时只应用最后一次的结果。
         if (seq !== tasksRequestSeqRef.current) return;
-        setTasks(Array.isArray(d?.tasks) ? d.tasks : []);
+        // 增量合并：保留各任务已加载的更多页；任务增删/排序以服务端为准。
+        setTasks((prev) => mergeTaskGroups(prev, Array.isArray(d?.tasks) ? d.tasks : []));
       })
       .catch(() => {});
   }, [selectedProject?.key]);
@@ -1053,12 +1095,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   // ---- 初始加载 + refreshKey 防抖调度 ----
   const initialLoadDone = useRef(false);
-  // Snapshot of the refreshKey at mount. The mount effect — including StrictMode's
-  // dev-only immediate replay — must never pass force: a second force=1 right
-  // after mount invalidates the server cache and starts a second full session
-  // scan, doubling the slow listing path on every page open. Only a later
-  // refreshKey change (session created/ended/deleted) requests force.
-  const initialRefreshKeyRef = useRef(refreshKey);
 
   // refreshKey 变化 → 300ms 防抖合并：新建会话/删除/改名/看板事件在极短
   // 时间内可能多次 bump refreshKey，合并为一次 loadSessions + loadTasks，
@@ -1071,23 +1107,22 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const isFirst = !initialLoadDone.current;
     initialLoadDone.current = true;
     if (isFirst) {
-      // 首屏立即（不防抖），force 由调用方决定：mount 时 refreshKey 尚未变化，
-      // 保持 false 避免 StrictMode 重放二次全量扫描。
-      loadSessions(true, refreshKey !== initialRefreshKeyRef.current);
+      // 首屏立即（不防抖）：分页路径无缓存，无需 force。
+      loadSessions(true);
       return;
     }
     // 手动刷新：跳过防抖，立即执行（同时由 onRefresh 已 bump refreshKey，
     // 看板等其他消费方同步刷新，这里不再二次调度）。
     if (manualRefreshRef.current) {
       manualRefreshRef.current = false;
-      void loadSessions(false, refreshKey !== initialRefreshKeyRef.current, true);
+      void loadSessions(false);
       void loadTasks();
       return;
     }
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = setTimeout(() => {
       refreshTimerRef.current = null;
-      void loadSessions(false, refreshKey !== initialRefreshKeyRef.current, true);
+      void loadSessions(false);
       void loadTasks();
     }, REFRESH_DEBOUNCE_MS);
     return () => {
@@ -1100,7 +1135,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (!key) return;
     const res = await fetch(`/api/tasks?projectKey=${encodeURIComponent(key)}`, { cache: "no-store" });
     const d = (await res.json().catch(() => ({}))) as { tasks?: TaskGroupUi[] };
-    setTasks(Array.isArray(d.tasks) ? d.tasks : []);
+    // 增量合并：保留各任务已加载的更多页；任务增删/排序以服务端为准。
+    setTasks((prev) => mergeTaskGroups(prev, Array.isArray(d.tasks) ? d.tasks : []));
   }, [selectedProject?.key]);
 
   // 任务区“加载更多”（#15 服务端分页）：只请求当前任务下一页，只更新该任务。
@@ -1173,7 +1209,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       .then(() => {
         persistTasks();
         // 服务端已 invalidateSessionListCache → 重拉聊天分页，置顶会话按新序返回
-        void loadChatPage(true);
+        void loadChatPage();
       });
   }, [persistTasks, loadChatPage]);
 
@@ -1239,10 +1275,21 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, [tasks, selectedProject?.key]);
 
-  // 改名成功：乐观更新本地 name，立即生效。不触发 loadSessions——
-  // 服务端列表扫描直接带名字，但刷新有 1-2s 延迟；本地先改，避免等。
+  // 改名成功：乐观更新本地 name，立即生效。三个渲染源同步（与置顶同路径）：
+  // 全量列表（运行检测/未读清理）、聊天分页态（chatNodes 由 chatPinned+
+  // chatSessions+chatRuntime 构建）、任务区 task.sessions——漏任何一个，改名后
+  // 该区不刷新。不触发 loadSessions：服务端列表扫描直接带名字，但刷新有 1-2s
+  // 延迟；本地先改，避免等。
   const handleSessionRenamed = useCallback((sessionId: string, newName: string) => {
-    setAllSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, name: newName } : s)));
+    const withName = (s: SessionInfo) => (s.id === sessionId ? { ...s, name: newName } : s);
+    setAllSessions((prev) => prev.map(withName));
+    setChatPinned((prev) => prev.map(withName));
+    setChatSessions((prev) => prev.map(withName));
+    setChatRuntime((prev) => prev.map(withName));
+    setTasks((prev) => prev.map((t) => ({
+      ...t,
+      sessions: (t.sessions ?? []).map(withName),
+    })));
   }, []);
 
   // 看板内会话改名 → 乐观更新左侧树（与上方 handleSessionRenamed 同路径，
@@ -1792,7 +1839,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   manualRefreshRef.current = true;
                   onRefresh();
                 } else {
-                  void loadSessions(false, true, true);
+                  void loadSessions(false);
                   void loadTasks();
                 }
               }}

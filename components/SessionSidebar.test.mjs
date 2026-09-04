@@ -60,13 +60,16 @@ test("offers the downstream context-menu hook only on a normal session row", () 
   );
 });
 
-test("manual and lifecycle refreshes bypass the server session-list cache", () => {
-  assert.match(source, /force \? "\/api\/sessions\?force=1" : "\/api\/sessions"/);
-  assert.match(source, /cache: "no-store"/);
-  assert.match(source, /loadSessions\(true, refreshKey !== initialRefreshKeyRef\.current\)/);
+test("refreshes are incremental and never force-reset the paginated lists", () => {
+  // 聊天区恒增量合并：不再有 force=1 全量重扫 / resetChat 整体重置。
+  assert.doesNotMatch(source, /force \? "\/api\/sessions\?force=1"/);
+  assert.doesNotMatch(source, /loadSessions\([^)]*force[^)]*\)/);
+  assert.match(source, /loadSessions\(true\)/);
+  assert.match(source, /loadSessions\(false\)/);
   // 手动刷新：跳过防抖立即执行，并同步 bump refreshKey（看板等其他消费方）。
   assert.match(source, /if \(onRefresh\) \{\n\s*manualRefreshRef\.current = true;/);
-  assert.match(source, /loadSessions\(false, true, false\);\n\s*\}[\s\S]*?onBackgroundTaskDone/);
+  // 运行轮询触发：增量刷新，不清用户已加载的分页。
+  assert.match(source, /loadSessions\(false\);\n\s*\}[\s\S]*?onBackgroundTaskDone/);
 });
 
 test("does not expose disk-backed actions for transient sessions", () => {
