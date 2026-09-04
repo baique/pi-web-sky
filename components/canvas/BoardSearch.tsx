@@ -55,7 +55,7 @@ export function BoardSearch({
 }) {
   const { t } = useI18n();
   const { setHighlight } = useBoardSearch();
-  const { setViewport, getViewport, getNodes } = useReactFlow();
+  const { setCenter, getViewport, getNodes } = useReactFlow();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -150,21 +150,18 @@ export function BoardSearch({
 
   /** 定位：把指定 nodeId 平移到视口中心（保持缩放）+ 高亮描边 */
   const locateNodeId = useCallback((nodeId: string) => {
-    const node = (getNodes() as Array<{ id: string; position: { x: number; y: number }; measured?: { width?: number; height?: number } }>).find((n) => n.id === nodeId);
+    const all = getNodes() as Array<{ id: string; position: { x: number; y: number }; measured?: { width?: number; height?: number } }>;
+    const node = all.find((n) => n.id === nodeId);
     if (!node) return;
     const w = node.measured?.width ?? 340;
     const h = node.measured?.height ?? 160;
     const cx = node.position.x + w / 2;
     const cy = node.position.y + h / 2;
-    const vp = getViewport();
-    // 屏幕中心 = viewport 平移 + 缩放
-    setViewport({
-      x: -cx * vp.zoom + window.innerWidth / 2,
-      y: -cy * vp.zoom + window.innerHeight / 2,
-      zoom: vp.zoom,
-    }, { duration: 300 });
+    // 用 RF 的 setCenter（语义正确：把指定点移到视口中心，保持缩放），
+    // 不用手算坐标的 setViewport——避免动画 transition 卡住 + 坐标算错。
+    void setCenter(cx, cy, { zoom: getViewport().zoom });
     setHighlight(nodeId);
-  }, [getNodes, getViewport, setViewport, setHighlight]);
+  }, [getNodes, getViewport, setCenter, setHighlight]);
 
   /** 命中总数：节点命中 + 正文命中 */
   const totalCount = matches.length + (bodyHits?.length ?? 0);

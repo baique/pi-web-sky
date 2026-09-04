@@ -154,18 +154,20 @@ export function useBoardCanvas({
         const prevDragging = new Set(prev.filter((n) => uiNode(n).dragging).map((n) => n.id));
         // 拖拽保护：position 只写本地（dragStop 才落 yjs），若拖拽期间远端写入触发
         // 回灌，dragging 中的节点必须沿用本地 position，否则会被 yjs 旧值冲回。
+        // 判据用 draggingNodeIdsRef（onNodesChange 的 change.dragging 维护），
+        // 不用 nodes 上的 dragging 字段——RF 受控 prop 不携带该标志（内部态）。
+        const draggingNow = draggingNodeIdsRef.current;
         const prevById = new Map(prev.map((n) => [n.id, n]));
         return Array.from(nodesMap.values()).map((n) => {
           if (changedIds && !changedIds.has(n.id)) {
             const old = prevById.get(n.id);
             if (old) return old; // 未变：整对象复用（含 selected/dragging/引用）
           }
-          const draggingNode = prevById.get(n.id) && uiNode(prevById.get(n.id)!)?.dragging;
           const out = { ...n } as Node & { selected?: boolean; dragging?: boolean };
-          if (draggingNode) {
+          if (draggingNow.has(n.id)) {
             // 拖拽中：沿用本地 position（远端对此节点的写入等拖完再说）
-            const local = prevById.get(n.id)!;
-            out.position = local.position;
+            const local = prevById.get(n.id);
+            if (local) out.position = local.position;
           }
           // 剥掉 yjs 残留的 UI 态字段
           delete out.selected;
@@ -438,6 +440,11 @@ export function useBoardCanvas({
   }, [sessionTitles, ready]);
 
   // ---- 前端编辑：增量写回 Y.Map ----
+  // 拖拽中节点 id 集合（本地 UI 态）：由 onNodesChange 的 position change.dragging 维护。
+  // 不依赖 RF 受控 nodes 上的 dragging 标志（那是 RF 内部状态，不随受控 prop 下发）——
+  // 用它做 syncNodes 回灌保护：拖拽中 position 只写本地，远端写入不得冲回。
+  const draggingNodeIdsRef = useRef<Set<string>>(new Set());
+
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
@@ -464,6 +471,9 @@ export function useBoardCanvas({
           }
         }
       } else if (c.type === "position") {
+        // 维护拖拽集合：change.dragging 是 RF 拖拽态（true=拖拽中，false=松手）
+        if (c.dragging) draggingNodeIdsRef.current.add(c.id);
+        else draggingNodeIdsRef.current.delete(c.id);
         // 拖拽位置只更新本地 state，不写 yjs——dragStop 时一次写入最终值。
         // 每帧写 yjs 会让 CRDT 历史爆炸（一次拖拽几十上百条 update，实测 5 节点看板
         // 堆到 21MB）。本地 state 由下方 setNodes 同步，跟手不受影响。

@@ -64,7 +64,7 @@ export function SchedulerPanel({ nodes }: {
   /** 当前画布节点（用于把全局 running/队列任务映射成本画布 nodeId） */
   nodes: Array<{ id: string; type?: string; data: Record<string, unknown> }>;
 }) {
-  const { setViewport, getViewport, getNodes } = useReactFlow();
+  const { setCenter, getViewport, getNodes } = useReactFlow();
   const { setHighlight } = useBoardSearch();
   const [status, setStatus] = useState<SchedulerStatus | null>(null);
   const [open, setOpen] = useState(false);
@@ -119,8 +119,8 @@ export function SchedulerPanel({ nodes }: {
     const h = node.measured?.height ?? node.style?.height ?? 270;
     const cx = node.position.x + w / 2;
     const cy = node.position.y + h / 2;
-    const vp = getViewport();
-    setViewport({ x: -cx * vp.zoom + window.innerWidth / 2, y: -cy * vp.zoom + window.innerHeight / 2, zoom: vp.zoom }, { duration: 300 });
+    // 用 RF 的 setCenter（把指定点移到视口中心，保持缩放），替代手算 setViewport
+    void setCenter(cx, cy, { zoom: getViewport().zoom });
     setHighlight(nodeId);
   };
 
