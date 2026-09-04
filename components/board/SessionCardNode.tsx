@@ -88,17 +88,24 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
   const cancelRename = () => setRenaming(false);
 
   // 独立展开/收起：切换 expanded + 尺寸（两态手动尺寸保留）
+  // 新建占位卡（cwd 非空）：双击禁止收起（也不删卡）——占位卡保持展开等待输入；
+  // 首条消息发完转正（cwd 清空）后 isNewSession 变 false，展开/收合恢复生效。
   const toggleExpand = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isNewSession) {
-      deleteNode(id);
-      return;
-    }
+    if (isNewSession) return;
     const next = nextExpandState(data, w, h);
     updateNode(id, { data: next.data });
     // 尺寸三处对齐：顶层 width/height（NodeResizer 拖过会残留，RF 优先读它）
     // + style（RF 备选）。只改 style 会被顶层残留值屏蔽。
     updateNode(id, { width: next.w, height: next.h, style: { width: next.w, height: next.h } });
+  };
+
+  // 显式丢弃新建占位卡（仅标题栏垃圾桶按钮；双击已被 toggleExpand 屏蔽，不再触达此处）。
+  // 会话未创建（cwd 非空）：删 Y.Doc 节点即可，无确认弹窗。
+  const discardNewSession = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isNewSession) return;
+    deleteNode(id);
   };
 
   // resize：写回 style + data.w/h + 对齐参考线吸附
@@ -234,7 +241,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
         <div data-session-navbar-slot className="nodrag" style={{ display: "flex", alignItems: "center" }} />
         <button
           type="button"
-          onClick={toggleExpand}
+          onClick={discardNewSession}
           className="nodrag"
           title={isNewSession ? "Discard" : expanded ? "Collapse" : "Expand"}
           style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: "var(--text-dim)", cursor: "pointer" }}
