@@ -25,6 +25,8 @@ export interface BoardCanvasOps {
   setSnapLines: (lines: SnapResult["lines"]) => void;
   /** 当前看板 id */
   boardId: string | null;
+  /** 是否为任务看板（任务看板删会话卡=删会话本体，普通看板只删卡） */
+  isTaskBoard: boolean;
 }
 
 const BoardCanvasContext = createContext<BoardCanvasOps | null>(null);
@@ -35,6 +37,6 @@ export function BoardCanvasProvider({ value, children }: { value: BoardCanvasOps
 
 export function useBoardCanvasOps(): BoardCanvasOps {
   const ctx = useContext(BoardCanvasContext);
-  if (!ctx) return { updateNode: () => {}, deleteNode: () => {}, normalizeNodeId: () => {}, deleteEdge: () => {}, addEdge: () => {}, addNode: () => {}, setSnapLines: () => {}, boardId: null };
+  if (!ctx) return { updateNode: () => {}, deleteNode: () => {}, normalizeNodeId: () => {}, deleteEdge: () => {}, addEdge: () => {}, addNode: () => {}, setSnapLines: () => {}, boardId: null, isTaskBoard: false };
   return ctx;
 }

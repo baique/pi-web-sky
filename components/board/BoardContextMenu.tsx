@@ -113,7 +113,7 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
         ))}
       {node && (
         <MenuItem
-          label={isSession ? "移除会话卡片" : isTask ? "删除任务卡" : "删除便笺"}
+          label={isSession ? (ops.isTaskBoard ? "删除会话" : "移除会话卡片") : isTask ? "删除任务卡" : "删除便笺"}
           danger
           onClick={handleDeleteNode}
         />

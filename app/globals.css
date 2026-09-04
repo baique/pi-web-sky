@@ -1603,6 +1603,14 @@ span.token.table {
   50% { opacity: 0.5; }
 }
 
+/* 看板离屏展开卡工作台占位骨架（SessionCardNode 离屏时） */
+.board-skeleton-line {
+  height: 12px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--border) 55%, transparent);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
 /* 压缩状态条：毛玻璃呼吸强调（正进行压缩时） */
 @keyframes compaction-breathe {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }

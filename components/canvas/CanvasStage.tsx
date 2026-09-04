@@ -47,6 +47,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   // BoardCanvasOps：把 Y.Doc 写操作暴露给节点组件
   const ops = useMemo<BoardCanvasOps>(() => ({
     boardId: board.board?.id ?? null,
+    isTaskBoard: Boolean(board.board?.taskId),
     updateNode: (id, patch) => {
       board.updateNode?.(id, patch);
     },
@@ -299,6 +300,8 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               minZoom={0.1}
               maxZoom={2}
               colorMode={isDark ? "dark" : "light"}
+              // 不做 RF 级 onlyRenderVisibleElements：整卡卸载会让拖拽出视口的卡瞬间销毁重建（事件阻塞假卡顿）。
+              // 离屏按需挂载下沉到 SessionCardNode 内部（外壳常驻 + 工作台 IO 缓冲挂载），见 SessionCardNode。
               deleteKeyCode={["Backspace", "Delete"]}
               proOptions={{ hideAttribution: false }} // 保留 attribution（MIT 合规，决策点③）
               defaultEdgeOptions={{ markerEnd: { type: "arrowclosed" }, style: { strokeWidth: 1.5, stroke: "#8b8fa3" } }}

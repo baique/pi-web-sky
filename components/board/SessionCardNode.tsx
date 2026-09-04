@@ -26,6 +26,11 @@ import { CardKindBadge } from "@/components/canvas/CardKindBadge";
 const EXPANDED_DEFAULT_W = 840;
 const EXPANDED_DEFAULT_H = 600;
 
+/** 工作台按需挂载：视口外扩缓冲（px）——卡片刚离开视口一点不卸载 */
+const WORKBENCH_NEAR_MARGIN = 400;
+/** 离开缓冲后延时卸载（防拖拽边缘横跳反复销毁重建） */
+const WORKBENCH_UNMOUNT_DELAY_MS = 5000;
+
 const phaseMeta: Record<string, { dot: string; label: string }> = {
   waiting_model: { dot: "var(--accent)", label: "thinking" },
   running_tools: { dot: "#f59e0b", label: "tools" },
@@ -49,6 +54,56 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
   const { title, projectName, messageCount, phase, runningMs, endedAt, lastActivityAt, stale, sessionId, lastReply, cwd, taskId } = data;
   const isNewSession = Boolean(cwd);
   const { setContainer } = useCardGlass("var(--board-card-glass)");
+
+  // ---- 展开态工作台按需挂载（离屏缓冲）----
+  // 卡片外壳（标题栏/Handle/边框）常驻 DOM，重量级 SessionWorkbench 仅在
+  // 「视口 + WORKBENCH_NEAR_MARGIN」内挂载；离开缓冲后延时 WORKBENCH_UNMOUNT_DELAY_MS
+  // 再卸载——拖出视口不会瞬间销毁重建（事件阻塞假卡顿），边缘横跳也不反复重建。
+  // 新会话卡（等待输入）恒挂载：卸载会丢输入。
+  const cardRootRef = useRef<HTMLDivElement | null>(null);
+  // 初始 true：视口内展开卡首帧即挂载（IO 回调异步，避免骨架屏闪烁）；
+  // 离屏卡由 IO 首回调 + 延时进入卸载流程。新会话卡由 isNewSession 分支恒挂载。
+  const [workbenchMounted, setWorkbenchMounted] = useState(true);
+  const workbenchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const el = cardRootRef.current;
+    if (!el) return;
+    const root = el.closest(".react-flow") as HTMLElement | null;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const visible = entries[0]?.isIntersecting ?? true;
+        if (visible) {
+          if (workbenchTimerRef.current) {
+            clearTimeout(workbenchTimerRef.current);
+            workbenchTimerRef.current = null;
+          }
+          setWorkbenchMounted(true);
+        } else if (!workbenchTimerRef.current) {
+          workbenchTimerRef.current = setTimeout(() => {
+            workbenchTimerRef.current = null;
+            setWorkbenchMounted(false);
+          }, WORKBENCH_UNMOUNT_DELAY_MS);
+        }
+      },
+      { root, rootMargin: `${WORKBENCH_NEAR_MARGIN}px` },
+    );
+    io.observe(el);
+    return () => {
+      io.disconnect();
+      if (workbenchTimerRef.current) {
+        clearTimeout(workbenchTimerRef.current);
+        workbenchTimerRef.current = null;
+      }
+    };
+  }, []);
+  // 组合 ref：玻璃层 setContainer 与 IO 观察目标 cardRootRef 都挂卡根
+  const setCardRoot = useCallback(
+    (node: HTMLDivElement | null) => {
+      cardRootRef.current = node;
+      setContainer(node);
+    },
+    [setContainer],
+  );
 
   // 收合态中间区滚动容器 ref（内部滚动 nowheel 由 RF 隔离）
   const replyScrollRef = useRef<HTMLDivElement | null>(null);
@@ -165,7 +220,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
       <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
 
     <div
-      ref={setContainer}
+      ref={setCardRoot}
       data-board-node
       data-testid={`session-card-${sessionId}`}
       onDoubleClick={toggleExpand}
@@ -261,7 +316,11 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
       {expanded ? (
         // 展开工作台（消息/工具/代码块）必须显式恢复文本选中：卡根 userSelect:none 会抑制整卡选中
         <div className="nodrag" style={{ flex: 1, minHeight: 0, padding: "0 12px 0", pointerEvents: "all", overflow: "visible", cursor: "default", userSelect: "text" }}>
-          <SessionWorkbench sessionId={sessionId} cwd={cwd} taskId={taskId} onPromote={handlePromote} />
+          {workbenchMounted || isNewSession ? (
+            <SessionWorkbench sessionId={sessionId} cwd={cwd} taskId={taskId} onPromote={handlePromote} />
+          ) : (
+            <WorkbenchSkeleton />
+          )}
         </div>
       ) : (
         <>
@@ -295,6 +354,21 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
       )}
     </div>
     </>
+  );
+}
+
+/** 离屏展开卡的轻量占位：与工作台同高同宽，仅数条 pulse 条（无 ChatWindow/SSE 开销）。
+ *  工作台回屏由 IO 缓冲提前挂载，此时骨架屏几乎不可见。 */
+function WorkbenchSkeleton() {
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8, padding: "4px 8px", opacity: 0.55 }}>
+      <div className="board-skeleton-line" style={{ width: "38%" }} />
+      <div className="board-skeleton-line" style={{ width: "72%" }} />
+      <div className="board-skeleton-line" style={{ width: "55%" }} />
+      <div className="board-skeleton-line" style={{ width: "88%" }} />
+      <div style={{ flex: 1 }} />
+      <div className="board-skeleton-line" style={{ width: "100%", height: 28, borderRadius: 8 }} />
+    </div>
   );
 }
 
