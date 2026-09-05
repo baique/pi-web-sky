@@ -36,18 +36,38 @@ export interface TextNodeData extends Record<string, unknown> {
   color?: string;
   /** 是否自动进入编辑（创建后首帧） */
   autofocus?: boolean;
+  /** 背景样式：无 / 玻璃（便笺同款磨砂） / 嵌入色彩（accent 融入） */
+  bg?: "none" | "glass" | "tint";
+  /** 下划线 */
+  underline?: boolean;
+  /** 删除线 */
+  strikethrough?: boolean;
 }
 
 function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data: TextNodeData }) {
-  const { updateNode, deleteNode } = useBoardCanvasOps();
+  const { updateNode, updateNodeDebounced, deleteNode } = useBoardCanvasOps();
   const text = data.text ?? "";
   const color = data.color ?? "var(--text)";
+  const bg = data.bg ?? "none";
+  const underline = Boolean(data.underline);
+  const strikethrough = Boolean(data.strikethrough);
+  // 背景样式（玻璃/嵌入色）+ 文本装饰：编辑与展示共用同一套派生样式
+  const bgStyle = bg === "glass"
+    ? { background: "var(--board-card-glass)", backdropFilter: "blur(14px) saturate(1.4)", WebkitBackdropFilter: "blur(14px) saturate(1.4)", border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)" }
+    : bg === "tint"
+      ? { background: "color-mix(in srgb, var(--accent) 16%, transparent)", border: "1px solid color-mix(in srgb, var(--accent) 42%, transparent)" }
+      : { background: "transparent", border: "1px solid transparent" };
+  const textDecoration = [underline ? "underline" : null, strikethrough ? "line-through" : null].filter(Boolean).join(" ") || "none";
 
   // 字号 = 宽度派生（纯函数，无状态）：宽 REF_W → 默认 40px，等比例放大缩小
   const nodeW = Math.max(20, width ?? REF_W);
   const derivedFs = Math.round(Math.min(FS_MAX, Math.max(FS_MIN, TEXT_NODE_DEFAULT_FS * (nodeW / REF_W))));
 
   const [editing, setEditing] = useState(Boolean(data.autofocus));
+  // 最新 data 镜像：格式按钮/保存回调读 ref，避免闭包旧 data 覆盖样式
+  //（点击格式后未及时 re-render → blur 保存用旧 data 把 bg/underline 冲掉）
+  const dataRef = useRef(data);
+  dataRef.current = data;
   // 拖拽缩放中的本地字号：RF 拖动时 props.width（来自 measured）不实时更新，
   // 用 onResize 的 params.width（flow 单位）实时算字号跟手；松手清空回落派生值。
   const [dragFs, setDragFs] = useState<number | null>(null);
@@ -105,7 +125,8 @@ function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data:
       return;
     }
     if (next !== text || data.autofocus) {
-      updateNode(id, { data: { ...data, autofocus: undefined, text: next } });
+      // 只传变更字段（autofocus 清除 + 新文本）：updateNode 深合并保留 bg/underline 等格式
+      updateNode(id, { data: { autofocus: undefined, text: next } });
     }
     setEditing(false);
   }, [text, data, id, updateNode, deleteNode]);
@@ -114,7 +135,7 @@ function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data:
     cancellingRef.current = true;
     draftRef.current = text;
     if (data.autofocus) {
-      updateNode(id, { data: { ...data, autofocus: undefined, text: draftRef.current } });
+      updateNode(id, { data: { autofocus: undefined } });
     }
     setEditing(false);
   }, [data, id, updateNode, text]);
@@ -150,25 +171,27 @@ function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data:
     autoGrow(e.target);
   }, [autoGrow]);
 
-  // 高度 = 内容自适应：字号变 / 文本变 → 内容重排 → 校准节点 height（flow 单位）。
+  // 高度 = 内容自适应：字号变 / 文本变 / 编辑中 → 内容重排 → 校准节点 height（flow 单位）。
   // offsetHeight 是 layout px（不含 RF 的 CSS transform 缩放），直接 = flow 单位，
   // 不能除以 zoom（rect 才需除，那是屏幕 px）。
   // 关键：缩放拖动中不写 yjs（resizingRef 保护）——每帧 updateNode 会触发 observe
   // 回灌 → setNodes 全量重建 → 重渲染 → 卡顿（“很不跟手”元凶）+ undo 栈被中间值污染。
   // 拖动中字号/重排本地跟手，松手后 effectiveFs 回落触发本函数一次落库。
+  // 编辑态也同步（否则 wrapper 停在创建高度 → 连线句柄 top:50% 偏离内容中心）。
+  // 编辑中打字高频变化 → 走 updateNodeDebounced（停顿 150ms 合并一次），不每帧写。
   const resizingRef = useRef(false);
   const syncHeight = useCallback(() => {
     const el = rootRef.current;
-    if (!el || editing || resizingRef.current) return;
+    if (!el || resizingRef.current) return;
     const h = Math.max(20, Math.round(el.offsetHeight));
     if (Math.abs(h - (height ?? 0)) > 1) {
       // 只校 height：宽度由 RF/NodeResizer 管（style 深合并保留现有 width）。
-      updateNode(id, { style: { height: h } });
+      if (editing) updateNodeDebounced(id, { style: { height: h } }, 150);
+      else updateNode(id, { style: { height: h } });
     }
-  }, [id, editing, updateNode, height]);
+  }, [id, editing, updateNode, updateNodeDebounced, height]);
 
   useEffect(() => {
-    if (editing) return;
     const t = requestAnimationFrame(syncHeight);
     return () => cancelAnimationFrame(t);
   }, [effectiveFs, text, editing, syncHeight, height]);
@@ -196,7 +219,77 @@ function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data:
     [id, updateNode],
   );
 
+  // ---- 编辑工具栏：透明/玻璃/嵌入色 + 下划线/删除线 ----
+  // 编辑态常驻，absolute 定位在节点上方（top:-38，root overflow visible 显示），
+  // DOM 仍在 root 内 → 点击不触发 blur 保存（handleBlur 的 contains 检查）。
+  // onMouseDown preventDefault 防 textarea 失焦；onPointerDown stopPropagation 防 RF 拖拽。
+  const setFormat = useCallback(
+    (patch: Partial<TextNodeData>) => {
+      // 增量更新：updateNode data 深合并，patch 只含本次字段，不覆盖先前格式
+      updateNode(id, { data: patch });
+    },
+    [id, updateNode],
+  );
+  const toggleBg = (next: "none" | "glass" | "tint") => {
+    if (next === bg) return;
+    setFormat({ bg: next });
+  };
+  const renderToolbar = () => {
+    if (!editing) return null;
+    const btnBase: React.CSSProperties = {
+      width: 24, height: 22, padding: 0, border: "none", borderRadius: 4, cursor: "pointer",
+      display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, lineHeight: 1,
+      color: "var(--text)", background: "transparent", flexShrink: 0,
+    };
+    const activeBtn: React.CSSProperties = { background: "color-mix(in srgb, var(--accent) 22%, transparent)", color: "var(--accent)" };
+    const swatch = (key: "none" | "glass" | "tint", color: string, title: string) => (
+      <button
+        title={title}
+        onMouseDown={(e) => e.preventDefault()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => toggleBg(key)}
+        style={{ ...btnBase, ...(bg === key ? activeBtn : {}) }}
+      >
+        <span style={{ width: 14, height: 14, borderRadius: 3, border: bg === key ? "2px solid var(--accent)" : "1px solid color-mix(in srgb, var(--border) 70%, transparent)", background: color, display: "block" }} />
+      </button>
+    );
+    const toggleBtn = (active: boolean, onClick: () => void, label: string, title: string) => (
+      <button
+        title={title}
+        onMouseDown={(e) => e.preventDefault()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={onClick}
+        style={{ ...btnBase, ...(active ? activeBtn : {}), fontWeight: 700 }}
+      >
+        {label}
+      </button>
+    );
+    return (
+      <div
+        className="nowheel"
+        data-testid="text-node-toolbar"
+        style={{
+          position: "absolute", top: -38, left: 0, zIndex: 50,
+          display: "flex", gap: 2, padding: 3, borderRadius: 8,
+          background: "var(--bg-panel)",
+          border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
+          boxShadow: "0 4px 16px color-mix(in srgb, #000 25%, transparent)",
+        }}
+      >
+        {swatch("none", "transparent", "透明背景")}
+        {swatch("glass", "var(--board-card-glass)", "玻璃背景")}
+        {swatch("tint", "color-mix(in srgb, var(--accent) 20%, transparent)", "嵌入色彩")}
+        <span style={{ width: 1, alignSelf: "stretch", margin: "2px 2px", background: "color-mix(in srgb, var(--border) 60%, transparent)" }} />
+        {toggleBtn(underline, () => setFormat({ underline: !underline }), "U", "下划线")}
+        {toggleBtn(strikethrough, () => setFormat({ strikethrough: !strikethrough }), "S̶", "删除线")}
+      </div>
+    );
+  };
+
   // 手柄渲染（选中态显示，wrapper 层，RF 处理遮挡/z-index）
+  // 4 角手柄透明化：视觉隐藏小圆球（突兀），保留事件与功能；hover/拖动时经
+  // .board-text-resize-handle 淡显（见 globals.css）。handleStyle 不设 background，
+  // 否则 inline 会覆盖 CSS 的 hover 态。
   const renderResizer = () => {
     if (!selected || editing) return null;
     return (
@@ -207,8 +300,9 @@ function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data:
         onResize={onResize}
         onResizeEnd={onResizeEnd}
         color="var(--accent)"
-        handleStyle={{ width: 12, height: 12, borderRadius: 3, border: "1px solid var(--bg-panel)", background: "var(--accent)", zIndex: 30, boxShadow: "0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent)" }}
-        lineStyle={{ borderColor: "color-mix(in srgb, var(--accent) 60%, transparent)", zIndex: 30 }}
+        handleClassName="board-text-resize-handle"
+        handleStyle={{ width: 16, height: 16, zIndex: 30, cursor: "nwse-resize" }}
+        lineStyle={{ borderColor: "color-mix(in srgb, var(--accent) 45%, transparent)", zIndex: 30 }}
       />
     );
   };
@@ -232,6 +326,9 @@ function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data:
           width: "100%",
           minHeight: 28,
           boxSizing: "border-box",
+          // 背景（透明/玻璃/嵌入色）与文本装饰（下划线/删除线）
+          ...bgStyle,
+          textDecoration,
           // 选中/编辑态：虚线描边（excalidraw 选中框）
           outline: selected || editing ? "1.5px dashed color-mix(in srgb, var(--accent) 65%, transparent)" : "none",
           outlineOffset: 5,
@@ -249,6 +346,7 @@ function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data:
           overflowWrap: "anywhere",
         }}
       >
+        {renderToolbar()}
         {editing ? (
           <textarea
             ref={textareaRef}
@@ -280,6 +378,8 @@ function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data:
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
               caretColor: "currentColor",
+              // 下划线/删除线：textarea 默认 text-decoration:none 不继承，需显式继承
+              textDecoration: "inherit",
             }}
           />
         ) : (

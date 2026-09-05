@@ -761,7 +761,15 @@ export function useBoardCanvas({
     if (!nodesMap) return;
     const cur = nodesMap.get(id);
     if (!cur) return;
-    nodesMap.set(id, { ...cur, ...patch, style: patch.style ? { ...cur.style, ...patch.style } : cur.style });
+    nodesMap.set(id, {
+      ...cur,
+      ...patch,
+      // data/style 深合并（增量语义）：patch 只覆盖指定字段，保留其余——
+      // 避免局部更新（如格式按钮只传 bg）整体替换 data 把先前的字段冲掉
+      //（闭包 data 快照过期的覆盖 bug：多次格式点击后 blur 保存丢样式）。
+      data: patch.data ? { ...(cur.data as object), ...(patch.data as object) } : cur.data,
+      style: patch.style ? { ...(cur.style ?? {}), ...patch.style } : cur.style,
+    });
   }, []);
 
   // 防抖更新：表单连续输入（打字）时合并多次 patch，窗口结束后一次写 yjs。

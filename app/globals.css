@@ -2350,3 +2350,17 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
   float: left;
   height: 0;
 }
+
+/* === 文字节点缩放手柄（透明化）===
+   选中态 4 角手柄默认透明（不突兀，保留事件与功能），hover/拖动中淡显 accent
+   小方角，让用户知道可拖。handleStyle 不设 background，避免 inline 覆盖 hover。 */
+.board-text-resize-handle {
+  background: transparent;
+  border: none;
+}
+.board-text-resize-handle:hover,
+.board-text-resize-handle:active {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  border-radius: 3px;
+}
