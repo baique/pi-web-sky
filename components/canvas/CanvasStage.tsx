@@ -17,6 +17,7 @@ import { BoardContextMenu, type BoardMenuState } from "@/components/board/BoardC
 import { BoardLoading } from "./BoardLoading";
 import { uploadBoardImage } from "@/lib/board-assets";
 import { dispatchBoardCwdSwitch } from "@/lib/board-events";
+import { boardFloatGlass } from "./board-glass";
 
 /**
  * React Flow 画布舞台：无限画布 + 工具行 + 拖放添加会话。
@@ -564,9 +565,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
                 pannable
                 zoomable
                 style={{
-                  background: "var(--board-card-glass)",
-                  backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-                  WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+                  ...boardFloatGlass,
                   border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
                   borderRadius: 12,
                   boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
@@ -600,7 +599,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
             </ReactFlow>
             {menu && <BoardContextMenu menu={menu} onClose={() => setMenu(null)} />}
             {/* 工具栏：会话/便笺/任务/文字/图片（底部居中玻璃浮层）。点击=当前视口中心创建；拖拽=拖放进画布落点创建 */}
-            <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 16, zIndex: 30, display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "var(--board-card-glass)", backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)" }}>
+            <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 16, zIndex: 30, display: "flex", gap: 4, padding: 4, borderRadius: 10, ...boardFloatGlass, border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)" }}>
               <ToolbarBtn label="会话" onClick={addSessionAtViewportCenter} onDragStart={(e) => onToolDragStart(e, "session-card")} />
               <span style={{ width: 1, height: 18, background: "color-mix(in srgb, var(--border) 70%, transparent)", margin: "0 2px" }} />
               <ToolbarBtn label="便笺" onClick={() => addNodeAtViewport("sticky-note")} onDragStart={(e) => onToolDragStart(e, "sticky-note")} />

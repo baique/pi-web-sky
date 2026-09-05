@@ -15,6 +15,7 @@ import { useReactFlow } from "@xyflow/react";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
 import type { SessionRunningState } from "@/hooks/useBoardCanvas";
 import { useBoardSearch } from "./BoardSearchContext";
+import { boardFloatGlass } from "./board-glass";
 
 /** session-card 运行中 phase（useBoardCanvas running 快照写入；waiting_input 视为待用户，不算运行） */
 const RUNNING_PHASES = new Set(["waiting_model", "running_tools", "running_command"]);
@@ -139,11 +140,9 @@ export function BoardTopbar({
     <div style={{ position: "absolute", top: 12, left: 12, zIndex: 40, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, maxWidth: "min(420px, calc(100% - 320px))" }}>
       {/* 主胶囊：看板名 + 刷新 + 新建/磨砂/清空 + 展开（进行中） */}
       <div ref={capsuleRef} style={{
+        ...boardFloatGlass,
         display: "flex", alignItems: "center", gap: 4, height: 36,
         padding: "0 6px 0 12px", borderRadius: 999,
-        background: "var(--board-card-glass)",
-        backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-        WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
         border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
         boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
         color: "var(--text)",
@@ -375,14 +374,12 @@ const queueItemStyle: React.CSSProperties = {
 
 /** 浮层面板（磨砂/进行中）的玻璃样式 */
 const panelStyle: React.CSSProperties = {
+  ...boardFloatGlass,
   display: "flex",
   flexDirection: "column",
   gap: 6,
   padding: "8px 10px",
   borderRadius: 12,
-  background: "var(--board-card-glass)",
-  backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-  WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
   border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
   boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
   color: "var(--text)",
