@@ -455,6 +455,11 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   // IntersectionObserver on the sentinel div at the top of the message list.
   // When it becomes visible, fetch the previous page of older messages from the
   // server and prepend it (loadContext handles anchoring + dedupe via `before`).
+  // The observer must NOT rebuild on entryIds change — prepending a page moves
+  // entryIds[0] to the new oldest id, and a rebuilt observer fires its initial
+  // callback immediately (reporting the sentinel still visible while the user is
+  // pinned at the top), which re-triggers loading forever. Read the latest ids
+  // through a ref so the observer is created once per session/leaf.
   useEffect(() => {
     const sentinel = sentinelRef.current;
     const container = scrollContainerRef.current;
@@ -464,7 +469,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
         if (!entries[0]?.isIntersecting) return;
         // Skip while a page is already loading or nothing older exists.
         if (loadingOlderRef.current) return;
-        const oldestId = entryIds[0];
+        const oldestId = entryIdsRef.current[0];
         if (!oldestId) return;
         const sid = session?.id ?? sessionIdRef.current;
         if (!sid) return;
@@ -479,7 +484,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [entryIds, session, activeLeafId, loadContext, sessionIdRef, scrollContainerRef]);
+  }, [session, activeLeafId, loadContext, scrollContainerRef]);
 
   // Keep the rendered window at least as large as what's loaded, so prepended
   // (older) pages stay visible instead of being sliced off the top.
