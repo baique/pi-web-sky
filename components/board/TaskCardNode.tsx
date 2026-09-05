@@ -411,9 +411,9 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       {(saveError || error) && <div style={{ color: "#f87171", fontSize: 11, marginTop: 6 }}>{saveError ?? error}</div>}
     </>
   ) : loading ? (
-    <div style={{ color: "var(--text-dim)", fontSize: 12, padding: 20, textAlign: "center" }}>加载中…</div>
+    <div style={{ color: "var(--text-muted)", fontSize: 12, padding: 20, textAlign: "center" }}>加载中…</div>
   ) : (
-    <div style={{ color: "var(--text-dim)", fontSize: 12, padding: 20, textAlign: "center" }}>未找到任务卡</div>
+    <div style={{ color: "var(--text-muted)", fontSize: 12, padding: 20, textAlign: "center" }}>未找到任务卡</div>
   );
 
   return (
@@ -692,7 +692,7 @@ function TemplateSelector({ onSelect }: { onSelect: (template: string) => void }
         onClick={() => setOpen((v) => !v)}
         style={{
           fontSize: 10,
-          color: "var(--text-dim)",
+          color: "var(--text-muted)",
           cursor: "pointer",
           userSelect: "none",
           display: "inline-flex",

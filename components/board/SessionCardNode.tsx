@@ -334,7 +334,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
         )}
         {/* 右侧操作区最左：会话标题编辑（历史按钮左侧） */}
         {!isNewSession && !renaming && (
-          <button type="button" onClick={startRename} title="Rename" aria-label="Rename" className="nodrag" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: "var(--text-dim)", cursor: "pointer", opacity: 0.65 }}>
+          <button type="button" onClick={startRename} title="Rename" aria-label="Rename" className="nodrag" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: "var(--text-muted)", cursor: "pointer" }}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>
           </button>
         )}
@@ -345,7 +345,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
           onClick={discardNewSession}
           className="nodrag"
           title={isNewSession ? "Discard" : expanded ? "Collapse" : "Expand"}
-          style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: "var(--text-dim)", cursor: "pointer" }}
+          style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: "var(--text-muted)", cursor: "pointer" }}
         >
           {isNewSession ? (
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
@@ -385,14 +385,14 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
                 {lastReply}
               </div>
             ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, color: "var(--text-dim)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, color: "var(--text-muted)" }}>
                 {projectName && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 1 }}>{projectName}</span>}
                 {messageCount > 0 && <span style={{ flexShrink: 0, whiteSpace: "nowrap" }}>{messageCount} msgs</span>}
               </div>
             )}
           </div>
           {/* 底部时间 */}
-          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text-dim)", borderTop: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", paddingTop: 3 }}>
+          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text-muted)", borderTop: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", paddingTop: 3 }}>
             <span aria-hidden style={{ flexShrink: 0 }}>🕒</span>
             <span>{formatTime(lastActivityAt)}</span>
             <div style={{ flex: 1 }} />

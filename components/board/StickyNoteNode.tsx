@@ -259,7 +259,7 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
               title={copied ? "已复制" : "复制内容"}
               onClick={copyContent}
               className="nodrag"
-              style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: copied ? "var(--accent)" : "var(--text-dim)", cursor: "pointer" }}
+              style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: copied ? "var(--accent)" : "var(--text-muted)", cursor: "pointer" }}
             >
               {copied ? (
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
@@ -296,7 +296,7 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
               <ReactMarkdown>{text}</ReactMarkdown>
             </div>
           ) : (
-            <div style={{ color: "var(--text-dim)", fontSize: 12, cursor: "text" }}>双击编辑 markdown</div>
+            <div style={{ color: "var(--text-muted)", fontSize: 12, cursor: "text" }}>双击编辑</div>
           )}
         </div>
       )}
