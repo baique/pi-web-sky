@@ -7,8 +7,8 @@ import {
   markdownPreviewRemarkPlugins,
   normalizeDisplayMath,
 } from "@/lib/markdown";
-import { splitFinalAssistantBlocks } from "@/lib/message-display";
-import type { AgentMessage, AssistantMessage, TextContent, UserMessage } from "@/lib/types";
+import { buildDomTurns, mergeTurns, type MergedTurn } from "@/lib/turn-merge";
+import type { AgentMessage, UserMessage } from "@/lib/types";
 import type { TurnIndexItem } from "@/lib/api-types";
 import styles from "./ChatMinimap.module.css";
 
@@ -59,25 +59,6 @@ interface NodeInfo {
   topRatio: number;
   targetTurn: TurnInfo;
   index: number;
-}
-
-function getUserPreview(message: UserMessage): string {
-  if (typeof message.content === "string") return message.content.trim();
-  return message.content
-    .filter((block): block is TextContent => block.type === "text")
-    .map((block) => block.text)
-    .join("\n")
-    .trim();
-}
-
-function getAssistantAnswerMarkdown(message: AgentMessage | Partial<AgentMessage>): string {
-  if (message.role !== "assistant") return "";
-  const { answerBlocks } = splitFinalAssistantBlocks(message as AssistantMessage);
-  return answerBlocks
-    .filter((block): block is TextContent => block.type === "text")
-    .map((block) => block.text)
-    .join("\n\n")
-    .trim();
 }
 
 function PreviewHeading({
@@ -349,101 +330,42 @@ export function ChatMinimap({
 
       const refs = messageRefs.current;
       const containerRect = scrollEl.getBoundingClientRect();
-      const indexItems = turnIndexRef.current;
 
-      // entryId → messageRefs 下标（只对 user/assistant 计数，与已加载消息同序）。
-      const entryRefIndex = new Map<string, number>();
-      let refIndex = 0;
-      allMessagesRef.current.forEach((msg, msgIdx) => {
-        if (msg.role !== "user" && msg.role !== "assistant") return;
-        const entryId = entryIdsRef.current[msgIdx];
-        if (entryId) entryRefIndex.set(entryId, refIndex);
-        refIndex += 1;
+      // 1) 纯函数：窗口内回合（msgIdx/refIdx 两套下标分离）
+      const domTurns = buildDomTurns(allMessagesRef.current, entryIdsRef.current);
+      // 2) 纯函数：索引 × 窗口合并（历史全量 + 尾部新回合）
+      const mergedTurns = mergeTurns(turnIndexRef.current, domTurns);
+
+      // 3) 测量副作用：唯一碰 DOM 的地方——填 scrollTop / assistant element。
+      const turns: TurnInfo[] = mergedTurns.map((turn: MergedTurn) => {
+        if (!turn.loaded) {
+          return {
+            entryId: turn.entryId,
+            userMessage: null,
+            userText: turn.userText,
+            assistantPreviews: [],
+            assistantPreviewText: turn.assistantPreviewText,
+            scrollTop: null,
+            loaded: false,
+          };
+        }
+        const userElement = refs?.[turn.refIdx];
+        const assistantPreviews: AssistantPreview[] = turn.assistantList.map((a) => ({
+          markdown: a.markdown,
+          element: refs?.[a.refIdx] ?? null,
+        }));
+        return {
+          entryId: turn.entryId,
+          userMessage: turn.userMessage,
+          userText: turn.userText,
+          assistantPreviews,
+          assistantPreviewText: turn.assistantPreviewText,
+          scrollTop: userElement
+            ? userElement.getBoundingClientRect().top - containerRect.top + scrollEl.scrollTop
+            : null,
+          loaded: true,
+        };
       });
-
-      const turns: TurnInfo[] = [];
-      if (indexItems.length > 0) {
-        // 索引驱动：全量回合。已加载窗口内用 DOM 测量（精确位置/完整预览），
-        // 窗口外只有索引摘要（scrollTop=null，点击后先加载再定位）。
-        for (const item of indexItems) {
-          const userRefIdx = entryRefIndex.get(item.entryId);
-          if (userRefIdx === undefined) {
-            turns.push({
-              entryId: item.entryId,
-              userMessage: null,
-              userText: item.userText,
-              assistantPreviews: [],
-              assistantPreviewText: item.assistantPreview,
-              scrollTop: null,
-              loaded: false,
-            });
-            continue;
-          }
-          const userMessage = allMessagesRef.current[userRefIdx] as UserMessage | undefined;
-          const userElement = refs?.[userRefIdx];
-          const assistantPreviews: AssistantPreview[] = [];
-          for (let msgIdx = userRefIdx + 1; msgIdx < allMessagesRef.current.length; msgIdx++) {
-            const m = allMessagesRef.current[msgIdx];
-            if (m.role === "user") break;
-            if (m.role !== "assistant") continue;
-            const answerMarkdown = getAssistantAnswerMarkdown(m);
-            if (!answerMarkdown) continue;
-            const aEntryId = entryIdsRef.current[msgIdx];
-            const aRefIdx = aEntryId ? entryRefIndex.get(aEntryId) : undefined;
-            assistantPreviews.push({
-              markdown: answerMarkdown,
-              element: aRefIdx !== undefined && refs ? refs[aRefIdx] ?? null : null,
-            });
-          }
-          turns.push({
-            entryId: item.entryId,
-            userMessage: userMessage ?? null,
-            userText: userMessage ? getUserPreview(userMessage) : item.userText,
-            assistantPreviews,
-            assistantPreviewText: item.assistantPreview,
-            scrollTop: userElement
-              ? userElement.getBoundingClientRect().top - containerRect.top + scrollEl.scrollTop
-              : null,
-            loaded: true,
-          });
-        }
-      } else {
-        // fallback：索引未就绪/接口失败时沿用旧行为，只显示已加载窗口。
-        let currentTurn: TurnInfo | null = null;
-        let fallbackRefIndex = 0;
-        for (let msgIdx = 0; msgIdx < allMessagesRef.current.length; msgIdx++) {
-          const message = allMessagesRef.current[msgIdx];
-          if (message.role !== "user" && message.role !== "assistant") continue;
-          const element = refs?.[fallbackRefIndex];
-          fallbackRefIndex += 1;
-
-          if (message.role === "user") {
-            const elementRect = element?.getBoundingClientRect();
-            currentTurn = {
-              entryId: entryIdsRef.current[msgIdx] ?? "",
-              userMessage: message as UserMessage,
-              userText: getUserPreview(message as UserMessage),
-              assistantPreviews: [],
-              assistantPreviewText: "",
-              scrollTop: elementRect
-                ? elementRect.top - containerRect.top + scrollEl.scrollTop
-                : null,
-              loaded: true,
-            };
-            turns.push(currentTurn);
-            continue;
-          }
-
-          if (!currentTurn) continue;
-          const answerMarkdown = getAssistantAnswerMarkdown(message);
-          if (answerMarkdown) {
-            currentTurn.assistantPreviews.push({
-              markdown: answerMarkdown,
-              element,
-            });
-          }
-        }
-      }
 
       const nextNodes = createTurnNodes(turns);
       // 高度自适应：点少时按舒适间距（MAX_NODE_GAP）算自然高度，柱子变矮；
