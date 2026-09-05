@@ -736,21 +736,22 @@ export interface RemoveSessionFromBoardsResult {
 
 export function removeSessionFromBoards(sessionId: string): RemoveSessionFromBoardsResult {
   const db = getDb();
+  // 业务表引用清理与画布节点无关，无条件先执行（即使下方提前 return 也必须清）：
+  // 执行会话被删 → 任务卡解绑 + 待答记录失效，保证幂等闭环。
+  // 注意：RF+yjs 架构下 board_nodes 已无生产写入（下方 sessionNodes 恒空），
+  // 画布节点分支属 tldraw 遗留兼容保留——task_cards/questions 清理绝不能依赖它。
+  const ts = now();
+  db.prepare("UPDATE task_cards SET session_id = NULL, updated = ? WHERE session_id = ?").run(ts, sessionId);
+  db.prepare("DELETE FROM task_card_questions WHERE session_id = ?").run(sessionId);
+
   const sessionNodes = db
     .prepare("SELECT id, board_id AS boardId FROM board_nodes WHERE kind = 'session' AND ref_id = ?")
     .all(sessionId) as Array<{ id: string; boardId: string }>;
-
-  // 待答队列清理与画布节点无关：即使画布无该会话卡（提前 return），
-  // 业务表引用也必须清掉（执行会话被删 → 卡待答记录失效），保证幂等闭环。
-  db.prepare("DELETE FROM task_card_questions WHERE session_id = ?").run(sessionId);
   if (sessionNodes.length === 0) return { removedNodes: 0, boards: [] };
 
-  const ts = now();
   const touched = new Map<string, number>();
   db.exec("BEGIN");
   try {
-    // 1. 任务卡解绑：所有 session_id 引用该会话的卡置空
-    db.prepare("UPDATE task_cards SET session_id = NULL, updated = ? WHERE session_id = ?").run(ts, sessionId);
     for (const n of sessionNodes) {
       // 2. 删指向该会话节点的 exec 线（from=taskcard node → to=会话节点）
       db.prepare("DELETE FROM board_edges WHERE board_id = ? AND to_id = ? AND label = 'exec'").run(n.boardId, n.id);

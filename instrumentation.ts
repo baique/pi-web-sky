@@ -7,8 +7,8 @@ export async function register(): Promise<void> {
   const { startTaskScheduler } = await import("@/lib/task-scheduler");
   startTaskScheduler();
 
-  // 二分定位：board-reconcile 每 10s reconcile 所有看板（写 yjs + sync.db），
-  // 是空壳 tick 下仍每 10s 卡 8s 的最后嫌疑。临时停用验证，定位后恢复。
-  // const { startBoardReconcileScheduler } = await import("@/lib/board-reconcile-scheduler");
-  // startBoardReconcileScheduler();
+  // 10s 定时兜底：补事件链路之外的派生（外部直写 session_meta / 任务卡改 sessionId 等）。
+  // 曾因每 10s 卡 8s 临时停用验证；compact 治理生效后恢复。
+  const { startBoardReconcileScheduler } = await import("@/lib/board-reconcile-scheduler");
+  startBoardReconcileScheduler();
 }
