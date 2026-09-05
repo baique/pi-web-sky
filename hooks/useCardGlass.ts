@@ -76,7 +76,9 @@ export function useCardGlass(bgToken: string, deps: unknown[] = []) {
       `position:absolute;left:0;top:0;pointer-events:none;` +
       // 合成层提升：每帧改 transform 只走合成，不触发重排/重绘
       `will-change:transform;` +
-      `background-image:linear-gradient(${bgToken}, ${bgToken}), var(--glass-bg-image, none);` +
+      // 卡片背景 = 气泡档真实值 + 画布 scrim 值叠加（--glass-bg-image-scrim），
+      // 气泡与磨砂滑块都影响它；未生成（无壁纸/首帧）时回退气泡档再回退纯色。
+      `background-image:linear-gradient(${bgToken}, ${bgToken}), var(--glass-bg-image-scrim, var(--glass-bg-image, none));` +
       `background-repeat:no-repeat,no-repeat;` +
       `background-size:100% 100%,100% 100%;`;
     clip.appendChild(layer);

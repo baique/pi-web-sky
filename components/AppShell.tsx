@@ -173,7 +173,7 @@ export function AppShell() {
  useGlassWallpaper(
    bgUrl,
    bgKind === "image",
-   { offsetX: wallSettings.offsetX, repeat: wallSettings.repeat, fill: wallSettings.fill, bubbleBlur: wallSettings.bubbleBlur },
+   { offsetX: wallSettings.offsetX, repeat: wallSettings.repeat, fill: wallSettings.fill, bubbleBlur: wallSettings.bubbleBlur, scrimBlur: wallSettings.scrimBlur },
    glassTick,
  );
  const [bgAdjusting, setBgAdjusting] = useState(false);
