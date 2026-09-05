@@ -91,15 +91,16 @@ export interface SessionCardData extends Record<string, unknown> {
 }
 
 /**
- * 落库前剥离 UI 态字段（selected/dragging/resizing/measured 是纯本地观感，
- * 绝不入 yjs 文档——写入会脏数据累积，且违背「UI 态不进文档」铁律）。
+ * 落库前剥离 UI 态字段（selected/dragging/resizing 是纯本地观感，绝不入 yjs 文档）。
+ * 注意：measured 必须保留——RF 的 nodeHasDimensions 判定（measured?.width ?? width ??
+ * initialWidth）决定节点是否渲染可见（visibility:hidden），剥掉会导致节点隐形、
+ * 点不中/选中失效/resize 手柄不显示（曾作为回归引入，ae7c052 修复）。
  */
 function cleanNode(node: Node): Node {
-  const { selected, dragging, resizing, measured, ...clean } = node;
+  const { selected, dragging, resizing, ...clean } = node;
   void selected;
   void dragging;
   void resizing;
-  void measured;
   return clean;
 }
 
