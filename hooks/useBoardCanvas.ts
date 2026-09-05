@@ -521,6 +521,11 @@ export function useBoardCanvas({
   // 不依赖 RF 受控 nodes 上的 dragging 标志（那是 RF 内部状态，不随受控 prop 下发）——
   // 用它做 syncNodes 回灌保护：拖拽中 position 只写本地，远端写入不得冲回。
   const draggingNodeIdsRef = useRef<Set<string>>(new Set());
+  // resize 会话守卫：resizing:true 帧标记活跃，resizing:false 落库后清除。
+  // RF 的 NodeResizer 在节点变化后会重新初始化 XYResizer（update 重置 prevValues），
+  // 触发第二次假的 drag end → 派发旧尺寸的 resizing:false change 覆盖刚落的库
+  // （松手尺寸还原）。无活跃会话的 resizing:false 是幽灵 change，必须忽略。
+  const resizeActiveRef = useRef<Set<string>>(new Set());
   // 左/上边缘 resize 的本地 position 跟踪：resize 中 position 只本地跟手（不写 yjs），
   // 松手（dimensions resizing:false）时用最后本地值补落，否则位置被写回 resize 前旧值。
   const lastResizePosRef = useRef(new Map<string, XYPosition>());
@@ -585,13 +590,28 @@ export function useBoardCanvas({
           //（一次 resize 几十条 update）；只写本地 state 跟手。
           // 松手（resizing:false）才落一次最终尺寸。
           if (c.resizing) {
+            resizeActiveRef.current.add(c.id); // 标记 resize 会话活跃
             setNodes((prev) => applyNodeChanges([c], prev)); // 本地 store 跟手
             return;
           }
-          // 松手落库：resize 中左/上边缘的 position 只本地跟手过，用最后本地值补落
+          // resizing:false（松手）：无活跃会话的幽灵 change（RF 重初始化旧值）直接忽略
+          if (!resizeActiveRef.current.has(c.id)) return;
+          resizeActiveRef.current.delete(c.id);
+          // 松手落库：onEnd 的 change 无 setAttributes，applyChange 只更新 measured、
+          // 不更新 style/顶层 width/height——RF 渲染尺寸优先 style，只落 measured 会
+          // 回灌后仍按旧 style 渲染（松手尺寸还原）。这里把最终尺寸写全三处。
           const lastPos = lastResizePosRef.current.get(c.id);
           if (lastPos) lastResizePosRef.current.delete(c.id);
-          nodesMap.set(c.id, lastPos ? { ...cleanNode(n), position: lastPos } : cleanNode(n));
+          const dims = (c.dimensions ?? n.measured) as { width: number; height: number } | undefined;
+          const finalNode = dims
+            ? {
+                ...cleanNode(n),
+                width: dims.width,
+                height: dims.height,
+                style: { ...((n as Node).style ?? {}), width: dims.width, height: dims.height },
+              }
+            : cleanNode(n);
+          nodesMap.set(c.id, lastPos ? { ...finalNode, position: lastPos } : finalNode);
         }
       }
     }
