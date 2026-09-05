@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactFlow } from "@xyflow/react";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
+import type { SessionRunningState } from "@/hooks/useBoardCanvas";
 import { useBoardSearch } from "./BoardSearchContext";
 
 /** session-card 运行中 phase（useBoardCanvas running 快照写入；waiting_input 视为待用户，不算运行） */
@@ -34,6 +35,7 @@ export function BoardTopbar({
   wallSettings,
   updateWallSettings,
   nodes,
+  sessionRunning,
 }: {
   boardName: string;
   /** 任务看板：清空文案与可用性提示随此变化 */
@@ -48,6 +50,8 @@ export function BoardTopbar({
   updateWallSettings: (patch: Partial<WallpaperSettings>) => void;
   /** 当前画布节点（yjs 派生，扫描运行中卡片用） */
   nodes: Array<{ id: string; type: string; data: Record<string, unknown> }>;
+  /** 会话卡运行态镜像（useBoardCanvas 2.5s 轮询维护；yjs data.phase 是旧值，不能用于运行中判定） */
+  sessionRunning: Record<string, SessionRunningState>;
 }) {
   const { setViewport, getViewport, getNodes, screenToFlowPosition } = useReactFlow();
   const { setHighlight } = useBoardSearch();
@@ -67,20 +71,23 @@ export function BoardTopbar({
     return () => ro.disconnect();
   }, []);
 
-  /** 运行中：画面中 phase ∈ 运行中的会话卡。 */
+  /** 运行中：画面中 phase ∈ 运行中的会话卡（读实时镜像，yjs data.phase 是旧值）。 */
   const runningItems = useMemo<RunningItem[]>(() => {
     const out: RunningItem[] = [];
     for (const n of nodes) {
       if (n.type !== "session-card") continue;
       const d = n.data as { phase?: string; title?: string; sessionId?: string };
-      const running = d.phase !== undefined && RUNNING_PHASES.has(d.phase);
-      if (!running || !d.sessionId) continue;
+      if (!d.sessionId) continue;
+      const st = sessionRunning[d.sessionId];
+      const phase = st ? st.phase : d.phase;
+      const running = phase !== undefined && RUNNING_PHASES.has(phase);
+      if (!running) continue;
       const title = (d.title ?? "").trim();
       if (!title) continue;
       out.push({ nodeId: n.id, label: title });
     }
     return out;
-  }, [nodes]);
+  }, [nodes, sessionRunning]);
 
   /** 工作中：画面中展开态（data.expanded）但未运行中的会话卡（运行中已入上区，去重）。 */
   const expandedItems = useMemo<RunningItem[]>(() => {
@@ -89,14 +96,16 @@ export function BoardTopbar({
       if (n.type !== "session-card") continue;
       const d = n.data as { phase?: string; title?: string; sessionId?: string; expanded?: boolean };
       if (!d.expanded || !d.sessionId) continue;
-      const running = d.phase !== undefined && RUNNING_PHASES.has(d.phase);
+      const st = sessionRunning[d.sessionId];
+      const phase = st ? st.phase : d.phase;
+      const running = phase !== undefined && RUNNING_PHASES.has(phase);
       if (running) continue;
       const title = (d.title ?? "").trim();
       if (!title) continue;
       out.push({ nodeId: n.id, label: title });
     }
     return out;
-  }, [nodes]);
+  }, [nodes, sessionRunning]);
 
   /** 角标总数：运行中 + 工作中 */
   const totalCount = runningItems.length + expandedItems.length;
