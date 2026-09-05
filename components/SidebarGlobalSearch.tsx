@@ -7,29 +7,33 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useRouter } from "next/navigation";
 import type { SessionInfo } from "@/lib/types";
 
-interface SearchHit {
-  session: SessionInfo;
-  titleMatch: boolean;
-  snippet: string;
+/** 会话命中：后端 lib/search.ts 的判别联合成员（kind: "session"） */
+interface SessionHit {
+  kind: "session";
+  result: { session: SessionInfo; titleMatch: boolean; snippet: string };
 }
 
+/** 任务卡命中：后端判别联合成员（kind: "task-card"） */
 interface TaskCardHit {
-  id: string;
-  boardId: string;
-  projectKey: string;
-  number: number;
-  name: string;
-  description: string;
-  readyStatus: string;
-  execStatus: string;
+  kind: "task-card";
+  card: {
+    id: string;
+    boardId: string;
+    projectKey: string;
+    number: number;
+    name: string;
+    description: string;
+    readyStatus: string;
+    execStatus: string;
+  };
   titleMatch: boolean;
   snippet: string;
 }
 
+/** 后端 /api/search 返回：任务卡在前、会话在后，全部在 results 里（无独立 taskCards 字段）。 */
 interface SearchResponse {
   indexing: boolean;
-  results: SearchHit[];
-  taskCards: TaskCardHit[];
+  results: Array<SessionHit | TaskCardHit>;
 }
 
 interface Props {
@@ -70,8 +74,7 @@ export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
   const isMobile = useIsMobile();
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchHit[] | null>(null);
-  const [taskCards, setTaskCards] = useState<TaskCardHit[] | null>(null);
+  const [results, setResults] = useState<Array<SessionHit | TaskCardHit> | null>(null);
   const [indexing, setIndexing] = useState(false);
   const [open, setOpen] = useState(false);
   const [mobileOverlay, setMobileOverlay] = useState(false);
@@ -117,7 +120,6 @@ export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
         .then((d) => {
           if (d) {
             setResults(d.results ?? []);
-            setTaskCards(d.taskCards ?? []);
             setIndexing(d.indexing);
           }
         })
@@ -140,7 +142,6 @@ export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
     setMobileOverlay(false);
     setQuery("");
     setResults(null);
-    setTaskCards(null);
   }, []);
 
   // Close on outside click / Escape.
@@ -180,12 +181,12 @@ export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
     fontSize: 12,
   };
 
-  const handlePickTaskCard = useCallback((card: TaskCardHit) => {
+  const handlePickTaskCard = useCallback((card: TaskCardHit["card"]) => {
     close();
     onOpenBoard?.(card.boardId);
   }, [close, onOpenBoard]);
 
-  const resultsPanel = (results: SearchHit[] | null, taskCards: TaskCardHit[] | null, indexing: boolean) => (
+  const resultsPanel = (results: Array<SessionHit | TaskCardHit> | null, indexing: boolean) => (
     <div
       ref={panelRef}
       className="glass-top-panel"
@@ -200,23 +201,25 @@ export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
         <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--text-muted)" }}>
           {t("search.indexing")}
         </div>
-      ) : (results === null || results.length === 0) && (taskCards === null || taskCards.length === 0) ? (
+      ) : results === null || results.length === 0 ? (
         <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--text-muted)" }}>
           {query.trim() ? t("search.noResults") : t("search.empty")}
         </div>
       ) : (
         <div style={{ overflowY: "auto" }}>
-          {/* 任务卡结果 */}
-          {taskCards && taskCards.length > 0 && (
+          {/* 任务卡结果（kind: task-card） */}
+          {results.some((h) => h.kind === "task-card") && (
             <>
               <div style={{ padding: "6px 12px 2px", fontSize: 10, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>
                 {t("search.taskCards")}
               </div>
-              {taskCards.map((card) => (
-                <button
-                  key={`task-${card.id}`}
-                  type="button"
-                  onClick={() => handlePickTaskCard(card)}
+              {results.filter((h): h is TaskCardHit => h.kind === "task-card").map((hit) => {
+                const card = hit.card;
+                return (
+                  <button
+                    key={`task-${card.id}`}
+                    type="button"
+                    onClick={() => handlePickTaskCard(card)}
                   style={{
                     display: "block",
                     width: "100%",
@@ -231,7 +234,7 @@ export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
                   onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                    {card.titleMatch && (
+                    {hit.titleMatch && (
                       <span style={{ flexShrink: 0, fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--accent)", background: "var(--side-selected)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)", borderRadius: 3, padding: "0 4px", lineHeight: "15px" }}>
                         {t("search.title")}
                       </span>
@@ -243,23 +246,24 @@ export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
                       {card.name}
                     </span>
                   </div>
-                  {card.snippet && (
+                  {hit.snippet && (
                     <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {card.snippet}
+                      {hit.snippet}
                     </div>
                   )}
                 </button>
-              ))}
+              );
+              })}
             </>
           )}
-          {/* 会话结果 */}
-          {results && results.length > 0 && (
+          {/* 会话结果（kind: session） */}
+          {results.some((h) => h.kind === "session") && (
             <>
               <div style={{ padding: "6px 12px 2px", fontSize: 10, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>
                 {t("search.sessions")}
               </div>
-              {results.map((hit) => {
-                const s = hit.session;
+              {results.filter((h): h is SessionHit => h.kind === "session").map((hit) => {
+                const s = hit.result.session;
                 const title = s.name || s.firstMessage.slice(0, 50) || s.id.slice(0, 12);
                 return (
                   <button
@@ -280,7 +284,7 @@ export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
                     onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                      {hit.titleMatch && (
+                      {hit.result.titleMatch && (
                         <span style={{ flexShrink: 0, fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--accent)", background: "var(--side-selected)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)", borderRadius: 3, padding: "0 4px", lineHeight: "15px" }}>
                           {t("search.title")}
                         </span>
@@ -292,9 +296,9 @@ export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
                         {s.cwd.split(/[\\/]/).filter(Boolean).pop()}
                       </span>
                     </div>
-                    {hit.snippet && (
+                    {hit.result.snippet && (
                       <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {renderSnippet(hit.snippet)}
+                        {renderSnippet(hit.result.snippet)}
                       </div>
                     )}
                   </button>
@@ -363,7 +367,7 @@ export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
                 {t("sidebar.cancel")}
               </button>
             </div>
-            {query.trim() && resultsPanel(results, taskCards, indexing)}
+            {query.trim() && resultsPanel(results, indexing)}
           </div>,
           document.body,
         )}
@@ -417,7 +421,7 @@ export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
       </div>
       {open && pos && createPortal(
         <div style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 520 }}>
-          {resultsPanel(results, taskCards, indexing)}
+          {resultsPanel(results, indexing)}
         </div>,
         document.body,
       )}
