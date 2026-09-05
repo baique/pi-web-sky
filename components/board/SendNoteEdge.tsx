@@ -130,7 +130,7 @@ export function SendNoteEdge({ id, source, target, sourceX, sourceY, targetX, ta
               background: "var(--board-card-glass)",
               backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
               WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-              color: disabled ? "var(--text-dim)" : "var(--accent)",
+              color: disabled ? "var(--text-muted)" : "var(--accent)",
               fontSize: 11,
               fontWeight: 600,
               cursor: disabled ? "default" : "pointer",
