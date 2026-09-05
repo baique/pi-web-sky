@@ -506,6 +506,13 @@ export function useBoardCanvas({
       } else if (c.type === "dimensions") {
         const n = next.find((x) => x.id === c.id);
         if (n) {
+          // 文字节点：尺寸驱动字号（fs = base × width/REF_W），拖动中 RF 每帧
+          // dimensions 是中间态，写 yjs 会 CRDT 历史爆炸；松手（resizing:false）
+          // 才落一次最终尺寸，高度由 TextNode 内容自适应校准。
+          if (n.type === "text-node" && c.resizing) {
+            setNodes((prev) => applyNodeChanges([c], prev)); // 本地 store 跟手
+            return;
+          }
           // 剥掉 dragging（UI 态，不落文档；RF 拖拽态由本地 store 管）
           const { dragging: _d, ...clean } = n;
           nodesMap.set(c.id, clean);

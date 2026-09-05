@@ -1,13 +1,17 @@
 "use client";
 
 /**
- * 手写体文字节点（RF 版）。
+ * 手写体文字节点（RF 版）——复刻 tldraw/excalidraw 文字交互。
  *
- * 类似 excalidraw 的文字：无卡片背景，只有文字本身，手写字体渲染（霞鹜文楷，全量中文字体）。
- * - 双击进入编辑：textarea 自适应高度，失焦/Ctrl+Enter 保存，Esc 取消
- * - 非编辑态：纯文字 + 手写体（--font-hand，粗体 700），选中态虚线描边随内容自适应
- * - 拖拽缩放（NodeResizer）：像 excalidraw 一样拖角缩放，按比例调整字号
- * - 空白文字：创建后默认进入编辑态（autofocus）
+ * 尺寸驱动派：NodeResizer 只改节点尺寸（RF 原生管理），字号 = 纯函数（宽度）：
+ *   fs = clamp(base × width / REF_W, FS_MIN, FS_MAX)
+ * 字号与边框同源同步（字号由宽度派生，内容重排撑高，高度再校准回内容）。
+ * 参考实践：XYflow 社区 srl-labs/vscode-containerlab TrafficRateNode（字号从
+ * 节点尺寸派生、onResizeEnd 落库）；公式与 excalidraw 的宽度比例缩放同构。
+ *
+ * - 双击进入编辑：textarea 自适应，失焦/Ctrl+Enter 保存，Esc 取消
+ * - 空内容失焦自动删卡
+ * - 选中态 NodeResizer 4 角 + 4 边手柄
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,89 +19,107 @@ import { NodeResizer, Handle, Position, type NodeProps } from "@xyflow/react";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { memoBoardNode } from "./memoNode";
 
-/** 默认字号（px） */
-export const TEXT_NODE_DEFAULT_FS = 18;
-/** 默认字重（加粗，手写观感更接近 excalidraw） */
+/** 创建时默认宽度（与 CanvasStage addNodeAt 一致），作为字号基准宽度 */
+const REF_W = 240;
+/** 基准宽度下的字号（px） */
+const TEXT_NODE_DEFAULT_FS = 40;
+/** 默认字重（粗体） */
 export const TEXT_NODE_FONT_WEIGHT = 700;
-/** 字号缩放 clamp 范围 */
-const FS_MIN = 10;
-const FS_MAX = 120;
+/** 字号 clamp 范围 */
+const FS_MIN = 12;
+const FS_MAX = 200;
 
 export interface TextNodeData extends Record<string, unknown> {
   /** 纯文本内容（无 markdown，所见即所得） */
   text: string;
-  /** 手写体字号（px），默认 18 */
-  fontSize?: number;
   /** 文字颜色（CSS 颜色），默认主题色 */
   color?: string;
   /** 是否自动进入编辑（创建后首帧） */
   autofocus?: boolean;
 }
 
-function TextNodeImpl({ id, data, selected, width }: NodeProps & { data: TextNodeData }) {
-  const { updateNode } = useBoardCanvasOps();
+function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data: TextNodeData }) {
+  const { updateNode, deleteNode } = useBoardCanvasOps();
   const text = data.text ?? "";
-  const fontSize = data.fontSize ?? TEXT_NODE_DEFAULT_FS;
   const color = data.color ?? "var(--text)";
 
+  // 字号 = 宽度派生（纯函数，无状态）：宽 REF_W → 默认 40px，等比例放大缩小
+  const nodeW = Math.max(20, width ?? REF_W);
+  const derivedFs = Math.round(Math.min(FS_MAX, Math.max(FS_MIN, TEXT_NODE_DEFAULT_FS * (nodeW / REF_W))));
+
   const [editing, setEditing] = useState(Boolean(data.autofocus));
-  // 编辑草稿（保存时读 ref，防 blur/Ctrl+Enter 丢尾输入——同便笺 latestMdRef 教训）
+  // 拖拽缩放中的本地字号：RF 拖动时 props.width（来自 measured）不实时更新，
+  // 用 onResize 的 params.width（flow 单位）实时算字号跟手；松手清空回落派生值。
+  const [dragFs, setDragFs] = useState<number | null>(null);
+  const effectiveFs = dragFs ?? derivedFs;
+  // 编辑草稿（保存时读 ref，防 blur/Ctrl+Enter 丢尾输入）
   const draftRef = useRef(text);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  // 进入编辑时的初始值（外部 text 变化只在进入编辑时重置一次）
-  const initialTextRef = useRef(text);
   const cancellingRef = useRef(false);
-  // 上次是否在编辑（防止编辑期间外部 yjs 回灌 text 覆盖草稿）
   const wasEditingRef = useRef(Boolean(data.autofocus));
 
-  // textarea 高度自适应内容（useCallback 需在 useEffect 前定义）
+  // textarea 高度自适应
   const autoGrow = useCallback((ta: HTMLTextAreaElement) => {
     ta.style.height = "auto";
     ta.style.height = `${Math.max(24, ta.scrollHeight)}px`;
   }, []);
 
-  // 进入编辑：重置草稿 + 聚焦末尾 + 自适应高度；编辑期间外部 text 变化不覆盖草稿
+  // 重置编辑草稿（编辑期间外部 text 变化不覆盖草稿：只在非编辑 → 编辑时重置）
   useEffect(() => {
     if (editing && !wasEditingRef.current) {
-      initialTextRef.current = text;
       draftRef.current = text;
       cancellingRef.current = false;
-      const ta = textareaRef.current;
-      if (ta) {
-        requestAnimationFrame(() => {
-          ta.focus();
-          ta.setSelectionRange(ta.value.length, ta.value.length);
-          autoGrow(ta);
-        });
-      }
     }
     wasEditingRef.current = editing;
+  }, [editing, text]);
+
+  // 聚焦：进入编辑（含 autofocus 首帧）即聚焦末尾 + 自适应高度。
+  useEffect(() => {
+    if (!editing) return;
+    draftRef.current = text;
+    let t1 = 0;
+    let t2 = 0;
+    const ta = textareaRef.current;
+    if (ta) {
+      t1 = requestAnimationFrame(() => {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+        autoGrow(ta);
+        t2 = requestAnimationFrame(() => {
+          if (document.activeElement !== ta) {
+            ta.focus();
+            ta.setSelectionRange(ta.value.length, ta.value.length);
+          }
+        });
+      });
+    }
+    return () => { cancelAnimationFrame(t1); cancelAnimationFrame(t2); };
   }, [editing, text, autoGrow]);
 
-  const save = useCallback(() => {
+  const finish = useCallback(() => {
     const next = draftRef.current;
+    // 空内容失焦：自动删卡（不留空白文字卡片）
+    if (!next.trim()) {
+      deleteNode(id);
+      return;
+    }
     if (next !== text || data.autofocus) {
       updateNode(id, { data: { ...data, autofocus: undefined, text: next } });
     }
-  }, [text, data, id, updateNode]);
-
-  const finish = useCallback(() => {
-    save();
     setEditing(false);
-  }, [save]);
+  }, [text, data, id, updateNode, deleteNode]);
 
   const cancel = useCallback(() => {
     cancellingRef.current = true;
-    draftRef.current = initialTextRef.current;
-    // 取消也清掉 autofocus 标记（防止 Esc 后 yjs 里残留 autofocus，下次回灌又进编辑）
+    draftRef.current = text;
     if (data.autofocus) {
       updateNode(id, { data: { ...data, autofocus: undefined, text: draftRef.current } });
     }
     setEditing(false);
-  }, [data, id, updateNode]);
+  }, [data, id, updateNode, text]);
 
-  // 失焦自动保存：焦点移到卡外（非本节点内部）→ 保存退出编辑
+  // 失焦自动保存：焦点移出节点 → finish（空内容会走删卡）
   const handleBlur = useCallback(
     (e: React.FocusEvent) => {
       if (cancellingRef.current) return;
@@ -123,52 +145,67 @@ function TextNodeImpl({ id, data, selected, width }: NodeProps & { data: TextNod
     [finish, cancel],
   );
 
-  // 编辑中 textarea 输入：更新草稿 + 自适应
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     draftRef.current = e.target.value;
     autoGrow(e.target);
   }, [autoGrow]);
 
-  // ---- 拖拽缩放：像 excalidraw 一样，resize 按比例调整字号 ----
-  // resize 起点快照（宽度基准：字重随宽度同比缩放，保持文字观感比例）
-  const resizeStartRef = useRef<{ w: number; fs: number } | null>(null);
-  const onResizeStart = useCallback(() => {
-    resizeStartRef.current = { w: width ?? 200, fs: fontSize };
-  }, [width, fontSize]);
+  // 高度 = 内容自适应：字号变 / 文本变 → 内容重排 → 校准节点 height（flow 单位）。
+  // offsetHeight 是 layout px（不含 RF 的 CSS transform 缩放），直接 = flow 单位，
+  // 不能除以 zoom（rect 才需除，那是屏幕 px）。
+  const syncHeight = useCallback(() => {
+    const el = rootRef.current;
+    if (!el || editing) return;
+    const h = Math.max(20, Math.round(el.offsetHeight));
+    if (Math.abs(h - (height ?? 0)) > 1) {
+      // 保留原 style 的 width（浅合并会整体替换 style 对象，丢掉 width 会让节点被内容撑开）
+      updateNode(id, { style: { width: width ?? REF_W, height: h } });
+    }
+  }, [id, editing, updateNode, width, height]);
+
+  useEffect(() => {
+    if (editing) return;
+    const t = requestAnimationFrame(syncHeight);
+    return () => cancelAnimationFrame(t);
+  }, [effectiveFs, text, editing, syncHeight, height]);
+
+  // NodeResizer：RF 原生改节点尺寸（flow 单位），松手落 yjs。拖动中 props.width
+  //（来自 measured）不实时更新，用 onResize 的 params.width 实时派生字号本地跟手；
+  // 松手清空 dragFs，回落派生值（= 拖动终值，无跳变）。
+  const onResizeStart = useCallback(() => { /* 无需起点快照：字号 = f(宽度) 纯函数 */ }, []);
   const onResize = useCallback(
     (_: unknown, params: { width: number; height: number }) => {
-      const start = resizeStartRef.current;
-      if (!start || start.w <= 0) return;
-      const scale = params.width / start.w;
-      const nextFs = Math.round(Math.min(FS_MAX, Math.max(FS_MIN, start.fs * scale)));
-      // 更新样式尺寸 + 字号（字号写进 data，换端/刷新保持）
-      updateNode(id, {
-        style: { width: Math.max(params.width, 40), height: Math.max(params.height, 24) },
-        data: { ...data, fontSize: nextFs },
-      });
+      const nextFs = Math.round(Math.min(FS_MAX, Math.max(FS_MIN, TEXT_NODE_DEFAULT_FS * (params.width / REF_W))));
+      setDragFs(nextFs);
     },
-    [id, data, updateNode],
+    [],
   );
   const onResizeEnd = useCallback(() => {
-    resizeStartRef.current = null;
+    setDragFs(null);
   }, []);
 
-  return (
-    <>
-      {/* 缩放手柄 + 连线 Handle 挂在卡根外（与便笺同款布局） */}
+  // 手柄渲染（选中态显示，wrapper 层，RF 处理遮挡/z-index）
+  const renderResizer = () => {
+    if (!selected || editing) return null;
+    return (
       <NodeResizer
-        isVisible={selected && !editing}
-        minWidth={40}
-        minHeight={24}
+        minWidth={80}
+        minHeight={40}
         onResizeStart={onResizeStart}
         onResize={onResize}
         onResizeEnd={onResizeEnd}
         color="var(--accent)"
-        handleStyle={{ width: 8, height: 8, borderRadius: 2, border: "1px solid var(--bg-panel)", background: "var(--accent)" }}
-        lineStyle={{ borderColor: "color-mix(in srgb, var(--accent) 50%, transparent)" }}
+        handleStyle={{ width: 12, height: 12, borderRadius: 3, border: "1px solid var(--bg-panel)", background: "var(--accent)", zIndex: 30, boxShadow: "0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent)" }}
+        lineStyle={{ borderColor: "color-mix(in srgb, var(--accent) 60%, transparent)", zIndex: 30 }}
       />
+    );
+  };
+
+  return (
+    <>
       <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
+      {renderResizer()}
       <div
         ref={rootRef}
         data-board-node
@@ -177,26 +214,27 @@ function TextNodeImpl({ id, data, selected, width }: NodeProps & { data: TextNod
         onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
         style={{
           position: "relative",
+          zIndex: 0, // NodeResizer 手柄 zIndex 30 必须盖住内容
+          // 尺寸：宽度跟随 RF 节点（NodeResizer 改），高度内容自适应（overflow visible，
+          // 同步校准到 style.height）
           width: "100%",
-          height: "100%",
-          minWidth: 40,
-          minHeight: 24,
+          minHeight: 28,
           boxSizing: "border-box",
-          // 选中/编辑态：虚线描边（类似 excalidraw 选中框）；非选中无边框无背景
+          // 选中/编辑态：虚线描边（excalidraw 选中框）
           outline: selected || editing ? "1.5px dashed color-mix(in srgb, var(--accent) 65%, transparent)" : "none",
-          outlineOffset: 4,
+          outlineOffset: 5,
           borderRadius: 4,
           padding: "4px 6px",
           color,
           fontFamily: "var(--font-hand)",
-          fontSize,
+          fontSize: effectiveFs,
           fontWeight: TEXT_NODE_FONT_WEIGHT,
           lineHeight: 1.35,
           cursor: "default",
           userSelect: editing ? "text" : "none",
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
-          overflow: "hidden",
+          overflowWrap: "anywhere",
         }}
       >
         {editing ? (
@@ -213,8 +251,8 @@ function TextNodeImpl({ id, data, selected, width }: NodeProps & { data: TextNod
             style={{
               display: "block",
               width: "100%",
-              minWidth: 160,
-              minHeight: 24,
+              minWidth: 0,
+              minHeight: 26,
               border: "none",
               outline: "none",
               background: "transparent",
@@ -229,14 +267,11 @@ function TextNodeImpl({ id, data, selected, width }: NodeProps & { data: TextNod
               userSelect: "text",
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
+              caretColor: "currentColor",
             }}
           />
         ) : (
-          <div
-            className="nodrag"
-            onPointerDown={(e) => { if (e.button === 0) e.stopPropagation(); }}
-            style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", minHeight: "1em" }}
-          >
+          <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", minHeight: "1em" }}>
             {text || <span style={{ opacity: 0.35 }}>双击编辑</span>}
           </div>
         )}
