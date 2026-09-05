@@ -130,7 +130,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
     setRenaming(false);
     if (!name || name === title) return;
     const prevTitle = title;
-    updateNode(id, { data: { ...data, title: name } });
+    updateNode(id, { data: { title: name } });
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
         method: "PATCH",
@@ -140,10 +140,10 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
       if (res.ok) {
         dispatchBoardSessionRenamed(sessionId, name);
       } else {
-        updateNode(id, { data: { ...data, title: prevTitle } });
+        updateNode(id, { data: { title: prevTitle } });
       }
     } catch {
-      updateNode(id, { data: { ...data, title: prevTitle } });
+      updateNode(id, { data: { title: prevTitle } });
     }
   };
   const cancelRename = () => setRenaming(false);
@@ -186,19 +186,17 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
     const nodes = getNodes();
     const self = nodes.find((n) => n.id === id);
     const pos = self?.position ?? { x: 0, y: 0 };
+    // 参考线跟手；尺寸不写 yjs（resize 中每帧写会 CRDT 历史爆炸），
+    // 松手由 onNodesChange dimensions(resizing:false) 一次性落库。
     const snap = computeResizeSnap(id, pos, params.width, params.height, nodes);
     setSnapLines(snap.lines);
-    const finalW = snap.snapW ?? params.width;
-    const finalH = snap.snapH ?? params.height;
-    updateNode(id, { data: { ...dataRef.current, w: finalW, h: finalH } });
-  }, [id, updateNode, setSnapLines, getNodes]);
+  }, [id, setSnapLines, getNodes]);
 
   // 新会话卡转正：清 cwd 字段（写 Y.Doc → CRDT 广播）。
   // 只清 cwd（未就绪标记）：taskId 是卡的任务归属信息，保留——
   // 孤儿删判据已改为只看 session_meta，不再依赖/清空卡上 taskId。
   const handlePromote = useCallback(() => {
-    const d = dataRef.current;
-    updateNode(id, { data: { ...d, cwd: "" } });
+    updateNode(id, { data: { cwd: "" } });
   }, [id, updateNode]);
 
   const meta = phaseMeta[phase] ?? phaseMeta.idle;
@@ -382,14 +380,14 @@ function nextExpandState(data: SessionCardData, w: number, h: number) {
   if (data.expanded) {
     // 展开 → 收合
     return {
-      data: { ...data, expanded: false, expandedW: w, expandedH: h, w: data.collapsedW || CARD_W, h: data.collapsedH || CARD_H },
+      data: { expanded: false, expandedW: w, expandedH: h, w: data.collapsedW || CARD_W, h: data.collapsedH || CARD_H },
       w: data.collapsedW || CARD_W,
       h: data.collapsedH || CARD_H,
     };
   }
   // 收合 → 展开
   return {
-    data: { ...data, expanded: true, collapsedW: w, collapsedH: h, w: data.expandedW || EXPANDED_DEFAULT_W, h: data.expandedH || EXPANDED_DEFAULT_H },
+    data: { expanded: true, collapsedW: w, collapsedH: h, w: data.expandedW || EXPANDED_DEFAULT_W, h: data.expandedH || EXPANDED_DEFAULT_H },
     w: data.expandedW || EXPANDED_DEFAULT_W,
     h: data.expandedH || EXPANDED_DEFAULT_H,
   };

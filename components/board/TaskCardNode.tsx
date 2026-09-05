@@ -171,7 +171,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     setDraft((d) => {
       const next = d ? { ...d, [key]: value } : d;
       if (next && (key === "name" || key === "description")) {
-        updateNodeDebounced(id, { data: { ...data, name: key === "name" ? (value as string) : next.name, description: key === "description" ? (value as string) : next.description ?? "" } });
+        updateNodeDebounced(id, { data: { name: key === "name" ? (value as string) : next.name, description: key === "description" ? (value as string) : next.description ?? "" } });
       }
       return next;
     });
@@ -206,7 +206,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       // 必须先改 id 再落 cardId，否则 reconcile 已按 task-<cardId> 补卡时两者并存。
       const newId = `task-${created.id}`;
       normalizeNodeId(id, newId);
-      updateNode(newId, { data: { ...data, cardId: created.id, number: created.number, name: created.name, readyStatus: created.readyStatus, priority: created.priority, due: created.due ?? undefined } });
+      updateNode(newId, { data: { cardId: created.id, number: created.number, name: created.name, readyStatus: created.readyStatus, priority: created.priority, due: created.due ?? undefined } });
       setDraft((d) => (d ? { ...d, ...created, sessionId: created.sessionId } : d));
       void reload();
     }
@@ -235,7 +235,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     savingRef.current = false;
     setSaving(false);
     if (ok) {
-      updateNode(id, { data: { ...data, name: draft.name, description: draft.description ?? "", readyStatus: draft.readyStatus, priority: draft.priority, due: draft.due ?? undefined } });
+      updateNode(id, { data: { name: draft.name, description: draft.description ?? "", readyStatus: draft.readyStatus, priority: draft.priority, due: draft.due ?? undefined } });
     } else {
       setSaveError(error ?? "保存失败");
     }
@@ -298,7 +298,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       const nw = ok ? data.collapsedW : FORM_W;
       const nh = ok ? data.collapsedH : FORM_H;
       updateNode(id, {
-        data: { ...data, expanded: false, expandedW: curW, expandedH: curH, w: nw, h: nh },
+        data: { expanded: false, expandedW: curW, expandedH: curH, w: nw, h: nh },
         // 尺寸三处对齐：顶层 width/height（NodeResizer 拖过会残留，RF 优先读它）
         // + style（RF 备选）+ data.w/h（镜像）。只改 style 会被顶层残留值屏蔽。
         width: nw,
@@ -311,7 +311,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       const nw = ok ? data.expandedW : EXPANDED_W;
       const nh = ok ? data.expandedH : EXPANDED_H;
       updateNode(id, {
-        data: { ...data, expanded: true, collapsedW: curW, collapsedH: curH, w: nw, h: nh },
+        data: { expanded: true, collapsedW: curW, collapsedH: curH, w: nw, h: nh },
         width: nw,
         height: nh,
         style: { width: nw, height: nh },
@@ -336,12 +336,11 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     const nodes = getNodes();
     const self = nodes.find((n) => n.id === id);
     const pos = self?.position ?? { x: 0, y: 0 };
+    // 参考线跟手；尺寸不写 yjs（resize 中每帧写会 CRDT 历史爆炸），
+    // 松手由 onNodesChange dimensions(resizing:false) 一次性落库。
     const snap = computeResizeSnap(id, pos, params.width, params.height, nodes);
     setSnapLines(snap.lines);
-    const finalW = snap.snapW ?? params.width;
-    const finalH = snap.snapH ?? params.height;
-    updateNode(id, { data: { ...data, w: finalW, h: finalH } });
-  }, [id, data, updateNode, setSnapLines, getNodes]);
+  }, [id, setSnapLines, getNodes]);
 
   // （exec 状态已由上方 useTaskCardStatus 从 running 轮询镜像读取）
 

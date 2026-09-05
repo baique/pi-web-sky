@@ -3,7 +3,7 @@
 import { createContext, createElement, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
-import type { Node, Edge, NodeChange, EdgeChange } from "@xyflow/react";
+import type { Node, Edge, NodeChange, EdgeChange, XYPosition } from "@xyflow/react";
 import { applyNodeChanges, applyEdgeChanges } from "@xyflow/react";
 import type { BoardInfo, RunningSnapshot, TaskCardRunningState } from "@/lib/board-types";
 import { dispatchBoardSessionCreated, dispatchBoardSessionDeleted } from "@/lib/board-events";
@@ -88,6 +88,19 @@ export interface SessionCardData extends Record<string, unknown> {
   expandedH: number;
   collapsedW: number;
   collapsedH: number;
+}
+
+/**
+ * 落库前剥离 UI 态字段（selected/dragging/resizing/measured 是纯本地观感，
+ * 绝不入 yjs 文档——写入会脏数据累积，且违背「UI 态不进文档」铁律）。
+ */
+function cleanNode(node: Node): Node {
+  const { selected, dragging, resizing, measured, ...clean } = node;
+  void selected;
+  void dragging;
+  void resizing;
+  void measured;
+  return clean;
 }
 
 export function useBoardCanvas({
@@ -248,6 +261,9 @@ export function useBoardCanvas({
       edgesMap.unobserve(syncEdges);
       viewMap.unobserve(syncView);
       p.off("synced", onSynced);
+      // 切板/关 tab 前先 flush 挂起更新：flushDelay 500ms 窗口内未送达的
+      // 位置/尺寸变更（拖完立刻切板）会随 destroy 静默丢失。
+      p.flushPendingUpdates?.();
       p.destroy();
       providerRef.current = null;
       nodesMapRef.current = null;
@@ -504,6 +520,9 @@ export function useBoardCanvas({
   // 不依赖 RF 受控 nodes 上的 dragging 标志（那是 RF 内部状态，不随受控 prop 下发）——
   // 用它做 syncNodes 回灌保护：拖拽中 position 只写本地，远端写入不得冲回。
   const draggingNodeIdsRef = useRef<Set<string>>(new Set());
+  // 左/上边缘 resize 的本地 position 跟踪：resize 中 position 只本地跟手（不写 yjs），
+  // 松手（dimensions resizing:false）时用最后本地值补落，否则位置被写回 resize 前旧值。
+  const lastResizePosRef = useRef(new Map<string, XYPosition>());
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     const nodesMap = nodesMapRef.current;
@@ -518,6 +537,14 @@ export function useBoardCanvas({
     if (dataChanges.length === 0) return;
     const current = Array.from(nodesMap.values());
     const next = applyNodeChanges(dataChanges, current);
+    // 预扫描本批 resize 帧（dimensions resizing:true）：左/上边缘 resize 的 position
+    // change 无 dragging 标记（RF 同批推送 position + dimensions(resizing:true)），
+    // 靠它识别，避免 resize 中每帧写 yjs 造成 CRDT 历史爆炸。
+    const resizeIds = new Set(
+      dataChanges
+        .filter((c): c is Extract<NodeChange, { type: "dimensions" }> => c.type === "dimensions" && c.resizing === true)
+        .map((c) => c.id),
+    );
     for (const c of dataChanges) {
       if (c.type === "add" || c.type === "replace") {
         nodesMap.set(c.item.id, c.item);
@@ -536,29 +563,34 @@ export function useBoardCanvas({
         else draggingNodeIdsRef.current.delete(c.id);
         const n = next.find((x) => x.id === c.id);
         if (n) {
-          if (c.dragging === true) {
-            // 拖拽中：position 只写本地 state，不写 yjs——每帧写会让 CRDT 历史爆炸
-            //（一次拖拽几十上百条 update，实测 5 节点看板堆到 21MB）。本地 state 跟手。
+          if (c.dragging === true || resizeIds.has(c.id)) {
+            // 拖拽/resize 中：position 只写本地 state，不写 yjs——每帧写会让
+            // CRDT 历史爆炸（一次拖拽几十上百条 update，实测 5 节点看板堆到
+            // 21MB）。本地 state 跟手。
             setNodes((prev) => prev.map((x) => (x.id === c.id ? { ...x, position: n.position } : x)));
+            // resize 的 position 帧（左/上边缘，无 dragging 标记）：记下本地值，
+            // 松手时补落（RF 松手只推 dimensions 不再推 position）。
+            if (!c.dragging) lastResizePosRef.current.set(c.id, n.position);
           } else {
-            // dragStop：一次写入最终值（“保留最后一帧”）。此前漏写 → 拖完刷新位置还原、多端不同步。
-            nodesMap.set(c.id, { ...n, position: n.position });
+            // dragStop：一次写入最终值（"保留最后一帧"）。此前漏写 → 拖完刷新位置还原、多端不同步。
+            nodesMap.set(c.id, { ...cleanNode(n), position: n.position });
             setNodes((prev) => prev.map((x) => (x.id === c.id ? { ...x, position: n.position } : x)));
           }
         }
       } else if (c.type === "dimensions") {
         const n = next.find((x) => x.id === c.id);
         if (n) {
-          // 文字节点：尺寸驱动字号（fs = base × width/REF_W），拖动中 RF 每帧
-          // dimensions 是中间态，写 yjs 会 CRDT 历史爆炸；松手（resizing:false）
-          // 才落一次最终尺寸，高度由 TextNode 内容自适应校准。
-          if (n.type === "text-node" && c.resizing) {
+          // resize 中：RF 每帧 dimensions 是中间态，写 yjs 会 CRDT 历史爆炸
+          //（一次 resize 几十条 update）；只写本地 state 跟手。
+          // 松手（resizing:false）才落一次最终尺寸。
+          if (c.resizing) {
             setNodes((prev) => applyNodeChanges([c], prev)); // 本地 store 跟手
             return;
           }
-          // 剥掉 dragging（UI 态，不落文档；RF 拖拽态由本地 store 管）
-          const { dragging: _d, ...clean } = n;
-          nodesMap.set(c.id, clean);
+          // 松手落库：resize 中左/上边缘的 position 只本地跟手过，用最后本地值补落
+          const lastPos = lastResizePosRef.current.get(c.id);
+          if (lastPos) lastResizePosRef.current.delete(c.id);
+          nodesMap.set(c.id, lastPos ? { ...cleanNode(n), position: lastPos } : cleanNode(n));
         }
       }
     }
@@ -748,8 +780,12 @@ export function useBoardCanvas({
         console.warn(`[board] 删除任务卡 ${d.cardId} 异常`, e),
       );
     } else {
-      // 便笺/文本/图片：直接删
+      // 便笺/文本/图片：直接删（级联删边——普通看板无 reconcile 兜底，
+      // 不删边会留 yjs 幽灵边永久残留）
       nodesMap.delete(node.id);
+      for (const e of Array.from(edgesMap.values())) {
+        if (e.source === node.id || e.target === node.id) edgesMap.delete(e.id);
+      }
     }
   }, []);
 

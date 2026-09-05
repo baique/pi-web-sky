@@ -91,9 +91,9 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   const save = useCallback(() => {
     const md = latestMdRef.current;
     if (md !== text || draftBadge !== badge) {
-      updateNode(id, { data: { ...data, text: md, badge: draftBadge } });
+      updateNode(id, { data: { text: md, badge: draftBadge } });
     }
-  }, [draftBadge, text, badge, updateNode, id, data]);
+  }, [draftBadge, text, badge, updateNode, id]);
 
   const finish = useCallback(() => {
     save();
@@ -176,12 +176,11 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     const nodes = getNodes();
     const self = nodes.find((n) => n.id === id);
     const pos = self?.position ?? { x: 0, y: 0 };
+    // 参考线跟手；尺寸不写 yjs（resize 中每帧写会 CRDT 历史爆炸），
+    // 松手由 onNodesChange dimensions(resizing:false) 一次性落库。
     const snap = computeResizeSnap(id, pos, params.width, params.height, nodes);
     setSnapLines(snap.lines);
-    const finalW = snap.snapW ?? params.width;
-    const finalH = snap.snapH ?? params.height;
-    updateNode(id, { data: { ...data, w: finalW, h: finalH } });
-  }, [id, data, updateNode, setSnapLines, getNodes]);
+  }, [id, setSnapLines, getNodes]);
 
   return (
     <>
