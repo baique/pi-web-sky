@@ -236,6 +236,7 @@ export async function reconcileBoard(boardId: string): Promise<void> {
           data: {
             sessionId: sid,
             title: "",
+            emoji: "💬",
             projectName: "",
             messageCount: 0,
             lastReply: "",

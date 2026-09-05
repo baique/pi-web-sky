@@ -80,6 +80,8 @@ export interface SessionRunningState {
 export interface SessionCardData extends Record<string, unknown> {
   sessionId: string;
   title: string;
+  /** 用户设置的 emoji（空/缺省 → 类别默认 💬）；状态跟随 emoji 不落库 */
+  emoji?: string;
   projectName: string;
   messageCount: number;
   lastReply: string;
@@ -668,6 +670,7 @@ export function useBoardCanvas({
       data: {
         sessionId,
         title: "",
+        emoji: "💬",
         projectName: "",
         messageCount: 0,
         lastReply: "",
@@ -734,6 +737,7 @@ export function useBoardCanvas({
       data: {
         sessionId,
         title: summary?.title ?? "Untitled",
+        emoji: "💬",
         projectName: summary?.projectName ?? "",
         messageCount: summary?.messageCount ?? 0,
         lastReply: summary?.lastReply ?? "",

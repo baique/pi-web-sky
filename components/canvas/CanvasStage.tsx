@@ -99,11 +99,11 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   const addNodeAt = useCallback((type: FreeNodeType, flowPos: { x: number; y: number }, extra?: { src?: string; naturalW?: number; naturalH?: number; name?: string }) => {
     const id = crypto.randomUUID();
     if (type === "sticky-note") {
-      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 280 }, data: { text: "", badge: "blue" } });
+      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 280 }, data: { text: "", badge: "blue", emoji: "📝" } });
     } else if (type === "text-node") {
       ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 240, height: 60 }, data: { text: "", autofocus: true } });
     } else if (type === "task-card") {
-      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 270 }, data: { cardId: "", number: 0, name: "新建任务", description: "", readyStatus: "draft", priority: 0, expanded: false, w: 380, h: 270, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0 } });
+      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 270 }, data: { cardId: "", number: 0, name: "新建任务", description: "", readyStatus: "draft", priority: 0, expanded: false, w: 380, h: 270, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0, emoji: "✅" } });
     } else if (type === "image-node" && extra?.src) {
       // 图片：有原始尺寸按等比（最长边 400）落位；无则默认 240x180
       let w = 240;

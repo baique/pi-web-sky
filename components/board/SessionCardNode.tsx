@@ -11,6 +11,7 @@ import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { useSessionRunning, useSessionSummary } from "@/hooks/useBoardCanvas";
 import { memoBoardNode } from "./memoNode";
 import { dispatchBoardSessionRenamed, dispatchBoardCwdSwitch } from "@/lib/board-events";
+import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
 import { CardKindBadge } from "@/components/canvas/CardKindBadge";
 
@@ -331,6 +332,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
         }}
       >
         <CardKindBadge kind="session" color={meta.dot} />
+        <EmojiPickerField kind="session" value={data.emoji} status={phase} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
         {renaming ? (
           <input
             ref={renameInputRef}

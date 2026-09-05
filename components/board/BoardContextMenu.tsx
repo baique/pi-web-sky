@@ -61,7 +61,7 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
       type: "sticky-note",
       position: { x: flowX ?? 0, y: flowY ?? 0 },
       style: { width: 338, height: 230 },
-      data: { text: "", badge: "blue" },
+      data: { text: "", badge: "blue", emoji: "📝" },
     });
     onClose();
   }, [ops, flowX, flowY, onClose]);
@@ -94,6 +94,7 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
         cardId: "", number: 0, name: "新建任务", description: "",
         readyStatus: "draft", priority: 0,
         expanded: false, w: 380, h: 270, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0,
+        emoji: "✅",
       },
     });
     onClose();

@@ -11,6 +11,7 @@ import { Markdown } from "@tiptap/markdown";
 import "prosemirror-view/style/prosemirror.css";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
 import { CardKindBadge } from "@/components/canvas/CardKindBadge";
+import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { memoBoardNode } from "./memoNode";
@@ -26,6 +27,8 @@ import { memoBoardNode } from "./memoNode";
 
 export interface StickyNoteData extends Record<string, unknown> {
   text: string;
+  /** 用户设置的 emoji（空/缺省 → 类别默认 📝）；便笺无状态跟随 */
+  emoji?: string;
   /** 徽记颜色：blue | green | red | yellow | purple */
   badge?: string;
   /** 新建时间（ms epoch） */
@@ -232,6 +235,7 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
         style={{ flexShrink: 0, height: 32, display: "flex", alignItems: "center", gap: 6, padding: "0 var(--bubble-pad-x, 12px)", fontSize: 10, color: "var(--text-muted)", cursor: isEditing ? "default" : "grab", boxSizing: "border-box" }}
       >
         <CardKindBadge kind="note" color={BADGE_COLORS[isEditing ? draftBadge : badge] ?? BADGE_COLORS.blue} />
+        <EmojiPickerField kind="note" value={data.emoji} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
         {isEditing ? (
           <>
             <div className="nodrag" style={{ display: "flex", alignItems: "center", gap: 5 }}>

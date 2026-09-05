@@ -14,6 +14,7 @@ import { ThemedSelect } from "@/components/canvas/ThemedSelect";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { TaskCardMultiSelect } from "@/components/canvas/TaskCardMultiSelect";
 import { CardKindBadge } from "@/components/canvas/CardKindBadge";
+import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
 import { WorktreePicker } from "@/components/canvas/WorktreePicker";
 import { WorktreeSelector } from "@/components/WorktreeSelector";
@@ -34,6 +35,8 @@ export interface TaskCardData extends Record<string, unknown> {
   cardId: string;
   number: number;
   name: string;
+  /** 用户设置的 emoji（空/缺省 → 类别默认 ✅）；状态跟随 emoji 不落库 */
+  emoji?: string;
   description: string;
   readyStatus: ReadyStatus;
   execStatus: ExecStatus;
@@ -472,6 +475,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
         <span title={`执行状态：${(EXEC_BADGE[execStatus] ?? EXEC_BADGE.not_started).label}`} style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
           <CardKindBadge kind="task" color={(EXEC_BADGE[execStatus] ?? EXEC_BADGE.not_started).color} />
         </span>
+        <EmojiPickerField kind="task" value={data.emoji} status={execStatus} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
         <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>
           {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
         </span>
