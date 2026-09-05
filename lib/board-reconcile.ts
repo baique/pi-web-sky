@@ -185,7 +185,16 @@ export async function reconcileBoard(boardId: string): Promise<void> {
       for (const card of cards) {
         if (nodesMap.has(`task-${card.id}`)) continue;
         const id = `task-${card.id}`;
-        const spot = findFreeSpot(remaining, TASK_CARD_W, TASK_CARD_H);
+        // 位置优先用「同卡无 cardId 草稿」（用户刚派发，画布节点尚未 normalize 成 task-<cardId>）：
+        // 避免并发窗口 reconcile 先补卡（findFreeSpot 自动布局）与客户端 normalize 竞争同一 key，
+        // yjs 后到覆盖 → 用户卡位置被自动布局顶飞（“派发后卡位置飞了/疑似丢卡”）。
+        // 匹配判据：无 cardId + 名称一致（用户填的表单名 = 业务表名）。
+        const pending = remaining.find(
+          (n) => n?.type === "task-card" && !n.data?.cardId && n.data?.name === card.name,
+        );
+        const spot = pending?.position
+          ? { x: pending.position.x, y: pending.position.y }
+          : findFreeSpot(remaining, TASK_CARD_W, TASK_CARD_H);
         nodesMap.set(id, {
           id,
           type: "task-card",
