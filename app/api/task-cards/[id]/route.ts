@@ -149,11 +149,11 @@ export async function PATCH(
     if (depsProvided) {
       replaceLinks(id, prerequisites ?? [], related ?? []);
     }
-    // 任务看板派生 reconcile：依赖/exec 线变化 → 增量补清（确定性 id 幂等）
+    // 业务派生同步：依赖/exec 线变化 → 增量补清（锚点存在才建，不反向补任务卡）
     void reconcileBoard(card.boardId).catch((e) =>
       console.warn(`[task-cards] reconcile ${card.boardId} 异常:`, e?.message ?? e),
     );
-    // 依赖线由派生 reconcile 渲染（确定性 id 幂等），不再 syncCardEdges 写 board_edges。
+    // 依赖线由业务派生同步渲染（确定性 id 幂等），不再 syncCardEdges 写 board_edges。
     return NextResponse.json({ card: getCard(id), updated: getBoard(card.boardId)?.updated ?? null });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
@@ -170,7 +170,7 @@ export async function DELETE(
     const card = getCard(id);
     const boardId = card?.boardId ?? null;
     deleteCard(id);
-    // 任务看板派生 reconcile：清 exec/依赖线 + 孤儿卡（确定性 id 幂等）
+    // 业务派生同步：清 exec/依赖线 + 孤儿卡（确定性 id 幂等）
     if (boardId) {
       void reconcileBoard(boardId).catch((e) =>
         console.warn(`[task-cards] reconcile ${boardId} 异常:`, e?.message ?? e),

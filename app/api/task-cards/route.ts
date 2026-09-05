@@ -124,7 +124,7 @@ export async function POST(req: Request) {
       throw error;
     }
 
-    // 任务看板派生 reconcile：补/清依赖线（确定性 id 幂等）
+    // 业务派生同步：补/清依赖线（锚点存在才建；不补任务卡——画布管理语义）
     void reconcileBoard(board.id).catch((e) =>
       console.warn(`[task-cards] reconcile ${board.id} 异常:`, e?.message ?? e),
     );

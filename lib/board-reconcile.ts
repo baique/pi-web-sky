@@ -1,13 +1,14 @@
 // ============================================================================
-// 看板派生 reconcile（后端权威）—— 替代前端 useBoardCanvas 的 reconcile
+// 看板派生同步（业务表 → 画布派生元素）—— 替代前端 useBoardCanvas 的 reconcile
 //
-// 设计（方案 rev2 核心）：
-//   - 业务表（tasks / task_cards / task_card_links / session_meta）= 唯一真相源，后端写
-//   - 派生元素（会话卡存在性 / exec 线 / 依赖线 / 孤儿删）= 后端读业务表 → 增量写 Y.Doc
+// 职责边界（画布管理语义）：
+//   - 画布元素（任务卡/便笺/文字/布局）由前端写 Y.Doc，协作看板（yjs）自己同步多端，
+//     本模块绝不反向从业务表补建用户画布内容（任务卡在不在画布由用户决定）。
+//   - 业务派生元素（执行会话卡 / exec 线 / 依赖线）读业务表 → 增量写 Y.Doc，且**锚点
+//     存在才派生**：执行会话卡的宿主任务卡节点不在画布 → 不补（业务展示锚定用户画布）。
+//   - 孤儿删：清「画布引用了已删业务记录」的残留（任务卡 cardId / 会话卡 sessionId）。
 //   - 确定性 id 幂等：会话卡 `session-<sid>`、exec 线 `exec-<cardId>-<sessionId>`、
 //     依赖线 `link-<fromShapeId>-<toShapeId>-<kind>` → 缺补多删，绝不整表覆盖
-//   - 用户内容（布局/尺寸/便笺文本）由前端写 Y.Doc，本模块只动派生元素，不碰用户布局
-//   - 孤儿删只删「业务表确认不存在的会话卡」，跳过新会话卡（cwd 非空 = 会话尚未创建）
 //
 // 触发：调度器写业务表后 / 任务归属变化 / 建卡删卡 / 定时兜底（见 board-reconcile-scheduler）
 // ============================================================================
@@ -54,15 +55,13 @@ interface DocNode {
 export const CARD_W = 340;
 export const CARD_H = 160;
 const FORM_W = 380;
-const COLLAPSED_MIN_H = 240;
 
 /** 会话卡默认尺寸（收合态） */
 export const SESSION_CARD_W = CARD_W;
 export const SESSION_CARD_H = CARD_H;
 
-/** 任务卡 shape 尺寸（未建卡占位 / 已建卡） */
+/** 任务卡 shape 宽度（findSpotNearTaskCard 锚点用） */
 const TASK_CARD_W = FORM_W;
-const TASK_CARD_H = COLLAPSED_MIN_H;
 
 /** 判断 Y.Doc 中某节点是否为「新会话卡」（cwd 非空 = 会话尚未创建，跳过补卡/孤儿删） */
 function isPendingNewSession(node: DocNode | undefined): boolean {
@@ -160,11 +159,10 @@ export async function reconcileBoard(boardId: string): Promise<void> {
     const edgesMap = maps.edges;
     const nodes = Array.from(nodesMap.values()) as unknown as DocNode[];
 
-    // ---- 1) 任务卡节点补齐：业务表存在、画布无对应节点 → 补（exec 线锚点 + 会话卡锚定）----
-    // 任务卡由用户从工具栏拖出创建；业务表已存在的卡（外部建卡/历史数据）自动入板。
-    // 确定性 id（task-<cardId>）→ 幂等；孤儿任务卡节点（业务表已删）→ 删。
-    // 必须先于会话卡补齐执行——任务执行会话卡要锚定任务卡右侧，任务卡节点得先存在。
-    // 孤儿任务卡：画布有 cardId 但业务表没有 → 删节点（级联删边）
+    // ---- 1) 任务卡孤儿删除：画布有 cardId 但业务表没有 → 删节点（级联删边）----
+    // 任务卡节点本身是用户画布内容（前端建/删，yjs 同步），reconcile 绝不从业务表
+    // 反向补卡——业务表只是派发记录，不是画布任务卡的来源。这里只清理「引用了
+    // 已删业务卡」的残留节点。
     const knownCardIds = new Set(cards.map((c) => c.id));
     const orphanCardIds: string[] = [];
     for (const n of nodes) {
@@ -177,47 +175,6 @@ export async function reconcileBoard(boardId: string): Promise<void> {
       nodesMap.delete(id);
       for (const e of Array.from(edgesMap.values())) {
         if (e.source === id || e.target === id) edgesMap.delete(e.id);
-      }
-    }
-    // 缺卡补：业务表有、画布没有 → 补（form 尺寸，4 列布局）
-    {
-      const remaining = Array.from(nodesMap.values()) as unknown as DocNode[];
-      for (const card of cards) {
-        if (nodesMap.has(`task-${card.id}`)) continue;
-        const id = `task-${card.id}`;
-        // 位置优先用「同卡无 cardId 草稿」（用户刚派发，画布节点尚未 normalize 成 task-<cardId>）：
-        // 避免并发窗口 reconcile 先补卡（findFreeSpot 自动布局）与客户端 normalize 竞争同一 key，
-        // yjs 后到覆盖 → 用户卡位置被自动布局顶飞（“派发后卡位置飞了/疑似丢卡”）。
-        // 匹配判据：无 cardId + 名称一致（用户填的表单名 = 业务表名）。
-        const pending = remaining.find(
-          (n) => n?.type === "task-card" && !n.data?.cardId && n.data?.name === card.name,
-        );
-        const spot = pending?.position
-          ? { x: pending.position.x, y: pending.position.y }
-          : findFreeSpot(remaining, TASK_CARD_W, TASK_CARD_H);
-        nodesMap.set(id, {
-          id,
-          type: "task-card",
-          position: { x: spot.x, y: spot.y },
-          style: { width: TASK_CARD_W, height: TASK_CARD_H },
-          data: {
-            cardId: card.id,
-            number: card.number,
-            name: card.name,
-            description: card.description,
-            readyStatus: card.readyStatus,
-            priority: card.priority,
-            due: card.due ?? undefined,
-            expanded: false,
-            w: TASK_CARD_W,
-            h: TASK_CARD_H,
-            expandedW: 0,
-            expandedH: 0,
-            collapsedW: 0,
-            collapsedH: 0,
-          },
-        });
-        remaining.push(nodesMap.get(id));
       }
     }
 
@@ -266,6 +223,9 @@ export async function reconcileBoard(boardId: string): Promise<void> {
         if (canvasSids.has(sid)) continue; // 画布已有（临时或正式）→ 不补
         const id = `session-${sid}`;
         const card = cardBySid.get(sid);
+        // 执行会话卡无条件补：会话是业务派生的独立展示（真实会话的存在性），
+        // 不依赖宿主任务卡节点在不在画布——任务卡是画布管理，执行会话卡是业务派生，
+        // 两者解耦。任务卡不在时落点回退 findFreeSpot（findSpotNearTaskCard 内部处理）。
         const taskNode = card ? remaining.find((n) => n?.id === `task-${card.id}`) : undefined;
         const spot = findSpotNearTaskCard(remaining, taskNode, SESSION_CARD_W, SESSION_CARD_H);
         nodesMap.set(id, {
