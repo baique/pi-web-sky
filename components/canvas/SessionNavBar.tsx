@@ -27,6 +27,11 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
   todos: TodoItem[];
   systemPrompt: string | null;
   systemPromptLoading: boolean;
+  /** 工作目录（统计弹层展示，任务卡 #16） */
+  cwd?: string | null;
+  projectRoot?: string | null;
+  isWorktree?: boolean;
+  worktreeBranch?: string | null;
 }>(function SessionNavBar({
   sessionId,
   stats,
@@ -34,6 +39,10 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
   todos,
   systemPrompt,
   systemPromptLoading,
+  cwd,
+  projectRoot,
+  isWorktree,
+  worktreeBranch,
 }, ref) {
   const { t } = useI18n();
   const [statsOpen, setStatsOpen] = useState(false);
@@ -230,7 +239,17 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
       )}
 
       {statsOpen && stats && (
-        <StatsPopover navRef={navRef} navWidth={getPanelWidth()} stats={stats} contextUsage={contextUsage} onClose={() => setStatsOpen(false)} />
+        <StatsPopover
+          navRef={navRef}
+          navWidth={getPanelWidth()}
+          stats={stats}
+          contextUsage={contextUsage}
+          onClose={() => setStatsOpen(false)}
+          cwd={cwd}
+          projectRoot={projectRoot}
+          isWorktree={isWorktree}
+          worktreeBranch={worktreeBranch}
+        />
       )}
       {todoOpen && todos.length > 0 && (
         <TodoPopover navRef={navRef} navWidth={getPanelWidth()} todos={todos} onClose={() => setTodoOpen(false)} />
@@ -299,12 +318,21 @@ function StatsPopover({
   stats,
   contextUsage,
   onClose,
+  cwd,
+  projectRoot,
+  isWorktree,
+  worktreeBranch,
 }: {
   navRef: React.RefObject<HTMLDivElement | null>;
   navWidth: number;
   stats: SessionStatsInfo;
   contextUsage: { percent: number | null; contextWindow: number; tokens: number | null } | null;
   onClose: () => void;
+  /** 工作目录（统计弹层展示，任务卡 #16） */
+  cwd?: string | null;
+  projectRoot?: string | null;
+  isWorktree?: boolean;
+  worktreeBranch?: string | null;
 }) {
   const { t } = useI18n();
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -362,6 +390,13 @@ function StatsPopover({
   const sessionRows = [
     ...(stats.sessionName ? [{ label: t("session.name"), value: stats.sessionName }] : []),
     { label: t("session.id"), value: stats.sessionId },
+    // 工作目录：worktree 显示分支 + 路径（否则用户不知道会话在哪，任务卡 #16）
+    ...(cwd ? [{
+      label: t("session.projectDir"),
+      value: isWorktree && worktreeBranch
+        ? `${worktreeBranch} · ${cwd}`
+        : (projectRoot ?? cwd),
+    }] : []),
     ...(totalActiveMs > 0 ? [{ label: t("session.totalActive"), value: formatDuration(totalActiveMs) }] : []),
   ];
   const messageRows = [

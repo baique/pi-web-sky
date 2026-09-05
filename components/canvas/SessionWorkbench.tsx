@@ -32,6 +32,7 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   cwd,
   taskId,
   onPromote,
+  onCwdChange,
 }: {
   sessionId: string;
   /** 新会话卡（看板新建会话）绑定目录；cwd 非空 = 会话尚未创建 */
@@ -40,6 +41,8 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   taskId?: string;
   /** 新会话卡转正回调（会话创建成功）：由父节点清 cwd 字段（写 Y.Doc） */
   onPromote?: () => void;
+  /** 新会话卡环境条切换 worktree：由父节点写卡片 cwd 字段（Y.Doc，任务卡 #16） */
+  onCwdChange?: (path: string) => void;
 }) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
@@ -64,6 +67,11 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   // 新会话卡初始 cwd：转正后卡片侧会把 cwd 字段清空（props.cwd 变 ""），但 isNew 实例
   // 仍需 cwd 作 newSessionCwd（第二条消息 ensure_session 用），这里缓存首帧值。
   const cwdRef = useRef(cwd ?? null);
+  // 环境条切换 worktree：父节点写 yjs 后 cwd prop 回灌新值（非空→非空），
+  // 同步到 cwdRef 让 ensure_session 用最新绑定目录；空值（转正）不覆盖。
+  useEffect(() => {
+    if (cwd) cwdRef.current = cwd;
+  }, [cwd]);
   // 转正标记：本实例内发过消息（prompt 正在跑，卸载/重挂 ChatWindow 会断开 SSE）。
   // 本实例生命周期内保持 isNew 模式继续，不重挂。组件重建（收合再展开 / 刷新 / 重新打开）
   // 时 wasNewSessionRef 重新按 isNewSession 初始化，转正后的卡片走回普通会话模式加载历史。
@@ -318,6 +326,10 @@ export const SessionWorkbench = memo(function SessionWorkbench({
           todos={todos}
           systemPrompt={systemPrompt}
           systemPromptLoading={systemPromptLoading}
+          cwd={session.cwd}
+          projectRoot={session.projectRoot}
+          isWorktree={session.isWorktree}
+          worktreeBranch={session.worktreeBranch}
         />,
         navbarSlot,
       )}
@@ -341,6 +353,7 @@ export const SessionWorkbench = memo(function SessionWorkbench({
         onSystemPromptLoaderChange={handleSystemPromptLoaderChange}
         onSessionCreated={isNewSession ? (created) => handleSessionCreated(created) : undefined}
         onSessionForked={handleSessionForked}
+        onEnvWorktreeChange={onCwdChange}
         onAgentEnd={handleAgentEnd}
         onAttentionNeeded={handleAttentionNeeded}
         soundEnabled={soundEnabled}

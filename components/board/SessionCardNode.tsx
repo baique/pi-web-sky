@@ -52,7 +52,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
   // 最新 data 镜像：回调（promote/resize）读 ref，不依赖渲染期 data 引用（引用随 yjs 回灌变化 → 回调每帧重建 → 工作台 memo 失效）
   const dataRef = useRef(data);
   dataRef.current = data;
-  const { title, projectName, messageCount, lastActivityAt, stale, sessionId, lastReply, cwd, taskId } = data;
+  const { title, projectName, messageCount, lastActivityAt, stale, sessionId, lastReply, cwd, taskId, worktreeBranch, isWorktree } = data;
   // 运行态镜像优先（2.5s 轮询本地快照，不写 yjs）：命中则覆盖 data 旧值。
   // runningMs 高频变化 → 只镜像变化，不进 CRDT/undo 栈。
   const runningState = useSessionRunning(sessionId ?? null);
@@ -296,6 +296,21 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
         }}
       >
         <CardKindBadge kind="session" color={meta.dot} />
+        {/* worktree 徽标：非主 worktree 时显示分支名（任务卡 #16），对齐侧边栏会话行样式 */}
+        {!isNewSession && isWorktree && worktreeBranch && (
+          <span
+            title={`Worktree: ${cwd ?? worktreeBranch}`}
+            style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--accent)", minWidth: 0, overflow: "hidden", flexShrink: 0 }}
+          >
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <line x1="6" y1="3" x2="6" y2="15" />
+              <circle cx="18" cy="6" r="3" />
+              <circle cx="6" cy="18" r="3" />
+              <path d="M18 9a9 9 0 0 1-9 9" />
+            </svg>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, maxWidth: 90 }}>{worktreeBranch}</span>
+          </span>
+        )}
         {renaming ? (
           <input
             ref={renameInputRef}
@@ -346,7 +361,13 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
         // 展开工作台（消息/工具/代码块）必须显式恢复文本选中：卡根 userSelect:none 会抑制整卡选中
         <div className="nodrag" style={{ flex: 1, minHeight: 0, padding: "0 12px 0", pointerEvents: "all", overflow: "visible", cursor: "default", userSelect: "text" }}>
           {workbenchMounted || isNewSession ? (
-            <SessionWorkbench sessionId={sessionId} cwd={cwd} taskId={taskId} onPromote={handlePromote} />
+            <SessionWorkbench
+              sessionId={sessionId}
+              cwd={cwd}
+              taskId={taskId}
+              onPromote={handlePromote}
+              onCwdChange={(path) => updateNode(id, { data: { ...dataRef.current, cwd: path } })}
+            />
           ) : (
             <WorkbenchSkeleton />
           )}

@@ -1074,6 +1074,13 @@ export function AppShell() {
     handleNewSession(crypto.randomUUID(), cwd);
   }, [selectedSession?.cwd, newSessionCwd, activeCwd, handleNewSession]);
 
+  /** 环境条 worktree 切换：新建会话 cwd 与全局有效 cwd 同步更新（任务卡 #16）。
+   *  只在空态欢迎页触达（有历史会话不显示选择器），不涉及已有会话。 */
+  const handleEnvWorktreeChange = useCallback((wtPath: string) => {
+    setNewSessionCwd(wtPath);
+    setActiveCwd(wtPath);
+  }, []);
+
   // 点任务行 → 打开该任务的看板：懒创建任务型看板后复用 handleOpenBoard。
   const handleOpenTaskBoard = useCallback((taskId: string) => {
     void fetch(`/api/tasks/${encodeURIComponent(taskId)}/board`, { cache: "no-store" })
@@ -3266,6 +3273,7 @@ export function AppShell() {
               newSessionCwd={effectiveNewSessionCwd}
               newSessionDraftKey={newSessionDraftKey}
               pendingNewSessionTaskRef={pendingNewSessionTaskRef}
+              onEnvWorktreeChange={handleEnvWorktreeChange}
               onAgentEnd={handleAgentEnd}
               onAttentionNeeded={handleAttentionNeeded}
               onSessionCreated={handleSessionCreated}

@@ -31,6 +31,10 @@ export type SessionSummary = {
   projectName: string;
   lastReply: string;
   lastActivityAt: number;
+  /** worktree 分支名（非主 worktree，卡片徽标用，任务卡 #16） */
+  worktreeBranch?: string;
+  /** 是否链接 worktree（非主 checkout） */
+  isWorktree?: boolean;
 };
 
 /** 卡片标题/最后回复轮询间隔（ms） */
@@ -82,6 +86,10 @@ export interface SessionCardData extends Record<string, unknown> {
   expanded: boolean;
   cwd?: string;
   taskId?: string;
+  /** worktree 分支名（非主 worktree，卡片徽标用，任务卡 #16） */
+  worktreeBranch?: string;
+  /** 是否链接 worktree（非主 checkout） */
+  isWorktree?: boolean;
   w: number;
   h: number;
   expandedW: number;
@@ -454,7 +462,7 @@ export function useBoardCanvas({
     try {
       const res = await fetch("/api/sessions", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { sessions: Array<{ id: string; name?: string; firstMessage?: string; messageCount?: number; projectKey?: string; projectRoot?: string; lastReply?: string; modified?: string }> };
+      const data = (await res.json()) as { sessions: Array<{ id: string; name?: string; firstMessage?: string; messageCount?: number; projectKey?: string; projectRoot?: string; lastReply?: string; modified?: string; worktreeBranch?: string; isWorktree?: boolean }> };
       const map: Record<string, SessionSummary> = {};
       for (const s of data.sessions) {
         map[s.id] = {
@@ -463,6 +471,8 @@ export function useBoardCanvas({
           projectName: s.projectKey ?? s.projectRoot ?? "",
           lastReply: s.lastReply ?? "",
           lastActivityAt: s.modified ? Date.parse(s.modified) : 0,
+          worktreeBranch: s.worktreeBranch,
+          isWorktree: s.isWorktree,
         };
       }
       setSessionTitles(map);
@@ -509,8 +519,8 @@ export function useBoardCanvas({
         const d = node.data as SessionCardData;
         const s = sessionTitles[d.sessionId];
         if (!s) continue;
-        if (d.title !== s.title || d.lastReply !== s.lastReply || d.messageCount !== s.messageCount || d.lastActivityAt !== s.lastActivityAt) {
-          nodesMap.set(node.id, { ...node, data: { ...d, title: s.title, lastReply: s.lastReply, messageCount: s.messageCount, lastActivityAt: s.lastActivityAt } });
+        if (d.title !== s.title || d.lastReply !== s.lastReply || d.messageCount !== s.messageCount || d.lastActivityAt !== s.lastActivityAt || d.worktreeBranch !== s.worktreeBranch || d.isWorktree !== s.isWorktree) {
+          nodesMap.set(node.id, { ...node, data: { ...d, title: s.title, lastReply: s.lastReply, messageCount: s.messageCount, lastActivityAt: s.lastActivityAt, worktreeBranch: s.worktreeBranch, isWorktree: s.isWorktree } });
         }
       }
     }, "board-summary");

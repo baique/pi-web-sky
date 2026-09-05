@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { FolderIcon } from "./FileIcons";
 import { AnimatedDropdown } from "./AnimatedDropdown";
+import { WorktreeSelector } from "./WorktreeSelector";
 import { dropdownDirection } from "@/lib/dropdown-direction";
 import type { SessionInfo } from "@/lib/types";
 
@@ -71,6 +72,10 @@ interface Props {
   onDropSessionToTask: (taskId: string, sessionId: string) => void;
   /** 任务卡片拖拽排序：上报一个区内完整的新顺序（置顶/非置顶分别调用）。 */
   onReorderTasks: (orderedIds: string[]) => void;
+  /** 当前有效 cwd（worktree 选择器解析用，任务卡 #16） */
+  cwd?: string | null;
+  /** worktree 切换回调（更新全局有效 cwd，随项目分组联动） */
+  onWorktreeChange?: (wtPath: string) => void;
 }
 
 const SESSION_MIME = "text/session-id";
@@ -149,6 +154,8 @@ function TaskCard({
   isDragging,
   dropBefore,
   dropAfter,
+  cwd,
+  onWorktreeChange,
 }: {
   task: TaskGroupUi;
   content: () => ReactNode;
@@ -186,6 +193,10 @@ function TaskCard({
   /** 落点指示：插到本卡片上方/下方（排序语义，用横线表示）。 */
   dropBefore: boolean;
   dropAfter: boolean;
+  /** 当前有效 cwd（worktree 选择器解析用，任务卡 #16） */
+  cwd?: string | null;
+  /** worktree 切换回调（更新全局有效 cwd） */
+  onWorktreeChange?: (wtPath: string) => void;
 }) {
   const { t } = useI18n();
   /** 任务卡片默认收起：用户创建的任务默认折叠，点击展开；
@@ -200,6 +211,7 @@ function TaskCard({
    *  点“加载更多”由父级按 offset 追加（#15 服务端分页）。 */
   const [dragOver, setDragOver] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [wtOpen, setWtOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -435,6 +447,22 @@ function TaskCard({
                 </svg>
               </span>
             )}
+            {/* 任务环境 worktree 选择器（任务名旁，与操作组同 hover 显隐，任务卡 #16）。
+                面板 portal 到 body：hover 移出 header 即卸载会让下拉消失，
+                故 open 期间（wtOpen）保持挂载。 */}
+            {(hovered || wtOpen) && !renaming && !confirmDelete && cwd && onWorktreeChange && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{ display: "flex", alignItems: "center", flexShrink: 0 }}
+              >
+                <WorktreeSelector
+                  cwd={cwd}
+                  onSelect={onWorktreeChange}
+                  onOpenChange={setWtOpen}
+                  style={{ height: 22, padding: "0 6px", gap: 4, fontSize: 10.5 }}
+                />
+              </div>
+            )}
             {(hovered || moreOpen || confirmDelete) && !renaming && (
               <span ref={actionsRef} style={{ position: "relative", display: "flex", gap: 3, flexShrink: 0, alignItems: "center" }}>
                 {/* 打开看板（任务即看板）：首位（用户要求：进入看板优先于新建会话） */}
@@ -663,6 +691,8 @@ export function TaskArea({
   onOpenTaskBoard,
   onDropSessionToTask,
   onReorderTasks,
+  cwd,
+  onWorktreeChange,
 }: Props) {
   const { t } = useI18n();
   const [newTaskName, setNewTaskName] = useState("");
@@ -876,6 +906,8 @@ export function TaskArea({
               onNewSession={(id, projectKey) => onNewSessionFromTask(id, projectKey)}
               onTogglePin={onToggleTaskPin}
               onOpenBoard={onOpenTaskBoard}
+              cwd={cwd}
+              onWorktreeChange={onWorktreeChange}
               onDragStartTask={handleDragStartTask}
               onDragOverTask={handleDragOverTask}
               onDropTask={handleDropTask}

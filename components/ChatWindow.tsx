@@ -20,6 +20,7 @@ import { phaseLabel, orbModeForPhase } from "@/lib/agent-phase";
 import { NoticeDrawer } from "./NoticeDrawer";
 import { QuotaView, NOTICE_COLOR } from "./ComposerHeader";
 import { formatTokenCount } from "./ChatInput";
+import { WorktreeSelector } from "./WorktreeSelector";
 import { useAgentSession, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -46,6 +47,8 @@ interface Props {
   onAttentionNeeded?: (request: BlockingExtensionUiRequest) => void;
   onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;
   onSessionForked?: (newSessionId: string) => void;
+  /** 空态欢迎页环境条 worktree 切换（会话未创建时决定运行目录，任务卡 #16） */
+  onEnvWorktreeChange?: (wtPath: string) => void;
   modelsRefreshKey?: number;
   chatInputRef?: React.RefObject<ChatInputHandle | null>;
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
@@ -258,7 +261,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal, inWorkbench = false }: Props) {
+export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onEnvWorktreeChange, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal, inWorkbench = false }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const { isDark } = useTheme();
@@ -916,14 +919,21 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 <span style={{ fontSize: 28, color: "#ffffff", fontWeight: 700, letterSpacing: 0, mixBlendMode: "exclusion", flexShrink: 0, whiteSpace: "nowrap" }}>Pi Web</span>
                 <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
               </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0, mixBlendMode: "exclusion" }}>
-                <span style={{ fontSize: 12, color: "#ffffff", fontWeight: 700 }}>
-                  web <span style={{ color: "#ffffff", fontWeight: 700 }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span>
-                </span>
-                <span style={{ fontSize: 12, color: "#ffffff", fontWeight: 700 }}>
-                  pi <span style={{ color: "#ffffff", fontWeight: 700 }}>v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span>
-                </span>
-              </div>
+              {/* 环境条：新建会话前决定 worktree（会话落盘即锁定，任务卡 #16）。
+                  取代原 web/pi 版本号展示（升级提示已由 NewSessionUpdateLink 承担）。 */}
+              {messageCwd && onEnvWorktreeChange ? (
+                <WorktreeSelector
+                  cwd={messageCwd}
+                  onSelect={onEnvWorktreeChange}
+                  style={{
+                    background: "color-mix(in srgb, var(--frame-glass) 80%, transparent)",
+                    border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
+                    borderRadius: 8,
+                    height: 30,
+                    flexShrink: 0,
+                  }}
+                />
+              ) : null}
             </div>
             {chatInputElement}
             {/* 欢迎页不渲染底部状态栏：状态栏属于会话界面，空会话欢迎页保持干净 */}
