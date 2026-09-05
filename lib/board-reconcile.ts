@@ -339,53 +339,6 @@ export async function reconcileBoard(boardId: string): Promise<void> {
 }
 
 /**
- * 任务下新建的会话入板（需求 2：外部/本页新建会话自动加入任务看板）。
- * 调度器 assignSessionToTask 后调用：补一张会话卡到对应任务看板。
- * 幂等（确定性 id）；看板不存在（任务看板未创建）时静默跳过。
- */
-export async function ensureTaskSessionCard(boardId: string, sessionId: string): Promise<void> {
-  const board = getBoard(boardId);
-  if (!board?.taskId) return;
-  await mutateBoard(boardId, (maps) => {
-    const nodesMap = maps.nodes;
-    const nodes = Array.from(nodesMap.values()) as unknown as DocNode[];
-    const id = `session-${sessionId}`;
-    if (nodesMap.has(id)) return;
-    // 锚定任务卡右侧（y 齐平）；找不到卡/被占则回退 findFreeSpot
-    const card = listCards(boardId).find((c) => c.sessionId === sessionId);
-    const taskNode = card ? nodes.find((n) => n?.id === `task-${card.id}`) : undefined;
-    const spot = findSpotNearTaskCard(nodes, taskNode, SESSION_CARD_W, SESSION_CARD_H);
-    nodesMap.set(id, {
-      id,
-      type: "session-card",
-      position: { x: spot.x, y: spot.y },
-      style: { width: SESSION_CARD_W, height: SESSION_CARD_H },
-      data: {
-        sessionId,
-        title: "",
-        projectName: "",
-        messageCount: 0,
-        lastReply: "",
-        phase: "idle",
-        runningMs: 0,
-        endedAt: 0,
-        lastActivityAt: 0,
-        stale: false,
-        expanded: false,
-        cwd: "",
-        taskId: "",
-        w: SESSION_CARD_W,
-        h: SESSION_CARD_H,
-        expandedW: 0,
-        expandedH: 0,
-        collapsedW: 0,
-        collapsedH: 0,
-      },
-    });
-  });
-}
-
-/**
  * 从所有 RF 看板的 yjs 文档中删除指定会话的会话卡（含占位卡）并级联删边。
  *
  * 背景：会话删除（单删 / 删任务整树）只走 removeSessionFromBoards 清 tldraw 遗留的
