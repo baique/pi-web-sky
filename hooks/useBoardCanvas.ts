@@ -8,6 +8,7 @@ import { applyNodeChanges, applyEdgeChanges } from "@xyflow/react";
 import type { BoardInfo, RunningSnapshot, TaskCardRunningState } from "@/lib/board-types";
 import { dispatchBoardSessionCreated, dispatchBoardSessionDeleted } from "@/lib/board-events";
 import { confirm } from "@/components/canvas/ConfirmDialog";
+import { isNoteNode } from "@/components/board/SendNoteEdge";
 
 // ============================================================================
 // 看板画布数据层（yjs 版，替代 tldraw useSync）
@@ -621,13 +622,23 @@ export function useBoardCanvas({
 
   const onConnect = useCallback((conn: { source: string; target: string }) => {
     const edgesMap = edgesMapRef.current;
-    if (!edgesMap) return;
+    const nodesMap = nodesMapRef.current;
+    if (!edgesMap || !nodesMap) return;
     const id = `edge-${conn.source}-${conn.target}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    // 便笺/文本 ↔ 会话卡的手动连线 → send-note 发送线（线上有「发送」按钮，一次性）；其余普通线
+    const src = nodesMap.get(conn.source);
+    const tgt = nodesMap.get(conn.target);
+    const srcNote = isNoteNode(src);
+    const tgtNote = isNoteNode(tgt);
+    const srcSession = src?.type === "session-card";
+    const tgtSession = tgt?.type === "session-card";
+    const sendable = (srcNote && tgtSession) || (srcSession && tgtNote);
     edgesMap.set(id, {
       id,
       source: conn.source,
       target: conn.target,
-      type: "default",
+      type: sendable ? "send-note" : "default",
+      data: sendable ? { sendNote: true, sent: false } : undefined,
       markerEnd: { type: "arrowclosed" },
       style: { strokeWidth: 1.5, stroke: "#8b8fa3" },
     });
@@ -894,6 +905,15 @@ export function useBoardCanvas({
     edgesMap.set(edge.id, edge);
   }, []);
 
+  /** 更新边（部分字段 + data 浅合并；发送线一次性标记 sent 经此写回 yjs） */
+  const updateEdge = useCallback((id: string, patch: Partial<Edge>) => {
+    const edgesMap = edgesMapRef.current;
+    if (!edgesMap) return;
+    const cur = edgesMap.get(id);
+    if (!cur) return;
+    edgesMap.set(id, { ...cur, ...patch, data: { ...(cur.data as object), ...(patch.data as object) } });
+  }, []);
+
   const addNode = useCallback((node: Node) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
@@ -968,6 +988,7 @@ export function useBoardCanvas({
       updateNodeDebounced,
       normalizeNodeId,
       addEdge,
+      updateEdge,
       addNode,
       clearBoard,
       sessionTitles,
@@ -976,7 +997,7 @@ export function useBoardCanvas({
       undo,
       redo,
     }),
-    [board, loading, error, running, nodes, edges, viewport, saveViewport, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, updateNodeDebounced, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, sessionRunning, registerVisibleTaskCard, unregisterVisibleTaskCard, undo, redo],
+    [board, loading, error, running, nodes, edges, viewport, saveViewport, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, updateNodeDebounced, normalizeNodeId, addEdge, updateEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, sessionRunning, registerVisibleTaskCard, unregisterVisibleTaskCard, undo, redo],
   );
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReactFlow, Controls, MiniMap, useReactFlow, type NodeTypes, type OnConnect, type Node, type Viewport } from "@xyflow/react";
+import { ReactFlow, Controls, MiniMap, useReactFlow, type NodeTypes, type EdgeTypes, type OnConnect, type Node, type Viewport } from "@xyflow/react";
 import { computeSnap, type SnapResult } from "@/lib/board-align";
 import "@xyflow/react/dist/style.css";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
@@ -11,6 +11,7 @@ import { StickyNoteNode } from "@/components/board/StickyNoteNode";
 import { TaskCardNode } from "@/components/board/TaskCardNode";
 import { TextNode } from "@/components/board/TextNode";
 import { ImageNode } from "@/components/board/ImageNode";
+import { SendNoteEdge } from "@/components/board/SendNoteEdge";
 import { BoardCanvasProvider, type BoardCanvasOps } from "@/components/board/BoardCanvasContext";
 import { BoardContextMenu, type BoardMenuState } from "@/components/board/BoardContextMenu";
 import { BoardLoading } from "./BoardLoading";
@@ -31,6 +32,11 @@ const nodeTypes: NodeTypes = {
   text: StickyNoteNode, // 旧 tldraw text shape 降级为便笺渲染（data.text）
   "text-node": TextNode,
   "image-node": ImageNode,
+};
+
+// 发送线（便笺/文本 → 会话卡）：线上「发送」按钮 + 一次性标记
+const edgeTypes: EdgeTypes = {
+  "send-note": SendNoteEdge,
 };
 
 // 工具栏可创建的「自由元素」类型（无业务表依赖，纯画布内容）
@@ -84,6 +90,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
       board.onEdgesChange?.([{ type: "remove", id }]);
     },
     addEdge: (edge) => board.addEdge?.(edge),
+    updateEdge: (id, patch) => board.updateEdge?.(id, patch),
     addNode: (node) => board.addNode?.(node),
     setSnapLines: (lines) => setSnapLines(lines),
   }), [board]);
@@ -521,6 +528,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               onEdgesChange={board.onEdgesChange}
               onConnect={board.onConnect as OnConnect}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               onBeforeDelete={onBeforeDelete}
               onNodeContextMenu={onNodeContextMenu}
               onNodeClick={onNodeClick}

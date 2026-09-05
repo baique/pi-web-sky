@@ -21,6 +21,8 @@ export interface BoardCanvasOps {
   deleteEdge: (id: string) => void;
   /** 新增边（连线） */
   addEdge: (edge: Edge) => void;
+  /** 更新边（部分字段 + data 浅合并；发送线 sent 标记用） */
+  updateEdge: (id: string, patch: Partial<Edge>) => void;
   /** 新增节点（新建便笺/任务卡等） */
   addNode: (node: Node) => void;
   /** 设置对齐参考线（resize/drag 时显示） */
@@ -39,6 +41,6 @@ export function BoardCanvasProvider({ value, children }: { value: BoardCanvasOps
 
 export function useBoardCanvasOps(): BoardCanvasOps {
   const ctx = useContext(BoardCanvasContext);
-  if (!ctx) return { updateNode: () => {}, updateNodeDebounced: () => {}, deleteNode: () => {}, normalizeNodeId: () => {}, deleteEdge: () => {}, addEdge: () => {}, addNode: () => {}, setSnapLines: () => {}, boardId: null, isTaskBoard: false };
+  if (!ctx) return { updateNode: () => {}, updateNodeDebounced: () => {}, deleteNode: () => {}, normalizeNodeId: () => {}, deleteEdge: () => {}, addEdge: () => {}, updateEdge: () => {}, addNode: () => {}, setSnapLines: () => {}, boardId: null, isTaskBoard: false };
   return ctx;
 }
