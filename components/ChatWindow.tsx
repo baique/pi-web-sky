@@ -493,14 +493,18 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   }, [messages.length]);
 
   // After visibleCount increases (more messages prepended), restore the
-  // scroll position so the viewport doesn't jump.
-  useEffect(() => {
+  // scroll position so the viewport doesn't jump. Runs as a layout effect and
+  // keys off messages.length (which ALWAYS changes on prepend) so the sentinel
+  // scrolls out of view in the same frame the new page renders — otherwise a
+  // shorter visibleCount keeps startIndex>0 and the top sentinel stays visible,
+  // re-triggering the observer in a loop until all history is loaded.
+  useLayoutEffect(() => {
     if (prevScrollDistanceRef.current == null) return;
     const container = scrollContainerRef.current;
     if (!container) return;
     container.scrollTop = restoreScrollTop(container.scrollHeight, prevScrollDistanceRef.current);
     prevScrollDistanceRef.current = null;
-  }, [visibleCount, scrollContainerRef]);
+  }, [messages.length, scrollContainerRef]);
   // Push session stats up to AppShell for the top bar.
   // Compare scalar fields to avoid loops from new object identity each render.
   const statsKey = sessionStats
@@ -1134,7 +1138,12 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 }
                 idx = endIdx;
               }
-              const { startIndex } = getVisibleRenderWindow(rendered.length, visibleCount);
+              // Render window covers everything loaded in this same frame: a
+              // prepended (older) page must render immediately, not after the
+              // async visibleCount bump — otherwise startIndex stays >0, the top
+              // sentinel stays pinned in view, and the observer loop-loads until
+              // all history is fetched (the "scroll-bar shaking" bug).
+              const { startIndex } = getVisibleRenderWindow(rendered.length, Math.max(visibleCount, messages.length));
               // Show the sentinel when the window is full: older history may exist
               // beyond the loaded tail (`hasOlderChat`, decided server-side) or
               // more loaded messages are still hidden above the window.
