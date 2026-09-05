@@ -1347,10 +1347,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const handleAssignSession = useCallback(async (taskId: string, sessionId: string) => {
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.sessionIds.includes(sessionId)) return;
-    await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
-      method: "PATCH",
+    // 原子归属（服务端 upsert，幂等）——避免读-改-写竞态（多端并发拖入互相踢）。
+    await fetch(`/api/tasks/${encodeURIComponent(taskId)}/assign-session`, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionIds: [...task.sessionIds, sessionId] }),
+      body: JSON.stringify({ sessionId }),
     });
     await persistTasks();
   }, [tasks, persistTasks]);

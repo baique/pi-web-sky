@@ -674,17 +674,14 @@ export function useBoardCanvas({
     // 任务看板：先写 session_meta 归属，成功才落卡（失败不落卡，不留无保护卡）
     if (taskId) {
       try {
-        const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
-        const d = (await res.json()) as { task?: { sessionIds?: string[] } };
-        const sessionIds = d.task?.sessionIds ?? [];
-        if (!sessionIds.includes(sessionId)) {
-          const patch = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionIds: [...sessionIds, sessionId] }),
-          });
-          if (!patch.ok) throw new Error(`HTTP ${patch.status}`);
-        }
+        // 原子归属（服务端 upsert，幂等，跨任务移动安全）——避免读-改-写竞态：
+        // 多端并发拖入不同会话时，full-replace 的后提交者会踢掉先提交者。
+        const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/assign-session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
       } catch (error) {
         console.warn(`[board] 拖入会话归属任务失败，未落卡 ${sessionId}:`, error instanceof Error ? error.message : error);
         return; // 归属失败：不落卡（reconcile 按业务表判据，不会有无保护窗口卡）
@@ -695,6 +692,13 @@ export function useBoardCanvas({
     // 落卡（任务看板：归属已落库；普通看板：直接落）
     const summary = sessionTitlesRef.current[sessionId];
     const id = `session-${sessionId}`;
+    const existing = nodesMap.get(id);
+    if (existing) {
+      // 画布已有同 sid 卡：不整卡覆盖（会重置展开态/尺寸/标题等用户布局），
+      // 只把卡移到新拖放位置（拖第二张 = 移动语义）。
+      nodesMap.set(id, { ...existing, position: { x, y } });
+      return;
+    }
     nodesMap.set(id, {
       id,
       type: "session-card",
@@ -771,6 +775,21 @@ export function useBoardCanvas({
       nodesMap.delete(node.id);
       for (const e of Array.from(edgesMap.values())) {
         if (e.source === node.id || e.target === node.id) edgesMap.delete(e.id);
+      }
+      // 图片：回收磁盘资产（仅当 src 指向 board-assets 且无其他节点引用同文件时）
+      if (node.type === "image-node") {
+        const src = (node.data as { src?: string }).src;
+        const name = src?.match(/^\/api\/board-assets\/([^/?#]+)$/)?.[1];
+        if (name) {
+          const stillReferenced = Array.from(nodesMap.values()).some(
+            (other) => other.id !== node.id && (other.data as { src?: string } | undefined)?.src?.includes(name),
+          );
+          if (!stillReferenced) {
+            void fetch(`/api/board-assets/${encodeURIComponent(name)}`, { method: "DELETE" }).catch((e) =>
+              console.warn(`[board] 回收图片资产 ${name} 异常`, e),
+            );
+          }
+        }
       }
     }
   }, []);

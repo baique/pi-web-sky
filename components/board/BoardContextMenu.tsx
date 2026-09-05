@@ -11,8 +11,13 @@ import type { Node } from "@xyflow/react";
 import { useBoardCanvasOps } from "@/components/board/BoardCanvasContext";
 
 export interface BoardMenuState {
+  /** 菜单渲染位置（screen 坐标，用于 fixed 定位菜单本体） */
   x: number;
   y: number;
+  /** 新建节点落点（flow 坐标，已由 CanvasStage screenToFlowPosition 换算；
+   * 与 x/y 分离——同一 screen 坐标不能当 flow 坐标用，平移/缩放后会错位） */
+  flowX?: number;
+  flowY?: number;
   node: Node | null;
   edgeId: string | null;
   /** 边是否为派生边（exec/依赖线，由后端 reconcile 权威维护，不可删） */
@@ -21,7 +26,7 @@ export interface BoardMenuState {
 
 export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onClose: () => void }) {
   const ops = useBoardCanvasOps();
-  const { node, edgeId, x, y, edgeDerived } = menu;
+  const { node, edgeId, x, y, flowX, flowY, edgeDerived } = menu;
   const menuRef = useRef<HTMLDivElement>(null);
 
   // 全局消失：左键点菜单外部任意位置（节点/输入框/工具栏/小地图/画布）→ 关闭。
@@ -54,23 +59,23 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
     ops.addNode({
       id: crypto.randomUUID(),
       type: "sticky-note",
-      position: { x, y },
+      position: { x: flowX ?? 0, y: flowY ?? 0 },
       style: { width: 338, height: 230 },
       data: { text: "", badge: "blue" },
     });
     onClose();
-  }, [ops, x, y, onClose]);
+  }, [ops, flowX, flowY, onClose]);
 
   const addText = useCallback(() => {
     ops.addNode({
       id: crypto.randomUUID(),
       type: "text-node",
-      position: { x, y },
+      position: { x: flowX ?? 0, y: flowY ?? 0 },
       style: { width: 240, height: 60 },
       data: { text: "", autofocus: true },
     });
     onClose();
-  }, [ops, x, y, onClose]);
+  }, [ops, flowX, flowY, onClose]);
 
   const addImage = useCallback(() => {
     onClose();
@@ -83,7 +88,7 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
     ops.addNode({
       id: crypto.randomUUID(),
       type: "task-card",
-      position: { x, y },
+      position: { x: flowX ?? 0, y: flowY ?? 0 },
       style: { width: 380, height: 270 },
       data: {
         cardId: "", number: 0, name: "新建任务", description: "",
@@ -92,7 +97,7 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
       },
     });
     onClose();
-  }, [ops, x, y, onClose]);
+  }, [ops, flowX, flowY, onClose]);
 
   // ---- 分组相关（已移除）：多选创建分组 / 取消分组不再支持 ----
   // 节点类型判断

@@ -118,13 +118,18 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  // 取消中标记：Esc 触发的取消不应被 input 卸载随后的 blur 重新提交（对齐 NoteEditor）。
+  const cancelRenameRef = useRef(false);
   const startRename = (e: React.MouseEvent) => {
     e.stopPropagation();
     setRenameValue(title || "");
     setRenaming(true);
+    cancelRenameRef.current = false;
     requestAnimationFrame(() => { renameInputRef.current?.focus(); renameInputRef.current?.select(); });
   };
   const commitRename = async () => {
+    if (cancelRenameRef.current) return; // 取消/已提交后随后的 blur 不再提交
+    cancelRenameRef.current = true;
     if (!sessionId) return;
     const name = renameValue.trim();
     setRenaming(false);
@@ -146,7 +151,10 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
       updateNode(id, { data: { title: prevTitle } });
     }
   };
-  const cancelRename = () => setRenaming(false);
+  const cancelRename = () => {
+    cancelRenameRef.current = true; // 取消中：随后的 blur 不再提交
+    setRenaming(false);
+  };
 
   // 独立展开/收起：切换 expanded + 尺寸（两态手动尺寸保留）
   // 新建占位卡（cwd 非空）：双击禁止收起（也不删卡）——占位卡保持展开等待输入；
@@ -293,7 +301,10 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
             ref={renameInputRef}
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void commitRename(); if (e.key === "Escape") cancelRename(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { cancelRenameRef.current = false; void commitRename(); }
+              if (e.key === "Escape") cancelRename();
+            }}
             onBlur={() => void commitRename()}
             className="nodrag"
             style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}

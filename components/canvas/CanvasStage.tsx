@@ -248,15 +248,19 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     board.saveViewport?.(vp);
   }, [board]);
 
-  // 右键菜单 handlers
+  // 右键菜单 handlers：菜单本体用 screen 坐标定位（fixed）；新建节点落点用
+  // screenToFlowPosition 换算的 flow 坐标（同一 screen 坐标不能当 flow 坐标用，
+  // 平移/缩放后落点会错位）。
   const onNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
     e.preventDefault();
-    setMenu({ x: e.clientX, y: e.clientY, node, edgeId: null });
-  }, []);
+    const fp = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    setMenu({ x: e.clientX, y: e.clientY, flowX: fp.x, flowY: fp.y, node, edgeId: null });
+  }, [screenToFlowPosition]);
   const onPaneContextMenu = useCallback((e: React.MouseEvent | MouseEvent) => {
     e.preventDefault();
-    setMenu({ x: e.clientX, y: e.clientY, node: null, edgeId: null });
-  }, []);
+    const fp = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    setMenu({ x: e.clientX, y: e.clientY, flowX: fp.x, flowY: fp.y, node: null, edgeId: null });
+  }, [screenToFlowPosition]);
   // 对齐参考线 handlers
   // draggingRef：守卫 onNodeDrag——拖拽停止后（含吸附修正引发的受控位置更新）
   // 迟到的 onNodeDrag 不得再画线，否则会把刚清空的参考线又画回来（抬起不消失）。
@@ -293,8 +297,9 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     // 找到 edge 的 data 判断派生边
     const full = board.edges.find((ed) => ed.id === edge.id);
     const d = full?.data as { execLink?: boolean; taskLink?: string } | undefined;
-    setMenu({ x: e.clientX, y: e.clientY, node: null, edgeId: full?.id ?? null, edgeDerived: Boolean(d?.execLink || d?.taskLink) });
-  }, [board.edges]);
+    const fp = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    setMenu({ x: e.clientX, y: e.clientY, flowX: fp.x, flowY: fp.y, node: null, edgeId: full?.id ?? null, edgeDerived: Boolean(d?.execLink || d?.taskLink) });
+  }, [board.edges, screenToFlowPosition]);
 
   // 工具栏：新建便笺/任务/文字/图片/会话 —— 点击=当前视口中心创建，拖拽=拖放进画布落点创建
   const addNodeAtViewport = useCallback((type: FreeNodeType) => {
