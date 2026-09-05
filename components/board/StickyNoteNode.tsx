@@ -166,11 +166,26 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     resizingRef.current = true;
     setSnapLines([]);
   }, [setSnapLines]);
-  const onResizeEnd = useCallback(() => {
-    resizingRef.current = false;
-    setSnapLines([]);
-    requestAnimationFrame(() => setSnapLines([]));
-  }, [setSnapLines]);
+  const onResizeEnd = useCallback(
+    (_: unknown, params: { width: number; height: number; x?: number; y?: number }) => {
+      if (!resizingRef.current) return; // 幽灵 end（RF 重初始化旧值）忽略
+      resizingRef.current = false;
+      setSnapLines([]);
+      requestAnimationFrame(() => setSnapLines([]));
+      // 松手一次落库最终尺寸（官方 onResizeEnd 契约）：RF 的 dimensions change 不写
+      // style（尺寸真相源），不写会回退。写全 style/顶层/data.w/h，左/上边缘的位置一并补落。
+      const w = Math.round(params.width);
+      const h = Math.round(params.height);
+      updateNode(id, {
+        width: w,
+        height: h,
+        style: { width: w, height: h },
+        data: { w, h },
+        ...(params.x !== undefined && params.y !== undefined ? { position: { x: params.x, y: params.y } } : {}),
+      });
+    },
+    [id, updateNode, setSnapLines],
+  );
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
     if (!resizingRef.current) return;
     const nodes = getNodes();

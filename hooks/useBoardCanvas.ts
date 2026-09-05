@@ -3,7 +3,7 @@
 import { createContext, createElement, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
-import type { Node, Edge, NodeChange, EdgeChange, XYPosition } from "@xyflow/react";
+import type { Node, Edge, NodeChange, EdgeChange } from "@xyflow/react";
 import { applyNodeChanges, applyEdgeChanges } from "@xyflow/react";
 import type { BoardInfo, RunningSnapshot, TaskCardRunningState } from "@/lib/board-types";
 import { dispatchBoardSessionCreated, dispatchBoardSessionDeleted } from "@/lib/board-events";
@@ -521,14 +521,6 @@ export function useBoardCanvas({
   // 不依赖 RF 受控 nodes 上的 dragging 标志（那是 RF 内部状态，不随受控 prop 下发）——
   // 用它做 syncNodes 回灌保护：拖拽中 position 只写本地，远端写入不得冲回。
   const draggingNodeIdsRef = useRef<Set<string>>(new Set());
-  // resize 会话守卫：resizing:true 帧标记活跃，resizing:false 落库后清除。
-  // RF 的 NodeResizer 在节点变化后会重新初始化 XYResizer（update 重置 prevValues），
-  // 触发第二次假的 drag end → 派发旧尺寸的 resizing:false change 覆盖刚落的库
-  // （松手尺寸还原）。无活跃会话的 resizing:false 是幽灵 change，必须忽略。
-  const resizeActiveRef = useRef<Set<string>>(new Set());
-  // 左/上边缘 resize 的本地 position 跟踪：resize 中 position 只本地跟手（不写 yjs），
-  // 松手（dimensions resizing:false）时用最后本地值补落，否则位置被写回 resize 前旧值。
-  const lastResizePosRef = useRef(new Map<string, XYPosition>());
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     const nodesMap = nodesMapRef.current;
@@ -572,11 +564,9 @@ export function useBoardCanvas({
           if (c.dragging === true || resizeIds.has(c.id)) {
             // 拖拽/resize 中：position 只写本地 state，不写 yjs——每帧写会让
             // CRDT 历史爆炸（一次拖拽几十上百条 update，实测 5 节点看板堆到
-            // 21MB）。本地 state 跟手。
+            // 21MB）。本地 state 跟手；resize 的最终 position 由卡组件
+            // onResizeEnd 一次性落库（官方契约）。
             setNodes((prev) => prev.map((x) => (x.id === c.id ? { ...x, position: n.position } : x)));
-            // resize 的 position 帧（左/上边缘，无 dragging 标记）：记下本地值，
-            // 松手时补落（RF 松手只推 dimensions 不再推 position）。
-            if (!c.dragging) lastResizePosRef.current.set(c.id, n.position);
           } else {
             // dragStop：一次写入最终值（"保留最后一帧"）。此前漏写 → 拖完刷新位置还原、多端不同步。
             nodesMap.set(c.id, { ...cleanNode(n), position: n.position });
@@ -584,35 +574,10 @@ export function useBoardCanvas({
           }
         }
       } else if (c.type === "dimensions") {
-        const n = next.find((x) => x.id === c.id);
-        if (n) {
-          // resize 中：RF 每帧 dimensions 是中间态，写 yjs 会 CRDT 历史爆炸
-          //（一次 resize 几十条 update）；只写本地 state 跟手。
-          // 松手（resizing:false）才落一次最终尺寸。
-          if (c.resizing) {
-            resizeActiveRef.current.add(c.id); // 标记 resize 会话活跃
-            setNodes((prev) => applyNodeChanges([c], prev)); // 本地 store 跟手
-            return;
-          }
-          // resizing:false（松手）：无活跃会话的幽灵 change（RF 重初始化旧值）直接忽略
-          if (!resizeActiveRef.current.has(c.id)) return;
-          resizeActiveRef.current.delete(c.id);
-          // 松手落库：onEnd 的 change 无 setAttributes，applyChange 只更新 measured、
-          // 不更新 style/顶层 width/height——RF 渲染尺寸优先 style，只落 measured 会
-          // 回灌后仍按旧 style 渲染（松手尺寸还原）。这里把最终尺寸写全三处。
-          const lastPos = lastResizePosRef.current.get(c.id);
-          if (lastPos) lastResizePosRef.current.delete(c.id);
-          const dims = (c.dimensions ?? n.measured) as { width: number; height: number } | undefined;
-          const finalNode = dims
-            ? {
-                ...cleanNode(n),
-                width: dims.width,
-                height: dims.height,
-                style: { ...((n as Node).style ?? {}), width: dims.width, height: dims.height },
-              }
-            : cleanNode(n);
-          nodesMap.set(c.id, lastPos ? { ...finalNode, position: lastPos } : finalNode);
-        }
+        // resize/测量帧：一律本地跟手，不写 yjs——最终尺寸由卡组件 NodeResizer 的
+        // onResizeEnd 一次性落库（官方契约，不赌 dimensions change 的内部行为），
+        // 这里只保证 UI 跟手与 visible 判定（measured 在本地 state 即可）。
+        setNodes((prev) => applyNodeChanges([c], prev));
       }
     }
   }, []);

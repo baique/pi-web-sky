@@ -209,6 +209,7 @@ function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data:
   );
   const onResizeEnd = useCallback(
     (_: unknown, params: { width: number; height: number }) => {
+      if (!resizingRef.current) return; // 幽灵 end（RF 重初始化旧值）忽略
       resizingRef.current = false;
       setDragFs(null);
       // 松手一次落库最终尺寸（flow 单位，RF store 终值）：RF 的 dimensions change
