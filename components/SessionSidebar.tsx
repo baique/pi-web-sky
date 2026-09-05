@@ -1711,8 +1711,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       onOpenTaskBoard={(taskId) => onOpenTaskBoard?.(taskId)}
                       onDropSessionToTask={(taskId, sessionId) => void handleAssignSession(taskId, sessionId)}
                       onReorderTasks={handleReorderTasks}
-                      cwd={selectedCwd}
-                      onWorktreeChange={(path) => setSelectedCwd(path)}
                     />
                   </div>
                 )}

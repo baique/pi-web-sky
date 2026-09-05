@@ -16,6 +16,8 @@ import { TaskCardMultiSelect } from "@/components/canvas/TaskCardMultiSelect";
 import { CardKindBadge } from "@/components/canvas/CardKindBadge";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
 import { WorktreePicker } from "@/components/canvas/WorktreePicker";
+import { WorktreeSelector } from "@/components/WorktreeSelector";
+import { dispatchBoardCwdSwitch } from "@/lib/board-events";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { useBoardId, useBoardDefaultCwd } from "./BoardIdContext";
 import { memoBoardNode } from "./memoNode";
@@ -361,7 +363,18 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
 
   const formBody = draft ? (
     <>
-      <label style={LABEL_STYLE}>任务名称 *</label>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "8px 0 3px" }}>
+        <label style={{ ...LABEL_STYLE, margin: 0 }}>任务名称 *</label>
+        {draft.cwd && (
+          <WorktreeSelector
+            cwd={draft.cwd}
+            onSelect={(p) => { set("cwd", p); setWtPath(p); dispatchBoardCwdSwitch(p); }}
+            showMainLabel={false}
+            compact
+            style={{ height: "auto", background: "transparent", flexShrink: 0, borderRadius: 0 }}
+          />
+        )}
+      </div>
       <input
         style={{ ...FIELD_STYLE, ...(nameError ? { borderColor: "#f87171", boxShadow: "0 0 0 1px #f87171" } : {}) }}
         value={draft.name}
