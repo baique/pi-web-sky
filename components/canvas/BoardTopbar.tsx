@@ -20,7 +20,7 @@ import { useBoardSearch } from "./BoardSearchContext";
 const RUNNING_PHASES = new Set(["waiting_model", "running_tools", "running_command"]);
 
 /** 进行中项：运行中 / 工作中（展开态）的会话卡 */
-interface RunningItem {
+interface QueueItem {
   nodeId: string;
   label: string;
 }
@@ -72,8 +72,8 @@ export function BoardTopbar({
   }, []);
 
   /** 运行中：画面中 phase ∈ 运行中的会话卡（读实时镜像，yjs data.phase 是旧值）。 */
-  const runningItems = useMemo<RunningItem[]>(() => {
-    const out: RunningItem[] = [];
+  const runningItems = useMemo<QueueItem[]>(() => {
+    const out: QueueItem[] = [];
     for (const n of nodes) {
       if (n.type !== "session-card") continue;
       const d = n.data as { phase?: string; title?: string; sessionId?: string };
@@ -90,8 +90,8 @@ export function BoardTopbar({
   }, [nodes, sessionRunning]);
 
   /** 工作中：画面中展开态（data.expanded）但未运行中的会话卡（运行中已入上区，去重）。 */
-  const expandedItems = useMemo<RunningItem[]>(() => {
-    const out: RunningItem[] = [];
+  const expandedItems = useMemo<QueueItem[]>(() => {
+    const out: QueueItem[] = [];
     for (const n of nodes) {
       if (n.type !== "session-card") continue;
       const d = n.data as { phase?: string; title?: string; sessionId?: string; expanded?: boolean };
@@ -137,7 +137,7 @@ export function BoardTopbar({
 
   return (
     <div style={{ position: "absolute", top: 12, left: 12, zIndex: 40, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, maxWidth: "min(420px, calc(100% - 320px))" }}>
-      {/* 主胶囊：看板名 + 刷新 + 新建/磨砂/清空 + 展开（执行队列） */}
+      {/* 主胶囊：看板名 + 刷新 + 新建/磨砂/清空 + 展开（进行中） */}
       <div ref={capsuleRef} style={{
         display: "flex", alignItems: "center", gap: 4, height: 36,
         padding: "0 6px 0 12px", borderRadius: 999,
@@ -285,7 +285,7 @@ export function BoardTopbar({
           ) : (
             <>
               {runningItems.length > 0 && (
-                <div style={{ padding: "4px 10px 2px", fontSize: 10.5, fontWeight: 600, color: "var(--text-dim)", letterSpacing: 0.2 }}>
+                <div style={{ padding: "4px 10px 2px", fontSize: 10.5, fontWeight: 600, color: "var(--text-muted)", letterSpacing: 0.2 }}>
                   运行中 · {runningItems.length}
                 </div>
               )}
@@ -307,7 +307,7 @@ export function BoardTopbar({
                 </button>
               ))}
               {expandedItems.length > 0 && (
-                <div style={{ padding: "4px 10px 2px", fontSize: 10.5, fontWeight: 600, color: "var(--text-dim)", letterSpacing: 0.2 }}>
+                <div style={{ padding: "4px 10px 2px", fontSize: 10.5, fontWeight: 600, color: "var(--text-muted)", letterSpacing: 0.2 }}>
                   工作中 · {expandedItems.length}
                 </div>
               )}
@@ -321,7 +321,7 @@ export function BoardTopbar({
                   onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 10%, transparent)"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
                 >
-                  <span aria-hidden style={{ flexShrink: 0, color: "var(--text-dim)", display: "inline-flex" }}>
+                  <span aria-hidden style={{ flexShrink: 0, color: "var(--accent)", display: "inline-flex" }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M21 8V5a2 2 0 0 0-2-2h-3" /><path d="M3 16v3a2 2 0 0 0 2 2h3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" /></svg>
                   </span>
                   <span style={{ flexShrink: 0, width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", boxShadow: "0 0 6px 1px color-mix(in srgb, var(--accent) 45%, transparent)" }} />
@@ -373,7 +373,7 @@ const queueItemStyle: React.CSSProperties = {
   textAlign: "left", cursor: "pointer",
 };
 
-/** 浮层面板（磨砂/执行队列）的玻璃样式 */
+/** 浮层面板（磨砂/进行中）的玻璃样式 */
 const panelStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
