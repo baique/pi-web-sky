@@ -184,8 +184,8 @@ export const SessionWorkbench = memo(function SessionWorkbench({
     });
   }, [sessionId]);
 
-  // wheel 拦截：tldraw 在 container 监听 wheel（画布 pan/zoom），工作台内的滚轮必须被会话自己消费。
-  // 不用 useEffect([])：tldraw 重渲染/resize/展开收合会替换 shape 的 DOM，[] 只在首次挂载跑，
+  // wheel 拦截：React Flow 画布在 container 监听 wheel（画布 pan/zoom），工作台内的滚轮必须被会话自己消费。
+  // 不用 useEffect([])：RF 重渲染/resize/展开收合会替换卡片 DOM，[] 只在首次挂载跑，
   // 监听会挂在被替换的旧元素上失效。用无依赖 effect —— 每次渲染后都清旧挂新，保证监听总在
   // 当前元素。判定「按需」= 状态 × 几何：卡片激活（用户当前关注此卡）且目标在可滚动容器内
   // 才拦截（stopPropagation，不 preventDefault —— 让消息区正常滚动）；未激活或不在滚动区则
@@ -194,7 +194,7 @@ export const SessionWorkbench = memo(function SessionWorkbench({
     const el = rootRef.current;
     if (!el) return;
     const stop = (e: WheelEvent) => {
-      // ctrl/meta+wheel 是缩放手势：放行给画布（tldraw 缩放），不吞
+      // ctrl/meta+wheel 是缩放手势：放行给画布（RF 缩放），不吞
       if (e.ctrlKey || e.metaKey) return;
       // 实验性去除激活态条件：内容溢出即拦（内部滚动），不再区分卡片是否激活
       const t = e.target;
@@ -208,12 +208,11 @@ export const SessionWorkbench = memo(function SessionWorkbench({
     };
   });
 
-  // copy 拦截（原生监听，bubble 阶段）：工作台内（消息区等）选中文本后 Ctrl+C 会被 tldraw 劫持——
-  // 卡片处于选中态（selectedShapeIds 非空）且焦点不在输入元素时，tldraw 的 useNativeClipboardEvents
-  // 在 document 上 preventDefault 并复制 shape，写出的 text/plain 是 shape 的文本而非选区（会话卡
-  // getText 提不出内容，实际是空/空白）。这里在事件冒泡到 document（tldraw 监听处）之前，若存在
-  // 非空文本选区就 stopPropagation，放行浏览器原生复制选区；无文本选区（shape 选中复制）则放行给
-  // tldraw 正常复制。与便笺 StickyNoteShape 同方案。无依赖 effect：DOM 随渲染替换。
+  // copy 拦截（原生监听，bubble 阶段）：RF 画布的 document keydown 处理 Ctrl+C 复制
+  // 选中节点（copySelected，见 CanvasStage）——工作台内（消息区等）选中文本时会被它劫持，
+  // 写出的剪贴板是复制的节点而非文本选区。这里在事件到达 document（RF keydown 监听处）之前，
+  // 若存在非空文本选区就 stopPropagation，放行浏览器原生复制选区；无文本选区（画布选中
+  // 复制节点）则放行给 RF 正常复制。无依赖 effect：DOM 随渲染替换。
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -298,13 +297,11 @@ export const SessionWorkbench = memo(function SessionWorkbench({
       ref={rootRef}
       className="board-workbench"
       style={containerStyle}
-      // 工作台嵌在 tldraw 卡片内：阻止事件冒泡到画布。tldraw 画布在 pointerDown 上
-      // preventDefault（会吞掉后续 click），导致终端/模型选择器/session/通知等无法弹出。
+      // 工作台嵌在 RF 会话卡内：阻止事件冒泡到画布（RF 画布在 pointerDown 上
+      // preventDefault 会吞掉后续 click，导致终端/模型选择器等无法弹出）。
       // 冒泡阶段拦截：事件先正常到达目标（内部按钮可点击），再阻止冒泡到画布。
-      // 仅左键（button 0）拦截；右键(2)/中键(1)放行 —— 右键必须冒泡到 tldraw 打开菜单。
-      // 实验性去除激活态条件：未激活的卡片点击内容区也直接拦截左键（与便笺同模式），
-      // 修复「点按钮以为点上了、实际只是激活了还要再点一下」；tldraw 的选中/双击判定
-      // 走 capture 阶段不受影响。右键(2)/中键(1)仍放行 —— 右键必须冒泡到 tldraw 打开菜单。
+      // 仅左键（button 0）拦截；右键(2)/中键(1)放行 —— 右键必须冒泡到画布打开菜单。
+      // RF 的选中/双击判定走 capture 阶段不受影响。
       onPointerDown={(e) => { if (e.button === 0) e.stopPropagation(); }}
       onPointerUp={(e) => { if (e.button === 0) e.stopPropagation(); }}
       onClick={(e) => e.stopPropagation()}
@@ -361,13 +358,13 @@ const containerStyle: React.CSSProperties = {
   width: "100%",
   height: "100%",
   // 展开卡容器不裁剪：卡片内元素（模型选择下拉等）超出卡片边界时保持可见，
-  // 由卡片外层 visible + tldraw 画布边界（clip）兜底，避免超高面板顶部被裁。
+  // 由卡片外层 visible + RF 画布边界（clip）兜底，避免超高面板顶部被裁。
   overflow: "visible",
   color: "var(--text)",
 };
 
 /** 从目标向上找可滚动容器（到 root 为止）：目标在可滚动容器内 → 滚轮属于它，不冒泡到画布。
- *  与 tldraw usePassThroughWheelEvents 同思路：内容溢出 + overflow 可滚动才算数。 */
+ *  与 RF 的 usePassThroughWheelEvents 同思路：内容溢出 + overflow 可滚动才算数。 */
 function hasScrollableAncestor(target: Node, root: HTMLElement): boolean {
   let elm: Element | null = target instanceof Element ? target : target.parentElement;
   while (elm && elm instanceof HTMLElement) {

@@ -217,13 +217,13 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     };
   }, [board, screenToFlowPosition, addNodeAt, addImageFromFile]);
 
-  // 删除：Delete/Backspace → 确认制（按节点类型）
+  // 删除：Delete/Backspace → 确认制（按节点类型）；多选时逐个处理（每个类型走各自确认）
   const onBeforeDelete = useCallback(async ({ nodes }: { nodes: Array<{ id: string }> }): Promise<boolean> => {
     if (!nodes || nodes.length === 0) return true;
-    const node = nodes[0];
-    // 通过 ops.deleteNode 走确认制（识别类型需要查 board.nodes）
-    const full = board.nodes.find((n) => n.id === node.id);
-    if (full) void board.deleteNodeWithConfirm?.(full);
+    for (const node of nodes) {
+      const full = board.nodes.find((n) => n.id === node.id);
+      if (full) void board.deleteNodeWithConfirm?.(full);
+    }
     return false; // 阻止 RF 默认删除，由我们处理
   }, [board]);
 
@@ -414,6 +414,9 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
       const ae = document.activeElement as HTMLElement | null;
       if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return;
       if (key === "c") {
+        // 有非空文本选区（如便笺/卡片文本选中复制）→ 放行浏览器原生复制，不劫持成节点复制
+        const sel = window.getSelection();
+        if (sel && sel.toString().length > 0) return;
         void copySelected();
       } else if (key === "v") {
         void pasteNodes();

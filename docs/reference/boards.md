@@ -57,7 +57,7 @@ npm run dev          # 单进程：HTTP + WS 同端口（yjs 房间内嵌，无�
 
 ## 看板内搜索（Ctrl+F）
 
-- 常驻搜索框（画布顶部居中玻璃胶囊），遍历 RF nodes（会话卡标题 + 便笺正文），命中后 `setViewport` 居中 + accent 描边渐隐（BoardSearchContext 驱动）。纯前端，不落库。
+- 常驻搜索框（画布顶部居中玻璃胶囊），遍历 RF nodes（会话卡标题 + 便笺正文），命中后 `setCenter` 居中 + accent 描边渐隐（BoardSearchContext 驱动）。定位成功后经 `onViewportSave` 写回 yjs view map（与手动平移/缩放同一持久化通道），非「纯前端不落库」。
 
 ## 便笺编辑（TipTap WYSIWYG）
 

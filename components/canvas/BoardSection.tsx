@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { BoardInfo } from "@/lib/board-types";
-import { BOARD_CANVAS_CHANGED_EVENT } from "@/lib/board-events";
 
 /**
  * 侧栏「看板」栏目：位于会话 tab 内、任务区上方，样式与任务条目一致。
@@ -57,13 +56,6 @@ export function BoardSection({
   useEffect(() => {
     void load();
   }, [load, refreshKey]);
-
-  // 画布结构变化（清空/清理失效）→ 刷新节点计数
-  useEffect(() => {
-    const onChange = () => void load();
-    window.addEventListener(BOARD_CANVAS_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(BOARD_CANVAS_CHANGED_EVENT, onChange);
-  }, [load]);
 
   useEffect(() => {
     if (newOpen) newInputRef.current?.focus();
@@ -513,9 +505,6 @@ function BoardRow({
             <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {board.name}
             </span>
-            {board.nodeCount > 0 && (
-              <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10.5 }}>{board.nodeCount}</span>
-            )}
             {hovered && (
               <span style={{ position: "relative", display: "flex", gap: 3, flexShrink: 0, alignItems: "center" }}>
                 <button

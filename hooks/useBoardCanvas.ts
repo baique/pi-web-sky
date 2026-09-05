@@ -606,7 +606,7 @@ export function useBoardCanvas({
   const onConnect = useCallback((conn: { source: string; target: string }) => {
     const edgesMap = edgesMapRef.current;
     if (!edgesMap) return;
-    const id = `edge-${conn.source}-${conn.target}-${Date.now()}`;
+    const id = `edge-${conn.source}-${conn.target}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     edgesMap.set(id, {
       id,
       source: conn.source,
@@ -762,13 +762,22 @@ export function useBoardCanvas({
       }
       const ok = await confirm({ message: "删除该任务卡？\n将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。" });
       if (!ok) return;
+      // 先删业务卡（await 成功），再删画布节点——API 失败则保留节点可重试，
+      // 避免「节点先删、API 失败 → DB 孤儿卡」（reconcile 不补任务卡，卡永不可见）。
+      try {
+        const res = await fetch(`/api/task-cards/${encodeURIComponent(d.cardId)}`, { method: "DELETE" });
+        if (!res.ok) {
+          console.warn(`[board] 删除任务卡 ${d.cardId} 失败 HTTP ${res.status}，保留画布卡`);
+          return;
+        }
+      } catch (e) {
+        console.warn(`[board] 删除任务卡 ${d.cardId} 异常，保留画布卡`, e);
+        return;
+      }
       nodesMap.delete(node.id);
       for (const e of Array.from(edgesMap.values())) {
         if (e.source === node.id || e.target === node.id) edgesMap.delete(e.id);
       }
-      fetch(`/api/task-cards/${encodeURIComponent(d.cardId)}`, { method: "DELETE" }).catch((e) =>
-        console.warn(`[board] 删除任务卡 ${d.cardId} 异常`, e),
-      );
     } else {
       // 便笺/文本/图片：直接删（级联删边——普通看板无 reconcile 兜底，
       // 不删边会留 yjs 幽灵边永久残留）
@@ -904,6 +913,9 @@ export function useBoardCanvas({
   const saveViewport = useCallback((vp: { x: number; y: number; zoom: number }) => {
     const vm = viewMapRef.current;
     if (!vm) return;
+    // 值未变直接 return：RF 程序化 setViewport（如 ready 恢复）会经 onMoveEnd 再触发一次
+    // saveViewport 原值重写——yjs typeMapSet 无值去重，无条件写会每次开板/重连多一次 CRDT 写+广播。
+    if (vm.get("x") === vp.x && vm.get("y") === vp.y && vm.get("zoom") === vp.zoom) return;
     vm.set("x", vp.x);
     vm.set("y", vp.y);
     vm.set("zoom", vp.zoom);
