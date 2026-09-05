@@ -998,7 +998,7 @@ export function AppShell() {
     // 看板模式下保留 ?board=（boardAwareUrl），否则 cwd 初始化会把看板地址清成 "/"
     router.replace(boardAwareUrl("/"), { scroll: false });
   }, [activeCwd, invalidateWorkspaceRestore, newSessionCwd, router, selectedSession, restoreWorkspaceContext]);
-
+  // 看板 cwd-switch 事件用最新引用（避免监听反复重绑）
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     invalidateWorkspaceRestore();
     activeNewSessionDraftKeyRef.current = null;
@@ -1080,6 +1080,9 @@ export function AppShell() {
     setNewSessionCwd(wtPath);
     setActiveCwd(wtPath);
   }, []);
+  // 看板 cwd-switch 事件用最新引用（避免监听反复重绑）
+  const handleEnvWorktreeChangeRef = useRef(handleEnvWorktreeChange);
+  handleEnvWorktreeChangeRef.current = handleEnvWorktreeChange;
 
   // 点任务行 → 打开该任务的看板：懒创建任务型看板后复用 handleOpenBoard。
   const handleOpenTaskBoard = useCallback((taskId: string) => {
@@ -1383,7 +1386,15 @@ export function AppShell() {
         tag: `pi-extension-ui:${detail.sessionId}`,
       });
     };
+    // 看板内切换 cwd（新建会话卡环境条 / 激活展开会话卡）→ 复用环境条标准切换
+    // （handleEnvWorktreeChange：set newSessionCwd + activeCwd → 左侧 selectedCwd 链自动跟随）
+    const onBoardCwdSwitch = (e: Event) => {
+      const detail = (e as CustomEvent<{ cwd: string }>).detail;
+      if (!detail?.cwd) return;
+      handleEnvWorktreeChangeRef.current(detail.cwd);
+    };
     window.addEventListener("pi-web:board-open-file", onBoardOpenFile);
+    window.addEventListener("pi-web:board-cwd-switch", onBoardCwdSwitch);
     window.addEventListener("pi-web:board-session-forked", onBoardSessionForked);
     window.addEventListener("pi-web:board-session-created", onBoardSessionCreated);
     window.addEventListener("pi-web:board-session-renamed", onBoardSessionRenamed);
@@ -1392,6 +1403,7 @@ export function AppShell() {
     window.addEventListener("pi-web:board-attention-needed", onBoardAttentionNeeded);
     return () => {
       window.removeEventListener("pi-web:board-open-file", onBoardOpenFile);
+      window.removeEventListener("pi-web:board-cwd-switch", onBoardCwdSwitch);
       window.removeEventListener("pi-web:board-session-forked", onBoardSessionForked);
       window.removeEventListener("pi-web:board-session-created", onBoardSessionCreated);
       window.removeEventListener("pi-web:board-session-renamed", onBoardSessionRenamed);

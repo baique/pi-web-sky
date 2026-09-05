@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
+import { WorktreeSelector } from "./WorktreeSelector";
 import type { SessionInfo } from "@/lib/types";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
@@ -1326,36 +1327,48 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           </div>
         </div>
 
-        {/* CWD picker */}
-        <div ref={dropdownRef} style={{ position: "relative" }}>
+        {/* CWD picker：单一 select 视觉——路径区（点开项目下拉）+ worktree suffix（点开 worktree 下拉） */}
+        <div
+          ref={dropdownRef}
+          style={{
+            position: "relative",
+            display: "flex",
+            alignItems: "center",
+            borderRadius: 7,
+            background: dropdownOpen
+              ? "var(--side-active)"
+              : cwdHovered
+                ? "var(--side-hover)"
+                : selectedCwd
+                  ? "color-mix(in srgb, var(--glass-bg-strong) 55%, transparent)"
+                  : "color-mix(in srgb, var(--accent) 8%, transparent)",
+            border: selectedCwd
+              ? "1px solid color-mix(in srgb, var(--border) 55%, transparent)"
+              : "1px solid color-mix(in srgb, var(--accent) 40%, transparent)",
+            boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent)",
+            transition: "border-color 0.15s, background 0.15s",
+          }}
+          onMouseEnter={() => setCwdHovered(true)}
+          onMouseLeave={() => setCwdHovered(false)}
+        >
           <button
             onClick={() => setDropdownOpen((v) => !v)}
             title={selectedProject?.root ?? selectedCwd ?? ""}
             style={{
-              width: "100%",
+              flex: 1,
+              minWidth: 0,
               display: "flex",
               alignItems: "center",
               padding: "6px 10px",
-              background: dropdownOpen
-                ? "var(--side-active)"
-                : cwdHovered
-                  ? "var(--side-hover)"
-                  : selectedCwd
-                    ? "color-mix(in srgb, var(--glass-bg-strong) 55%, transparent)"
-                    : "color-mix(in srgb, var(--accent) 8%, transparent)",
-              border: selectedCwd
-                ? "1px solid color-mix(in srgb, var(--border) 55%, transparent)"
-                : "1px solid color-mix(in srgb, var(--accent) 40%, transparent)",
-              borderRadius: 7,
+              background: "transparent",
+              border: "none",
+              borderRadius: 0,
               cursor: "pointer",
               fontSize: 12,
               color: "var(--text)",
               textAlign: "left",
-              boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent)",
-              transition: "border-color 0.15s, background 0.15s",
+              transition: "background 0.15s",
             }}
-            onMouseEnter={() => setCwdHovered(true)}
-            onMouseLeave={() => setCwdHovered(false)}
           >
             {selectedCwd ? (
               <PathLabel
@@ -1397,6 +1410,21 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               />
             )}
           </button>
+
+          {/* worktree suffix：分隔线 + worktree 选择器（共享 select 容器，无独立边框/背景） */}
+          {selectedCwd && (
+            <>
+              <span aria-hidden style={{ flexShrink: 0, width: 1, alignSelf: "stretch", margin: "5px 0", background: "color-mix(in srgb, var(--border) 55%, transparent)" }} />
+              <WorktreeSelector
+                cwd={selectedCwd}
+                onSelect={(path) => { setSelectedCwd(path); setDropdownOpen(false); }}
+                onOpenChange={(open) => { if (open) setDropdownOpen(false); }}
+                showMainLabel={false}
+                compact
+                style={{ height: "auto", background: "transparent", flexShrink: 0, borderRadius: 0, maxWidth: 85 }}
+              />
+            </>
+          )}
 
           <AnimatedDropdown
             open={dropdownOpen}

@@ -8,9 +8,9 @@ import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 import type { SessionCardData } from "@/hooks/useBoardCanvas";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
-import { useSessionRunning } from "@/hooks/useBoardCanvas";
+import { useSessionRunning, useSessionSummary } from "@/hooks/useBoardCanvas";
 import { memoBoardNode } from "./memoNode";
-import { dispatchBoardSessionRenamed } from "@/lib/board-events";
+import { dispatchBoardSessionRenamed, dispatchBoardCwdSwitch } from "@/lib/board-events";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
 import { CardKindBadge } from "@/components/canvas/CardKindBadge";
 
@@ -52,12 +52,17 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
   // 最新 data 镜像：回调（promote/resize）读 ref，不依赖渲染期 data 引用（引用随 yjs 回灌变化 → 回调每帧重建 → 工作台 memo 失效）
   const dataRef = useRef(data);
   dataRef.current = data;
-  const { title, projectName, messageCount, lastActivityAt, stale, sessionId, lastReply, cwd, taskId, worktreeBranch, isWorktree } = data;
+  const { title, projectName, messageCount, lastActivityAt, stale, sessionId, lastReply, cwd, taskId } = data;
   // 运行态镜像优先（2.5s 轮询本地快照，不写 yjs）：命中则覆盖 data 旧值。
   // runningMs 高频变化 → 只镜像变化，不进 CRDT/undo 栈。
   const runningState = useSessionRunning(sessionId ?? null);
   const phase = runningState?.phase ?? data.phase;
   const runningMs = runningState?.runningMs ?? data.runningMs;
+  // worktree 徽标数据源：会话信息摘要（/api/sessions 轮询，不写 yjs）。
+  // 派生展示字段不入 CRDT（铁律：派生元素后端 reconcile 权威 / UI 态不进 yjs）。
+  const summary = useSessionSummary(sessionId ?? null);
+  const worktreeBranch = summary?.worktreeBranch ?? data.worktreeBranch;
+  const isWorktree = summary?.isWorktree ?? data.isWorktree;
   const isNewSession = Boolean(cwd);
   const { setContainer } = useCardGlass("var(--board-card-glass)");
 
@@ -163,10 +168,16 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
     e.stopPropagation();
     if (isNewSession) return;
     const next = nextExpandState(data, w, h);
+    const expanding = next.data.expanded && !data.expanded;
     updateNode(id, { data: next.data });
     // 尺寸三处对齐：顶层 width/height（NodeResizer 拖过会残留，RF 优先读它）
     // + style（RF 备选）。只改 style 会被顶层残留值屏蔽。
     updateNode(id, { width: next.w, height: next.h, style: { width: next.w, height: next.h } });
+    // 展开（收→展）= 激活该会话 → 触发全局标准切换（左侧文件区跟随该会话 worktree）。
+    if (expanding) {
+      const actCwd = summary?.cwd || summary?.projectRoot || cwd || "";
+      if (actCwd) dispatchBoardCwdSwitch(actCwd);
+    }
   };
 
   // 显式丢弃新建占位卡（仅标题栏垃圾桶按钮；双击已被 toggleExpand 屏蔽，不再触达此处）。
@@ -223,6 +234,30 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
   }, [id, updateNode]);
 
   const meta = phaseMeta[phase] ?? phaseMeta.idle;
+
+  // 统一底部条（收起/展开共用）：🕒 时间 · worktree 分支 · 运行时长。
+  // 分支信息非主 worktree 时显示（会话信息摘要，不写 yjs）。
+  const sessionFooter = (
+    <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text-muted)", borderTop: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", paddingTop: 3, marginTop: 2 }}>
+      <span aria-hidden style={{ flexShrink: 0 }}>🕒</span>
+      <span>{formatTime(lastActivityAt)}</span>
+      {!isNewSession && isWorktree && worktreeBranch && (
+        <span title={`Worktree: ${worktreeBranch}`} style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "var(--text-muted)", minWidth: 0, flexShrink: 0 }}>
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <line x1="6" y1="3" x2="6" y2="15" />
+            <circle cx="18" cy="6" r="3" />
+            <circle cx="6" cy="18" r="3" />
+            <path d="M18 9a9 9 0 0 1-9 9" />
+          </svg>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, maxWidth: 90 }}>{worktreeBranch}</span>
+        </span>
+      )}
+      <div style={{ flex: 1 }} />
+      {runningMs > 0 && phase !== "idle" && (
+        <span style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap", flexShrink: 0 }}>{formatDuration(runningMs)}</span>
+      )}
+    </div>
+  );
 
   // 收合态滚轮内部滚动（RF 的 nowheel 类已处理，这里不需要额外监听）
 
@@ -296,21 +331,6 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
         }}
       >
         <CardKindBadge kind="session" color={meta.dot} />
-        {/* worktree 徽标：非主 worktree 时显示分支名（任务卡 #16），对齐侧边栏会话行样式 */}
-        {!isNewSession && isWorktree && worktreeBranch && (
-          <span
-            title={`Worktree: ${cwd ?? worktreeBranch}`}
-            style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--accent)", minWidth: 0, overflow: "hidden", flexShrink: 0 }}
-          >
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-              <line x1="6" y1="3" x2="6" y2="15" />
-              <circle cx="18" cy="6" r="3" />
-              <circle cx="6" cy="18" r="3" />
-              <path d="M18 9a9 9 0 0 1-9 9" />
-            </svg>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, maxWidth: 90 }}>{worktreeBranch}</span>
-          </span>
-        )}
         {renaming ? (
           <input
             ref={renameInputRef}
@@ -366,7 +386,11 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
               cwd={cwd}
               taskId={taskId}
               onPromote={handlePromote}
-              onCwdChange={(path) => updateNode(id, { data: { ...dataRef.current, cwd: path } })}
+              onCwdChange={(path) => {
+                updateNode(id, { data: { ...dataRef.current, cwd: path } });
+                // 切分支 → 触发全局标准切换（左侧跟随 + 后续衍生），复用 AppShell.handleCwdChange
+                dispatchBoardCwdSwitch(path);
+              }}
             />
           ) : (
             <WorkbenchSkeleton />
@@ -391,15 +415,8 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
               </div>
             )}
           </div>
-          {/* 底部时间 */}
-          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text-muted)", borderTop: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", paddingTop: 3 }}>
-            <span aria-hidden style={{ flexShrink: 0 }}>🕒</span>
-            <span>{formatTime(lastActivityAt)}</span>
-            <div style={{ flex: 1 }} />
-            {runningMs > 0 && phase !== "idle" && (
-              <span style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap", flexShrink: 0 }}>{formatDuration(runningMs)}</span>
-            )}
-          </div>
+        {/* 底部条：时间 · worktree 分支 · 运行时长（收起态） */}
+        {sessionFooter}
         </>
       )}
     </div>

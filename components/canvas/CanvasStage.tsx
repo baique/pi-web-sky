@@ -15,6 +15,7 @@ import { BoardCanvasProvider, type BoardCanvasOps } from "@/components/board/Boa
 import { BoardContextMenu, type BoardMenuState } from "@/components/board/BoardContextMenu";
 import { BoardLoading } from "./BoardLoading";
 import { uploadBoardImage } from "@/lib/board-assets";
+import { dispatchBoardCwdSwitch } from "@/lib/board-events";
 
 /**
  * React Flow 画布舞台：无限画布 + 工具行 + 拖放添加会话。
@@ -292,6 +293,21 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     },
     [board, getNodes],
   );
+  // 单击已展开的会话卡 = 激活该会话 → 触发全局标准切换（左侧文件区跟随该会话 worktree）。
+  // 约定：仅展开态会话卡单击；收起态/新建占位卡不触发。RF onNodeClick 在 wrapper 层捕获，拖拽不误触。
+  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    if (node.type !== "session-card") return;
+    const d = node.data as Record<string, unknown> | undefined;
+    if (!d || !d.sessionId) return;
+    const sessionId = String(d.sessionId);
+    const expanded = Boolean(d.expanded);
+    if (!expanded) return;
+    if (d.cwd) return; // 新建占位卡不是激活既有会话
+    const summary = board.sessionTitles?.[sessionId];
+    const actCwd = summary?.cwd || summary?.projectRoot || "";
+    if (actCwd) dispatchBoardCwdSwitch(actCwd);
+  }, [board.sessionTitles]);
+
   const onEdgeContextMenu = useCallback((e: React.MouseEvent, edge: { id: string }) => {
     e.preventDefault();
     // 找到 edge 的 data 判断派生边
@@ -507,6 +523,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               nodeTypes={nodeTypes}
               onBeforeDelete={onBeforeDelete}
               onNodeContextMenu={onNodeContextMenu}
+              onNodeClick={onNodeClick}
               onPaneContextMenu={onPaneContextMenu}
               onEdgeContextMenu={onEdgeContextMenu}
               onPaneClick={onPaneClick}

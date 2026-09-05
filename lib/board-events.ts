@@ -20,6 +20,9 @@ export const BOARD_SESSION_DELETED_EVENT = "pi-web:board-session-deleted";
 /** 看板内会话改名 → AppShell 刷新侧栏（左侧树名称同步） */
 export const BOARD_SESSION_RENAMED_EVENT = "pi-web:board-session-renamed";
 
+/** 看板内切换 cwd（新建会话卡环境条 / 激活展开会话卡）→ AppShell 调 handleCwdChange 标准切换 */
+export const BOARD_CWD_SWITCH_EVENT = "pi-web:board-cwd-switch";
+
 /** 工作台内会话运行结束 → AppShell 刷新侧栏 + 浏览器通知 */
 export const BOARD_AGENT_END_EVENT = "pi-web:board-agent-end";
 
@@ -36,6 +39,7 @@ declare global {
     "pi-web:board-session-created": CustomEvent<{ sessionId: string; nodeId?: string }>;
     "pi-web:board-session-deleted": CustomEvent<{ sessionId: string }>;
     "pi-web:board-session-renamed": CustomEvent<{ sessionId: string; name?: string }>;
+    "pi-web:board-cwd-switch": CustomEvent<{ cwd: string }>;
     "pi-web:board-agent-end": CustomEvent<{ sessionId: string; sessionName?: string }>;
     "pi-web:board-attention-needed": CustomEvent<{ sessionId: string; title?: string; method: string }>;
     "pi-web:board-tasks-changed": CustomEvent<Record<string, never>>;
@@ -60,6 +64,10 @@ export function dispatchBoardSessionDeleted(sessionId: string): void {
 
 export function dispatchBoardSessionRenamed(sessionId: string, name?: string): void {
   window.dispatchEvent(new CustomEvent(BOARD_SESSION_RENAMED_EVENT, { detail: { sessionId, name } }));
+}
+
+export function dispatchBoardCwdSwitch(cwd: string): void {
+  window.dispatchEvent(new CustomEvent(BOARD_CWD_SWITCH_EVENT, { detail: { cwd } }));
 }
 
 export function dispatchBoardAgentEnd(sessionId: string, sessionName?: string): void {

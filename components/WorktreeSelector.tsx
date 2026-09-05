@@ -69,6 +69,10 @@ interface WorktreeSelectorProps {
   labelStyle?: CSSProperties;
   /** 下拉开关状态上抛（父级用于 hover 门控挂载时避免卸载导致面板消失） */
   onOpenChange?: (open: boolean) => void;
+  /** 主 worktree 是否显示「主分支」文字标签（紧凑场景如 select suffix 可关，只留 icon+名+count） */
+  showMainLabel?: boolean;
+  /** 紧凑模式（select suffix 内嵌）：限宽 + 去 count + 去下拉箭头，只留 icon+分支名 */
+  compact?: boolean;
 }
 
 const branchIcon = (
@@ -86,7 +90,7 @@ const branchIcon = (
  * 由父级更新全局有效 cwd（activeCwd / newSessionCwd）。不服务会话中切换
  * （会话 cwd 落盘即锁定，任务卡 #16）。
  */
-export function WorktreeSelector({ cwd, onSelect, style, labelStyle, onOpenChange }: WorktreeSelectorProps) {
+export function WorktreeSelector({ cwd, onSelect, style, labelStyle, onOpenChange, showMainLabel = true, compact = false }: WorktreeSelectorProps) {
   const { t } = useI18n();
   const [state, setState] = useState<WorktreeState | null>(null);
   const [loading, setLoading] = useState(false);
@@ -280,7 +284,8 @@ export function WorktreeSelector({ cwd, onSelect, style, labelStyle, onOpenChang
           gap: 6,
           height: 28,
           boxSizing: "border-box",
-          padding: "0 10px",
+          padding: compact ? "0 6px" : "0 10px",
+          maxWidth: compact ? 85 : undefined,
           background: open ? "var(--side-active)" : triggerHovered ? "var(--side-hover)" : "transparent",
           border: "none",
           borderRadius: 5,
@@ -300,15 +305,15 @@ export function WorktreeSelector({ cwd, onSelect, style, labelStyle, onOpenChang
           text={currentWorktree ? (currentWorktree.branch ?? displayCwd(currentWorktree.path, homeDir)) : loading ? "…" : t("sidebar.worktrees")}
           style={{ flex: 1, fontFamily: "var(--font-mono)", color: "var(--text)", ...labelStyle }}
         />
-        {currentWorktree?.isMain && (
+        {showMainLabel && currentWorktree?.isMain && (
           <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{t("sidebar.main")}</span>
         )}
-        {!gated && (state?.worktrees.length ?? 0) > 1 && (
+        {!compact && !gated && (state?.worktrees.length ?? 0) > 1 && (
           <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>
             {state!.worktrees.length}
           </span>
         )}
-        {!gated && (
+        {!compact && !gated && (
           <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
             <polyline points="2 3.5 5 6.5 8 3.5" />
           </svg>
@@ -316,7 +321,7 @@ export function WorktreeSelector({ cwd, onSelect, style, labelStyle, onOpenChang
       </button>
 
       {panelPos && createPortal(
-        <div ref={panelRef} style={{ position: "fixed", left: panelPos.left, top: panelPos.top, width: panelPos.width, zIndex: 100 }}>
+        <div ref={panelRef} style={{ position: "fixed", left: panelPos.left, top: panelPos.top, width: panelPos.width, zIndex: 1000 }}>
         <AnimatedDropdown
           open={open}
           up={panelPos.up}

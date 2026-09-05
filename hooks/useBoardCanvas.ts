@@ -31,6 +31,10 @@ export type SessionSummary = {
   projectName: string;
   lastReply: string;
   lastActivityAt: number;
+  /** 会话工作目录（= projectRoot，激活会话时全局 cwd 跟随目标） */
+  projectRoot?: string;
+  /** 会话真实 cwd（worktree 路径；激活会话时全局 cwd 应切到这里而非 projectRoot） */
+  cwd?: string;
   /** worktree 分支名（非主 worktree，卡片徽标用，任务卡 #16） */
   worktreeBranch?: string;
   /** 是否链接 worktree（非主 checkout） */
@@ -462,7 +466,7 @@ export function useBoardCanvas({
     try {
       const res = await fetch("/api/sessions", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { sessions: Array<{ id: string; name?: string; firstMessage?: string; messageCount?: number; projectKey?: string; projectRoot?: string; lastReply?: string; modified?: string; worktreeBranch?: string; isWorktree?: boolean }> };
+      const data = (await res.json()) as { sessions: Array<{ id: string; name?: string; firstMessage?: string; messageCount?: number; projectKey?: string; projectRoot?: string; cwd?: string; lastReply?: string; modified?: string; worktreeBranch?: string; isWorktree?: boolean }> };
       const map: Record<string, SessionSummary> = {};
       for (const s of data.sessions) {
         map[s.id] = {
@@ -471,6 +475,8 @@ export function useBoardCanvas({
           projectName: s.projectKey ?? s.projectRoot ?? "",
           lastReply: s.lastReply ?? "",
           lastActivityAt: s.modified ? Date.parse(s.modified) : 0,
+          projectRoot: s.projectRoot,
+          cwd: s.cwd,
           worktreeBranch: s.worktreeBranch,
           isWorktree: s.isWorktree,
         };
@@ -519,8 +525,8 @@ export function useBoardCanvas({
         const d = node.data as SessionCardData;
         const s = sessionTitles[d.sessionId];
         if (!s) continue;
-        if (d.title !== s.title || d.lastReply !== s.lastReply || d.messageCount !== s.messageCount || d.lastActivityAt !== s.lastActivityAt || d.worktreeBranch !== s.worktreeBranch || d.isWorktree !== s.isWorktree) {
-          nodesMap.set(node.id, { ...node, data: { ...d, title: s.title, lastReply: s.lastReply, messageCount: s.messageCount, lastActivityAt: s.lastActivityAt, worktreeBranch: s.worktreeBranch, isWorktree: s.isWorktree } });
+        if (d.title !== s.title || d.lastReply !== s.lastReply || d.messageCount !== s.messageCount || d.lastActivityAt !== s.lastActivityAt) {
+          nodesMap.set(node.id, { ...node, data: { ...d, title: s.title, lastReply: s.lastReply, messageCount: s.messageCount, lastActivityAt: s.lastActivityAt } });
         }
       }
     }, "board-summary");
@@ -1031,6 +1037,8 @@ export function useTaskCardVisibility() {
 export interface SessionRunningValue {
   /** 单会话运行态镜像；未命中 → undefined（组件回落 yjs data 旧值） */
   getRunning: (sessionId: string) => SessionRunningState | undefined;
+  /** 单会话摘要镜像（标题/分支等，经 /api/sessions 轮询维护，不写 yjs） */
+  getSummary: (sessionId: string) => SessionSummary | undefined;
 }
 
 const SessionRunningContext = createContext<SessionRunningValue | null>(null);
@@ -1044,4 +1052,10 @@ export function SessionRunningProvider({ value, children }: { value: SessionRunn
 export function useSessionRunning(sessionId: string | null): SessionRunningState | undefined {
   const ctx = useContext(SessionRunningContext);
   return sessionId && ctx ? ctx.getRunning(sessionId) : undefined;
+}
+
+/** 读取单会话摘要镜像（标题/分支等；会话信息 API 轮询维护，不写 yjs） */
+export function useSessionSummary(sessionId: string | null): SessionSummary | undefined {
+  const ctx = useContext(SessionRunningContext);
+  return sessionId && ctx ? ctx.getSummary(sessionId) : undefined;
 }

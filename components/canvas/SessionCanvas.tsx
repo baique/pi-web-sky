@@ -71,8 +71,9 @@ export function SessionCanvas({
   const sessionRunningValue = useMemo<SessionRunningValue>(
     () => ({
       getRunning: (sessionId) => board.sessionRunning[sessionId],
+      getSummary: (sessionId) => board.sessionTitles[sessionId],
     }),
-    [board.sessionRunning],
+    [board.sessionRunning, board.sessionTitles],
   );
   // 看板搜索框 input ref：Ctrl+F 聚焦目标（仅看板模式生效）
   const searchBoxRef = useRef<HTMLInputElement>(null);
