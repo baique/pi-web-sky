@@ -498,14 +498,24 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
       <div ref={stageRef} style={{ flex: 1, minHeight: 0, position: "relative" }}>
-        {/* 画布 scrim：内容层之下、壁纸之上的一层暗色承托 + 磨砂（与旧一致） */}
+        {/* 画布 scrim：内容层之下、壁纸之上的一层暗色承托 + 磨砂（与旧一致）。
+          混合渲染（任务卡 #17）：背景图 = 视口对齐的 scrim 档预模糊壁纸切片
+          （--glass-bg-image-scrim，由 useGlassWallpaper 生成，fixed 对齐视口），
+          零实时 blur；backdrop-filter 保留作实时预览——磨砂滑块拖动时 blur 即时
+          生效（applyWallpaperCss 写 --board-scrim-filter），生成成功后摘掉 → 稳态。
+          无壁纸图时纯色跟随主题 + blur 实时磨砂。 */}
         <div
           style={{
             position: "absolute",
             inset: 0,
             zIndex: 0,
             pointerEvents: "none",
-            background: "var(--board-scrim-bg)",
+            backgroundColor: "var(--board-scrim-bg)",
+            backgroundImage: "var(--glass-bg-image-scrim, none)",
+            backgroundAttachment: "fixed",
+            backgroundSize: "100% 100%, 100% 100%",
+            backgroundRepeat: "no-repeat, no-repeat",
+            backgroundPosition: "0 0, 0 0",
             backdropFilter: "var(--board-scrim-filter, none)",
             WebkitBackdropFilter: "var(--board-scrim-filter, none)",
           }}
