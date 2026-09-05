@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
-import { useBoardCanvas, TaskCardStatusProvider, type TaskCardStatusValue } from "@/hooks/useBoardCanvas";
+import { useBoardCanvas, TaskCardStatusProvider, SessionRunningProvider, type TaskCardStatusValue, type SessionRunningValue } from "@/hooks/useBoardCanvas";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
 import { BoardSearchProvider } from "./BoardSearchContext";
 import { GlassScopeProvider } from "./GlassScopeContext";
@@ -65,6 +65,14 @@ export function SessionCanvas({
       unregister: board.unregisterVisibleTaskCard,
     }),
     [board.taskCardStatus, board.registerVisibleTaskCard, board.unregisterVisibleTaskCard],
+  );
+  // 会话卡运行态镜像值：getRunning 读 2.5s 轮询维护的本地镜像（不写 yjs），
+  // 引用随 board.sessionRunning 变化重建，订阅节点随之更新 phase/时钟。
+  const sessionRunningValue = useMemo<SessionRunningValue>(
+    () => ({
+      getRunning: (sessionId) => board.sessionRunning[sessionId],
+    }),
+    [board.sessionRunning],
   );
   // 看板搜索框 input ref：Ctrl+F 聚焦目标（仅看板模式生效）
   const searchBoxRef = useRef<HTMLInputElement>(null);
@@ -126,6 +134,7 @@ export function SessionCanvas({
       <BoardSearchProvider>
       <ReactFlowProvider>
       <TaskCardStatusProvider value={taskCardStatusValue}>
+      <SessionRunningProvider value={sessionRunningValue}>
       {!board.loading && (
         <BoardTopbar
           boardName={board.board?.name ?? ""}
@@ -164,6 +173,7 @@ export function SessionCanvas({
         board={board}
         isDark={isDark}
       />
+      </SessionRunningProvider>
       </TaskCardStatusProvider>
       </ReactFlowProvider>
       </BoardSearchProvider>

@@ -153,15 +153,19 @@ function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data:
   // 高度 = 内容自适应：字号变 / 文本变 → 内容重排 → 校准节点 height（flow 单位）。
   // offsetHeight 是 layout px（不含 RF 的 CSS transform 缩放），直接 = flow 单位，
   // 不能除以 zoom（rect 才需除，那是屏幕 px）。
+  // 关键：缩放拖动中不写 yjs（resizingRef 保护）——每帧 updateNode 会触发 observe
+  // 回灌 → setNodes 全量重建 → 重渲染 → 卡顿（“很不跟手”元凶）+ undo 栈被中间值污染。
+  // 拖动中字号/重排本地跟手，松手后 effectiveFs 回落触发本函数一次落库。
+  const resizingRef = useRef(false);
   const syncHeight = useCallback(() => {
     const el = rootRef.current;
-    if (!el || editing) return;
+    if (!el || editing || resizingRef.current) return;
     const h = Math.max(20, Math.round(el.offsetHeight));
     if (Math.abs(h - (height ?? 0)) > 1) {
-      // 保留原 style 的 width（浅合并会整体替换 style 对象，丢掉 width 会让节点被内容撑开）
-      updateNode(id, { style: { width: width ?? REF_W, height: h } });
+      // 只校 height：宽度由 RF/NodeResizer 管（style 深合并保留现有 width）。
+      updateNode(id, { style: { height: h } });
     }
-  }, [id, editing, updateNode, width, height]);
+  }, [id, editing, updateNode, height]);
 
   useEffect(() => {
     if (editing) return;
@@ -172,7 +176,7 @@ function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data:
   // NodeResizer：RF 原生改节点尺寸（flow 单位），松手落 yjs。拖动中 props.width
   //（来自 measured）不实时更新，用 onResize 的 params.width 实时派生字号本地跟手；
   // 松手清空 dragFs，回落派生值（= 拖动终值，无跳变）。
-  const onResizeStart = useCallback(() => { /* 无需起点快照：字号 = f(宽度) 纯函数 */ }, []);
+  const onResizeStart = useCallback(() => { resizingRef.current = true; }, []);
   const onResize = useCallback(
     (_: unknown, params: { width: number; height: number }) => {
       const nextFs = Math.round(Math.min(FS_MAX, Math.max(FS_MIN, TEXT_NODE_DEFAULT_FS * (params.width / REF_W))));
@@ -180,9 +184,17 @@ function TextNodeImpl({ id, data, selected, width, height }: NodeProps & { data:
     },
     [],
   );
-  const onResizeEnd = useCallback(() => {
-    setDragFs(null);
-  }, []);
+  const onResizeEnd = useCallback(
+    (_: unknown, params: { width: number; height: number }) => {
+      resizingRef.current = false;
+      setDragFs(null);
+      // 松手一次落库最终尺寸（flow 单位，RF store 终值）：RF 的 dimensions change
+      // 不写 user node 的 style（只更新 internal measured），尺寸真相源在 style——
+      // 不写会回退到创建值。style 深合并保留另一维；height 稍后由 syncHeight 校准为内容高。
+      updateNode(id, { style: { width: Math.max(20, Math.round(params.width)), height: Math.max(20, Math.round(params.height)) } });
+    },
+    [id, updateNode],
+  );
 
   // 手柄渲染（选中态显示，wrapper 层，RF 处理遮挡/z-index）
   const renderResizer = () => {

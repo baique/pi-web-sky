@@ -5,9 +5,10 @@ import { NodeResizer, Handle, Position, useReactFlow, type NodeProps } from "@xy
 import { computeResizeSnap } from "@/lib/board-align";
 import { SessionWorkbench } from "@/components/canvas/SessionWorkbench";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
-import type { CanvasPhase, SessionCardData } from "@/hooks/useBoardCanvas";
+import type { SessionCardData } from "@/hooks/useBoardCanvas";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
+import { useSessionRunning } from "@/hooks/useBoardCanvas";
 import { memoBoardNode } from "./memoNode";
 import { dispatchBoardSessionRenamed } from "@/lib/board-events";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
@@ -51,7 +52,12 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
   // 最新 data 镜像：回调（promote/resize）读 ref，不依赖渲染期 data 引用（引用随 yjs 回灌变化 → 回调每帧重建 → 工作台 memo 失效）
   const dataRef = useRef(data);
   dataRef.current = data;
-  const { title, projectName, messageCount, phase, runningMs, endedAt, lastActivityAt, stale, sessionId, lastReply, cwd, taskId } = data;
+  const { title, projectName, messageCount, lastActivityAt, stale, sessionId, lastReply, cwd, taskId } = data;
+  // 运行态镜像优先（2.5s 轮询本地快照，不写 yjs）：命中则覆盖 data 旧值。
+  // runningMs 高频变化 → 只镜像变化，不进 CRDT/undo 栈。
+  const runningState = useSessionRunning(sessionId ?? null);
+  const phase = runningState?.phase ?? data.phase;
+  const runningMs = runningState?.runningMs ?? data.runningMs;
   const isNewSession = Boolean(cwd);
   const { setContainer } = useCardGlass("var(--board-card-glass)");
 

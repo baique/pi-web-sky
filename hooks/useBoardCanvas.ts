@@ -60,6 +60,13 @@ const SYNC_BASE =
 
 export type CanvasPhase = "waiting_model" | "running_tools" | "running_command" | "waiting_input" | "idle" | "just-ended";
 
+/** 会话卡运行态镜像（DB/调度器真相的展示快照，不写 yjs——高频展示态与 CRDT 分离） */
+export interface SessionRunningState {
+  phase: CanvasPhase;
+  runningMs: number;
+  endedAt: number;
+}
+
 /** 会话卡 data（与后端 reconcile 的 node.data 对齐） */
 export interface SessionCardData extends Record<string, unknown> {
   sessionId: string;
@@ -133,6 +140,9 @@ export function useBoardCanvas({
       url: syncUri,
       name: boardId,
       forceSyncInterval: false,
+      // 批量发送：本地多次 update 在 500ms 窗口合并为一条 WS 消息，减少同步/解析开销。
+      // 官方推荐（HocuspocusProvider flushDelay 典型值 500ms）。拖拽/轮询高频写场景收益明显。
+      flushDelay: 500,
     });
     providerRef.current = p;
     setProvider(p);
@@ -222,8 +232,12 @@ export function useBoardCanvas({
     syncEdges();
 
     // UndoManager：追踪 nodesMap + edgesMap 的变化（忽略远程/初始同步）。
+    // trackedOrigins 显式 = {null}：只记录本地事务（origin=null，即用户操作/onNodesChange
+    // 写入）。远端更新 origin=provider 实例（readSyncMessage 第四参）天然排除；
+    // 噪音后台写（摘要回填）已用独立 origin 隔离（见下），不再进撤销栈。
     const undoManager = new Y.UndoManager([nodesMap, edgesMap], {
       captureTimeout: 500,
+      trackedOrigins: new Set([null]),
     });
     undoManagerRef.current = undoManager;
 
@@ -297,6 +311,13 @@ export function useBoardCanvas({
     visibleTaskCardIdsRef.current.delete(cardId);
   }, []);
 
+  // ---- 会话卡运行态镜像（状态从 CRDT 分离）----
+  // phase/runningMs/endedAt 是高频变化的展示态（runningMs 每次轮询必变：Date.now()-startedAt），
+  // 写 yjs 会导致：①每 2.5s 一次 CRDT 事务+广播+持久化（与“减少存盘”优化直接冲突）；
+  // ②origin=null 进 UndoManager 栈，撤销会回滚 runningMs。改为本地 state 镜像，
+  // 与 taskCardStatus 同款模式；SessionCardNode 经 context 读取覆盖 data 值。
+  const [sessionRunning, setSessionRunning] = useState<Record<string, SessionRunningState>>({});
+
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -348,24 +369,37 @@ export function useBoardCanvas({
           });
         }
         const nodesMap = nodesMapRef.current;
-        if (!nodesMap) return;
-        // 会话卡：phase/runningMs 仍写回 Y.Map（CRDT 广播，供多端一致展示运行态）
-        for (const node of Array.from(nodesMap.values())) {
-          if (node.type !== "session-card") continue;
-          const d = node.data as SessionCardData;
-          if (!d.sessionId) continue;
-          const state = data.states[d.sessionId] as { phase?: CanvasPhase; startedAt?: number } | undefined;
-          const runningNow = data.runningSessionIds.includes(d.sessionId);
-          if (runningNow && state) {
-            const phase = (state.phase as CanvasPhase) ?? "waiting_model";
-            const runningMs = state.startedAt ? Date.now() - state.startedAt : 0;
-            if (d.phase !== phase || d.runningMs !== runningMs || d.endedAt !== 0) {
-              nodesMap.set(node.id, { ...node, data: { ...d, phase, runningMs, endedAt: 0 } });
+        // 会话卡运行态：只更新本地镜像，不写 yjs（高频展示态与 CRDT 分离，见上）
+        const nextRunning: Record<string, SessionRunningState> = {};
+        if (nodesMap) {
+          for (const node of Array.from(nodesMap.values())) {
+            if (node.type !== "session-card") continue;
+            const d = node.data as SessionCardData;
+            if (!d.sessionId) continue;
+            const state = data.states[d.sessionId] as { phase?: CanvasPhase; startedAt?: number } | undefined;
+            const runningNow = data.runningSessionIds.includes(d.sessionId);
+            if (runningNow && state) {
+              const phase = (state.phase as CanvasPhase) ?? "waiting_model";
+              const runningMs = state.startedAt ? Date.now() - state.startedAt : 0;
+              nextRunning[d.sessionId] = { phase, runningMs, endedAt: 0 };
+            } else {
+              nextRunning[d.sessionId] = { phase: "idle", runningMs: 0, endedAt: 0 };
             }
-          } else if (!runningNow && d.phase !== "idle") {
-            nodesMap.set(node.id, { ...node, data: { ...d, phase: "idle", runningMs: 0, endedAt: 0 } });
           }
         }
+        // 只在实际变化时 setState（引用稳定 → 不击穿下游 memo）
+        setSessionRunning((prev) => {
+          let changed = false;
+          const next = { ...prev };
+          for (const [sid, s] of Object.entries(nextRunning)) {
+            const old = prev[sid];
+            if (!old || old.phase !== s.phase || old.runningMs !== s.runningMs || old.endedAt !== s.endedAt) {
+              next[sid] = s;
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
       } catch {
         // keep last
       } finally {
@@ -445,19 +479,24 @@ export function useBoardCanvas({
   }, [loadSessionSummaries]);
 
   // 摘要 → 写回节点 data（标题/最后回复实时刷新，CRDT 同步到多端）
+  // 后台噪音写：用独立 origin 事务包裹，UndoManager trackedOrigins={null} 自动排除，
+  // 撤销不会回滚标题/消息数等轮询回填值（官方推荐：为不想被撤销的变更设置专属 origin）。
   useEffect(() => {
+    const provider = providerRef.current;
     const nodesMap = nodesMapRef.current;
-    if (!nodesMap || !readyRef.current) return;
+    if (!provider || !nodesMap || !readyRef.current) return;
     if (Object.keys(sessionTitles).length === 0) return;
-    for (const node of Array.from(nodesMap.values())) {
-      if (node.type !== "session-card") continue;
-      const d = node.data as SessionCardData;
-      const s = sessionTitles[d.sessionId];
-      if (!s) continue;
-      if (d.title !== s.title || d.lastReply !== s.lastReply || d.messageCount !== s.messageCount || d.lastActivityAt !== s.lastActivityAt) {
-        nodesMap.set(node.id, { ...node, data: { ...d, title: s.title, lastReply: s.lastReply, messageCount: s.messageCount, lastActivityAt: s.lastActivityAt } });
+    provider.document.transact(() => {
+      for (const node of Array.from(nodesMap.values())) {
+        if (node.type !== "session-card") continue;
+        const d = node.data as SessionCardData;
+        const s = sessionTitles[d.sessionId];
+        if (!s) continue;
+        if (d.title !== s.title || d.lastReply !== s.lastReply || d.messageCount !== s.messageCount || d.lastActivityAt !== s.lastActivityAt) {
+          nodesMap.set(node.id, { ...node, data: { ...d, title: s.title, lastReply: s.lastReply, messageCount: s.messageCount, lastActivityAt: s.lastActivityAt } });
+        }
       }
-    }
+    }, "board-summary");
   }, [sessionTitles, ready]);
 
   // ---- 前端编辑：增量写回 Y.Map ----
@@ -493,15 +532,19 @@ export function useBoardCanvas({
         }
       } else if (c.type === "position") {
         // 维护拖拽集合：change.dragging 是 RF 拖拽态（true=拖拽中，false=松手）
-        if (c.dragging) draggingNodeIdsRef.current.add(c.id);
+        if (c.dragging === true) draggingNodeIdsRef.current.add(c.id);
         else draggingNodeIdsRef.current.delete(c.id);
-        // 拖拽位置只更新本地 state，不写 yjs——dragStop 时一次写入最终值。
-        // 每帧写 yjs 会让 CRDT 历史爆炸（一次拖拽几十上百条 update，实测 5 节点看板
-        // 堆到 21MB）。本地 state 由下方 setNodes 同步，跟手不受影响。
         const n = next.find((x) => x.id === c.id);
         if (n) {
-          // 只改 position，保留本地 data/selected/dragging（yjs data 可能滞后）
-          setNodes((prev) => prev.map((x) => (x.id === c.id ? { ...x, position: n.position } : x)));
+          if (c.dragging === true) {
+            // 拖拽中：position 只写本地 state，不写 yjs——每帧写会让 CRDT 历史爆炸
+            //（一次拖拽几十上百条 update，实测 5 节点看板堆到 21MB）。本地 state 跟手。
+            setNodes((prev) => prev.map((x) => (x.id === c.id ? { ...x, position: n.position } : x)));
+          } else {
+            // dragStop：一次写入最终值（“保留最后一帧”）。此前漏写 → 拖完刷新位置还原、多端不同步。
+            nodesMap.set(c.id, { ...n, position: n.position });
+            setNodes((prev) => prev.map((x) => (x.id === c.id ? { ...x, position: n.position } : x)));
+          }
         }
       } else if (c.type === "dimensions") {
         const n = next.find((x) => x.id === c.id);
@@ -711,12 +754,14 @@ export function useBoardCanvas({
   }, []);
 
   // ---- 节点/边操作：暴露给自定义节点组件（写 Y.Map 增量）----
+  // style 深合并：patch.style 只覆盖指定键（保留现有 width/height），防止
+  // 局部更新（如只校 height）整体替换 style 丢掉另一维（曾致节点被内容撑开/缩放回退）。
   const updateNode = useCallback((id: string, patch: Partial<Node>) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
     const cur = nodesMap.get(id);
     if (!cur) return;
-    nodesMap.set(id, { ...cur, ...patch });
+    nodesMap.set(id, { ...cur, ...patch, style: patch.style ? { ...cur.style, ...patch.style } : cur.style });
   }, []);
 
   // 防抖更新：表单连续输入（打字）时合并多次 patch，窗口结束后一次写 yjs。
@@ -824,6 +869,8 @@ export function useBoardCanvas({
       runningCount: running?.runningSessionIds.length ?? 0,
       // 可见任务卡状态镜像（DB 真相的展示快照，running 轮询维护）
       taskCardStatus,
+      // 会话卡运行态镜像（同上，不写 yjs）
+      sessionRunning,
       registerVisibleTaskCard,
       unregisterVisibleTaskCard,
       // React Flow 受控数据
@@ -852,7 +899,7 @@ export function useBoardCanvas({
       undo,
       redo,
     }),
-    [board, loading, error, running, nodes, edges, viewport, saveViewport, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, updateNodeDebounced, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, registerVisibleTaskCard, unregisterVisibleTaskCard, undo, redo],
+    [board, loading, error, running, nodes, edges, viewport, saveViewport, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, updateNodeDebounced, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, sessionRunning, registerVisibleTaskCard, unregisterVisibleTaskCard, undo, redo],
   );
 }
 
@@ -897,4 +944,33 @@ export function useTaskCardVisibility() {
     register: ctx?.register ?? (() => {}),
     unregister: ctx?.unregister ?? (() => {}),
   };
+}
+
+// ============================================================================
+// 会话卡运行态上下文（状态分离：phase/runningMs 不进 yjs）
+//
+// 与 TaskCardStatus 同款模式：2.5s running 轮询把 DB/调度器真相快照到
+// sessionRunning map（本地 state，不写 yjs），经此 context 提供给 SessionCardNode。
+// 高频展示态（runningMs 每次轮询必变）进 CRDT = 每 2.5s 一次事务+广播+持久化
+// + undo 栈污染，已彻底移出。yjs data 里的 phase/runningMs 保留旧值作兜底，
+// 组件优先读本镜像（getRunning 命中则覆盖）。
+// ============================================================================
+
+/** 会话卡运行态查询（SessionCanvas 提供，RF 节点经此读取） */
+export interface SessionRunningValue {
+  /** 单会话运行态镜像；未命中 → undefined（组件回落 yjs data 旧值） */
+  getRunning: (sessionId: string) => SessionRunningState | undefined;
+}
+
+const SessionRunningContext = createContext<SessionRunningValue | null>(null);
+
+/** 供 SessionCanvas 包住 ReactFlow：把 useBoardCanvas 的会话运行态镜像桥接给 RF 节点 */
+export function SessionRunningProvider({ value, children }: { value: SessionRunningValue; children: ReactNode }) {
+  return createElement(SessionRunningContext.Provider, { value }, children);
+}
+
+/** 读取单会话实时运行态（SessionCardNode 用；未命中回落 data 值） */
+export function useSessionRunning(sessionId: string | null): SessionRunningState | undefined {
+  const ctx = useContext(SessionRunningContext);
+  return sessionId && ctx ? ctx.getRunning(sessionId) : undefined;
 }
