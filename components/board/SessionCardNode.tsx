@@ -364,7 +364,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
         <div data-session-navbar-slot className="nodrag" style={{ display: "flex", alignItems: "center" }} />
         <button
           type="button"
-          onClick={discardNewSession}
+          onClick={isNewSession ? discardNewSession : toggleExpand}
           className="nodrag"
           title={isNewSession ? "Discard" : expanded ? "Collapse" : "Expand"}
           style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: "var(--text-muted)", cursor: "pointer" }}
