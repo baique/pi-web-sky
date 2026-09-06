@@ -5,10 +5,11 @@
 ## app/api/
 
 ```
-sessions/route.ts               GET  list all sessions
-sessions/[id]/route.ts          GET/PATCH/DELETE session
+sessions/route.ts               GET ?project=<key> 单项目无分页 | 无参全量（看板/跨项目）
+sessions/[id]/route.ts          GET/PATCH/DELETE session（PATCH name 同步写 session_meta.title）
 sessions/[id]/context/route.ts  GET ?leafId= — context for a specific leaf
 sessions/[id]/export/route.ts   GET exported HTML for a session
+sessions/summary/route.ts       POST { ids } — 看板卡片摘要点查（替代全量轮询自筛）
 agent/new/route.ts              POST { cwd, message, toolNames?, provider?, modelId? }
 agent/[id]/route.ts             GET state | POST any command
 agent/[id]/events/route.ts      GET SSE stream
@@ -63,7 +64,7 @@ board-utils.ts       看板工具（shouldRemoveEndedCard 等）
 board-scrim-settings.ts  画布 scrim 磨砂设置持久化
 session-stats.ts     会话统计行格式（in/out/cache/cost/context，与 AppShell 共用）
 task-store.ts        任务元数据 CRUD（session_meta 旁路，boards.task_id 联动的源头）
-sqlite-db.ts         SQLite 单例 + 版本化迁移（SCHEMA_VERSION = 5，boards 于 v3–v5）
+sqlite-db.ts         SQLite 单例 + 版本化迁移（SCHEMA_VERSION = 11，session_meta 含会话索引列）
 draft-store.ts       local draft persistence helpers
 file-access.ts       allowed file roots for /api/files and worktrees
 file-paths.ts        client/server path encoding helpers
@@ -71,7 +72,10 @@ markdown.ts          shared markdown helpers
 npx.ts               npx runner used by skill install
 pi-types.ts          local structural types for pi SDK objects
 rpc-manager.ts      AgentSessionWrapper + registry + startRpcSession
-session-reader.ts   SessionManager wrappers + path cache + buildSessionContext adapter
+session-reader.ts   SessionManager wrappers + path cache + buildSessionContext adapter +
+                    loadProjectSessions（按 project_key 纯查 session_meta）+ loadSessionSummariesByIds（摘要点查）
+session-index-scanner.ts  后台扫描器：30s 全量扫磁盘建/刷 session_meta 索引（列表纯查表的事实源维护者）
+session-scanner.ts 轻量会话文件扫描（头尾定向读：header/首条消息/自定义名/lastReply）
 tool-presets.ts     PRESET_NONE/READ_ONLY/DEFAULT/FULL + getPresetFromTools()
 tool-preset-preference.ts  browser-persisted default for fresh sessions
 types.ts            shared TypeScript types
