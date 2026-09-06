@@ -17,54 +17,6 @@ export interface BoardInfo {
   sortOrder: number;
   created: number;
   updated: number;
-  /** 节点数（列表展示用，不落库） */
-  nodeCount: number;
-}
-
-export type BoardNodeKind = "session" | "shape" | "taskcard";
-
-export interface BoardNode {
-  id: string;
-  boardId: string;
-  kind: BoardNodeKind;
-  /** sessionId（kind=session）；失效时 refId 仍保留但 session 不存在 */
-  refId: string | null;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  expanded: boolean;
-  props: Record<string, unknown>;
-  created: number;
-  updated: number;
-}
-
-export interface BoardEdge {
-  id: string;
-  boardId: string;
-  fromId: string;
-  toId: string;
-  label: string | null;
-  color: string | null;
-  dashed: boolean;
-  created: number;
-  updated: number;
-}
-
-export interface BoardView {
-  boardId: string;
-  cameraX: number;
-  cameraY: number;
-  cameraZ: number;
-  updated: number;
-}
-
-/** GET /api/boards/[id]/canvas 响应（整张画布） */
-export interface BoardCanvas {
-  board: BoardInfo;
-  nodes: BoardNode[];
-  edges: BoardEdge[];
-  view: BoardView | null;
 }
 
 /** 运行中会话细分状态（GET /api/agent/running 扩展） */

@@ -147,11 +147,16 @@ export function useProviderQuota(provider: string | null | undefined): QuotaResu
       }
     };
 
-    void refresh();
-    const timer = setInterval(refresh, POLL_MS);
+    // 链式调度：上一次完成后再排下一次（响应慢自动降频，绝不叠加堆积）。
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const loop = async () => {
+      await refresh();
+      if (alive) timer = setTimeout(loop, POLL_MS);
+    };
+    void loop();
     return () => {
       alive = false;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
     };
   }, [provider, supported]);
 

@@ -78,3 +78,13 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 ```
 
 `entryIds[]` in `SessionContext` is a parallel array to `messages[]` — maps each displayed message back to its `.jsonl` entry id, used for fork and navigate_tree calls.
+
+## Session list indexing (v2, 2026-09)
+
+左栏聊天列表不再逐请求全量扫会话文件——`session_meta` 升格为会话完整索引，由后台扫描器维护。
+
+- **`lib/session-index-scanner.ts`**：启动即扫 + 每 30s 全量扫磁盘（`scanSessionFileMeta`），建行/刷 mtime/删行，幂等。`ensureSessionIndexReady` 供首请求前懒初始化（复用首轮 promise，不双跑）。
+- **`GET /api/sessions?project=<key>`**：单项目聊天区列表，`loadProjectSessions` 纯查 session_meta（project_key 过滤 + 排除 task 会话 + 置顶/mtime 排序），union 运行中 runtime。
+- **`GET /api/sessions/summary`**（POST `{ids}`）：看板卡片摘要点查——画布有几张卡查几个 id，替代全量轮询自筛。
+- 改名 `PATCH /[id]` 同步写 `session_meta.title`（不依赖扫描器）。lastReply 不入库，列表/卡片尾读文件。
+- 列表读取 = stat(存在/mtime) + meta(title/pinned) + 尾读(lastReply) 结合；文件是存在性事实源，meta 是标题/归属持久层，不做主动补行。

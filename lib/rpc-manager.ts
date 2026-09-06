@@ -13,6 +13,9 @@ import {
   preferUserBashExtension,
 } from "./project-command-env";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
+import { projectIdentityKey } from "./project-identity";
+import { resolveProject } from "./worktree";
+import { ensureSessionMetaRow } from "./task-store";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
@@ -530,6 +533,8 @@ export class AgentSessionWrapper {
         if (this.inner.isBashRunning) {
           throw new Error("Cannot fork while a shell command is running");
         }
+        // fork 前先取源会话 id：SDK fork 会原地改 inner.sessionId（见 AGENTS.md 铁律）
+        const sourceSessionId = this.inner.sessionId;
         const entryId = command.entryId as string;
         const sessionManager = this.inner.sessionManager;
         const currentSessionFile = this.inner.sessionFile;
@@ -566,7 +571,25 @@ export class AgentSessionWrapper {
         const newSessionId = SessionManager.open(newSessionFile, sessionDir).getSessionId();
         cacheSessionPath(newSessionId, newSessionFile);
         invalidateSessionListCache();
+        // fork 即建全列索引行（与 persistNewSessionFile 对齐）：文件已落盘，
+        // 行建好后刷新/切走不依赖扫描器补行（否则 fork 新会话最多 30s 不在列表）。
+        // parent_id 传源会话 id（列语义统一为会话 id，与扫描器反查结果一致）。
+        // 建行在 shutdown 之后：fork 后 inner 状态已变（铁律要求立即销毁 wrapper），
+        // resolveProject 的 await 不能发生在 registry 还挂着已 fork wrapper 的窗口里；
+        // 建行只用局部变量（cwd/newSessionFile/sourceSessionId），不依赖 wrapper。
+        const cwd = sessionManager.getCwd();
         await this.shutdown();
+        try {
+          const project = await resolveProject(cwd ?? "");
+          ensureSessionMetaRow(newSessionId, {
+            path: newSessionFile,
+            cwd: cwd ?? "",
+            projectKey: projectIdentityKey(project?.projectRoot ?? cwd ?? ""),
+            parentId: sourceSessionId,
+          });
+        } catch {
+          // 建行失败不阻塞 fork：扫描器下一轮兜底补行。
+        }
         return { cancelled: false, newSessionId };
       }
 
@@ -1402,7 +1425,7 @@ function trackStartingSession(cwd: string): () => void {
  * 落盘，刷新后 /api/sessions 读不到该会话，绑定就会“丢失”。
  * 调用后 manager 的后续 append 走 appendFileSync（见 SDK _persist）。
  */
-function persistNewSessionFile(manager: SessionManager, sessionId: string): void {
+async function persistNewSessionFile(manager: SessionManager, sessionId: string): Promise<void> {
   const sessionFile = manager.getSessionFile();
   if (!sessionFile || existsSync(sessionFile)) return;
   const header = manager.getHeader();
@@ -1413,6 +1436,25 @@ function persistNewSessionFile(manager: SessionManager, sessionId: string): void
   writeFileSync(sessionFile, content, { encoding: "utf8", flag: "wx" });
   (manager as unknown as { flushed: boolean }).flushed = true;
   cacheSessionPath(sessionId, sessionFile);
+
+  // 落盘即建全列索引行：会话从出生就是完整索引（先于会话真正运行）。
+  // project_key 需 resolveProject（可能 git 调用），在落盘后异步补齐；
+  // 行已落库，期间列表读取由 runtime union 覆盖，不退化扫盘。
+  // first_message 此刻恒空（刚创建无消息），由扫描器下一轮补。
+  // parent_id 不在此传：新建会话无父（header.parentSession 恒空），
+  // 有父的场景（fork）由 fork 分支显式传源会话 id——列语义统一为会话 id。
+  const cwd = manager.getCwd();
+  try {
+    const project = await resolveProject(cwd ?? "");
+    ensureSessionMetaRow(sessionId, {
+      path: sessionFile,
+      cwd: cwd ?? "",
+      // 与扫描器同源归一化（Windows 大小写折叠等），防新建会话 project_key 与列表查询键不一致
+      projectKey: projectIdentityKey(project?.projectRoot ?? cwd ?? ""),
+    });
+  } catch {
+    // 建行失败不阻塞开会话：扫描器下一轮兜底补行。
+  }
 }
 
 export function getRpcSession(sessionId: string): AgentSessionWrapper | undefined {
@@ -1583,7 +1625,7 @@ export async function startRpcSession(
     const isExplicitId = sessionId.length > 0 && !sessionId.startsWith("__");
     sessionManager = SessionManager.create(cwd, undefined, isExplicitId ? { id: sessionId } : undefined);
     // 创建即落盘：会话文件从出生就在磁盘，刷新后绑定不丢（见 persistNewSessionFile）。
-    if (isExplicitId) persistNewSessionFile(sessionManager, sessionId);
+    if (isExplicitId) await persistNewSessionFile(sessionManager, sessionId);
   }
   const sessionCwd = sessionManager.getCwd();
   const finishStartingSession = trackStartingSession(sessionCwd);

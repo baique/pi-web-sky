@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
+import { WorktreeSelector } from "./WorktreeSelector";
 import type { SessionInfo } from "@/lib/types";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
-import { getProjectActivity, getRecentProjects, sessionsForProject } from "@/lib/project-groups";
+import { getProjectActivity, getRecentProjects } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { useI18n } from "@/hooks/useI18n";
 import { AnimatedDropdown } from "./AnimatedDropdown";
@@ -13,7 +14,7 @@ import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { SessionTabs, type SidebarTab } from "./SessionTabs";
 import { BoardSection } from "./canvas/BoardSection";
-import { TaskArea, TASK_SESSION_PREVIEW_LIMIT, type TaskGroupUi } from "./TaskArea";
+import { TaskArea, type TaskGroupUi } from "./TaskArea";
 
 declare global {
   interface Window {
@@ -102,6 +103,8 @@ interface Props {
   onExplorerRefresh?: () => void;
   /** 左上角「刷新」按钮：触发父级全量刷新（会话/任务/看板同源信号 refreshKey） */
   onRefresh?: () => void;
+  /** loadSessions 成功拿到全量列表后回调（供父级 hydrate 等复用，避免重复拉全量）。 */
+  onSessionsLoaded?: (sessions: SessionInfo[]) => void;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onAtMentions?: (relativePaths: string[]) => void;
   /** Fired when a session that is not currently selected finishes running.
@@ -119,27 +122,6 @@ interface Props {
   onOpenTaskBoard?: (taskId: string) => void;
   /** 当前激活看板 id（看板模式下高亮） */
   activeBoardId?: string | null;
-}
-
-interface WorktreeEntry {
-  path: string;
-  branch: string | null;
-  isMain: boolean;
-}
-
-interface WorktreeState {
-  /** The cwd this data was fetched for — guards against stale responses */
-  forCwd: string;
-  projectRoot: string;
-  /** Stable server-computed identity; never derive OS path semantics here. */
-  projectKey: string;
-  isGit: boolean;
-  /** False when forCwd is a repo subdirectory — the switcher is hidden there
-   *  because subdir sessions keep their own project identity */
-  isTopLevel: boolean;
-  /** Canonical path of the checkout containing forCwd, resolved server-side. */
-  currentWorktreePath: string | null;
-  worktrees: WorktreeEntry[];
 }
 
 interface ProjectSelection {
@@ -263,6 +245,42 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 
 const SCRAMBLE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
 
+/**
+ * 任务区增量合并：以服务端返回的任务列表为骨架（任务增删/排序以服务端为准），
+ * 对每个任务保留本地已加载的额外会话页（加载更多），并用服务端全量根 id
+ * （sessionIds）剔除已移出该任务的会话及其子树（unassign/删除后不残留）。
+ */
+function mergeTaskGroups(prev: TaskGroupUi[], incoming: TaskGroupUi[]): TaskGroupUi[] {
+  const prevById = new Map(prev.map((t) => [t.id, t]));
+  return incoming.map((task) => {
+    const prevTask = prevById.get(task.id);
+    if (!prevTask) return task;
+    // 服务端根 id 全集 = 权威归属；本地已加载详情中根仍在此集合的才保留（子树随根）。
+    const rootIds = new Set(task.sessionIds);
+    const parentOf = new Map((prevTask.sessions ?? []).map((s) => [s.id, s.parentSessionId]));
+    const rootInTask = (s: SessionInfo): boolean => {
+      if (rootIds.has(s.id)) return true;
+      let cur = s.parentSessionId;
+      const visited = new Set<string>();
+      while (cur && !visited.has(cur)) {
+        visited.add(cur);
+        if (rootIds.has(cur)) return true;
+        cur = parentOf.get(cur) ?? undefined;
+      }
+      return false;
+    };
+    const seen = new Set((task.sessions ?? []).map((s) => s.id));
+    const extra = (prevTask.sessions ?? []).filter((s) => !seen.has(s.id) && rootInTask(s));
+    return {
+      ...task,
+      sessions: [...(task.sessions ?? []), ...extra],
+      pinnedSessionIds: task.pinnedSessionIds ?? prevTask.pinnedSessionIds,
+      rootTotal: task.rootTotal ?? prevTask.rootTotal,
+      sessionTotal: task.sessionTotal ?? prevTask.sessionTotal,
+    };
+  });
+}
+
 function useScramble(target: string, running: boolean): string {
   const [display, setDisplay] = useState(target);
   const frameRef = useRef<number | null>(null);
@@ -349,9 +367,16 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onRefresh, onSessionsLoaded, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
+  /** 聊天区会话（列表重构 v2）：当前项目（projectKey）的全部会话，服务端
+   *  一次排好序（置顶 + mtime），无分页。运行时浮顶由 running 轮询本地处理。 */
+  const [chatSessions, setChatSessions] = useState<SessionInfo[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  // 当前聊天区所属 projectKey 的 ref 镜像：loadChatPage/loadSessions 在
+  // selectedProject（hook 后声明）定义前就需引用当前 key，读 ref 避免 TDZ。
+  const chatProjectKeyRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
@@ -359,25 +384,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [cwdHovered, setCwdHovered] = useState(false);
   const [projectFilter, setProjectFilter] = useState("");
-  const [wtFilter, setWtFilter] = useState("");
   const [customPathOpen, setCustomPathOpen] = useState(false);
   const [customPathValue, setCustomPathValue] = useState("");
   const [customPathError, setCustomPathError] = useState<string | null>(null);
   const [customPathValidating, setCustomPathValidating] = useState(false);
   const [validatedProject, setValidatedProject] = useState<ValidatedProject | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  // Worktree switcher state
-  const [worktreeState, setWorktreeState] = useState<WorktreeState | null>(null);
-  const [wtDropdownOpen, setWtDropdownOpen] = useState(false);
-  const [wtTriggerHovered, setWtTriggerHovered] = useState(false);
-  const [wtNewOpen, setWtNewOpen] = useState(false);
-  const [wtNewBranch, setWtNewBranch] = useState("");
-  const [wtError, setWtError] = useState<string | null>(null);
-  const [wtBusy, setWtBusy] = useState(false);
-  const [wtConfirmRemove, setWtConfirmRemove] = useState<string | null>(null);
-  const [worktreeLoadingCwd, setWorktreeLoadingCwd] = useState<string | null>(null);
-  const wtDropdownRef = useRef<HTMLDivElement>(null);
-  const wtNewInputRef = useRef<HTMLInputElement>(null);
   // 视图持久化状态：初始值固定为 SSR 默认。localStorage 仅客户端存在——
   // 若在 useState 初始化时读取，服务端默认值与客户端持久化值不一致会触发
   // hydration mismatch；用户偏好由下方 mount effect 统一恢复。
@@ -414,15 +426,61 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const explorerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileExplorerRef = useRef<FileExplorerHandle>(null);
 
-  const loadSessions = useCallback(async (showLoading = false, force = false) => {
+  // 聊天区会话（列表重构 v2）：当前项目（projectKey）的全部会话，一次拉取整体替换。
+  // 服务端已排好序（置顶 + mtime），前端不再维护分页/增量合并；运行时浮顶由
+  // running 轮询（RUNNING_SESSIONS_POLL_MS）在渲染层本地处理（见 orderByRunning）。
+  // 在途去重：首屏 loadSessions + 项目切换 effect 可能同帧先后调 loadChatPage，
+  // 同 key 在途时复用，避免并发拉两遍；key 已变化则不等旧请求，直接开新拉取（P2-4）。
+  const chatPageInFlightRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
+  const loadChatPage = useCallback(async () => {
+    const projectKey = chatProjectKeyRef.current;
+    if (!projectKey) return;
+    const inFlight = chatPageInFlightRef.current;
+    if (inFlight && inFlight.key === projectKey) return inFlight.promise;
+    const run = (async () => {
+      setChatLoading(true);
+      try {
+        const res = await fetch(`/api/sessions?project=${encodeURIComponent(projectKey)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
+        // 只有当前 key 仍匹配才写 state（旧请求迟到不覆盖新项目列表）
+        if (chatProjectKeyRef.current === projectKey) {
+          setChatSessions(data.sessions ?? []);
+          if (!runningPollAuthoritativeRef.current) {
+            setRunningSessionIds(new Set(data.runningSessionIds ?? []));
+          }
+        }
+      } catch {
+        // keep last list; next refresh retries
+      } finally {
+        setChatLoading(false);
+      }
+    })();
+    chatPageInFlightRef.current = { key: projectKey, promise: run };
+    try {
+      await run;
+    } finally {
+      if (chatPageInFlightRef.current?.key === projectKey) {
+        chatPageInFlightRef.current = null;
+      }
+    }
+  }, []);
+
+  const loadSessions = useCallback(async (showLoading = false) => {
     try {
       if (showLoading) setLoading(true);
-      const res = await fetch(force ? "/api/sessions?force=1" : "/api/sessions", {
+      // 聊天区：当前项目（无分页，整体替换）
+      await loadChatPage();
+      // 全量列表（看板标题映射 / 跨项目统计 / 项目选择 / hydrate 等消费方）：
+      // 无参全量仍保留——数据源已切到 session_meta 索引，一次性读表返回。
+      const res = await fetch("/api/sessions", {
         cache: "no-store",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
       setAllSessions(data.sessions);
+      // 上抛全量列表：父级 hydrate 直接复用，避免再拉一次 /api/sessions。
+      onSessionsLoaded?.(data.sessions);
       // Treat the fetched running set as an initial fallback only. Once the
       // lightweight poll is live, a slow session-list fetch cannot overwrite it.
       if (!runningPollAuthoritativeRef.current) {
@@ -446,20 +504,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, []);
+  }, [onSessionsLoaded, loadChatPage]);
 
-  const initialLoadDone = useRef(false);
-  // Snapshot of the refreshKey at mount. The mount effect — including StrictMode's
-  // dev-only immediate replay — must never pass force: a second force=1 right
-  // after mount invalidates the server cache and starts a second full session
-  // scan, doubling the slow listing path on every page open. Only a later
-  // refreshKey change (session created/ended/deleted) requests force.
-  const initialRefreshKeyRef = useRef(refreshKey);
-  useEffect(() => {
-    const isFirst = !initialLoadDone.current;
-    initialLoadDone.current = true;
-    loadSessions(isFirst, refreshKey !== initialRefreshKeyRef.current);
-  }, [loadSessions, refreshKey]);
 
   // Persist unread markers so they survive a browser refresh before the user
   // has actually opened the completed session.
@@ -553,7 +599,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       (id) => !allSessions.some((session) => session.id === id),
     );
     if (completedInBackground.length > 0 || hasUnlistedRunningSession) {
-      loadSessions(false, true);
+      // 运行轮询触发：增量刷新（不清用户已加载的分页）。
+      loadSessions(false);
     }
     if (completedInBackground.length > 0) {
       onBackgroundTaskDone?.(completedInBackground);
@@ -597,21 +644,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (validatedProject?.cwd === cwd) {
       return projectSelection(validatedProject.root, validatedProject.key);
     }
-    if (worktreeState && worktreeState.forCwd === cwd) {
-      return projectSelection(worktreeState.projectRoot, worktreeState.projectKey);
-    }
-    // Any path in the loaded worktree list belongs to that project — covers
-    // worktrees without sessions, so switching to them keeps the row mounted.
-    if (worktreeState?.worktrees.some((w) => w.path === cwd)) {
-      return projectSelection(worktreeState.projectRoot, worktreeState.projectKey);
-    }
     const match = allSessions.find((session) => (
       session.cwd === cwd || (session.projectRoot ?? session.cwd) === cwd
     ));
     return match
       ? projectSelection(match.projectRoot ?? match.cwd, workspaceKeyOf(match))
       : projectSelection(cwd, cwd);
-  }, [validatedProject, worktreeState, allSessions, projectSelection]);
+  }, [validatedProject, allSessions, projectSelection]);
 
   // A worktree/session refresh can hydrate the stable key without changing
   // cwd, so notify when either changes. The parent treats same-cwd key changes
@@ -641,44 +680,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, [selectedCwdProp]);
 
-  // Load worktrees for the current effective cwd
-  const [wtRefreshKey, setWtRefreshKey] = useState(0);
-  useLayoutEffect(() => {
-    if (!selectedCwd) {
-      setWorktreeState(null);
-      setWorktreeLoadingCwd(null);
-      return;
-    }
-    let cancelled = false;
-    setWorktreeLoadingCwd(selectedCwd);
-    fetch(`/api/worktrees?cwd=${encodeURIComponent(selectedCwd)}`)
-      .then((r) => r.json())
-      .then((d: { projectRoot?: string; projectKey?: string; isGit?: boolean; isTopLevel?: boolean; currentWorktreePath?: string | null; worktrees?: WorktreeEntry[]; error?: string }) => {
-        if (cancelled) return;
-        setWorktreeLoadingCwd(null);
-        if (d.error || !d.projectRoot) {
-          setWorktreeState(null);
-          return;
-        }
-        setWorktreeState({
-          forCwd: selectedCwd,
-          projectRoot: d.projectRoot,
-          projectKey: d.projectKey ?? d.projectRoot,
-          isGit: d.isGit ?? false,
-          isTopLevel: d.isTopLevel ?? false,
-          currentWorktreePath: d.currentWorktreePath ?? null,
-          worktrees: d.worktrees ?? [],
-        });
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setWorktreeLoadingCwd(null);
-          setWorktreeState(null);
-        }
-      });
-    return () => { cancelled = true; };
-  }, [selectedCwd, wtRefreshKey, refreshKey]);
-
   // Auto-select cwd and restore session from URL on first load
   useEffect(() => {
     if (allSessions.length === 0 || skipInitialProjectSelection) return;
@@ -700,18 +701,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       if (projects.length > 0) setSelectedCwd(projects[0].root);
     }
   }, [allSessions, selectedCwd, initialSessionId, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone]);
-
-  // Prefer an exact UI selection while a refetch is in flight. Once the
-  // response catches up, the server-resolved path handles Windows case and
-  // separator differences without teaching the browser OS path semantics.
-  const currentWorktree = worktreeState
-    ? worktreeState.worktrees.find((worktree) => worktree.path === selectedCwd)
-      ?? (worktreeState.forCwd === selectedCwd && worktreeState.currentWorktreePath
-        ? worktreeState.worktrees.find((worktree) => worktree.path === worktreeState.currentWorktreePath)
-        : undefined)
-      ?? worktreeState.worktrees.find((worktree) => worktree.isMain)
-    : undefined;
-  const currentWorktreePath = currentWorktree?.path ?? null;
 
   const commitCustomPath = useCallback(async (candidate?: string) => {
     const path = (candidate ?? customPathValue).trim();
@@ -772,87 +761,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, []);
 
-  const handleCreateWorktree = useCallback(async () => {
-    const branch = wtNewBranch.trim();
-    if (!branch || wtBusy || !worktreeState) return;
-    setWtBusy(true);
-    setWtError(null);
-    try {
-      const res = await fetch("/api/worktrees", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd: worktreeState.projectRoot, branch }),
-      });
-      const data = await res.json().catch(() => ({})) as { path?: string; error?: string };
-      if (!res.ok || data.error || !data.path) {
-        setWtError(data.error ?? `HTTP ${res.status}`);
-        return;
-      }
-      setWtNewOpen(false);
-      setWtNewBranch("");
-      setWtDropdownOpen(false);
-      // Optimistically register the new worktree so projectFor() resolves
-      // it to the main repo before the refetch lands (keeps AppShell from
-      // treating the new cwd as a different project).
-      setWorktreeState((prev) => prev ? {
-        ...prev,
-        forCwd: data.path!,
-        currentWorktreePath: data.path!,
-        worktrees: [...prev.worktrees, { path: data.path!, branch, isMain: false }],
-      } : prev);
-      setSelectedCwd(data.path);
-      setWtRefreshKey((k) => k + 1);
-    } catch (e) {
-      setWtError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setWtBusy(false);
-    }
-  }, [wtNewBranch, wtBusy, worktreeState]);
-
-  const handleRemoveWorktree = useCallback(async (path: string, force: boolean) => {
-    if (!worktreeState || wtBusy) return;
-    setWtBusy(true);
-    setWtError(null);
-    try {
-      const res = await fetch("/api/worktrees", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd: worktreeState.projectRoot, path, force }),
-      });
-      const data = await res.json().catch(() => ({})) as { error?: string; dirty?: boolean };
-      if (!res.ok) {
-        if (data.dirty && !force) {
-          // Dirty worktree — ask the user to confirm a force removal
-          setWtConfirmRemove(path);
-          return;
-        }
-        setWtError(data.error ?? `HTTP ${res.status}`);
-        return;
-      }
-      setWtConfirmRemove(null);
-      if (currentWorktreePath === path) setSelectedCwd(worktreeState.projectRoot);
-      setWtRefreshKey((k) => k + 1);
-    } catch (e) {
-      setWtError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setWtBusy(false);
-    }
-  }, [worktreeState, wtBusy, currentWorktreePath]);
-
   // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setDropdownOpen(false);
         setProjectFilter("");
-      }
-      if (wtDropdownRef.current && !wtDropdownRef.current.contains(e.target as Node)) {
-        setWtDropdownOpen(false);
-        setWtNewOpen(false);
-        setWtNewBranch("");
-        setWtError(null);
-        setWtConfirmRemove(null);
-        setWtFilter("");
       }
     };
     document.addEventListener("mousedown", handler);
@@ -886,6 +800,20 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   // Sessions of every worktree in the selected project are shown together
   const selectedProject = projectFor(selectedCwd);
+  // 渲染期同步当前项目 key（ref 供 loadChatPage 读，避开闭包声明顺序）
+  chatProjectKeyRef.current = selectedProject?.key ?? null;
+
+  // 项目切换 → 重拉当前项目聊天区（初次确定项目也在此加载）。
+  // selectedProject.key 变化（含从 null 到首个项目）→ loadChatPage 整体替换。
+  const prevChatProjectKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = selectedProject?.key ?? null;
+    if (prevChatProjectKeyRef.current === key) return;
+    prevChatProjectKeyRef.current = key;
+    if (!key) return;
+    // 首帧 key 确定后主动拉；后续 key 变化也拉。setTimeout 0 避开首帧 loadSessions 竞争。
+    void loadChatPage();
+  }, [selectedProject?.key, loadChatPage]);
 
   // Per-project activity counts (running / unread) for the workspace selector.
   // Uses the same stable server key as the project list and filtering.
@@ -904,83 +832,135 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     [projectActivity, selectedProject],
   );
 
-  const filteredSessions = selectedProject
-    ? sessionsForProject(allSessions, selectedProject.key)
-    : allSessions;
-  const showWorktreeSwitcher = Boolean(
-    worktreeState?.isGit
-    && worktreeState.isTopLevel
-    && selectedCwd
-    && selectedProject?.key === worktreeState.projectKey
-  );
-  const worktreeGuide = selectedCwd
-    && worktreeState
-    && selectedProject?.key === worktreeState.projectKey
-    && !showWorktreeSwitcher
-    ? (worktreeState.isGit
-        ? {
-             label: t("sidebar.openRepoRoot"),
-             title: t("sidebar.openRepoRootTitle"),
-          }
-        : {
-             label: t("sidebar.gitRepoRootOnly"),
-             title: t("sidebar.gitRepoRootOnlyTitle"),
-          })
-    : null;
-  const worktreeLoading = Boolean(selectedCwd && worktreeLoadingCwd === selectedCwd);
-  const inactiveWorktreeSelector = worktreeGuide
-    ?? (worktreeLoading && !showWorktreeSwitcher
-      ? {
-           label: t("sidebar.worktrees"),
-           title: t("sidebar.checkingWorktrees"),
-        }
-      : null);
-
-  // Build parent-child tree within the filtered set
-  const sessionTree = buildSessionTree(filteredSessions);
-
   // ---- Task groups (per-project) ----
-  useEffect(() => {
+  // 抽成函数供防抖调度复用（refreshKey 驱动时与 loadSessions 并入同一周期，
+  // 避免新建会话等场景多接口同时被重复调用）。
+  const tasksRequestSeqRef = useRef(0);
+  const loadTasks = useCallback(() => {
     const key = selectedProject?.key;
+    const seq = ++tasksRequestSeqRef.current;
     if (!key) {
       setTasks([]);
       return;
     }
-    let cancelled = false;
     fetch(`/api/tasks?projectKey=${encodeURIComponent(key)}`, { cache: "no-store" })
       .then((r) => (r.ok ? (r.json() as Promise<{ tasks?: TaskGroupUi[] }>) : null))
       .then((d) => {
-        if (!cancelled) setTasks(Array.isArray(d?.tasks) ? d.tasks : []);
+        // 过期响应丢弃：快速连续触发时只应用最后一次的结果。
+        if (seq !== tasksRequestSeqRef.current) return;
+        // 增量合并：保留各任务已加载的更多页；任务增删/排序以服务端为准。
+        setTasks((prev) => mergeTaskGroups(prev, Array.isArray(d?.tasks) ? d.tasks : []));
       })
       .catch(() => {});
+  }, [selectedProject?.key]);
+
+  // 项目切换 → 立即拉任务列表（用户主动切换，不走防抖）。
+  useEffect(() => {
+    loadTasks();
+  }, [loadTasks]);
+
+  // ---- 初始加载 + refreshKey 防抖调度 ----
+  const initialLoadDone = useRef(false);
+
+  // refreshKey 变化 → 300ms 防抖合并：新建会话/删除/改名/看板事件在极短
+  // 时间内可能多次 bump refreshKey，合并为一次 loadSessions + loadTasks，
+  // 避免多接口同时被重复调用。首屏（isFirst）仍然立即执行。
+  // 手动刷新（manualRefreshRef）跳过防抖，立即执行。
+  const REFRESH_DEBOUNCE_MS = 300;
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const manualRefreshRef = useRef(false);
+  useEffect(() => {
+    const isFirst = !initialLoadDone.current;
+    initialLoadDone.current = true;
+    if (isFirst) {
+      // 首屏立即（不防抖）：分页路径无缓存，无需 force。
+      loadSessions(true);
+      return;
+    }
+    // 手动刷新：跳过防抖，立即执行（同时由 onRefresh 已 bump refreshKey，
+    // 看板等其他消费方同步刷新，这里不再二次调度）。
+    if (manualRefreshRef.current) {
+      manualRefreshRef.current = false;
+      void loadSessions(false);
+      void loadTasks();
+      return;
+    }
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      void loadSessions(false);
+      void loadTasks();
+    }, REFRESH_DEBOUNCE_MS);
     return () => {
-      cancelled = true;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
-  }, [selectedProject?.key, refreshKey]);
+  }, [loadSessions, loadTasks, refreshKey]);
 
   const persistTasks = useCallback(async (): Promise<void> => {
     const key = selectedProject?.key;
     if (!key) return;
     const res = await fetch(`/api/tasks?projectKey=${encodeURIComponent(key)}`, { cache: "no-store" });
     const d = (await res.json().catch(() => ({}))) as { tasks?: TaskGroupUi[] };
-    setTasks(Array.isArray(d.tasks) ? d.tasks : []);
+    // 增量合并：保留各任务已加载的更多页；任务增删/排序以服务端为准。
+    setTasks((prev) => mergeTaskGroups(prev, Array.isArray(d.tasks) ? d.tasks : []));
   }, [selectedProject?.key]);
+
+  // 任务区“加载更多”（#15 服务端分页）：只请求当前任务下一页，只更新该任务。
+  // offset 语义 = 已加载的非置顶根数（服务端对 nonPinnedRoots slice）；
+  // 去重基准 = 已加载的 sessions（不是全量 sessionIds——那是服务端 Task 的全量根 id，
+  // 用它会把所有新页会话全部滤掉，加载更多恒无效）。
+  const handleLoadMoreTaskSessions = useCallback(async (taskId: string, offset: number): Promise<void> => {
+    try {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}?offset=${offset}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+      const d = (await res.json()) as { task?: TaskGroupUi | null };
+      const more = d.task;
+      if (!more) return;
+      setTasks((prev) => prev.map((t) => {
+        if (t.id !== taskId) return t;
+        const loaded = t.sessions ?? [];
+        const seen = new Set(loaded.map((s) => s.id));
+        const extra = (more.sessions ?? []).filter((s) => !seen.has(s.id));
+        return {
+          ...t,
+          sessions: [...loaded, ...extra],
+          sessionIds: [...t.sessionIds, ...extra.map((s) => s.id)],
+          rootTotal: more.rootTotal ?? t.rootTotal,
+          sessionTotal: more.sessionTotal ?? t.sessionTotal,
+        };
+      }));
+    } catch {
+      // 静默失败：下次点击重试
+    }
+  }, []);
 
   // Pin / unpin a session inside its region (task group or chat). Optimistic:
   // reorder immediately, persist in the background — no full re-scan.
   const handleToggleSessionPin = useCallback((sessionId: string, nextPinned: boolean) => {
+    // 渲染源同步乐观更新：全量列表（跨项目用途）、当前项目聊天区、任务区。
     setAllSessions((prev) => prev.map((s) => (
       s.id === sessionId ? { ...s, pinned: nextPinned ? true : undefined } : s
     )));
-    // If the session belongs to a task, move it to the pinned head of that
-    // task's sessionIds immediately (same order the server would return).
+    const flipPinned = (s: SessionInfo) =>
+      s.id === sessionId ? { ...s, pinned: nextPinned ? true : undefined } : s;
+    setChatSessions((prev) => prev.map(flipPinned));
     setTasks((prev) => prev.map((t) => {
       if (!t.sessionIds.includes(sessionId)) return t;
       const pinnedSet = new Set(t.pinnedSessionIds ?? []);
       if (nextPinned) pinnedSet.add(sessionId); else pinnedSet.delete(sessionId);
       const pinned = new Set(t.sessionIds.filter((id) => pinnedSet.has(id)));
       const rest = t.sessionIds.filter((id) => !pinnedSet.has(id));
-      return { ...t, pinnedSessionIds: [...pinnedSet], sessionIds: [...pinned, ...rest] };
+      return {
+        ...t,
+        pinnedSessionIds: [...pinnedSet],
+        sessionIds: [...pinned, ...rest],
+        // 任务区渲染源同步：sessions 里该会话置顶标记翻转，orderPinnedFirst 自动前排
+        sessions: (t.sessions ?? []).map((s) =>
+          s.id === sessionId ? { ...s, pinned: nextPinned ? true : undefined } : s,
+        ),
+      };
     }));
     void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
       method: "PATCH",
@@ -988,8 +968,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       body: JSON.stringify({ pinned: nextPinned }),
     })
       .catch(() => {})
-      .then(() => persistTasks());
-  }, [persistTasks]);
+      .then(() => {
+        persistTasks();
+        // 服务端已 invalidateSessionListCache → 重拉聊天分页，置顶会话按新序返回
+        void loadChatPage();
+      });
+  }, [persistTasks, loadChatPage]);
 
   // Pin / unpin a task in the tasks region. Optimistic: flip + reorder
   // pinned-first immediately, persist in the background.
@@ -1053,10 +1037,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, [tasks, selectedProject?.key]);
 
-  // 改名成功：乐观更新本地 name，立即生效。不触发 loadSessions——
-  // 服务端列表扫描直接带名字，但刷新有 1-2s 延迟；本地先改，避免等。
+  // 改名成功：乐观更新本地 name，立即生效。渲染源同步：全量列表（跨项目用途）、
+  // 当前项目聊天区（chatNodes）、任务区 task.sessions。本地先改避免等扫描刷新。
   const handleSessionRenamed = useCallback((sessionId: string, newName: string) => {
-    setAllSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, name: newName } : s)));
+    const withName = (s: SessionInfo) => (s.id === sessionId ? { ...s, name: newName } : s);
+    setAllSessions((prev) => prev.map(withName));
+    setChatSessions((prev) => prev.map(withName));
+    setTasks((prev) => prev.map((t) => ({
+      ...t,
+      sessions: (t.sessions ?? []).map(withName),
+    })));
   }, []);
 
   // 看板内会话改名 → 乐观更新左侧树（与上方 handleSessionRenamed 同路径，
@@ -1114,10 +1104,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const handleAssignSession = useCallback(async (taskId: string, sessionId: string) => {
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.sessionIds.includes(sessionId)) return;
-    await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
-      method: "PATCH",
+    // 原子归属（服务端 upsert，幂等）——避免读-改-写竞态（多端并发拖入互相踢）。
+    await fetch(`/api/tasks/${encodeURIComponent(taskId)}/assign-session`, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionIds: [...task.sessionIds, sessionId] }),
+      body: JSON.stringify({ sessionId }),
     });
     await persistTasks();
   }, [tasks, persistTasks]);
@@ -1151,420 +1142,33 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     ];
   }
 
+  // 任务下全部会话数（含 fork 子树）——删除确认文案用。
+  const countTree = (nodes: SessionTreeNode[]): number =>
+    nodes.reduce((sum, n) => sum + 1 + countTree(n.children), 0);
+
+  // 服务端分流（#12）：任务会话详情由 /api/tasks 直接下发（含 fork 子树），
+  // 前端不再 join sessionTree 反查。task.sessions 是「置顶全量 + 非置顶当前页」，
+  // 建树后即完整子树；rootTotal 是加载更多游标基准（服务端已算好根数）。
   const taskGroups = useMemo(() => {
-    // Full-tree index (roots *and* descendants) so forked child sessions
-    // assigned to a task render inside the group and leave the chat region.
-    const byId = new Map<string, SessionTreeNode>();
-    const walk = (nodes: SessionTreeNode[]) => {
-      for (const n of nodes) {
-        byId.set(n.session.id, n);
-        walk(n.children);
-      }
-    };
-    walk(sessionTree);
-    // 任务下全部会话数（含 fork 子树）——删除确认文案用。
-    const countTree = (nodes: SessionTreeNode[]): number =>
-      nodes.reduce((sum, n) => sum + 1 + countTree(n.children), 0);
     return tasks.map((task) => {
-      const nodes = orderPinnedFirst(
-        task.sessionIds
-          .map((sid) => byId.get(sid))
-          .filter((n): n is SessionTreeNode => Boolean(n)),
-      );
-      return { task, nodes, sessionTotal: countTree(nodes) };
+      const nodes = orderPinnedFirst(buildSessionTree(task.sessions ?? []));
+      const sessionTotal = task.sessionTotal ?? countTree(nodes);
+      return { task, nodes, sessionTotal };
     });
-  }, [tasks, sessionTree]);
+  }, [tasks]);
 
-  // Everything owned by a task group (including its descendants) leaves the
-  // chat region; remaining roots form the temp/chat list.
-  const tempNodes = useMemo(() => {
-    const owned = new Set<string>();
-    for (const g of taskGroups) {
-      const walk = (nodes: SessionTreeNode[]) => {
-        for (const n of nodes) {
-          owned.add(n.session.id);
-          walk(n.children);
-        }
-      };
-      walk(g.nodes);
-    }
-    return sessionTree.filter((n) => !owned.has(n.session.id));
-  }, [sessionTree, taskGroups]);
+  // Chat region: 当前项目会话（服务端已按置顶 + mtime 排序返回）。
+  // 运行中会话本地浮顶（G1）：runningSessionIds 来自轻量轮询，变化时只重排不重拉列表。
+  const chatNodes = useMemo(() => {
+    const runningIds = runningSessionIds;
+    const running = chatSessions.filter((s) => runningIds.has(s.id));
+    const rest = chatSessions.filter((s) => !runningIds.has(s.id));
+    const tree = orderPinnedFirst(buildSessionTree([...running, ...rest]));
+    // 树内按置顶段/非置顶段渲染；会话若已置顶则整棵子树留在置顶区。
+    return tree;
+  }, [chatSessions, runningSessionIds]);
 
-  // Chat region: pinned sessions first, then the rest (hairline between).
-  const chatNodes = useMemo(
-    () => [
-      ...tempNodes.filter((n) => n.session.pinned),
-      ...tempNodes.filter((n) => !n.session.pinned),
-    ],
-    [tempNodes],
-  );
 
-  // Worktree switcher — moved out of the header into the files tab.
-  const worktreeSection = (
-    <>
-      {/* Worktree switcher — shown only for git projects at a checkout top
-            level (repo subdirs keep their own project identity, so switching
-            from them would jump projects). Rendered whenever the selected cwd
-            belongs to the loaded project (not just when forCwd matches), so
-            switching between worktrees of one project keeps the row mounted
-            instead of flickering while data refetches: all worktrees of a
-            project share the same list anyway. */}
-        {showWorktreeSwitcher && (() => {
-          if (!worktreeState) return null;
-          const showWtFilter = worktreeState.worktrees.length >= 8;
-          const visibleWorktrees = showWtFilter && wtFilter.trim()
-            ? worktreeState.worktrees.filter((w) =>
-                (w.branch ?? displayCwd(w.path, homeDir)).toLowerCase().includes(wtFilter.trim().toLowerCase()))
-            : worktreeState.worktrees;
-          return (
-            <div ref={wtDropdownRef} style={{ position: "relative", marginTop: 6 }}>
-              <button
-                onClick={() => setWtDropdownOpen((v) => !v)}
-                 title={currentWorktree ? t("sidebar.switchWorktreeTitle", { path: currentWorktree.path }) : t("sidebar.switchWorktree")}
-                style={{
-                  width: "100%",
-                  height: 28,
-                  boxSizing: "border-box",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "0 10px",
-                  background: wtDropdownOpen ? "var(--side-active)" : wtTriggerHovered ? "var(--side-hover)" : "transparent",
-                  border: "none",
-                  borderRadius: 5,
-                  cursor: "pointer",
-                  fontSize: 11,
-                  lineHeight: 1.35,
-                  color: "var(--text-muted)",
-                  textAlign: "left",
-                  transition: "background 0.12s",
-                }}
-                onMouseEnter={() => setWtTriggerHovered(true)}
-                onMouseLeave={() => setWtTriggerHovered(false)}
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: currentWorktree && !currentWorktree.isMain ? "var(--accent)" : "var(--text-dim)" }}>
-                  <line x1="6" y1="3" x2="6" y2="15" />
-                  <circle cx="18" cy="6" r="3" />
-                  <circle cx="6" cy="18" r="3" />
-                  <path d="M18 9a9 9 0 0 1-9 9" />
-                </svg>
-                <PathLabel
-                  text={currentWorktree ? (currentWorktree.branch ?? displayCwd(currentWorktree.path, homeDir)) : "…"}
-                  style={{ flex: 1, fontFamily: "var(--font-mono)", color: "var(--text)" }}
-                />
-                {currentWorktree?.isMain && (
-                   <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{t("sidebar.main")}</span>
-                )}
-                {worktreeState.worktrees.length > 1 && (
-                  <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>
-                    {worktreeState.worktrees.length}
-                  </span>
-                )}
-                <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                  <polyline points="2 3.5 5 6.5 8 3.5" />
-                </svg>
-              </button>
-
-              <AnimatedDropdown
-                open={wtDropdownOpen}
-                up
-                style={{
-                  position: "absolute",
-                  top: "auto",
-                  bottom: "calc(100% + 4px)",
-                  left: 0,
-                  right: 0,
-                  zIndex: 100,
-                  background: "var(--popover-glass)",
-                  backdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-                  WebkitBackdropFilter: "blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate))",
-                  border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
-                  borderRadius: 8,
-                  boxShadow: "0 6px 20px rgba(0,0,0,0.10)",
-                  overflow: "hidden",
-                }}
-              >
-                  {showWtFilter && (
-                    <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
-                      <input
-                        value={wtFilter}
-                        onChange={(e) => setWtFilter(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Escape") {
-                            setWtFilter("");
-                            setWtDropdownOpen(false);
-                          }
-                        }}
-                        placeholder={t("sidebar.filterWorktrees")}
-                        autoFocus
-                        style={{
-                          width: "100%",
-                          fontSize: 11,
-                          fontFamily: "var(--font-mono)",
-                          padding: "5px 8px",
-                          border: "1px solid color-mix(in srgb, var(--border) 55%, transparent)",
-                          borderRadius: 5,
-                          outline: "none",
-                          background: "var(--side-input)",
-                          color: "var(--text)",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    </div>
-                  )}
-                  <div style={{ maxHeight: "min(40vh, 300px)", overflowY: "auto" }}>
-                    {visibleWorktrees.map((wt) => {
-                      const isCurrent = wt.path === currentWorktreePath;
-                      if (wtConfirmRemove === wt.path) {
-                        return (
-                          <div key={wt.path} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: "1px solid var(--border)", background: "rgba(239,68,68,0.06)" }}>
-                            <span style={{ flex: 1, fontSize: 11, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {t("sidebar.forceRemoveCheckout")}
-                            </span>
-                            <button
-                              onClick={() => void handleRemoveWorktree(wt.path, true)}
-                              disabled={wtBusy}
-                              style={{ padding: "3px 9px", background: "#ef4444", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
-                            >
-                              {t("sidebar.force")}
-                            </button>
-                            <button
-                              onClick={() => setWtConfirmRemove(null)}
-                              style={{ padding: "3px 9px", background: "transparent", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-muted)", fontSize: 11, cursor: "pointer", flexShrink: 0 }}
-                            >
-                              {t("sidebar.cancel")}
-                            </button>
-                          </div>
-                        );
-                      }
-                      return (
-                        <div
-                          key={wt.path}
-                          className="wt-row"
-                          style={{ display: "flex", alignItems: "center", borderBottom: "1px solid var(--border)" }}
-                        >
-                          <button
-                            onClick={() => {
-                              setSelectedCwd(wt.path);
-                              setWtDropdownOpen(false);
-                              setWtError(null);
-                              setWtFilter("");
-                            }}
-                            title={wt.path}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--side-hover)"; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                            style={{
-                              flex: 1,
-                              minWidth: 0,
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 7,
-                              padding: "8px 10px",
-                              background: "transparent",
-                              border: "none",
-                              color: isCurrent ? "var(--text)" : "var(--text-muted)",
-                              cursor: "pointer",
-                              textAlign: "left",
-                              fontSize: 11,
-                              fontFamily: "var(--font-mono)",
-                            }}
-                          >
-                            {isCurrent ? (
-                              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                                <polyline points="1.5 5 4 7.5 8.5 2.5" />
-                              </svg>
-                            ) : (
-                              <span style={{ width: 10, flexShrink: 0 }} />
-                            )}
-                            <PathLabel text={wt.branch ?? displayCwd(wt.path, homeDir)} style={{ flex: 1 }} />
-                            {wt.isMain && <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{t("sidebar.main")}</span>}
-                          </button>
-                          {!wt.isMain && (
-                            <button
-                              onClick={() => void handleRemoveWorktree(wt.path, false)}
-                              disabled={wtBusy}
-                               title={t("sidebar.removeWorktreeTitle", { path: wt.path })}
-                              style={{
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                width: 34, height: 28, padding: 0, marginRight: 4,
-                                background: "none", border: "none",
-                                color: "var(--text-dim)", cursor: "pointer",
-                                borderRadius: 5, flexShrink: 0,
-                                transition: "color 0.12s, background 0.12s",
-                              }}
-                              onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.background = "rgba(239,68,68,0.08)"; }}
-                              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
-                            >
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="3 6 5 6 21 6" />
-                                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                                <path d="M10 11v6M14 11v6" />
-                                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                              </svg>
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {showWtFilter && visibleWorktrees.length === 0 && wtFilter.trim() && (
-                      <div style={{ padding: "8px 10px", fontSize: 11, color: "var(--text-dim)" }}>{t("sidebar.noMatchingWorktrees")}</div>
-                    )}
-                  </div>
-
-                  {!wtNewOpen ? (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setWtNewOpen(true);
-                        setWtError(null);
-                        setTimeout(() => wtNewInputRef.current?.focus(), 0);
-                      }}
-                      title={t("sidebar.createWorktreeTitle")}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 7,
-                        width: "100%",
-                        padding: "8px 10px",
-                        background: "none",
-                        border: "none",
-                        color: "var(--text-muted)",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        fontSize: 11,
-                      }}
-                    >
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" style={{ flexShrink: 0 }}>
-                        <line x1="5" y1="1" x2="5" y2="9" />
-                        <line x1="1" y1="5" x2="9" y2="5" />
-                      </svg>
-                       <span>{t("sidebar.newWorktree")}</span>
-                    </button>
-                  ) : (
-                    <div style={{ padding: "6px 8px" }}>
-                      <input
-                        ref={wtNewInputRef}
-                        value={wtNewBranch}
-                        onChange={(e) => {
-                          setWtNewBranch(e.target.value);
-                          setWtError(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            void handleCreateWorktree();
-                          }
-                          if (e.key === "Escape") {
-                            setWtNewOpen(false);
-                            setWtNewBranch("");
-                            setWtError(null);
-                          }
-                        }}
-                         placeholder={t("sidebar.branchName")}
-                        style={{
-                          width: "100%",
-                          fontSize: 11,
-                          fontFamily: "var(--font-mono)",
-                          padding: "5px 8px",
-                          border: "1px solid var(--accent)",
-                          borderRadius: 5,
-                          outline: "none",
-                          background: "var(--side-input)",
-                          color: "var(--text)",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                      <div style={{ display: "flex", gap: 5, marginTop: 5 }}>
-                        <button
-                          onClick={() => void handleCreateWorktree()}
-                          disabled={wtBusy || !wtNewBranch.trim()}
-                          style={{
-                            flex: 1,
-                            padding: "4px 0",
-                            background: "var(--accent)",
-                            border: "none",
-                            borderRadius: 5,
-                            color: "#fff",
-                            fontSize: 11,
-                            fontWeight: 600,
-                            cursor: wtBusy || !wtNewBranch.trim() ? "not-allowed" : "pointer",
-                            opacity: wtBusy || !wtNewBranch.trim() ? 0.65 : 1,
-                          }}
-                        >
-                           {wtBusy ? t("sidebar.creating") : t("sidebar.create")}
-                        </button>
-                        <button
-                          onClick={() => { setWtNewOpen(false); setWtNewBranch(""); setWtError(null); }}
-                          style={{
-                            flex: 1,
-                            padding: "4px 0",
-                            background: "transparent",
-                            border: "1px solid var(--border)",
-                            borderRadius: 5,
-                            color: "var(--text-muted)",
-                            fontSize: 11,
-                            cursor: "pointer",
-                          }}
-                        >
-                           {t("sidebar.cancel")}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {wtError && (
-                    <div style={{
-                      padding: "5px 10px 8px",
-                      color: "#dc2626",
-                      fontSize: 11,
-                      lineHeight: 1.35,
-                      overflowWrap: "anywhere",
-                    }}>
-                      {wtError}
-                    </div>
-                  )}
-              </AnimatedDropdown>
-            </div>
-          );
-        })()}
-        {inactiveWorktreeSelector && (
-          <button
-            type="button"
-            aria-disabled="true"
-            tabIndex={-1}
-            title={inactiveWorktreeSelector.title}
-            style={{
-              width: "100%",
-              height: 29,
-              boxSizing: "border-box",
-              marginTop: 6,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "0 10px",
-              border: "1px solid var(--border)",
-              borderRadius: 7,
-              background: "transparent",
-              color: "var(--text-dim)",
-              fontSize: 11,
-              lineHeight: 1.35,
-              whiteSpace: "nowrap",
-              textAlign: "left",
-              cursor: "default",
-              opacity: 0.82,
-            }}
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-              <line x1="6" y1="3" x2="6" y2="15" />
-              <circle cx="18" cy="6" r="3" />
-              <circle cx="6" cy="18" r="3" />
-              <path d="M18 9a9 9 0 0 1-9 9" />
-            </svg>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{inactiveWorktreeSelector.label}</span>
-          </button>
-        )}
-    </>
-  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -1624,7 +1228,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {t("sidebar.tempSessions")}
             </button>
             <button
-              onClick={() => { if (onRefresh) onRefresh(); else loadSessions(false, true); }}
+              onClick={() => {
+                // 手动刷新：立即执行，不走防抖；onRefresh 同步 bump refreshKey
+                // 通知看板等其他消费方，manualRefreshRef 让本组件跳过防抖。
+                if (onRefresh) {
+                  manualRefreshRef.current = true;
+                  onRefresh();
+                } else {
+                  void loadSessions(false);
+                  void loadTasks();
+                }
+              }}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
                 background: sessionRefreshDone ? "rgba(74,222,128,0.12)" : "transparent",
@@ -1667,36 +1281,48 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           </div>
         </div>
 
-        {/* CWD picker */}
-        <div ref={dropdownRef} style={{ position: "relative" }}>
+        {/* CWD picker：单一 select 视觉——路径区（点开项目下拉）+ worktree suffix（点开 worktree 下拉） */}
+        <div
+          ref={dropdownRef}
+          style={{
+            position: "relative",
+            display: "flex",
+            alignItems: "center",
+            borderRadius: 7,
+            background: dropdownOpen
+              ? "var(--side-active)"
+              : cwdHovered
+                ? "var(--side-hover)"
+                : selectedCwd
+                  ? "color-mix(in srgb, var(--glass-bg-strong) 55%, transparent)"
+                  : "color-mix(in srgb, var(--accent) 8%, transparent)",
+            border: selectedCwd
+              ? "1px solid color-mix(in srgb, var(--border) 55%, transparent)"
+              : "1px solid color-mix(in srgb, var(--accent) 40%, transparent)",
+            boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent)",
+            transition: "border-color 0.15s, background 0.15s",
+          }}
+          onMouseEnter={() => setCwdHovered(true)}
+          onMouseLeave={() => setCwdHovered(false)}
+        >
           <button
             onClick={() => setDropdownOpen((v) => !v)}
             title={selectedProject?.root ?? selectedCwd ?? ""}
             style={{
-              width: "100%",
+              flex: 1,
+              minWidth: 0,
               display: "flex",
               alignItems: "center",
               padding: "6px 10px",
-              background: dropdownOpen
-                ? "var(--side-active)"
-                : cwdHovered
-                  ? "var(--side-hover)"
-                  : selectedCwd
-                    ? "color-mix(in srgb, var(--glass-bg-strong) 55%, transparent)"
-                    : "color-mix(in srgb, var(--accent) 8%, transparent)",
-              border: selectedCwd
-                ? "1px solid color-mix(in srgb, var(--border) 55%, transparent)"
-                : "1px solid color-mix(in srgb, var(--accent) 40%, transparent)",
-              borderRadius: 7,
+              background: "transparent",
+              border: "none",
+              borderRadius: 0,
               cursor: "pointer",
               fontSize: 12,
               color: "var(--text)",
               textAlign: "left",
-              boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent)",
-              transition: "border-color 0.15s, background 0.15s",
+              transition: "background 0.15s",
             }}
-            onMouseEnter={() => setCwdHovered(true)}
-            onMouseLeave={() => setCwdHovered(false)}
           >
             {selectedCwd ? (
               <PathLabel
@@ -1738,6 +1364,21 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               />
             )}
           </button>
+
+          {/* worktree suffix：分隔线 + worktree 选择器（共享 select 容器，无独立边框/背景） */}
+          {selectedCwd && (
+            <>
+              <span aria-hidden style={{ flexShrink: 0, width: 1, alignSelf: "stretch", margin: "5px 0", background: "color-mix(in srgb, var(--border) 55%, transparent)" }} />
+              <WorktreeSelector
+                cwd={selectedCwd}
+                onSelect={(path) => { setSelectedCwd(path); setDropdownOpen(false); }}
+                onOpenChange={(open) => { if (open) setDropdownOpen(false); }}
+                showMainLabel={false}
+                compact
+                style={{ height: "auto", background: "transparent", flexShrink: 0, borderRadius: 0, maxWidth: 85 }}
+              />
+            </>
+          )}
 
           <AnimatedDropdown
             open={dropdownOpen}
@@ -1962,23 +1603,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     <TaskArea
                       groups={taskGroups.map(({ task, nodes, sessionTotal }) => {
                         const pinnedCount = nodes.filter((n) => n.session.pinned).length;
+                        const loadedRoots = nodes.length;
+                        const rootTotal = task.rootTotal ?? loadedRoots;
                         return {
                           task,
-                          sessionCount: nodes.length,
+                          sessionCount: loadedRoots,
                           pinnedCount,
                           sessionTotal,
-                          content: (showAll: boolean) => {
+                          // 服务端已按需下发当前页（置顶全量 + 非置顶前 N）；
+                          // 剩余根数 > 0 才显示“加载更多”（#15 服务端分页）。
+                          // offset 语义 = 已加载的非置顶根数（服务端对 nonPinnedRoots slice）。
+                          hasMore: rootTotal > loadedRoots,
+                          remainingCount: Math.max(0, rootTotal - loadedRoots),
+                          onLoadMore: () => handleLoadMoreTaskSessions(task.id, loadedRoots - pinnedCount),
+                          content: () => {
                             const pinnedSet = new Set(task.pinnedSessionIds ?? []);
-                            // 默认只展示置顶会话 + 最近 5 个非置顶会话（nodes 已按
-                            // 置顶在前、非置顶按 modified 降序排序，前段即最近）。
-                            const visible = showAll
-                              ? nodes
-                              : nodes.slice(0, pinnedCount + TASK_SESSION_PREVIEW_LIMIT);
                             const out: ReactNode[] = [];
-                            visible.forEach((node, i) => {
+                            nodes.forEach((node, i) => {
                               const isPin = pinnedSet.has(node.session.id);
                               if (i > 0) {
-                                const prev = visible[i - 1];
+                                const prev = nodes[i - 1];
                                 if (prev && pinnedSet.has(prev.session.id) && !isPin) {
                                   out.push(
                                     <div key={`pin-line-${i}`} style={{ margin: "2px 6px 4px", height: 1, background: "color-mix(in srgb, var(--border) 45%, transparent)" }} />,
@@ -1996,7 +1640,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                                   onRenamed={(id, name) => handleSessionRenamed(id, name)}
                                   onSessionDeleted={(id) => {
                                     onSessionDeleted?.(id);
-                                    loadSessions();
                                   }}
                                   onTogglePin={handleToggleSessionPin}
                                   depth={0}
@@ -2088,7 +1731,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             onRenamed={(id, name) => handleSessionRenamed(id, name)}
                             onSessionDeleted={(id) => {
                               onSessionDeleted?.(id);
-                              loadSessions();
                             }}
                             onTogglePin={handleToggleSessionPin}
                             depth={0}
@@ -2100,6 +1742,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
                         {t("sidebar.noSessions")}
                       </div>
+                    )}
+                    {/* 滚动分页：加载中整行居中；哨兵独立一行（不占用 loading 宽度） */}
+                    {chatNodes.length > 0 && (
+                      <>
+                        {chatLoading && (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "6px 0", color: "var(--text-dim)", fontSize: 11 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true" style={{ flexShrink: 0, animation: "spin 0.9s linear infinite" }}>
+                              <path d="M21 12a9 9 0 1 1-5.7-8.4" />
+                            </svg>
+                            <span>{t("sidebar.loading")}</span>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
@@ -2197,7 +1852,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           </div>
         </div>
       )}
-          {worktreeSection}
         </div>
     </div>
   );
@@ -2577,6 +2231,8 @@ function SessionItem({
       onDragStart={(e) => {
         setMoreOpen(false);
         e.dataTransfer.setData("text/session-id", session.id);
+        // 拖入画布自带标题：dataTransfer 带 session 名，画布落卡直接可用（不依赖轮询）
+        e.dataTransfer.setData("text/session-title", title);
         e.dataTransfer.effectAllowed = "move";
       }}
       style={{

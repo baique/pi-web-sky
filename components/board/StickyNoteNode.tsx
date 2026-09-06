@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NodeResizer, Handle, Position, type NodeProps } from "@xyflow/react";
+import { NodeResizer, Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
+import { computeResizeSnap } from "@/lib/board-align";
 import ReactMarkdown from "react-markdown";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -9,7 +10,7 @@ import { Markdown } from "@tiptap/markdown";
 // ProseMirror 基样式（white-space/ligatures 等），与 @xyflow 同方式按需引入
 import "prosemirror-view/style/prosemirror.css";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
-import { CardKindBadge } from "@/components/canvas/CardKindBadge";
+import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { memoBoardNode } from "./memoNode";
@@ -25,44 +26,26 @@ import { memoBoardNode } from "./memoNode";
 
 export interface StickyNoteData extends Record<string, unknown> {
   text: string;
-  /** 徽记颜色：blue | green | red | yellow | purple */
-  badge?: string;
+  /** 用户设置的 emoji（空/缺省 → 类别默认 📝）；便笺无状态跟随 */
+  emoji?: string;
   /** 新建时间（ms epoch） */
   createdAt?: number;
 }
 
-/** 徽记可选色（固定色，不随主题） */
-export const BADGE_COLORS: Record<string, string> = {
-  blue: "#3184f8",
-  green: "#10b981",
-  red: "#ef4444",
-  yellow: "#f59e0b",
-  purple: "#8b5cf6",
-};
-
-export const BADGE_NAMES: Record<string, string> = {
-  blue: "蓝",
-  green: "绿",
-  red: "红",
-  yellow: "黄",
-  purple: "紫",
-};
-
 function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & { data: StickyNoteData }) {
-  const { updateNode, deleteNode } = useBoardCanvasOps();
+  const { getNodes } = useReactFlow();
+  const { updateNode, deleteNode, setSnapLines } = useBoardCanvasOps();
   const { highlightId } = useBoardSearch();
   const isHighlighted = highlightId === id;
   const w = width ?? 380;
   const h = height ?? 280;
   const text = data.text ?? "";
-  const badge = data.badge ?? "blue";
 
   // 玻璃（局部贴图）：从 RF store 读节点 position
   const { setContainer } = useCardGlass("var(--assistant-card-glass)");
 
   // 本地编辑态（RF 无 tldraw editing 概念）
   const [isEditing, setIsEditing] = useState(false);
-  const [draftBadge, setDraftBadge] = useState(badge);
   const contentRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   // 编辑中的最新 markdown（同步镜像）：TipTap onUpdate 实时写这里，save/finish/blur 读它——
@@ -73,13 +56,12 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 进入编辑重置镜像 + 徽记草稿（TipTap 编辑器初始化由子组件 NoteEditor 在 mount 时完成）
+  // 进入编辑重置镜像（TipTap 编辑器初始化由子组件 NoteEditor 在 mount 时完成）
   useEffect(() => {
     if (isEditing) {
-      setDraftBadge(badge);
       latestMdRef.current = text;
     }
-  }, [isEditing, text, badge]);
+  }, [isEditing, text]);
 
   // onDraftChange：实时写 markdown 镜像
   const handleDraftChange = useCallback((md: string) => {
@@ -88,10 +70,10 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
 
   const save = useCallback(() => {
     const md = latestMdRef.current;
-    if (md !== text || draftBadge !== badge) {
-      updateNode(id, { data: { ...data, text: md, badge: draftBadge } });
+    if (md !== text) {
+      updateNode(id, { data: { text: md } });
     }
-  }, [draftBadge, text, badge, updateNode, id, data]);
+  }, [text, updateNode, id]);
 
   const finish = useCallback(() => {
     save();
@@ -99,10 +81,9 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   }, [save]);
 
   const cancel = useCallback(() => {
-    setDraftBadge(badge);
     latestMdRef.current = text;
     setIsEditing(false);
-  }, [text, badge]);
+  }, [text]);
 
   // 失焦自动保存：编辑器失去焦点且焦点移出卡片 → 保存并退出编辑。
   // （点画布空白/点别的节点/切走应用 → 等价 tldraw 点别处退出编辑自动保存）
@@ -157,10 +138,43 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   // 非编辑态内容交互：阻止事件冒泡到 RF（避免触发节点拖动/画布平移）
   const isolateContent = useCallback((e: React.PointerEvent) => { if (e.button === 0) e.stopPropagation(); }, []);
 
-  // resize：写回 style + data.w/h（NodeResizer 已改 style，这里同步 data）
+  // resize：写回 style + data.w/h + 对齐参考线吸附
+  // resizingRef 守卫：停止后 yjs 尺寸回灌可能再触发 onResize，不得再画线（抬起线不消失）
+  const resizingRef = useRef(false);
+  const onResizeStart = useCallback(() => {
+    resizingRef.current = true;
+    setSnapLines([]);
+  }, [setSnapLines]);
+  const onResizeEnd = useCallback(
+    (_: unknown, params: { width: number; height: number; x?: number; y?: number }) => {
+      if (!resizingRef.current) return; // 幽灵 end（RF 重初始化旧值）忽略
+      resizingRef.current = false;
+      setSnapLines([]);
+      requestAnimationFrame(() => setSnapLines([]));
+      // 松手一次落库最终尺寸（官方 onResizeEnd 契约）：RF 的 dimensions change 不写
+      // style（尺寸真相源），不写会回退。写全 style/顶层/data.w/h，左/上边缘的位置一并补落。
+      const w = Math.round(params.width);
+      const h = Math.round(params.height);
+      updateNode(id, {
+        width: w,
+        height: h,
+        style: { width: w, height: h },
+        data: { w, h },
+        ...(params.x !== undefined && params.y !== undefined ? { position: { x: params.x, y: params.y } } : {}),
+      });
+    },
+    [id, updateNode, setSnapLines],
+  );
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
-    updateNode(id, { data: { ...data, w: params.width, h: params.height } });
-  }, [id, data, updateNode]);
+    if (!resizingRef.current) return;
+    const nodes = getNodes();
+    const self = nodes.find((n) => n.id === id);
+    const pos = self?.position ?? { x: 0, y: 0 };
+    // 参考线跟手；尺寸不写 yjs（resize 中每帧写会 CRDT 历史爆炸），
+    // 松手由 onNodesChange dimensions(resizing:false) 一次性落库。
+    const snap = computeResizeSnap(id, pos, params.width, params.height, nodes);
+    setSnapLines(snap.lines);
+  }, [id, setSnapLines, getNodes]);
 
   return (
     <>
@@ -172,7 +186,9 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
         isVisible={selected}
         minWidth={120}
         minHeight={60}
+        onResizeStart={onResizeStart}
         onResize={onResize}
+        onResizeEnd={onResizeEnd}
         keepAspectRatio={false}
       />
       <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
@@ -194,21 +210,9 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
         className={isEditing ? "nodrag" : ""}
         style={{ flexShrink: 0, height: 32, display: "flex", alignItems: "center", gap: 6, padding: "0 var(--bubble-pad-x, 12px)", fontSize: 10, color: "var(--text-muted)", cursor: isEditing ? "default" : "grab", boxSizing: "border-box" }}
       >
-        <CardKindBadge kind="note" color={BADGE_COLORS[isEditing ? draftBadge : badge] ?? BADGE_COLORS.blue} />
+        <EmojiPickerField kind="note" value={data.emoji} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
         {isEditing ? (
           <>
-            <div className="nodrag" style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              {Object.entries(BADGE_COLORS).map(([key, color]) => (
-                <button
-                  key={key}
-                  type="button"
-                  title={`徽记·${BADGE_NAMES[key] ?? key}`}
-                  className="nodrag"
-                  onClick={(e) => { e.stopPropagation(); setDraftBadge(key); }}
-                  style={{ width: 14, height: 14, padding: 0, border: "none", borderRadius: "50%", background: color, cursor: "pointer", boxShadow: draftBadge === key ? `0 0 0 2px var(--bg-panel), 0 0 0 3.5px ${color}` : `0 0 0 1px color-mix(in srgb, ${color} 45%, transparent)`, opacity: draftBadge === key ? 1 : 0.72 }}
-                />
-              ))}
-            </div>
             <div style={{ flex: 1 }} />
             <button type="button" className="nodrag" onClick={cancel} style={footerBtnStyle} title="放弃变更 (Esc)">取消</button>
             <button type="button" className="nodrag" onClick={finish} style={footerBtnStyle} title="完成 (Ctrl+Enter)">完成</button>
@@ -216,13 +220,13 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
         ) : (
           <>
             <div style={{ flex: 1 }} />
-            <span style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{formatNoteTime(createdAt)}</span>
+            <span className="nodrag" style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap", userSelect: "text", cursor: "text" }}>{formatNoteTime(createdAt)}</span>
             <button
               type="button"
               title={copied ? "已复制" : "复制内容"}
               onClick={copyContent}
               className="nodrag"
-              style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: copied ? "var(--accent)" : "var(--text-dim)", cursor: "pointer" }}
+              style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: copied ? "var(--accent)" : "var(--text-muted)", cursor: "pointer" }}
             >
               {copied ? (
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
@@ -259,7 +263,7 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
               <ReactMarkdown>{text}</ReactMarkdown>
             </div>
           ) : (
-            <div style={{ color: "var(--text-dim)", fontSize: 12, cursor: "text" }}>双击编辑 markdown</div>
+            <div style={{ color: "var(--text-muted)", fontSize: 12, cursor: "text" }}>双击编辑</div>
           )}
         </div>
       )}

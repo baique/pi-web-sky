@@ -1,13 +1,14 @@
 // ============================================================================
-// 看板派生 reconcile（后端权威）—— 替代前端 useBoardCanvas 的 reconcile
+// 看板派生同步（业务表 → 画布派生元素）—— 替代前端 useBoardCanvas 的 reconcile
 //
-// 设计（方案 rev2 核心）：
-//   - 业务表（tasks / task_cards / task_card_links / session_meta）= 唯一真相源，后端写
-//   - 派生元素（会话卡存在性 / exec 线 / 依赖线 / 孤儿删）= 后端读业务表 → 增量写 Y.Doc
+// 职责边界（画布管理语义）：
+//   - 画布元素（任务卡/便笺/文字/布局）由前端写 Y.Doc，协作看板（yjs）自己同步多端，
+//     本模块绝不反向从业务表补建用户画布内容（任务卡在不在画布由用户决定）。
+//   - 业务派生元素（执行会话卡 / exec 线 / 依赖线）读业务表 → 增量写 Y.Doc，且**锚点
+//     存在才派生**：执行会话卡的宿主任务卡节点不在画布 → 不补（业务展示锚定用户画布）。
+//   - 孤儿删：清「画布引用了已删业务记录」的残留（任务卡 cardId / 会话卡 sessionId）。
 //   - 确定性 id 幂等：会话卡 `session-<sid>`、exec 线 `exec-<cardId>-<sessionId>`、
 //     依赖线 `link-<fromShapeId>-<toShapeId>-<kind>` → 缺补多删，绝不整表覆盖
-//   - 用户内容（布局/尺寸/便笺文本）由前端写 Y.Doc，本模块只动派生元素，不碰用户布局
-//   - 孤儿删只删「业务表确认不存在的会话卡」，跳过新会话卡（cwd 非空 = 会话尚未创建）
 //
 // 触发：调度器写业务表后 / 任务归属变化 / 建卡删卡 / 定时兜底（见 board-reconcile-scheduler）
 // ============================================================================
@@ -54,15 +55,13 @@ interface DocNode {
 export const CARD_W = 340;
 export const CARD_H = 160;
 const FORM_W = 380;
-const COLLAPSED_MIN_H = 240;
 
 /** 会话卡默认尺寸（收合态） */
 export const SESSION_CARD_W = CARD_W;
 export const SESSION_CARD_H = CARD_H;
 
-/** 任务卡 shape 尺寸（未建卡占位 / 已建卡） */
+/** 任务卡 shape 宽度（findSpotNearTaskCard 锚点用） */
 const TASK_CARD_W = FORM_W;
-const TASK_CARD_H = COLLAPSED_MIN_H;
 
 /** 判断 Y.Doc 中某节点是否为「新会话卡」（cwd 非空 = 会话尚未创建，跳过补卡/孤儿删） */
 function isPendingNewSession(node: DocNode | undefined): boolean {
@@ -97,20 +96,62 @@ function findFreeSpot(nodes: DocNode[], width = CARD_W, height = CARD_H) {
   return { x: 60, y: 60 };
 }
 
+/** 检查指定矩形是否与画布上的会话卡重叠（与 findFreeSpot 同判据）。 */
+function overlapsSessionCards(nodes: DocNode[], x: number, y: number, width: number, height: number): boolean {
+  const STEP = 24;
+  const occupied = nodes
+    .filter((n) => n?.type === "session-card")
+    .map((n) => ({
+      x: n.position?.x ?? 0,
+      y: n.position?.y ?? 0,
+      w: n.style?.width ?? width,
+      h: n.style?.height ?? height,
+    }));
+  return occupied.some(
+    (o) => x < o.x + o.w + STEP && x + width + STEP > o.x && y < o.y + o.h + STEP && y + height + STEP > o.y,
+  );
+}
+
+/**
+ * 任务执行会话卡落点：锚定任务卡右侧（y 与任务卡齐平），右侧被占则回退 findFreeSpot。
+ * 任务卡节点已存在才锚定（补齐顺序保证先补任务卡再补会话卡）。
+ */
+function findSpotNearTaskCard(
+  nodes: DocNode[],
+  taskNode: DocNode | undefined,
+  width: number,
+  height: number,
+): { x: number; y: number } {
+  if (taskNode?.position) {
+    const STEP = 24;
+    const taskW = taskNode.style?.width ?? TASK_CARD_W;
+    const x = taskNode.position.x + taskW + STEP;
+    const y = taskNode.position.y;
+    if (!overlapsSessionCards(nodes, x, y, width, height)) return { x, y };
+  }
+  return findFreeSpot(nodes, width, height);
+}
+
 /**
  * 对单个看板执行派生 reconcile（幂等）。
  * 读业务表 → mutate Y.Doc：补/清会话卡、补/清 exec 线、补/清依赖线。
- * 仅任务看板（board.taskId 非空）有派生元素；普通看板跳过。
+ *
+ * 分两层：
+ *   - 任务卡派生（所有看板通用）：任务卡节点补齐、执行会话卡补齐（卡 sessionId）、
+ *     exec 线、依赖线。普通看板上的任务卡同样派发执行，执行会话卡+exec 线必须入板。
+ *   - 任务看板专属：任务根会话补齐（listTaskSessionIds）+ 会话卡孤儿删。
+ *     普通看板不做会话卡孤儿删——普通看板的会话卡由用户拖入/新建管理，不归业务表。
  */
 export async function reconcileBoard(boardId: string): Promise<void> {
   const board = getBoard(boardId);
-  if (!board?.taskId) return; // 普通看板：会话卡由用户拖入/新建管理，无派生
-  const taskId = board.taskId;
+  if (!board) return;
+  const isTaskBoard = Boolean(board.taskId);
 
-  const sessionIds = listTaskSessionIds(taskId);
   const cards = listCards(boardId);
-  // 全部会话 id（任务会话 + 任务卡执行会话）——执行会话卡必然存在（先有会话才有关联）
-  const allSessionIds = new Set(sessionIds);
+  // 全部应存在的会话 id：任务看板 = 根会话 + 任务卡执行会话；普通看板 = 仅任务卡执行会话。
+  // 执行会话卡必然存在（先有会话才有关联）——exec 线目标会话卡必须有节点。
+  const allSessionIds = new Set<string>();
+  if (isTaskBoard) for (const sid of listTaskSessionIds(board.taskId!)) allSessionIds.add(sid);
   for (const c of cards) if (c.sessionId) allSessionIds.add(c.sessionId);
 
   await mutateBoard(boardId, (maps) => {
@@ -118,30 +159,50 @@ export async function reconcileBoard(boardId: string): Promise<void> {
     const edgesMap = maps.edges;
     const nodes = Array.from(nodesMap.values()) as unknown as DocNode[];
 
-    // ---- 1) 会话卡：缺补、孤儿删 ----
-    const existingSessionBySid = new Map(); // sid -> node（转正卡）
-    const pendingSids = new Set(); // 新建中占位卡（cwd 非空）的 sid——视为「该 sid 已有卡，不补、不孤儿删」
+    // ---- 1) 任务卡孤儿删除：画布有 cardId 但业务表没有 → 删节点（级联删边）----
+    // 任务卡节点本身是用户画布内容（前端建/删，yjs 同步），reconcile 绝不从业务表
+    // 反向补卡——业务表只是派发记录，不是画布任务卡的来源。这里只清理「引用了
+    // 已删业务卡」的残留节点。
+    const knownCardIds = new Set(cards.map((c) => c.id));
+    const orphanCardIds: string[] = [];
+    for (const n of nodes) {
+      if (n?.type !== "task-card") continue;
+      const cardId = n.data?.cardId;
+      if (typeof cardId !== "string" || !cardId) continue;
+      if (!knownCardIds.has(cardId)) orphanCardIds.push(n.id);
+    }
+    for (const id of orphanCardIds) {
+      nodesMap.delete(id);
+      for (const e of Array.from(edgesMap.values())) {
+        if (e.source === id || e.target === id) edgesMap.delete(e.id);
+      }
+    }
+
+    // ---- 2) 会话卡：缺补、孤儿删 ----
+    // 画布上所有会话卡 sid（无论临时/正式）——补卡判据：画布已有同 sid 卡（含未就绪
+    // 新建临时卡）就不补，天然豁免“新建会话转正”窗口，无需额外豁免逻辑。
+    const canvasSids = new Set();
+    const existingSessionBySid = new Map(); // sid -> node（仅正式卡：孤儿删检测集合）
     for (const n of nodes) {
       if (n?.type !== "session-card") continue;
       const sid = n.data?.sessionId;
       if (!sid) continue;
-      // 新建中占位卡（cwd 非空）：不参与转正卡 map，也不做孤儿删；
-      // 但它的 sid 要进 pendingSids——窗口期（服务端已 assign、前端尚未转正清 cwd）
-      // 补卡循环应把该 sid 视为「已覆盖」，否则会补出第二张确定性 session-<sid> 卡。
-      if (isPendingNewSession(n)) {
-        pendingSids.add(sid);
-        continue;
-      }
+      canvasSids.add(sid);
+      // 新建中占位卡（cwd 非空）不参与孤儿删检测（未就绪不判死）；
+      // 但它的 sid 已在 canvasSids——补卡循环视为「已有卡」，不会补第二张。
+      if (isPendingNewSession(n)) continue;
       existingSessionBySid.set(sid, n);
     }
-    // 孤儿删：画布有、业务表没有的会话卡（非新会话卡）→ 删
-    // 例外：卡声明归属本板任务（data.taskId === 本板 taskId，拖入已存在会话时前端先落卡
-    // 异步归属，归属完成前本板 reconcile 不能把它当孤儿删——否则用户刚拖的卡消失）
+    // 孤儿删：画布有、业务表没有的正式卡（非新会话卡）→ 删（仅任务看板）
+    // 判据只信业务表集合（allSessionIds）——不再有 data.taskId 豁免：拖入会话已改为
+    // “先写 session_meta 归属、成功才落卡”，不存在“卡已落、归属未到”的窗口。
+    // 普通看板不删会话卡：会话卡由用户自由拖入/新建管理，不在本模块派生范围。
     const orphanIds = [];
-    for (const [sid, n] of existingSessionBySid) {
-      if (allSessionIds.has(sid)) continue;
-      if (n.data?.taskId === taskId) continue;
-      orphanIds.push(n.id);
+    if (isTaskBoard) {
+      for (const [sid, n] of existingSessionBySid) {
+        if (allSessionIds.has(sid)) continue;
+        orphanIds.push(n.id);
+      }
     }
     for (const id of orphanIds) {
       nodesMap.delete(id);
@@ -150,18 +211,23 @@ export async function reconcileBoard(boardId: string): Promise<void> {
         if (e.source === id || e.target === id) edgesMap.delete(e.id);
       }
     }
-    // 缺卡补：业务表有、画布没有的会话卡 → 补（确定性 id，4 列布局落点）
+    // 缺卡补：业务表有、画布没有的会话卡 → 补（确定性 id）
     // 补全 allSessionIds（任务根会话 + 任务卡执行会话）——exec 线目标会话卡必须有节点。
-    // 注意：不能因画布存在「新建中占位卡」（pendingNew，cwd 非空）就跳过补卡——
-    // 那会让任务卡执行会话卡永远不补、exec 线断（历史 bug）。补卡 id 为确定性 session-<sid>，
-    // 与随机 id 的占位卡不冲突、幂等。
+    // 判据只看 canvasSids（画布是否存在同 sid 卡，无论临时/正式）：
+    // 新建会话转正（画布已有同 sid 卡）天然豁免，不补第二张。
+    // 落点：任务卡执行会话锚定任务卡右侧（y 齐平）；任务根会话/无锚点走 4 列布局。
     {
-      const remaining = Array.from(nodesMap.values());
+      const remaining = Array.from(nodesMap.values()) as unknown as DocNode[];
+      const cardBySid = new Map(cards.filter((c) => c.sessionId).map((c) => [c.sessionId as string, c]));
       for (const sid of allSessionIds) {
-        // 已有转正卡 或 存在同 sid 新建中占位卡（窗口期视为已覆盖）→ 不补
-        if (existingSessionBySid.has(sid) || pendingSids.has(sid)) continue;
+        if (canvasSids.has(sid)) continue; // 画布已有（临时或正式）→ 不补
         const id = `session-${sid}`;
-        const spot = findFreeSpot(remaining);
+        const card = cardBySid.get(sid);
+        // 执行会话卡无条件补：会话是业务派生的独立展示（真实会话的存在性），
+        // 不依赖宿主任务卡节点在不在画布——任务卡是画布管理，执行会话卡是业务派生，
+        // 两者解耦。任务卡不在时落点回退 findFreeSpot（findSpotNearTaskCard 内部处理）。
+        const taskNode = card ? remaining.find((n) => n?.id === `task-${card.id}`) : undefined;
+        const spot = findSpotNearTaskCard(remaining, taskNode, SESSION_CARD_W, SESSION_CARD_H);
         nodesMap.set(id, {
           id,
           type: "session-card",
@@ -170,6 +236,7 @@ export async function reconcileBoard(boardId: string): Promise<void> {
           data: {
             sessionId: sid,
             title: "",
+            emoji: "💬",
             projectName: "",
             messageCount: 0,
             lastReply: "",
@@ -183,58 +250,6 @@ export async function reconcileBoard(boardId: string): Promise<void> {
             taskId: "",
             w: SESSION_CARD_W,
             h: SESSION_CARD_H,
-            expandedW: 0,
-            expandedH: 0,
-            collapsedW: 0,
-            collapsedH: 0,
-          },
-        });
-        remaining.push(nodesMap.get(id));
-      }
-    }
-
-    // ---- 1.5) 任务卡节点补齐：业务表存在、画布无对应节点 → 补（exec 线锚点）----
-    // 任务卡由用户从工具栏拖出创建；业务表已存在的卡（外部建卡/历史数据）自动入板。
-    // 确定性 id（task-<cardId>）→ 幂等；孤儿任务卡节点（业务表已删）→ 删。
-    const existingCardByCardId = new Map(); // cardId -> node
-    for (const n of nodes) {
-      if (n?.type === "task-card" && n.data?.cardId) existingCardByCardId.set(n.data.cardId, n);
-    }
-    // 孤儿任务卡：画布有 cardId 但业务表没有 → 删节点（级联删边）
-    const knownCardIds = new Set(cards.map((c) => c.id));
-    const orphanCardIds = [];
-    for (const [cid, n] of existingCardByCardId) {
-      if (!knownCardIds.has(cid)) orphanCardIds.push(n.id);
-    }
-    for (const id of orphanCardIds) {
-      nodesMap.delete(id);
-      for (const e of Array.from(edgesMap.values())) {
-        if (e.source === id || e.target === id) edgesMap.delete(e.id);
-      }
-    }
-    // 缺卡补：业务表有、画布没有 → 补（form 尺寸，4 列布局）
-    {
-      const remaining = Array.from(nodesMap.values()) as unknown as DocNode[];
-      for (const card of cards) {
-        if (existingCardByCardId.has(card.id)) continue;
-        const id = `task-${card.id}`;
-        const spot = findFreeSpot(remaining, TASK_CARD_W, TASK_CARD_H);
-        nodesMap.set(id, {
-          id,
-          type: "task-card",
-          position: { x: spot.x, y: spot.y },
-          style: { width: TASK_CARD_W, height: TASK_CARD_H },
-          data: {
-            cardId: card.id,
-            number: card.number,
-            name: card.name,
-            description: card.description,
-            readyStatus: card.readyStatus,
-            priority: card.priority,
-            due: card.due ?? undefined,
-            expanded: false,
-            w: TASK_CARD_W,
-            h: TASK_CARD_H,
             expandedW: 0,
             expandedH: 0,
             collapsedW: 0,
@@ -321,50 +336,6 @@ export async function reconcileBoard(boardId: string): Promise<void> {
     for (const [key, edgeId] of existingLinks) {
       if (!wantLinks.has(key)) edgesMap.delete(edgeId);
     }
-  });
-}
-
-/**
- * 任务下新建的会话入板（需求 2：外部/本页新建会话自动加入任务看板）。
- * 调度器 assignSessionToTask 后调用：补一张会话卡到对应任务看板。
- * 幂等（确定性 id）；看板不存在（任务看板未创建）时静默跳过。
- */
-export async function ensureTaskSessionCard(boardId: string, sessionId: string): Promise<void> {
-  const board = getBoard(boardId);
-  if (!board?.taskId) return;
-  await mutateBoard(boardId, (maps) => {
-    const nodesMap = maps.nodes;
-    const nodes = Array.from(nodesMap.values());
-    const id = `session-${sessionId}`;
-    if (nodesMap.has(id)) return;
-    const spot = findFreeSpot(nodes);
-    nodesMap.set(id, {
-      id,
-      type: "session-card",
-      position: { x: spot.x, y: spot.y },
-      style: { width: SESSION_CARD_W, height: SESSION_CARD_H },
-      data: {
-        sessionId,
-        title: "",
-        projectName: "",
-        messageCount: 0,
-        lastReply: "",
-        phase: "idle",
-        runningMs: 0,
-        endedAt: 0,
-        lastActivityAt: 0,
-        stale: false,
-        expanded: false,
-        cwd: "",
-        taskId: "",
-        w: SESSION_CARD_W,
-        h: SESSION_CARD_H,
-        expandedW: 0,
-        expandedH: 0,
-        collapsedW: 0,
-        collapsedH: 0,
-      },
-    });
   });
 }
 

@@ -15,9 +15,10 @@ const jiti = createJiti(import.meta.url, {
 const { GET: getSessionDetail } = await jiti.import("./[id]/route.ts");
 const { GET: getSessionState } = await jiti.import("./[id]/state/route.ts");
 
-test("session listing merges live registry snapshots and honors force refresh", () => {
-  assert.match(listRoute, /searchParams\.get\("force"\) === "1"/);
-  assert.match(listRoute, /listAllSessions\(\{ force \}\)/);
+test("session listing merges live registry snapshots (no pagination)", () => {
+  // 分页已删（马尾辫：无调用方链路不保留）
+  assert.ok(!listRoute.includes("loadChatSessionsPage"), "分页分支已移除");
+  assert.ok(!/offset/.test(listRoute), "offset 分页参数已移除");
   assert.match(listRoute, /attachSessionProjectInfo\(getRpcSessionInfos\(\)\)/);
   assert.match(listRoute, /mergeSessionLists\(persistedSessions, runtimeSessions\)/);
   assert.match(listRoute, /"Cache-Control": "no-store"/);
@@ -94,4 +95,12 @@ test("live detail and state routes work without a persisted JSONL file", async (
     running: true,
     state: { isStreaming: true },
   });
+});
+
+test("session listing supports the v2 project-scoped path (no pagination)", () => {
+  assert.match(listRoute, /search\.get\("project"\)/);
+  assert.match(listRoute, /loadProjectSessions\(projectKey\)/);
+  assert.match(listRoute, /s\.projectKey === projectKey/);
+  // 单项目路径无分页字段
+  assert.match(listRoute, /sessions: \[\.\.\.persisted, \.\.\.extraRuntime\]/);
 });

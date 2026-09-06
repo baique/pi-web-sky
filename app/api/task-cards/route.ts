@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createCard, deleteCard, getCard, listCards, listLinks, replaceLinks } from "@/lib/task-card-store";
 import { getBoard } from "@/lib/board-store";
 import { reconcileBoard } from "@/lib/board-reconcile";
+import { resolveProject } from "@/lib/worktree";
+import { projectIdentityKey } from "@/lib/project-identity";
 
 export const dynamic = "force-dynamic";
 
@@ -100,16 +102,29 @@ export async function POST(req: Request) {
       }
     }
 
+    // 归属：优先看板自身 projectKey（项目/任务看板）；全局看板（无归属）
+    // 按当前工作目录归属——resolveProject(cwd) → projectIdentityKey(projectRoot)，
+    // 即“任务卡归属跟当前 pwd 走”（左侧选中目录由前端随 cwd 字段带出）。
+    let projectKey = board.projectKey;
+    const cardCwd = typeof body.cwd === "string" ? body.cwd : undefined;
+    if (!projectKey && cardCwd) {
+      const proj = await resolveProject(cardCwd);
+      projectKey = projectIdentityKey(proj.projectRoot);
+    }
+    if (!projectKey) {
+      return NextResponse.json({ error: "projectKey is required（全局看板建卡需先选中项目目录）" }, { status: 400 });
+    }
+
     const card = createCard({
       boardId: board.id,
-      projectKey: board.projectKey,
+      projectKey,
       name: body.name,
       description: typeof body.description === "string" ? body.description : undefined,
       readyStatus: body.readyStatus as "draft" | "todo" | undefined,
       priority: typeof body.priority === "number" ? body.priority : undefined,
       due: typeof body.due === "number" ? body.due : body.due === null ? null : undefined,
       attachments,
-      cwd: typeof body.cwd === "string" ? body.cwd : undefined,
+      cwd: cardCwd,
       useWorktree: typeof body.useWorktree === "boolean" ? body.useWorktree : undefined,
       maxRetries: typeof body.maxRetries === "number" ? body.maxRetries : undefined,
     });
@@ -124,7 +139,7 @@ export async function POST(req: Request) {
       throw error;
     }
 
-    // 任务看板派生 reconcile：补/清依赖线（确定性 id 幂等）
+    // 业务派生同步：补/清依赖线（锚点存在才建；不补任务卡——画布管理语义）
     void reconcileBoard(board.id).catch((e) =>
       console.warn(`[task-cards] reconcile ${board.id} 异常:`, e?.message ?? e),
     );

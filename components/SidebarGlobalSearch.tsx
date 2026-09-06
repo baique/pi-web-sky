@@ -4,16 +4,41 @@ import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useRouter } from "next/navigation";
 import type { SessionInfo } from "@/lib/types";
 
-interface SearchHit {
-  session: SessionInfo;
+/** 会话命中：后端 lib/search.ts 的判别联合成员（kind: "session"） */
+interface SessionHit {
+  kind: "session";
+  result: { session: SessionInfo; titleMatch: boolean; snippet: string };
+}
+
+/** 任务卡命中：后端判别联合成员（kind: "task-card"） */
+interface TaskCardHit {
+  kind: "task-card";
+  card: {
+    id: string;
+    boardId: string;
+    projectKey: string;
+    number: number;
+    name: string;
+    description: string;
+    readyStatus: string;
+    execStatus: string;
+  };
   titleMatch: boolean;
   snippet: string;
 }
 
+/** 后端 /api/search 返回：任务卡在前、会话在后，全部在 results 里（无独立 taskCards 字段）。 */
+interface SearchResponse {
+  indexing: boolean;
+  results: Array<SessionHit | TaskCardHit>;
+}
+
 interface Props {
   onSelectSession: (session: SessionInfo) => void;
+  onOpenBoard?: (boardId: string) => void;
 }
 
 const DEBOUNCE_MS = 350;
@@ -44,11 +69,12 @@ function renderSnippet(snippet: string): React.ReactNode {
  * results. Mobile: icon button that expands a full-width overlay input.
  * Carries the trailing divider that separates it from the buttons on its right.
  */
-export function SidebarGlobalSearch({ onSelectSession }: Props) {
+export function SidebarGlobalSearch({ onSelectSession, onOpenBoard }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
+  const router = useRouter();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchHit[] | null>(null);
+  const [results, setResults] = useState<Array<SessionHit | TaskCardHit> | null>(null);
   const [indexing, setIndexing] = useState(false);
   const [open, setOpen] = useState(false);
   const [mobileOverlay, setMobileOverlay] = useState(false);
@@ -90,7 +116,7 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
       setOpen(true);
       setIndexing(true);
       fetch(`/api/search?q=${encodeURIComponent(q)}&limit=20`, { signal: controller.signal })
-        .then((r) => (r.ok ? (r.json() as Promise<{ results: SearchHit[]; indexing: boolean }>) : null))
+        .then((r) => (r.ok ? (r.json() as Promise<SearchResponse>) : null))
         .then((d) => {
           if (d) {
             setResults(d.results ?? []);
@@ -155,7 +181,12 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
     fontSize: 12,
   };
 
-  const resultsPanel = (results: SearchHit[] | null, indexing: boolean) => (
+  const handlePickTaskCard = useCallback((card: TaskCardHit["card"]) => {
+    close();
+    onOpenBoard?.(card.boardId);
+  }, [close, onOpenBoard]);
+
+  const resultsPanel = (results: Array<SessionHit | TaskCardHit> | null, indexing: boolean) => (
     <div
       ref={panelRef}
       className="glass-top-panel"
@@ -176,55 +207,105 @@ export function SidebarGlobalSearch({ onSelectSession }: Props) {
         </div>
       ) : (
         <div style={{ overflowY: "auto" }}>
-          {results.map((hit) => {
-            const s = hit.session;
-            const title = s.name || s.firstMessage.slice(0, 50) || s.id.slice(0, 12);
-            return (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => handlePick(s)}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  padding: "8px 12px",
-                  background: "none",
-                  border: "none",
-                  borderBottom: "1px solid var(--border)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                  {hit.titleMatch && (
-                    <span
-                      style={{
-                        flexShrink: 0, fontSize: 9, fontFamily: "var(--font-mono)",
-                        color: "var(--accent)", background: "var(--side-selected)",
-                        border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
-                        borderRadius: 3, padding: "0 4px", lineHeight: "15px",
-                      }}
-                    >
-                      {t("search.title")}
+          {/* 任务卡结果（kind: task-card） */}
+          {results.some((h) => h.kind === "task-card") && (
+            <>
+              <div style={{ padding: "6px 12px 2px", fontSize: 10, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                {t("search.taskCards")}
+              </div>
+              {results.filter((h): h is TaskCardHit => h.kind === "task-card").map((hit) => {
+                const card = hit.card;
+                return (
+                  <button
+                    key={`task-${card.id}`}
+                    type="button"
+                    onClick={() => handlePickTaskCard(card)}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    padding: "8px 12px",
+                    background: "none",
+                    border: "none",
+                    borderBottom: "1px solid var(--border)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    {hit.titleMatch && (
+                      <span style={{ flexShrink: 0, fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--accent)", background: "var(--side-selected)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)", borderRadius: 3, padding: "0 4px", lineHeight: "15px" }}>
+                        {t("search.title")}
+                      </span>
+                    )}
+                    <span style={{ flexShrink: 0, fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+                      #{card.number}
                     </span>
-                  )}
-                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
-                    {title}
-                  </span>
-                  <span style={{ flexShrink: 0, fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
-                    {s.cwd.split(/[\\/]/).filter(Boolean).pop()}
-                  </span>
-                </div>
-                {hit.snippet && (
-                  <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {renderSnippet(hit.snippet)}
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
+                      {card.name}
+                    </span>
                   </div>
-                )}
-              </button>
-            );
-          })}
+                  {hit.snippet && (
+                    <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {hit.snippet}
+                    </div>
+                  )}
+                </button>
+              );
+              })}
+            </>
+          )}
+          {/* 会话结果（kind: session） */}
+          {results.some((h) => h.kind === "session") && (
+            <>
+              <div style={{ padding: "6px 12px 2px", fontSize: 10, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                {t("search.sessions")}
+              </div>
+              {results.filter((h): h is SessionHit => h.kind === "session").map((hit) => {
+                const s = hit.result.session;
+                const title = s.name || s.firstMessage.slice(0, 50) || s.id.slice(0, 12);
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handlePick(s)}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      padding: "8px 12px",
+                      background: "none",
+                      border: "none",
+                      borderBottom: "1px solid var(--border)",
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                      {hit.result.titleMatch && (
+                        <span style={{ flexShrink: 0, fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--accent)", background: "var(--side-selected)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)", borderRadius: 3, padding: "0 4px", lineHeight: "15px" }}>
+                          {t("search.title")}
+                        </span>
+                      )}
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
+                        {title}
+                      </span>
+                      <span style={{ flexShrink: 0, fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+                        {s.cwd.split(/[\\/]/).filter(Boolean).pop()}
+                      </span>
+                    </div>
+                    {hit.result.snippet && (
+                      <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {renderSnippet(hit.result.snippet)}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </>
+          )}
         </div>
       )}
     </div>

@@ -32,6 +32,7 @@ function toTaskCardState(c: {
 //     返回前端画布正在展示、需刷新徽章的卡。cardIds 上限保护，防恶意大查询。
 const MAX_CARD_IDS = 500;
 
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const boardId = searchParams.get("boardId");
@@ -52,9 +53,12 @@ export async function GET(req: Request) {
     taskCards = listCardsByExecStatus(["running", "review", "waiting_reply"]).map(toTaskCardState);
   }
 
+  const runningIds = getRunningRpcSessionIds();
+  const states = getRunningSessionStates();
+
   const snapshot: RunningSnapshot = {
-    runningSessionIds: getRunningRpcSessionIds(),
-    states: getRunningSessionStates(),
+    runningSessionIds: runningIds,
+    states,
     taskCards,
   };
   return NextResponse.json(snapshot, { headers: { "Cache-Control": "no-store" } });

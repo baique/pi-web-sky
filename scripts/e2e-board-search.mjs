@@ -201,6 +201,52 @@ try {
     check("Enter cycles to next hit", panCalls2 >= 2, `calls=${panCalls2}`);
   }
 
+  // 7b. 聊天正文搜索：单个输入框直接搜正文（/api/search，后端限定当前看板会话）
+  // 从任务首个会话的 jsonl 提取一个正文词（标题不含），输入搜索框 → 正文命中出现在下拉。
+  const bodyKeyword = await (async () => {
+    try {
+      const sid = task.sessionIds?.[0];
+      if (!sid) return null;
+      const sres = await api(`/api/sessions/${encodeURIComponent(sid)}`);
+      const filePath = sres.body?.filePath;
+      if (!filePath) return null;
+      const { readFileSync } = require("node:fs");
+      const texts = [];
+      for (const line of readFileSync(filePath, "utf8").split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const e = JSON.parse(line);
+          if (e.type !== "message" || !e.message) continue;
+          const c = e.message.content;
+          if (typeof c === "string") texts.push(c);
+          else if (Array.isArray(c)) for (const bl of c) if (bl?.type === "text" && typeof bl.text === "string") texts.push(bl.text);
+        } catch {}
+      }
+      const body = texts.join(" ").replace(/\s+/g, " ");
+      // 取一个长度 ≥3 的中文/英文词作为正文命中词（避开标题词，验证的是正文而非标题）
+      const terms = body.match(/[\u4e00-\u9fa5]{3,}|[a-zA-Z0-9_]{3,}/g) ?? [];
+      return terms.find((w) => !(task.name ?? "").includes(w)) ?? terms[0] ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  check("extracted a chat-body keyword", !!bodyKeyword, bodyKeyword ?? "none");
+  if (bodyKeyword) {
+    // 清空上一个标题搜索，输入正文词
+    await searchBox.fill(bodyKeyword);
+    await page.waitForTimeout(700); // 防抖 350ms + 请求
+    const ddBody = page.locator("[data-testid=board-search-dropdown]");
+    const ddBodyVisible = await ddBody.isVisible().catch(() => false);
+    check("dropdown shows for body keyword", ddBodyVisible);
+    if (ddBodyVisible) {
+      const bodyText = await ddBody.innerText().catch(() => "");
+      check("dropdown lists a body hit (group label)", bodyText.includes("正文命中") || bodyText.includes("Chat hits"), bodyText.trim().slice(0, 60));
+      // 正文命中项：会话名 + snippet 都非空
+      const hitButtons = await ddBody.locator("button").count();
+      check("body dropdown has >=1 hit row", hitButtons >= 1, `hits=${hitButtons}`);
+    }
+  }
+
   // 8. 无命中 → 空态
   await searchBox.fill("zzzz_not_exist_zzzz");
   await page.waitForTimeout(300);

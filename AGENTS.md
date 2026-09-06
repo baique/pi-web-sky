@@ -101,6 +101,7 @@ Browser                Next.js Server              AgentSession (in-process)
 | 插件与技能 | [docs/reference/plugins-skills.md](docs/reference/plugins-skills.md) | 改 /api/plugins / /api/skills / 技能开关 / 插件安装移除 |
 | 完整文件清单 | [docs/reference/file-map.md](docs/reference/file-map.md) | 新增 API 路由 / 组件 / hook / lib，或要查某文件职责 |
 | CSS 变量体系 | [docs/reference/css-tokens.md](docs/reference/css-tokens.md) | 调 UI 观感 / 加样式 / 气泡 token / scrim / 思考球 |
+| 看板 RF/yjs 开发陷阱 | [docs/reference/board-dev-traps.md](docs/reference/board-dev-traps.md) | 改 RF 节点 / resize / 尺寸字段 / 写 yjs / e2e 验证看板交互时（含 cleanNode 隐形回归与 resize 还原教训） |
 
 ---
 

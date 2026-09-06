@@ -20,12 +20,14 @@ import { phaseLabel, orbModeForPhase } from "@/lib/agent-phase";
 import { NoticeDrawer } from "./NoticeDrawer";
 import { QuotaView, NOTICE_COLOR } from "./ComposerHeader";
 import { formatTokenCount } from "./ChatInput";
+import { WorktreeSelector } from "./WorktreeSelector";
 import { useAgentSession, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { TodoItem } from "@/lib/types";
 import type { AppUpdateResponse } from "@/lib/api-types";
+import type { TurnIndexItem } from "@/lib/api-types";
 import {
   captureScrollDistance,
   getPromptAnchorSpacerHeight,
@@ -45,6 +47,8 @@ interface Props {
   onAttentionNeeded?: (request: BlockingExtensionUiRequest) => void;
   onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;
   onSessionForked?: (newSessionId: string) => void;
+  /** 空态欢迎页环境条 worktree 切换（会话未创建时决定运行目录，任务卡 #16） */
+  onEnvWorktreeChange?: (wtPath: string) => void;
   modelsRefreshKey?: number;
   chatInputRef?: React.RefObject<ChatInputHandle | null>;
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
@@ -257,7 +261,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal, inWorkbench = false }: Props) {
+export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onEnvWorktreeChange, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal, inWorkbench = false }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const { isDark } = useTheme();
@@ -390,6 +394,15 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   const loadingOlderRef = useRef(false);
   // Drives the back-to-latest button in the ChatInput toolbar row.
   const [atBottom, setAtBottom] = useState(true);
+  // 防抖：避免流式输出时 atBottom 频繁变化导致置顶按钮闪烁
+  const atBottomDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setAtBottomDebounced = useCallback((value: boolean) => {
+    if (atBottomDebounceRef.current) clearTimeout(atBottomDebounceRef.current);
+    atBottomDebounceRef.current = setTimeout(() => {
+      setAtBottom(value);
+      atBottomDebounceRef.current = null;
+    }, 150);
+  }, []);
 
   // Pinned message windows — floating snapshot copies of individual bubbles.
   // Session-scoped and ephemeral: live in React state only, cleared on refresh
@@ -564,9 +577,57 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     return history.reverse();
   }, [messages]);
   const messageRefs = useMessageRefs(visibleMessages.length);
-  const revealHistoryForMinimap = useCallback(() => {
-    setVisibleCount((current) => Math.max(current, messages.length * 2));
-  }, [messages.length]);
+  // 全量 turn 索引（导航条）：桌面端拉取，随活动分支切换刷新。
+  const [turnIndex, setTurnIndex] = useState<TurnIndexItem[]>([]);
+  useEffect(() => {
+    const sid = session?.id ?? sessionIdRef.current;
+    if (!sid || isMobile) return;
+    let cancelled = false;
+    const params = new URLSearchParams();
+    if (activeLeafId) params.set("leafId", activeLeafId);
+    fetch(`/api/sessions/${encodeURIComponent(sid)}/minimap?${params}`)
+      .then((r) => (r.ok ? r.json() as Promise<{ turns: TurnIndexItem[]; leafId: string | null }> : null))
+      .then((d) => {
+        if (!cancelled && d) setTurnIndex(d.turns);
+      })
+      .catch(() => { /* 导航条为增强能力，失败静默降级为窗口内导航 */ });
+    return () => { cancelled = true; };
+  }, [session?.id, sessionIdRef, activeLeafId, isMobile]);
+
+  const entryIdsRef = useRef(entryIds);
+  entryIdsRef.current = entryIds;
+  const hasOlderChatRef = useRef(hasOlderChat);
+  hasOlderChatRef.current = hasOlderChat;
+  // 导航条点击窗口外回合：循环分页（tail=1000 大页）直到目标 entry 进入
+  // 已加载集合，随后由 ChatMinimap 的 pendingNavigation 机制滚动定位。
+  const revealHistoryForMinimap = useCallback(async (entryId: string) => {
+    const sid = session?.id ?? sessionIdRef.current;
+    if (!sid || !entryId) return;
+    // 让进行中的滚动加载（sentinel）先完成：同一 before 双请求会重复 prepend。
+    for (let spin = 0; spin < 20 && loadingOlderRef.current; spin++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    try {
+      let loadedIds = [...entryIdsRef.current];
+      let hasMore = hasOlderChatRef.current;
+      let guard = 0;
+      while (!loadedIds.includes(entryId) && hasMore && guard < 30) {
+        guard += 1;
+        const before = loadedIds[0];
+        if (!before) break;
+        const result = await loadContext(sid, activeLeafId, before, 1000);
+        if (!result || result.entryIds.length === 0) break;
+        loadedIds = [...result.entryIds, ...loadedIds];
+        hasMore = result.hasMore;
+      }
+      // 渲染窗口至少覆盖已加载内容（现有 effect 也会自动提升）。
+      setVisibleCount((current) => Math.max(current, loadedIds.length));
+    } finally {
+      loadingOlderRef.current = false;
+    }
+  }, [session?.id, activeLeafId, loadContext, sessionIdRef]);
 
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
   const hasStreamingContent = Boolean(streamState.streamingMessage?.content.length);
@@ -858,14 +919,21 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 <span style={{ fontSize: 28, color: "#ffffff", fontWeight: 700, letterSpacing: 0, mixBlendMode: "exclusion", flexShrink: 0, whiteSpace: "nowrap" }}>Pi Web</span>
                 <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
               </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0, mixBlendMode: "exclusion" }}>
-                <span style={{ fontSize: 12, color: "#ffffff", fontWeight: 700 }}>
-                  web <span style={{ color: "#ffffff", fontWeight: 700 }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span>
-                </span>
-                <span style={{ fontSize: 12, color: "#ffffff", fontWeight: 700 }}>
-                  pi <span style={{ color: "#ffffff", fontWeight: 700 }}>v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span>
-                </span>
-              </div>
+              {/* 环境条：新建会话前决定 worktree（会话落盘即锁定，任务卡 #16）。
+                  取代原 web/pi 版本号展示（升级提示已由 NewSessionUpdateLink 承担）。 */}
+              {messageCwd && onEnvWorktreeChange ? (
+                <WorktreeSelector
+                  cwd={messageCwd}
+                  onSelect={onEnvWorktreeChange}
+                  style={{
+                    background: "color-mix(in srgb, var(--frame-glass) 80%, transparent)",
+                    border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
+                    borderRadius: 8,
+                    height: 30,
+                    flexShrink: 0,
+                  }}
+                />
+              ) : null}
             </div>
             {chatInputElement}
             {/* 欢迎页不渲染底部状态栏：状态栏属于会话界面，空会话欢迎页保持干净 */}
@@ -879,7 +947,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
           className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 pb-[4px] mb-[4px] [scrollbar-width:none]"
           onScroll={(e) => {
             const el = e.currentTarget;
-            setAtBottom(isScrollAtTail(el.scrollTop, el.clientHeight, el.scrollHeight));
+            setAtBottomDebounced(isScrollAtTail(el.scrollTop, el.clientHeight, el.scrollHeight));
           }}
         >
           <div style={{ minWidth: 0, padding: isMobile ? `0 ${CHAT_COLUMN_PADDING}px` : `0 ${CHAT_MESSAGE_RIGHT_PADDING}px 0 ${CHAT_COLUMN_PADDING}px` }}>
@@ -1070,7 +1138,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 <>
                   {hasMore && (
                      <div ref={sentinelRef} className="py-3 text-center text-xs text-text-muted">
-                       {t("chat.loadEarlier", { count: startIndex })}
+                       {t("chat.loadEarlier")}
                     </div>
                   )}
                   {rendered.slice(startIndex)}
@@ -1161,6 +1229,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
         {isMobile ? null : (
           <ChatMinimap
             messages={messages}
+            entryIds={entryIds}
+            turnIndex={turnIndex}
             streamingMessage={streamState.streamingMessage}
             scrollContainer={scrollContainerRef}
             messageRefs={messageRefs}

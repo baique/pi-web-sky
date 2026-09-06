@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NodeResizer, Handle, Position, type NodeProps } from "@xyflow/react";
+import { NodeResizer, Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
+import { computeResizeSnap } from "@/lib/board-align";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
@@ -12,9 +13,11 @@ import { useTaskCardStatus, useTaskCardVisibility } from "@/hooks/useBoardCanvas
 import { ThemedSelect } from "@/components/canvas/ThemedSelect";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { TaskCardMultiSelect } from "@/components/canvas/TaskCardMultiSelect";
-import { CardKindBadge } from "@/components/canvas/CardKindBadge";
+import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
 import { WorktreePicker } from "@/components/canvas/WorktreePicker";
+import { WorktreeSelector } from "@/components/WorktreeSelector";
+import { dispatchBoardCwdSwitch } from "@/lib/board-events";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { useBoardId, useBoardDefaultCwd } from "./BoardIdContext";
 import { memoBoardNode } from "./memoNode";
@@ -31,6 +34,8 @@ export interface TaskCardData extends Record<string, unknown> {
   cardId: string;
   number: number;
   name: string;
+  /** 用户设置的 emoji（空/缺省 → 类别默认 ✅）；状态跟随 emoji 不落库 */
+  emoji?: string;
   description: string;
   readyStatus: ReadyStatus;
   execStatus: ExecStatus;
@@ -71,7 +76,8 @@ const EXPANDED_H = 620;
 const COLLAPSED_MIN_H = 240;
 
 function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { data: TaskCardData }) {
-  const { updateNode, deleteNode, normalizeNodeId } = useBoardCanvasOps();
+  const { getNodes } = useReactFlow();
+  const { updateNode, updateNodeDebounced, deleteNode, normalizeNodeId, setSnapLines } = useBoardCanvasOps();
   const w = width ?? data.w ?? FORM_W;
   const h = height ?? data.h ?? FORM_H;
   const expanded = Boolean(data.expanded);
@@ -163,11 +169,13 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
   const rootRef = useRef<HTMLDivElement>(null);
 
   // 编辑实时写回节点 data（CRDT 广播到多端 + 持久化）
+  // 表单字符输入走防抖（400ms 窗口合并），避免每字符一条 yjs 历史；
+  // 非文本字段（priority 等）仍即时写（低频）。
   const set = <K extends keyof TaskCard>(key: K, value: TaskCard[K]) => {
     setDraft((d) => {
       const next = d ? { ...d, [key]: value } : d;
       if (next && (key === "name" || key === "description")) {
-        updateNode(id, { data: { ...data, name: key === "name" ? (value as string) : next.name, description: key === "description" ? (value as string) : next.description ?? "" } });
+        updateNodeDebounced(id, { data: { name: key === "name" ? (value as string) : next.name, description: key === "description" ? (value as string) : next.description ?? "" } });
       }
       return next;
     });
@@ -202,7 +210,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       // 必须先改 id 再落 cardId，否则 reconcile 已按 task-<cardId> 补卡时两者并存。
       const newId = `task-${created.id}`;
       normalizeNodeId(id, newId);
-      updateNode(newId, { data: { ...data, cardId: created.id, number: created.number, name: created.name, readyStatus: created.readyStatus, priority: created.priority, due: created.due ?? undefined } });
+      updateNode(newId, { data: { cardId: created.id, number: created.number, name: created.name, readyStatus: created.readyStatus, priority: created.priority, due: created.due ?? undefined } });
       setDraft((d) => (d ? { ...d, ...created, sessionId: created.sessionId } : d));
       void reload();
     }
@@ -231,7 +239,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     savingRef.current = false;
     setSaving(false);
     if (ok) {
-      updateNode(id, { data: { ...data, name: draft.name, description: draft.description ?? "", readyStatus: draft.readyStatus, priority: draft.priority, due: draft.due ?? undefined } });
+      updateNode(id, { data: { name: draft.name, description: draft.description ?? "", readyStatus: draft.readyStatus, priority: draft.priority, due: draft.due ?? undefined } });
     } else {
       setSaveError(error ?? "保存失败");
     }
@@ -294,7 +302,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       const nw = ok ? data.collapsedW : FORM_W;
       const nh = ok ? data.collapsedH : FORM_H;
       updateNode(id, {
-        data: { ...data, expanded: false, expandedW: curW, expandedH: curH, w: nw, h: nh },
+        data: { expanded: false, expandedW: curW, expandedH: curH, w: nw, h: nh },
         // 尺寸三处对齐：顶层 width/height（NodeResizer 拖过会残留，RF 优先读它）
         // + style（RF 备选）+ data.w/h（镜像）。只改 style 会被顶层残留值屏蔽。
         width: nw,
@@ -307,7 +315,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       const nw = ok ? data.expandedW : EXPANDED_W;
       const nh = ok ? data.expandedH : EXPANDED_H;
       updateNode(id, {
-        data: { ...data, expanded: true, collapsedW: curW, collapsedH: curH, w: nw, h: nh },
+        data: { expanded: true, collapsedW: curW, collapsedH: curH, w: nw, h: nh },
         width: nw,
         height: nh,
         style: { width: nw, height: nh },
@@ -315,15 +323,60 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     }
   }, [id, data, expanded, w, h, updateNode]);
 
+  // resize：写回 data.w/h + 对齐参考线吸附
+  // resizingRef 守卫：停止后 yjs 尺寸回灌可能再触发 onResize，不得再画线（抬起线不消失）
+  const resizingRef = useRef(false);
+  const onResizeStart = useCallback(() => {
+    resizingRef.current = true;
+    setSnapLines([]);
+  }, [setSnapLines]);
+  const onResizeEnd = useCallback(
+    (_: unknown, params: { width: number; height: number; x?: number; y?: number }) => {
+      if (!resizingRef.current) return; // 幽灵 end（RF 重初始化旧值）忽略
+      resizingRef.current = false;
+      setSnapLines([]);
+      requestAnimationFrame(() => setSnapLines([]));
+      // 松手一次落库最终尺寸（官方 onResizeEnd 契约）：RF 的 dimensions change 不写
+      // style（尺寸真相源），不写会回退。写全 style/顶层/data.w/h，左/上边缘的位置一并补落。
+      const w = Math.round(params.width);
+      const h = Math.round(params.height);
+      updateNode(id, {
+        width: w,
+        height: h,
+        style: { width: w, height: h },
+        data: { w, h },
+        ...(params.x !== undefined && params.y !== undefined ? { position: { x: params.x, y: params.y } } : {}),
+      });
+    },
+    [id, updateNode, setSnapLines],
+  );
   const onResize = useCallback((_: unknown, params: { width: number; height: number }) => {
-    updateNode(id, { data: { ...data, w: params.width, h: params.height } });
-  }, [id, data, updateNode]);
+    if (!resizingRef.current) return;
+    const nodes = getNodes();
+    const self = nodes.find((n) => n.id === id);
+    const pos = self?.position ?? { x: 0, y: 0 };
+    // 参考线跟手；尺寸不写 yjs（resize 中每帧写会 CRDT 历史爆炸），
+    // 松手由 onNodesChange dimensions(resizing:false) 一次性落库。
+    const snap = computeResizeSnap(id, pos, params.width, params.height, nodes);
+    setSnapLines(snap.lines);
+  }, [id, setSnapLines, getNodes]);
 
   // （exec 状态已由上方 useTaskCardStatus 从 running 轮询镜像读取）
 
   const formBody = draft ? (
     <>
-      <label style={LABEL_STYLE}>任务名称 *</label>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "8px 0 3px" }}>
+        <label style={{ ...LABEL_STYLE, margin: 0 }}>任务名称 *</label>
+        {draft.cwd && (
+          <WorktreeSelector
+            cwd={draft.cwd}
+            onSelect={(p) => { set("cwd", p); setWtPath(p); dispatchBoardCwdSwitch(p); }}
+            showMainLabel={false}
+            compact
+            style={{ height: "auto", background: "transparent", flexShrink: 0, borderRadius: 0 }}
+          />
+        )}
+      </div>
       <input
         style={{ ...FIELD_STYLE, ...(nameError ? { borderColor: "#f87171", boxShadow: "0 0 0 1px #f87171" } : {}) }}
         value={draft.name}
@@ -331,7 +384,10 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
         placeholder="任务名称"
       />
       {nameError && <div style={{ color: "#f87171", fontSize: 11, marginTop: 3 }}>{nameError}</div>}
-      <label style={LABEL_STYLE}>需求说明</label>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "8px 0 3px" }}>
+        <label style={{ ...LABEL_STYLE, margin: 0 }}>需求说明</label>
+        <TemplateSelector onSelect={(tpl) => set("description", (draft?.description ?? "") + (draft?.description ? "\n\n" : "") + tpl)} />
+      </div>
       <MarkdownField
         value={draft.description}
         onChange={(md) => set("description", md)}
@@ -370,9 +426,9 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       {(saveError || error) && <div style={{ color: "#f87171", fontSize: 11, marginTop: 6 }}>{saveError ?? error}</div>}
     </>
   ) : loading ? (
-    <div style={{ color: "var(--text-dim)", fontSize: 12, padding: 20, textAlign: "center" }}>加载中…</div>
+    <div style={{ color: "var(--text-muted)", fontSize: 12, padding: 20, textAlign: "center" }}>加载中…</div>
   ) : (
-    <div style={{ color: "var(--text-dim)", fontSize: 12, padding: 20, textAlign: "center" }}>未找到任务卡</div>
+    <div style={{ color: "var(--text-muted)", fontSize: 12, padding: 20, textAlign: "center" }}>未找到任务卡</div>
   );
 
   return (
@@ -381,7 +437,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
           卡根 overflow:hidden 会裁掉外扩的 resize 角柄 → 点击落到卡根变成拖卡，
           resize 永远无法触发。放外面后手柄可正常外扩/命中。
           直线隐藏（四边直线无法圆角）：选中态边线由卡根圆角 accent 边框呈现。 */}
-      <NodeResizer isVisible={selected} minWidth={expanded ? 480 : FORM_W} minHeight={expanded ? 400 : COLLAPSED_MIN_H} onResize={onResize} keepAspectRatio={false} />
+      <NodeResizer isVisible={selected} minWidth={expanded ? 480 : FORM_W} minHeight={expanded ? 400 : COLLAPSED_MIN_H} onResizeStart={onResizeStart} onResize={onResize} onResizeEnd={onResizeEnd} keepAspectRatio={false} />
       <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <div
@@ -415,13 +471,11 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       >
       {/* 拖拽把手：不拦 pointer（RF 拖动节点）；右上角操作按钮 nodrag 独立点击 */}
       <div style={{ flexShrink: 0, height: 36, display: "flex", alignItems: "center", gap: 6, padding: "0 10px", borderBottom: "1px solid var(--bubble-hairline)", cursor: "grab", fontSize: 11, color: "var(--text-muted)" }}>
-        <span title={`执行状态：${(EXEC_BADGE[execStatus] ?? EXEC_BADGE.not_started).label}`} style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-          <CardKindBadge kind="task" color={(EXEC_BADGE[execStatus] ?? EXEC_BADGE.not_started).color} />
-        </span>
-        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>
+        <EmojiPickerField kind="task" value={data.emoji} status={execStatus} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
+        <span className="nodrag" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>
           {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
         </span>
-        {draft?.number ? <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text)", marginLeft: 4 }}>#{draft.number}</span> : null}
+        {draft?.number ? <span className="nodrag" style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text)", marginLeft: 4 }}>#{draft.number}</span> : null}
         <div className="nodrag" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }} onPointerDown={(e) => e.stopPropagation()}>
           {isCreating ? (
             <button type="button" style={footerBtnStyle} disabled={saving || !boardId} onClick={() => void handleCreate()} title="创建任务并派发（转待办，调度器可执行）">
@@ -445,8 +499,8 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
           ) : null}
         </div>
       </div>
-      {/* 内容区：编辑表单 */}
-      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+      {/* 内容区：编辑表单。双击 input/textarea/选择器不得冒泡成展开收起（根 onDoubleClick 拦在表单外）。 */}
+      <div onDoubleClick={(e) => e.stopPropagation()} style={{ flex: 1, minHeight: 0, display: "flex" }}>
         {/* 表单区必须显式恢复文本选中：卡根 userSelect:none 会抑制输入框/表单文字选中复制 */}
         <div className="[scrollbar-width:none] nodrag nowheel" style={{ flex: "1 1 auto", minWidth: 0, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", cursor: "default", userSelect: "text" }}>
           {formBody}
@@ -581,6 +635,19 @@ function MarkdownField({
     }
   }, [editor, value]);
 
+  // 空内容时编辑器只占一行，wrap 下方留有空白；点空白区域时把光标送进编辑器。
+  // 只要点击来自 wrap 内部（无论编辑器内部还是空白），都确保编辑器聚焦。
+  const handleWrapMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (!editor) return;
+      // 点击编辑器内部 → 交给 ProseMirror 原生定位，避免 focus("end") 把光标冲到末尾
+      if (editor.view.dom.contains(e.target as Node)) return;
+      // 空内容时编辑器只占一行，点击下方空白区域 → 聚焦编辑器
+      editor.commands.focus("end");
+    },
+    [editor],
+  );
+
   return (
     <div
       className="nodrag nowheel task-card-md-wrap"
@@ -593,8 +660,105 @@ function MarkdownField({
         padding: 0,
         userSelect: "text",
       }}
+      onMouseDown={handleWrapMouseDown}
     >
       <EditorContent editor={editor} />
+    </div>
+  );
+}
+
+/**
+ * 模板选择器（plaintext 形式，非按钮）。
+ * 点击展开下拉菜单，选择后追加模板到 description。
+ */
+const TEMPLATES: Record<string, { label: string; content: string }> = {
+  feat: {
+    label: "feat",
+    content: "## 需求\n\n\n## 背景\n\n\n## 约束\n\n\n## 验收标准\n\n",
+  },
+  bug: {
+    label: "bug",
+    content: "## 问题说明\n\n\n## 最小复现步骤\n\n\n## 是否只报告原因不执行修复\n\n",
+  },
+  design: {
+    label: "design",
+    content: "## 需求\n\n\n## 约束\n\n",
+  },
+};
+
+function TemplateSelector({ onSelect }: { onSelect: (template: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} style={{ position: "relative" }}>
+      <span
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          fontSize: 10,
+          color: "var(--text-muted)",
+          cursor: "pointer",
+          userSelect: "none",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 2,
+        }}
+      >
+        模板
+        <svg width="8" height="8" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+          <polyline points="2 3.5 5 6.5 8 3.5" />
+        </svg>
+      </span>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            zIndex: 120,
+            minWidth: 90,
+            background: "var(--popover-glass)",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            boxShadow: "0 6px 20px -6px rgba(0,0,0,0.35)",
+            padding: 4,
+          }}
+        >
+          {Object.entries(TEMPLATES).map(([key, { label, content }]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => { onSelect(content); setOpen(false); }}
+              style={{
+                display: "block",
+                width: "100%",
+                boxSizing: "border-box",
+                padding: "5px 8px",
+                border: "none",
+                borderRadius: 4,
+                background: "transparent",
+                color: "var(--text)",
+                fontSize: 11,
+                textAlign: "left",
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--side-hover)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

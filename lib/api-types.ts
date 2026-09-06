@@ -1,5 +1,15 @@
 import type { ResourceDiagnostic } from "@earendil-works/pi-coding-agent";
 
+/** 时间轴导航条（ChatMinimap）的 turn 索引条目：只含文本摘要，不携带完整 content。 */
+export interface TurnIndexItem {
+  /** 该 turn 第一条 user message 的 entry id（前端定位/分页加载的游标锚点）。 */
+  entryId: string;
+  /** user 消息纯文本预览（截断）。 */
+  userText: string;
+  /** 该 turn 最后一条 assistant 回复的纯文本预览（截断），无回复时为空串。 */
+  assistantPreview: string;
+}
+
 export interface SkillSearchResult {
   package: string;
   installs: string;

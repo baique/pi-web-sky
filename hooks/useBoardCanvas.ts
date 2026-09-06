@@ -6,8 +6,9 @@ import * as Y from "yjs";
 import type { Node, Edge, NodeChange, EdgeChange } from "@xyflow/react";
 import { applyNodeChanges, applyEdgeChanges } from "@xyflow/react";
 import type { BoardInfo, RunningSnapshot, TaskCardRunningState } from "@/lib/board-types";
-import { dispatchBoardSessionCreated } from "@/lib/board-events";
+import { dispatchBoardSessionCreated, dispatchBoardSessionDeleted } from "@/lib/board-events";
 import { confirm } from "@/components/canvas/ConfirmDialog";
+import { isNoteNode } from "@/components/board/SendNoteEdge";
 
 // ============================================================================
 // 看板画布数据层（yjs 版，替代 tldraw useSync）
@@ -31,10 +32,18 @@ export type SessionSummary = {
   projectName: string;
   lastReply: string;
   lastActivityAt: number;
+  /** 会话工作目录（= projectRoot，激活会话时全局 cwd 跟随目标） */
+  projectRoot?: string;
+  /** 会话真实 cwd（worktree 路径；激活会话时全局 cwd 应切到这里而非 projectRoot） */
+  cwd?: string;
+  /** worktree 分支名（非主 worktree，卡片徽标用，任务卡 #16） */
+  worktreeBranch?: string;
+  /** 是否链接 worktree（非主 checkout） */
+  isWorktree?: boolean;
 };
 
-/** 卡片标题/最后回复轮询间隔（ms） */
-const SUMMARY_POLL_MS = 10000;
+/** 卡片标题/最后回复轮询间隔（ms）。卡片只展示摘要，5s 足够。 */
+const SUMMARY_POLL_MS = 5000;
 /** running 快照轮询间隔（ms） */
 const RUNNING_POLL_MS = 2500;
 
@@ -60,10 +69,19 @@ const SYNC_BASE =
 
 export type CanvasPhase = "waiting_model" | "running_tools" | "running_command" | "waiting_input" | "idle" | "just-ended";
 
+/** 会话卡运行态镜像（DB/调度器真相的展示快照，不写 yjs——高频展示态与 CRDT 分离） */
+export interface SessionRunningState {
+  phase: CanvasPhase;
+  runningMs: number;
+  endedAt: number;
+}
+
 /** 会话卡 data（与后端 reconcile 的 node.data 对齐） */
 export interface SessionCardData extends Record<string, unknown> {
   sessionId: string;
   title: string;
+  /** 用户设置的 emoji（空/缺省 → 类别默认 💬）；状态跟随 emoji 不落库 */
+  emoji?: string;
   projectName: string;
   messageCount: number;
   lastReply: string;
@@ -75,12 +93,30 @@ export interface SessionCardData extends Record<string, unknown> {
   expanded: boolean;
   cwd?: string;
   taskId?: string;
+  /** worktree 分支名（非主 worktree，卡片徽标用，任务卡 #16） */
+  worktreeBranch?: string;
+  /** 是否链接 worktree（非主 checkout） */
+  isWorktree?: boolean;
   w: number;
   h: number;
   expandedW: number;
   expandedH: number;
   collapsedW: number;
   collapsedH: number;
+}
+
+/**
+ * 落库前剥离 UI 态字段（selected/dragging/resizing 是纯本地观感，绝不入 yjs 文档）。
+ * 注意：measured 必须保留——RF 的 nodeHasDimensions 判定（measured?.width ?? width ??
+ * initialWidth）决定节点是否渲染可见（visibility:hidden），剥掉会导致节点隐形、
+ * 点不中/选中失效/resize 手柄不显示（曾作为回归引入，ae7c052 修复）。
+ */
+function cleanNode(node: Node): Node {
+  const { selected, dragging, resizing, ...clean } = node;
+  void selected;
+  void dragging;
+  void resizing;
+  return clean;
 }
 
 export function useBoardCanvas({
@@ -98,17 +134,24 @@ export function useBoardCanvas({
 
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+  const [viewport, setViewport] = useState<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 1 });
 
   // ---- Hocuspocus provider：连接看板文档 ----
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const providerRef = useRef<HocuspocusProvider | null>(null);
   const nodesMapRef = useRef<Y.Map<Node> | null>(null);
   const edgesMapRef = useRef<Y.Map<Edge> | null>(null);
+  const viewMapRef = useRef<Y.Map<number> | null>(null);
   const readyRef = useRef(false);
   readyRef.current = ready;
 
+  // ---- Undo/Redo ----
+  const undoManagerRef = useRef<Y.UndoManager | null>(null);
+
   const boardIdRef = useRef(boardId);
   boardIdRef.current = boardId;
+  // 任务会话补卡就绪 → 已通知过左侧刷新的 sessionId 集合（跨热重载/重连去重）
+  const notifiedReadySessionIdsRef = useRef<Set<string>>(new Set());
   // 任务看板 taskId：prop 可能在 URL 直达时为空，看板元信息(board.board.taskId)恒有 —— 归属用两者兜底
   const boardRef = useRef<BoardInfo | null>(null);
   boardRef.current = board;
@@ -126,18 +169,42 @@ export function useBoardCanvas({
       url: syncUri,
       name: boardId,
       forceSyncInterval: false,
+      // 批量发送：本地多次 update 在 500ms 窗口合并为一条 WS 消息，减少同步/解析开销。
+      // 官方推荐（HocuspocusProvider flushDelay 典型值 500ms）。拖拽/轮询高频写场景收益明显。
+      flushDelay: 500,
     });
     providerRef.current = p;
     setProvider(p);
     const nodesMap = p.document.getMap<Node>("nodes");
     const edgesMap = p.document.getMap<Edge>("edges");
+    const viewMap = p.document.getMap<number>("view");
     nodesMapRef.current = nodesMap;
     edgesMapRef.current = edgesMap;
+    viewMapRef.current = viewMap;
 
     const syncNodes = (changes?: Y.YMapEvent<Node>) => {
       // yjs 铁律：changes 只能在 observe 回调同步阶段访问（事务结束后抛错），
       // 必须在这里先取出变化的 key 集合，再传给异步的 setNodes reducer。
       const changedIds = changes ? new Set(Array.from(changes.keys.keys())) : null;
+      // 任务会话补卡就绪 → 触发一次左侧刷新：
+      // 后端 reconcile 补执行会话卡（业务表已有、画布新增）时，左侧会话树不会自动感知，
+      // 这里在 synced 之后监听 yjs 新增的正式会话卡（cwd 空 = 就绪），dispatch 事件桥让 AppShell 刷新。
+      // 初始同步（synced 前 ready=false）不触发——打开看板时画布既有卡不重复刷新左侧；
+      // 同一 sessionId 只通知一次（notified 集合去重），占位卡（cwd 非空）不算就绪跳过。
+      if (changes && readyRef.current) {
+        let notifySid: string | null = null;
+        for (const [key, change] of changes.keys) {
+          if (change?.action !== "add") continue;
+          const n = nodesMap.get(key);
+          if (n?.type !== "session-card") continue;
+          const d = n.data as SessionCardData | undefined;
+          if (!d?.sessionId || d.cwd) continue;
+          if (notifiedReadySessionIdsRef.current.has(d.sessionId)) continue;
+          notifiedReadySessionIdsRef.current.add(d.sessionId);
+          notifySid = notifySid ?? d.sessionId;
+        }
+        if (notifySid) dispatchBoardSessionCreated(notifySid);
+      }
       setNodes((prev) => {
         // selected/dragging 是 UI 态：只存活于本地 state，绝不进 yjs。
         // 回灌时从上一帧保留同 id 节点的选中/拖拽态，并剥掉 yjs 可能的历史残留
@@ -145,9 +212,11 @@ export function useBoardCanvas({
         const uiNode = (x: Node) => x as Node & { selected?: boolean; dragging?: boolean };
         const prevSelected = new Set(prev.filter((n) => uiNode(n).selected).map((n) => n.id));
         const prevDragging = new Set(prev.filter((n) => uiNode(n).dragging).map((n) => n.id));
-        // yjs Y.Map 每次 get 都 JSON decode 出全新对象（data 引用全变 →
-        // 节点组件 memo 失效 → 拖一张卡全部卡每帧重渲染）。
-        // 只重建本次变化的节点，未变节点复用上一帧对象 → data 引用稳定。
+        // 拖拽保护：position 只写本地（dragStop 才落 yjs），若拖拽期间远端写入触发
+        // 回灌，dragging 中的节点必须沿用本地 position，否则会被 yjs 旧值冲回。
+        // 判据用 draggingNodeIdsRef（onNodesChange 的 change.dragging 维护），
+        // 不用 nodes 上的 dragging 字段——RF 受控 prop 不携带该标志（内部态）。
+        const draggingNow = draggingNodeIdsRef.current;
         const prevById = new Map(prev.map((n) => [n.id, n]));
         return Array.from(nodesMap.values()).map((n) => {
           if (changedIds && !changedIds.has(n.id)) {
@@ -155,6 +224,11 @@ export function useBoardCanvas({
             if (old) return old; // 未变：整对象复用（含 selected/dragging/引用）
           }
           const out = { ...n } as Node & { selected?: boolean; dragging?: boolean };
+          if (draggingNow.has(n.id)) {
+            // 拖拽中：沿用本地 position（远端对此节点的写入等拖完再说）
+            const local = prevById.get(n.id);
+            if (local) out.position = local.position;
+          }
           // 剥掉 yjs 残留的 UI 态字段
           delete out.selected;
           delete out.dragging;
@@ -166,21 +240,51 @@ export function useBoardCanvas({
       });
     };
     const syncEdges = () => setEdges(Array.from(edgesMap.values()));
-    const onSynced = () => setReady(true);
+    const syncView = () => {
+      const vm = viewMapRef.current;
+      if (!vm) return;
+      setViewport({
+        x: vm.get("x") ?? 0,
+        y: vm.get("y") ?? 0,
+        zoom: vm.get("zoom") ?? 1,
+      });
+    };
+    const onSynced = () => {
+      syncView();
+      setReady(true);
+    };
     nodesMap.observe(syncNodes as (e: unknown) => void);
     edgesMap.observe(syncEdges);
+    viewMap.observe(syncView);
     p.on("synced", onSynced);
     syncNodes();
     syncEdges();
 
+    // UndoManager：追踪 nodesMap + edgesMap 的变化（忽略远程/初始同步）。
+    // trackedOrigins 显式 = {null}：只记录本地事务（origin=null，即用户操作/onNodesChange
+    // 写入）。远端更新 origin=provider 实例（readSyncMessage 第四参）天然排除；
+    // 噪音后台写（摘要回填）已用独立 origin 隔离（见下），不再进撤销栈。
+    const undoManager = new Y.UndoManager([nodesMap, edgesMap], {
+      captureTimeout: 500,
+      trackedOrigins: new Set([null]),
+    });
+    undoManagerRef.current = undoManager;
+
     return () => {
+      undoManager.destroy();
+      undoManagerRef.current = null;
       nodesMap.unobserve(syncNodes);
       edgesMap.unobserve(syncEdges);
+      viewMap.unobserve(syncView);
       p.off("synced", onSynced);
+      // 切板/关 tab 前先 flush 挂起更新：flushDelay 500ms 窗口内未送达的
+      // 位置/尺寸变更（拖完立刻切板）会随 destroy 静默丢失。
+      p.flushPendingUpdates?.();
       p.destroy();
       providerRef.current = null;
       nodesMapRef.current = null;
       edgesMapRef.current = null;
+      viewMapRef.current = null;
       setReady(false);
     };
   }, [syncUri, boardId]);
@@ -239,6 +343,13 @@ export function useBoardCanvas({
     visibleTaskCardIdsRef.current.delete(cardId);
   }, []);
 
+  // ---- 会话卡运行态镜像（状态从 CRDT 分离）----
+  // phase/runningMs/endedAt 是高频变化的展示态（runningMs 每次轮询必变：Date.now()-startedAt），
+  // 写 yjs 会导致：①每 2.5s 一次 CRDT 事务+广播+持久化（与“减少存盘”优化直接冲突）；
+  // ②origin=null 进 UndoManager 栈，撤销会回滚 runningMs。改为本地 state 镜像，
+  // 与 taskCardStatus 同款模式；SessionCardNode 经 context 读取覆盖 data 值。
+  const [sessionRunning, setSessionRunning] = useState<Record<string, SessionRunningState>>({});
+
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -290,24 +401,37 @@ export function useBoardCanvas({
           });
         }
         const nodesMap = nodesMapRef.current;
-        if (!nodesMap) return;
-        // 会话卡：phase/runningMs 仍写回 Y.Map（CRDT 广播，供多端一致展示运行态）
-        for (const node of Array.from(nodesMap.values())) {
-          if (node.type !== "session-card") continue;
-          const d = node.data as SessionCardData;
-          if (!d.sessionId) continue;
-          const state = data.states[d.sessionId] as { phase?: CanvasPhase; startedAt?: number } | undefined;
-          const runningNow = data.runningSessionIds.includes(d.sessionId);
-          if (runningNow && state) {
-            const phase = (state.phase as CanvasPhase) ?? "waiting_model";
-            const runningMs = state.startedAt ? Date.now() - state.startedAt : 0;
-            if (d.phase !== phase || d.runningMs !== runningMs || d.endedAt !== 0) {
-              nodesMap.set(node.id, { ...node, data: { ...d, phase, runningMs, endedAt: 0 } });
+        // 会话卡运行态：只更新本地镜像，不写 yjs（高频展示态与 CRDT 分离，见上）
+        const nextRunning: Record<string, SessionRunningState> = {};
+        if (nodesMap) {
+          for (const node of Array.from(nodesMap.values())) {
+            if (node.type !== "session-card") continue;
+            const d = node.data as SessionCardData;
+            if (!d.sessionId) continue;
+            const state = data.states[d.sessionId] as { phase?: CanvasPhase; startedAt?: number } | undefined;
+            const runningNow = data.runningSessionIds.includes(d.sessionId);
+            if (runningNow && state) {
+              const phase = (state.phase as CanvasPhase) ?? "waiting_model";
+              const runningMs = state.startedAt ? Date.now() - state.startedAt : 0;
+              nextRunning[d.sessionId] = { phase, runningMs, endedAt: 0 };
+            } else {
+              nextRunning[d.sessionId] = { phase: "idle", runningMs: 0, endedAt: 0 };
             }
-          } else if (!runningNow && d.phase !== "idle") {
-            nodesMap.set(node.id, { ...node, data: { ...d, phase: "idle", runningMs: 0, endedAt: 0 } });
           }
         }
+        // 只在实际变化时 setState（引用稳定 → 不击穿下游 memo）
+        setSessionRunning((prev) => {
+          let changed = false;
+          const next = { ...prev };
+          for (const [sid, s] of Object.entries(nextRunning)) {
+            const old = prev[sid];
+            if (!old || old.phase !== s.phase || old.runningMs !== s.runningMs || old.endedAt !== s.endedAt) {
+              next[sid] = s;
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
       } catch {
         // keep last
       } finally {
@@ -339,13 +463,33 @@ export function useBoardCanvas({
   const sessionTitlesRef = useRef<Record<string, SessionSummary>>({});
   sessionTitlesRef.current = sessionTitles;
   const summariesInFlightRef = useRef(false);
+  // 点查画布上实际存在的会话卡（B 组重构：替代全量 /api/sessions 轮询自筛）。
   const loadSessionSummaries = useCallback(async () => {
     if (summariesInFlightRef.current) return;
     summariesInFlightRef.current = true;
     try {
-      const res = await fetch("/api/sessions", { cache: "no-store" });
+      // 画布上所有 session-card 的 id（含新建占位卡 cwd 非空——占位卡无真实会话，跳过）
+      const nodesMap = nodesMapRef.current;
+      if (!nodesMap) return;
+      const ids: string[] = [];
+      for (const node of Array.from(nodesMap.values())) {
+        if (node?.type !== "session-card") continue;
+        const d = node.data as { sessionId?: string; cwd?: string } | undefined;
+        if (!d?.sessionId || d.cwd) continue; // cwd 非空 = 未落盘占位卡
+        ids.push(d.sessionId);
+      }
+      if (ids.length === 0) {
+        setSessionTitles({});
+        return;
+      }
+      const res = await fetch("/api/sessions/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+        cache: "no-store",
+      });
       if (!res.ok) return;
-      const data = (await res.json()) as { sessions: Array<{ id: string; name?: string; firstMessage?: string; messageCount?: number; projectKey?: string; projectRoot?: string; lastReply?: string; modified?: string }> };
+      const data = (await res.json()) as { sessions: Array<{ id: string; name?: string; firstMessage?: string; messageCount?: number; projectKey?: string; projectRoot?: string; cwd?: string; lastReply?: string; modified?: string; worktreeBranch?: string; isWorktree?: boolean }> };
       const map: Record<string, SessionSummary> = {};
       for (const s of data.sessions) {
         map[s.id] = {
@@ -354,6 +498,10 @@ export function useBoardCanvas({
           projectName: s.projectKey ?? s.projectRoot ?? "",
           lastReply: s.lastReply ?? "",
           lastActivityAt: s.modified ? Date.parse(s.modified) : 0,
+          projectRoot: s.projectRoot,
+          cwd: s.cwd,
+          worktreeBranch: s.worktreeBranch,
+          isWorktree: s.isWorktree,
         };
       }
       setSessionTitles(map);
@@ -387,22 +535,32 @@ export function useBoardCanvas({
   }, [loadSessionSummaries]);
 
   // 摘要 → 写回节点 data（标题/最后回复实时刷新，CRDT 同步到多端）
+  // 后台噪音写：用独立 origin 事务包裹，UndoManager trackedOrigins={null} 自动排除，
+  // 撤销不会回滚标题/消息数等轮询回填值（官方推荐：为不想被撤销的变更设置专属 origin）。
   useEffect(() => {
+    const provider = providerRef.current;
     const nodesMap = nodesMapRef.current;
-    if (!nodesMap || !readyRef.current) return;
+    if (!provider || !nodesMap || !readyRef.current) return;
     if (Object.keys(sessionTitles).length === 0) return;
-    for (const node of Array.from(nodesMap.values())) {
-      if (node.type !== "session-card") continue;
-      const d = node.data as SessionCardData;
-      const s = sessionTitles[d.sessionId];
-      if (!s) continue;
-      if (d.title !== s.title || d.lastReply !== s.lastReply || d.messageCount !== s.messageCount || d.lastActivityAt !== s.lastActivityAt) {
-        nodesMap.set(node.id, { ...node, data: { ...d, title: s.title, lastReply: s.lastReply, messageCount: s.messageCount, lastActivityAt: s.lastActivityAt } });
+    provider.document.transact(() => {
+      for (const node of Array.from(nodesMap.values())) {
+        if (node.type !== "session-card") continue;
+        const d = node.data as SessionCardData;
+        const s = sessionTitles[d.sessionId];
+        if (!s) continue;
+        if (d.title !== s.title || d.lastReply !== s.lastReply || d.messageCount !== s.messageCount || d.lastActivityAt !== s.lastActivityAt) {
+          nodesMap.set(node.id, { ...node, data: { ...d, title: s.title, lastReply: s.lastReply, messageCount: s.messageCount, lastActivityAt: s.lastActivityAt } });
+        }
       }
-    }
+    }, "board-summary");
   }, [sessionTitles, ready]);
 
   // ---- 前端编辑：增量写回 Y.Map ----
+  // 拖拽中节点 id 集合（本地 UI 态）：由 onNodesChange 的 position change.dragging 维护。
+  // 不依赖 RF 受控 nodes 上的 dragging 标志（那是 RF 内部状态，不随受控 prop 下发）——
+  // 用它做 syncNodes 回灌保护：拖拽中 position 只写本地，远端写入不得冲回。
+  const draggingNodeIdsRef = useRef<Set<string>>(new Set());
+
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
@@ -416,6 +574,14 @@ export function useBoardCanvas({
     if (dataChanges.length === 0) return;
     const current = Array.from(nodesMap.values());
     const next = applyNodeChanges(dataChanges, current);
+    // 预扫描本批 resize 帧（dimensions resizing:true）：左/上边缘 resize 的 position
+    // change 无 dragging 标记（RF 同批推送 position + dimensions(resizing:true)），
+    // 靠它识别，避免 resize 中每帧写 yjs 造成 CRDT 历史爆炸。
+    const resizeIds = new Set(
+      dataChanges
+        .filter((c): c is Extract<NodeChange, { type: "dimensions" }> => c.type === "dimensions" && c.resizing === true)
+        .map((c) => c.id),
+    );
     for (const c of dataChanges) {
       if (c.type === "add" || c.type === "replace") {
         nodesMap.set(c.item.id, c.item);
@@ -428,13 +594,29 @@ export function useBoardCanvas({
             if (e.source === c.id || e.target === c.id) edgesMap.delete(e.id);
           }
         }
-      } else if (c.type === "position" || c.type === "dimensions") {
+      } else if (c.type === "position") {
+        // 维护拖拽集合：change.dragging 是 RF 拖拽态（true=拖拽中，false=松手）
+        if (c.dragging === true) draggingNodeIdsRef.current.add(c.id);
+        else draggingNodeIdsRef.current.delete(c.id);
         const n = next.find((x) => x.id === c.id);
         if (n) {
-          // 剥掉 dragging（UI 态，不落文档；RF 拖拽态由本地 store 管）
-          const { dragging: _d, ...clean } = n;
-          nodesMap.set(c.id, clean);
+          if (c.dragging === true || resizeIds.has(c.id)) {
+            // 拖拽/resize 中：position 只写本地 state，不写 yjs——每帧写会让
+            // CRDT 历史爆炸（一次拖拽几十上百条 update，实测 5 节点看板堆到
+            // 21MB）。本地 state 跟手；resize 的最终 position 由卡组件
+            // onResizeEnd 一次性落库（官方契约）。
+            setNodes((prev) => prev.map((x) => (x.id === c.id ? { ...x, position: n.position } : x)));
+          } else {
+            // dragStop：一次写入最终值（"保留最后一帧"）。此前漏写 → 拖完刷新位置还原、多端不同步。
+            nodesMap.set(c.id, { ...cleanNode(n), position: n.position });
+            setNodes((prev) => prev.map((x) => (x.id === c.id ? { ...x, position: n.position } : x)));
+          }
         }
+      } else if (c.type === "dimensions") {
+        // resize/测量帧：一律本地跟手，不写 yjs——最终尺寸由卡组件 NodeResizer 的
+        // onResizeEnd 一次性落库（官方契约，不赌 dimensions change 的内部行为），
+        // 这里只保证 UI 跟手与 visible 判定（measured 在本地 state 即可）。
+        setNodes((prev) => applyNodeChanges([c], prev));
       }
     }
   }, []);
@@ -462,13 +644,23 @@ export function useBoardCanvas({
 
   const onConnect = useCallback((conn: { source: string; target: string }) => {
     const edgesMap = edgesMapRef.current;
-    if (!edgesMap) return;
-    const id = `edge-${conn.source}-${conn.target}-${Date.now()}`;
+    const nodesMap = nodesMapRef.current;
+    if (!edgesMap || !nodesMap) return;
+    const id = `edge-${conn.source}-${conn.target}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    // 便笺/文本 ↔ 会话卡的手动连线 → send-note 发送线（线上有「发送」按钮，一次性）；其余普通线
+    const src = nodesMap.get(conn.source);
+    const tgt = nodesMap.get(conn.target);
+    const srcNote = isNoteNode(src);
+    const tgtNote = isNoteNode(tgt);
+    const srcSession = src?.type === "session-card";
+    const tgtSession = tgt?.type === "session-card";
+    const sendable = (srcNote && tgtSession) || (srcSession && tgtNote);
     edgesMap.set(id, {
       id,
       source: conn.source,
       target: conn.target,
-      type: "default",
+      type: sendable ? "send-note" : "default",
+      data: sendable ? { sendNote: true, sent: false } : undefined,
       markerEnd: { type: "arrowclosed" },
       style: { strokeWidth: 1.5, stroke: "#8b8fa3" },
     });
@@ -481,7 +673,9 @@ export function useBoardCanvas({
     const w = NEW_SESSION_CARD_W;
     const h = NEW_SESSION_CARD_H;
     const sessionId = crypto.randomUUID();
-    const id = crypto.randomUUID();
+    // 统一节点 id 锚：新会话卡出生即确定性 id（与拖入/补卡/转正一致），
+    // reconcile 补卡/幂等/exec 线 target 全部依赖该锚，不再有随机 id 分裂。
+    const id = `session-${sessionId}`;
     // 落点：传入的 flowPos 视为卡片【中心】坐标（NewSessionButton 传视口中心）→
     // position 是左上角，需减去卡片宽高的一半让卡片居中。未传则画布原点附近 + 级联偏移。
     const cx = flowPos?.x ?? 60;
@@ -496,6 +690,7 @@ export function useBoardCanvas({
       data: {
         sessionId,
         title: "",
+        emoji: "💬",
         projectName: "",
         messageCount: 0,
         lastReply: "",
@@ -506,7 +701,9 @@ export function useBoardCanvas({
         stale: false,
         expanded: true,
         cwd: newSessionCwdRef.current ?? "",
-        taskId: taskIdRef.current ?? "",
+        // 任务看板：taskId 兜底取看板元信息（数据库恒有）——URL 直达/刷新时
+        // activeTaskId（prop）可能为 null，不能作为归属依据（否则会话不归属任务）。
+        taskId: taskIdRef.current ?? boardRef.current?.taskId ?? "",
         w, h, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0,
       },
     });
@@ -514,20 +711,46 @@ export function useBoardCanvas({
 
   // ---- 拖入会话（看板）----
   /**
-   * 拖入会话卡。任务看板：拖入 = 加入当前任务 —— 先落卡（用户立即可见），再异步归属任务，
-   * 否则 10s reconcile 会把非任务会话当孤儿删（board-reconcile allSessionIds 只含任务会话）。
-   * 普通看板：直接落卡（无派生 reconcile，不删）。
-   * 注意：落卡在前，归属在后 —— 归属是网络请求，若先 await 会阻塞落卡（拖入无反应假象）。
+   * 拖入会话卡。
+   * - 任务看板：拖入 = 加入当前任务 —— 先写归属（session_meta），成功才落卡。
+   *   落卡时业务表已存在该会话（reconcile 按业务表判据放行），不产生“卡已落、
+   *   归属未到”的窗口，无需任何豁免字段。
+   * - 普通看板：直接落卡（无派生 reconcile，不删）。
    */
-  const addSessionNode = useCallback((sessionId: string, x: number, y: number) => {
+  const addSessionNode = useCallback(async (sessionId: string, x: number, y: number, dropTitle?: string) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
-    // 先落卡（同步，用户松手立即看到卡）
+    const taskId = taskIdRef.current ?? boardRef.current?.taskId ?? null;
+    // 任务看板：先写 session_meta 归属，成功才落卡（失败不落卡，不留无保护卡）
+    if (taskId) {
+      try {
+        // 原子归属（服务端 upsert，幂等，跨任务移动安全）——避免读-改-写竞态：
+        // 多端并发拖入不同会话时，full-replace 的后提交者会踢掉先提交者。
+        const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/assign-session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (error) {
+        console.warn(`[board] 拖入会话归属任务失败，未落卡 ${sessionId}:`, error instanceof Error ? error.message : error);
+        return; // 归属失败：不落卡（reconcile 按业务表判据，不会有无保护窗口卡）
+      }
+      // 归属成功 → 通知侧栏刷新：会话从游离区移入该任务分组下
+      dispatchBoardSessionCreated(sessionId);
+    }
+    // 落卡（任务看板：归属已落库；普通看板：直接落）
+    // 外部拖入的标题由拖拽源经 dataTransfer 带入（CanvasStage → title 参数），
+    // 不再落卡后依赖摘要轮询补齐——拖拽源自己就有标题。
     const summary = sessionTitlesRef.current[sessionId];
     const id = `session-${sessionId}`;
-    // 归属目标：任务看板拖入 = 加入本任务。落卡即写 data.taskId——reconcile 孤儿删放行它
-    // （归属异步完成前不把卡当孤儿删）；普通看板 taskId 为空。
-    const taskId = taskIdRef.current ?? boardRef.current?.taskId ?? null;
+    const existing = nodesMap.get(id);
+    if (existing) {
+      // 画布已有同 sid 卡：不整卡覆盖（会重置展开态/尺寸/标题等用户布局），
+      // 只把卡移到新拖放位置（拖第二张 = 移动语义）。
+      nodesMap.set(id, { ...existing, position: { x, y } });
+      return;
+    }
     nodesMap.set(id, {
       id,
       type: "session-card",
@@ -535,7 +758,8 @@ export function useBoardCanvas({
       style: { width: CARD_W, height: CARD_H },
       data: {
         sessionId,
-        title: summary?.title ?? "Untitled",
+        title: dropTitle ?? summary?.title ?? "Untitled",
+        emoji: "💬",
         projectName: summary?.projectName ?? "",
         messageCount: summary?.messageCount ?? 0,
         lastReply: summary?.lastReply ?? "",
@@ -549,38 +773,6 @@ export function useBoardCanvas({
         w: CARD_W, h: CARD_H, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0,
       },
     });
-    // 任务看板：归属到任务（避免 reconcile 孤儿删）—— 异步后台做，不阻塞落卡
-    if (taskId) {
-      void (async () => {
-        try {
-          const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
-          const d = (await res.json()) as { task?: { sessionIds?: string[] } };
-          const sessionIds = d.task?.sessionIds ?? [];
-          if (!sessionIds.includes(sessionId)) {
-            await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ sessionIds: [...sessionIds, sessionId] }),
-            });
-            // 归属成功 → 通知侧栏刷新：会话从游离区移入该任务分组下
-            dispatchBoardSessionCreated(sessionId);
-          }
-        } catch (error) {
-          console.warn(`[board] 拖入会话归属任务失败 ${sessionId}:`, error instanceof Error ? error.message : error);
-        } finally {
-          // 归属 settle（成败皆清）：撤掉落卡时的 taskId 声明。
-          // 成功后会话已入本任务 sessionIds（reconcile 不再当孤儿）；
-          // 失败后卡回到无保护态，下轮 reconcile 正确按成员关系清理（与 WIP 注释一致）。
-          const nodesMap = nodesMapRef.current;
-          if (nodesMap?.has(id)) {
-            const cur = nodesMap.get(id);
-            if (cur && (cur.data as Record<string, unknown>)?.taskId) {
-              nodesMap.set(id, { ...cur, data: { ...cur.data, taskId: "" } });
-            }
-          }
-        }
-      })();
-    }
   }, []);
 
   // ---- 删除（确认制）：删会话/任务卡 → 确认 → 删 Y.Doc 节点 + 调删除 API ----
@@ -598,8 +790,19 @@ export function useBoardCanvas({
         }
         return;
       }
-      const ok = await confirm({ message: "移除该会话卡片？\n会话本身将保留在会话列表中，可随时重新拖入。" });
-      if (!ok) return;
+      const isTaskBoard = Boolean(taskIdRef.current ?? boardRef.current?.taskId);
+      if (isTaskBoard) {
+        // 任务看板：会话属于任务，删卡 = 先删会话本体，再删画布卡（reconcile 不再补回）
+        const ok = await confirm({ message: "删除该会话？\n将同时删除会话文件并移除画布卡片。此操作不可撤销。" });
+        if (!ok) return;
+        await fetch(`/api/sessions/${encodeURIComponent(d.sessionId)}`, { method: "DELETE" })
+          .then(() => dispatchBoardSessionDeleted(d.sessionId!))
+          .catch((e) => console.warn(`[board] 删除会话 ${d.sessionId} 异常`, e));
+      } else {
+        // 普通看板：卡片是引用，只删卡不删会话
+        const ok = await confirm({ message: "移除该会话卡片？\n会话本身将保留在会话列表中，可随时重新拖入。" });
+        if (!ok) return;
+      }
       nodesMap.delete(node.id);
       for (const e of Array.from(edgesMap.values())) {
         if (e.source === node.id || e.target === node.id) edgesMap.delete(e.id);
@@ -612,27 +815,93 @@ export function useBoardCanvas({
       }
       const ok = await confirm({ message: "删除该任务卡？\n将删除任务卡、依赖线与执行会话连线；关联的执行会话保留。此操作不可撤销。" });
       if (!ok) return;
+      // 先删业务卡（await 成功），再删画布节点——API 失败则保留节点可重试，
+      // 避免「节点先删、API 失败 → DB 孤儿卡」（reconcile 不补任务卡，卡永不可见）。
+      try {
+        const res = await fetch(`/api/task-cards/${encodeURIComponent(d.cardId)}`, { method: "DELETE" });
+        if (!res.ok) {
+          console.warn(`[board] 删除任务卡 ${d.cardId} 失败 HTTP ${res.status}，保留画布卡`);
+          return;
+        }
+      } catch (e) {
+        console.warn(`[board] 删除任务卡 ${d.cardId} 异常，保留画布卡`, e);
+        return;
+      }
       nodesMap.delete(node.id);
       for (const e of Array.from(edgesMap.values())) {
         if (e.source === node.id || e.target === node.id) edgesMap.delete(e.id);
       }
-      fetch(`/api/task-cards/${encodeURIComponent(d.cardId)}`, { method: "DELETE" }).catch((e) =>
-        console.warn(`[board] 删除任务卡 ${d.cardId} 异常`, e),
-      );
     } else {
-      // 便笺/文本：直接删
+      // 便笺/文本/图片：直接删（级联删边——普通看板无 reconcile 兜底，
+      // 不删边会留 yjs 幽灵边永久残留）
       nodesMap.delete(node.id);
+      for (const e of Array.from(edgesMap.values())) {
+        if (e.source === node.id || e.target === node.id) edgesMap.delete(e.id);
+      }
+      // 图片：回收磁盘资产（仅当 src 指向 board-assets 且无其他节点引用同文件时）
+      if (node.type === "image-node") {
+        const src = (node.data as { src?: string }).src;
+        const name = src?.match(/^\/api\/board-assets\/([^/?#]+)$/)?.[1];
+        if (name) {
+          const stillReferenced = Array.from(nodesMap.values()).some(
+            (other) => other.id !== node.id && (other.data as { src?: string } | undefined)?.src?.includes(name),
+          );
+          if (!stillReferenced) {
+            void fetch(`/api/board-assets/${encodeURIComponent(name)}`, { method: "DELETE" }).catch((e) =>
+              console.warn(`[board] 回收图片资产 ${name} 异常`, e),
+            );
+          }
+        }
+      }
     }
   }, []);
 
   // ---- 节点/边操作：暴露给自定义节点组件（写 Y.Map 增量）----
+  // style 深合并：patch.style 只覆盖指定键（保留现有 width/height），防止
+  // 局部更新（如只校 height）整体替换 style 丢掉另一维（曾致节点被内容撑开/缩放回退）。
   const updateNode = useCallback((id: string, patch: Partial<Node>) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
     const cur = nodesMap.get(id);
     if (!cur) return;
-    nodesMap.set(id, { ...cur, ...patch });
+    nodesMap.set(id, {
+      ...cur,
+      ...patch,
+      // data/style 深合并（增量语义）：patch 只覆盖指定字段，保留其余——
+      // 避免局部更新（如格式按钮只传 bg）整体替换 data 把先前的字段冲掉
+      //（闭包 data 快照过期的覆盖 bug：多次格式点击后 blur 保存丢样式）。
+      data: patch.data ? { ...(cur.data as object), ...(patch.data as object) } : cur.data,
+      style: patch.style ? { ...(cur.style ?? {}), ...patch.style } : cur.style,
+    });
   }, []);
+
+  // 防抖更新：表单连续输入（打字）时合并多次 patch，窗口结束后一次写 yjs。
+  // 避免每字符一条 CRDT 历史（与拖拽每帧写同源，历史爆炸元凶之一）。
+  const pendingNodePatchesRef = useRef<Map<string, Partial<Node>>>(new Map());
+  const pendingNodeTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const updateNodeDebounced = useCallback((id: string, patch: Partial<Node>, delay = 400) => {
+    const nodesMap = nodesMapRef.current;
+    if (!nodesMap || !nodesMap.has(id)) return;
+    // 合并窗口内的多次 patch（data 深合并，position 等顶层覆盖）
+    const prev = pendingNodePatchesRef.current.get(id) ?? {};
+    const merged: Partial<Node> = {
+      ...prev,
+      ...patch,
+      data: { ...(prev.data as object), ...(patch.data as object) },
+    };
+    pendingNodePatchesRef.current.set(id, merged);
+    const timer = pendingNodeTimerRef.current.get(id);
+    if (timer) clearTimeout(timer);
+    pendingNodeTimerRef.current.set(
+      id,
+      setTimeout(() => {
+        const p = pendingNodePatchesRef.current.get(id);
+        pendingNodePatchesRef.current.delete(id);
+        pendingNodeTimerRef.current.delete(id);
+        if (p) updateNode(id, p);
+      }, delay),
+    );
+  }, [updateNode]);
 
   /**
    * 规范化节点 id：新建任务卡派发成功后，把随机 UUID 节点 id 改成确定性 `task-<cardId>`，
@@ -662,6 +931,15 @@ export function useBoardCanvas({
     edgesMap.set(edge.id, edge);
   }, []);
 
+  /** 更新边（部分字段 + data 浅合并；发送线一次性标记 sent 经此写回 yjs） */
+  const updateEdge = useCallback((id: string, patch: Partial<Edge>) => {
+    const edgesMap = edgesMapRef.current;
+    if (!edgesMap) return;
+    const cur = edgesMap.get(id);
+    if (!cur) return;
+    edgesMap.set(id, { ...cur, ...patch, data: { ...(cur.data as object), ...(patch.data as object) } });
+  }, []);
+
   const addNode = useCallback((node: Node) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
@@ -684,7 +962,26 @@ export function useBoardCanvas({
     // 任务看板：会话卡保留，派生边由后端 reconcile 补回
   }, []);
 
+  const undo = useCallback(() => {
+    undoManagerRef.current?.undo();
+  }, []);
+
+  const redo = useCallback(() => {
+    undoManagerRef.current?.redo();
+  }, []);
+
   const loading = !ready;
+
+  const saveViewport = useCallback((vp: { x: number; y: number; zoom: number }) => {
+    const vm = viewMapRef.current;
+    if (!vm) return;
+    // 值未变直接 return：RF 程序化 setViewport（如 ready 恢复）会经 onMoveEnd 再触发一次
+    // saveViewport 原值重写——yjs typeMapSet 无值去重，无条件写会每次开板/重连多一次 CRDT 写+广播。
+    if (vm.get("x") === vp.x && vm.get("y") === vp.y && vm.get("zoom") === vp.zoom) return;
+    vm.set("x", vp.x);
+    vm.set("y", vp.y);
+    vm.set("zoom", vp.zoom);
+  }, []);
 
   return useMemo(
     () => ({
@@ -695,11 +992,15 @@ export function useBoardCanvas({
       runningCount: running?.runningSessionIds.length ?? 0,
       // 可见任务卡状态镜像（DB 真相的展示快照，running 轮询维护）
       taskCardStatus,
+      // 会话卡运行态镜像（同上，不写 yjs）
+      sessionRunning,
       registerVisibleTaskCard,
       unregisterVisibleTaskCard,
       // React Flow 受控数据
       nodes,
       edges,
+      viewport,
+      saveViewport,
       onNodesChange,
       onEdgesChange,
       onConnect,
@@ -710,15 +1011,19 @@ export function useBoardCanvas({
       addNewSessionCard,
       deleteNodeWithConfirm,
       updateNode,
+      updateNodeDebounced,
       normalizeNodeId,
       addEdge,
+      updateEdge,
       addNode,
       clearBoard,
       sessionTitles,
       loadSessionSummaries,
       reloadCanvas,
+      undo,
+      redo,
     }),
-    [board, loading, error, running, nodes, edges, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, normalizeNodeId, addEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, registerVisibleTaskCard, unregisterVisibleTaskCard],
+    [board, loading, error, running, nodes, edges, viewport, saveViewport, onNodesChange, onEdgesChange, onConnect, provider, ready, addSessionNode, addNewSessionCard, deleteNodeWithConfirm, updateNode, updateNodeDebounced, normalizeNodeId, addEdge, updateEdge, addNode, clearBoard, sessionTitles, loadSessionSummaries, reloadCanvas, load, taskCardStatus, sessionRunning, registerVisibleTaskCard, unregisterVisibleTaskCard, undo, redo],
   );
 }
 
@@ -763,4 +1068,41 @@ export function useTaskCardVisibility() {
     register: ctx?.register ?? (() => {}),
     unregister: ctx?.unregister ?? (() => {}),
   };
+}
+
+// ============================================================================
+// 会话卡运行态上下文（状态分离：phase/runningMs 不进 yjs）
+//
+// 与 TaskCardStatus 同款模式：2.5s running 轮询把 DB/调度器真相快照到
+// sessionRunning map（本地 state，不写 yjs），经此 context 提供给 SessionCardNode。
+// 高频展示态（runningMs 每次轮询必变）进 CRDT = 每 2.5s 一次事务+广播+持久化
+// + undo 栈污染，已彻底移出。yjs data 里的 phase/runningMs 保留旧值作兜底，
+// 组件优先读本镜像（getRunning 命中则覆盖）。
+// ============================================================================
+
+/** 会话卡运行态查询（SessionCanvas 提供，RF 节点经此读取） */
+export interface SessionRunningValue {
+  /** 单会话运行态镜像；未命中 → undefined（组件回落 yjs data 旧值） */
+  getRunning: (sessionId: string) => SessionRunningState | undefined;
+  /** 单会话摘要镜像（标题/分支等，经 /api/sessions 轮询维护，不写 yjs） */
+  getSummary: (sessionId: string) => SessionSummary | undefined;
+}
+
+const SessionRunningContext = createContext<SessionRunningValue | null>(null);
+
+/** 供 SessionCanvas 包住 ReactFlow：把 useBoardCanvas 的会话运行态镜像桥接给 RF 节点 */
+export function SessionRunningProvider({ value, children }: { value: SessionRunningValue; children: ReactNode }) {
+  return createElement(SessionRunningContext.Provider, { value }, children);
+}
+
+/** 读取单会话实时运行态（SessionCardNode 用；未命中回落 data 值） */
+export function useSessionRunning(sessionId: string | null): SessionRunningState | undefined {
+  const ctx = useContext(SessionRunningContext);
+  return sessionId && ctx ? ctx.getRunning(sessionId) : undefined;
+}
+
+/** 读取单会话摘要镜像（标题/分支等；会话信息 API 轮询维护，不写 yjs） */
+export function useSessionSummary(sessionId: string | null): SessionSummary | undefined {
+  const ctx = useContext(SessionRunningContext);
+  return sessionId && ctx ? ctx.getSummary(sessionId) : undefined;
 }

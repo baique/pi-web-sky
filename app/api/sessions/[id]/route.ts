@@ -16,7 +16,7 @@ import { sessionPathKey } from "@/lib/session-path";
 import { getRpcSession } from "@/lib/rpc-manager";
 import { projectTreeForResponse } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
-import { setSessionPinned, taskNameForSession, unassignSession } from "@/lib/task-store";
+import { setSessionPinned, setSessionTitle, taskNameForSession, unassignSession } from "@/lib/task-store";
 import { removeSessionFromBoards } from "@/lib/board-store";
 import { removeSessionsFromYjsBoards } from "@/lib/board-reconcile";
 
@@ -107,6 +107,8 @@ export async function PATCH(
       }
       const sm = SessionManager.open(filePath);
       sm.appendSessionInfo(body.name.trim());
+      // 列表索引同步：改名实时写 session_meta.title，不依赖扫描器/懒更新。
+      setSessionTitle(id, body.name.trim());
       invalidateSessionListCache();
       return NextResponse.json({ ok: true });
     }

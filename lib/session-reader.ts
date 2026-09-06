@@ -14,9 +14,84 @@ import { normalizeToolCalls } from "./normalize";
 import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
-import { scanSessionFiles, sessionScanner } from "./session-scanner";
+import { scanSessionFiles, scanSessionFileMeta, scanOneSessionFile, sessionScanner } from "./session-scanner";
+import { ensureSessionIndexReady } from "./session-index-scanner";
+import type { TurnIndexItem } from "./api-types";
 
 export { getAgentDir };
+
+/**
+ * 当前项目聊天区会话（列表重构 v2 主读取路径）。
+ *
+ * 纯查 session_meta：按 project_key 过滤 + 排除任务会话（task_id 非空交任务区管），
+ * 置顶优先 + modified 降序。不读文件内容——title 用 meta.title（本应用改名写库），
+ * 无自定义名回退 first_message；last_reply 不入库也不在此读（侧栏列表不消费，
+ * 看板卡片走独立摘要轮询）。运行时/未落盘会话由调用方 union getRpcSessionInfos。
+ */
+export async function loadProjectSessions(projectKey: string): Promise<SessionInfo[]> {
+  if (!projectKey) return [];
+  await ensureSessionIndexReady();
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = getDb()
+      .prepare(
+        `SELECT session_id, path, cwd, title, first_message, parent_id, created, modified, pinned
+         FROM session_meta
+         WHERE project_key = ? AND task_id IS NULL
+         ORDER BY pinned DESC, modified DESC`,
+      )
+      .all(projectKey) as Array<Record<string, unknown>>;
+  } catch {
+    return [];
+  }
+
+  const sessions: SessionInfo[] = rows.map((r) => ({
+    path: (r.path as string) ?? "",
+    id: r.session_id as string,
+    cwd: (r.cwd as string) ?? "",
+    name: (r.title as string | null) ?? undefined,
+    created: new Date((r.created as number) ?? 0).toISOString(),
+    modified: new Date((r.modified as number) ?? 0).toISOString(),
+    messageCount: 0,
+    firstMessage: (r.first_message as string | null) ?? "(no messages)",
+    parentSessionId: (r.parent_id as string | null) ?? undefined,
+    pinned: Boolean((r.pinned as number) ?? 0),
+  }));
+  return attachSessionProjectInfo(sessions);
+}
+
+/** 全项目会话索引读取（无参 /api/sessions：跨项目统计/项目下拉/hydrate/红点清理用）。
+ *  纯查 session_meta 全表（含任务会话、含各项目），不再整盘扫文件——
+ *  lastReply 消费方已改走摘要点查，侧栏 allSessions 不需要它。 */
+export async function loadAllSessionIndex(): Promise<SessionInfo[]> {
+  await ensureSessionIndexReady();
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = getDb()
+      .prepare(
+        `SELECT session_id, path, cwd, title, first_message, parent_id, created, modified, pinned
+         FROM session_meta
+         ORDER BY modified DESC`,
+      )
+      .all() as Array<Record<string, unknown>>;
+  } catch {
+    return [];
+  }
+
+  const sessions: SessionInfo[] = rows.map((r) => ({
+    path: (r.path as string) ?? "",
+    id: r.session_id as string,
+    cwd: (r.cwd as string) ?? "",
+    name: (r.title as string | null) ?? undefined,
+    created: new Date((r.created as number) ?? 0).toISOString(),
+    modified: new Date((r.modified as number) ?? 0).toISOString(),
+    messageCount: 0,
+    firstMessage: (r.first_message as string | null) ?? "(no messages)",
+    parentSessionId: (r.parent_id as string | null) ?? undefined,
+    pinned: Boolean((r.pinned as number) ?? 0),
+  }));
+  return attachSessionProjectInfo(sessions);
+}
 
 export async function attachSessionProjectInfo(sessions: SessionInfo[]): Promise<SessionInfo[]> {
   const uniqueCwds = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
@@ -89,6 +164,132 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
     };
   });
   return attachSessionProjectInfo(sessions);
+}
+
+/** 阶段二：批量读详情（只读需要的子集）。返回顺序与入参一致。 */
+async function readSessionDetails(metas: Array<{ path: string; id: string; modified: Date }>): Promise<SessionInfo[]> {
+  const pathToId = new Map<string, string>();
+  for (const m of metas) pathToId.set(sessionPathKey(m.path), m.id);
+  const sessions: SessionInfo[] = [];
+  for (const meta of metas) {
+    const scanned = scanOneSessionFile(meta.path);
+    if (!scanned) continue;
+    cacheSessionPath(scanned.id, scanned.path);
+    sessions.push({
+      path: scanned.path,
+      id: scanned.id,
+      cwd: scanned.cwd,
+      name: scanned.name,
+      created: scanned.created.toISOString(),
+      modified: scanned.modified.toISOString(),
+      messageCount: 0,
+      firstMessage: scanned.firstMessage || "(no messages)",
+      lastReply: scanned.lastReply || "",
+      parentSessionId: scanned.parentSessionPath ? pathToId.get(sessionPathKey(scanned.parentSessionPath)) : undefined,
+      transient: false,
+    });
+  }
+  return sessions;
+}
+
+
+/** 任务会话详情按需分页（侧栏任务区）。
+ *
+ *  服务端分流：任务下的会话详情由 /api/tasks 直接下发，前端不再用
+ *  /api/sessions 全量列表 join task.sessionIds 反查（旧设计已被服务端
+ *  分流取代——前端零归属判断）。
+ *
+ *  每任务返回：置顶根会话全量 + 非置顶根从 offset 起的 limit 个（含各自
+ *  fork 子树），外加 rootTotal（根会话总数，加载更多游标）与
+ *  sessionTotal（含子树全部节点数，删除确认文案用）。
+ */
+export async function loadTaskSessionsPage(
+  taskId: string,
+  offset = 0,
+  limit = 5,
+): Promise<{ sessions: SessionInfo[]; rootTotal: number; sessionTotal: number; pinnedSessionIds: string[] }> {
+  return loadTaskSessionsPageWithIndex(taskId, await buildTaskSessionIndex(), offset, limit);
+}
+
+/** 任务会话索引：全量 id+path+mtime（readdir/stat，不读内容）+ 父链（读 header 首行）。
+ *  一次构建供多个任务复用——/api/tasks 列表对每个任务都调 loadTaskSessionsPage，
+ *  若各自全量扫文件会随任务数线性变慢（N 任务 = N 次全量 readdir+header）。 */
+export async function buildTaskSessionIndex(): Promise<{
+  metaById: Map<string, { path: string; id: string; modified: Date }>;
+  childrenOf: Map<string, string[]>;
+}> {
+  // 阶段一：全量 id+path+mtime（readdir+stat，不读内容）。
+  const metas = await scanSessionFileMeta();
+  const metaById = new Map(metas.map((m) => [m.id, m]));
+  const metaByPath = new Map(metas.map((m) => [sessionPathKey(m.path), m]));
+
+  // 父链索引（只读每个文件 header 首行——比 scanOneSessionFile 便宜，
+  // 不需要尾部反向分块）：childId -> parentId（childrenOf: parentId -> [childId]）。
+  const childrenOf = new Map<string, string[]>();
+  for (const m of metas) {
+    let parentPath: string | undefined;
+    try {
+      parentPath = readSessionHeader(m.path)?.parentSession ?? undefined;
+    } catch {
+      // 首行不可读 → 视为根会话
+    }
+    if (!parentPath) continue;
+    const parentMeta = metaByPath.get(sessionPathKey(parentPath));
+    if (!parentMeta) continue;
+    const arr = childrenOf.get(parentMeta.id) ?? [];
+    arr.push(m.id);
+    childrenOf.set(parentMeta.id, arr);
+  }
+  return { metaById, childrenOf };
+}
+
+/** 加载单个任务会话详情分页（复用外部已构建的任务索引，避免重复全量扫）。 */
+export async function loadTaskSessionsPageWithIndex(
+  taskId: string,
+  index: { metaById: Map<string, { path: string; id: string; modified: Date }>; childrenOf: Map<string, string[]> },
+  offset = 0,
+  limit = 5,
+): Promise<{ sessions: SessionInfo[]; rootTotal: number; sessionTotal: number; pinnedSessionIds: string[] }> {
+  const { metaById, childrenOf } = index;
+  const collectSubtree = (rootId: string): string[] => {
+    const out = [rootId];
+    const queue = [rootId];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      for (const child of childrenOf.get(cur) ?? []) {
+        out.push(child);
+        queue.push(child);
+      }
+    }
+    return out;
+  };
+
+  const { listTaskSessionIds, listPinnedTaskSessionIds } = await import("./task-store");
+  const rootIds = listTaskSessionIds(taskId);
+  const pinnedSessionIds = listPinnedTaskSessionIds(taskId);
+  const pinnedSet = new Set(pinnedSessionIds);
+
+  // 任务区根会话排序：按文件 mtime（最后写入时间）降序——活跃会话必然
+  // 最新写入，排最前。session_meta.updated 只是归属/置顶时间，切页用它
+  // 会把活跃会话切到后页（前端只能重排已加载页，够不着它）。
+  const modifiedOf = (id: string): number => metaById.get(id)?.modified.getTime() ?? 0;
+  const byMtimeDesc = (a: string, b: string) => modifiedOf(b) - modifiedOf(a);
+  const pinnedRoots = [...pinnedSessionIds].sort(byMtimeDesc);
+  const nonPinnedRoots = rootIds.filter((id) => !pinnedSet.has(id)).sort(byMtimeDesc);
+
+  // 当前页根 = 置顶全量 + 非置顶 slice(offset, offset+limit)；子树跟随根。
+  const pageRootIds = [...pinnedRoots, ...nonPinnedRoots.slice(offset, offset + limit)];
+  const wantedIds = new Set<string>();
+  for (const rid of pageRootIds) {
+    for (const id of collectSubtree(rid)) wantedIds.add(id);
+  }
+  const orderedMetas = [...wantedIds].map((id) => metaById.get(id)).filter((m): m is NonNullable<typeof m> => Boolean(m));
+  const sessions = await attachSessionProjectInfo(await readSessionDetails(orderedMetas));
+
+  // sessionTotal：任务下全部根 + 子树节点数（删除确认文案）。
+  const allIds = new Set<string>();
+  for (const rid of rootIds) for (const id of collectSubtree(rid)) allIds.add(id);
+  return { sessions, rootTotal: rootIds.length, sessionTotal: allIds.size, pinnedSessionIds };
 }
 
 export async function listAllSessions(options: { force?: boolean } = {}): Promise<SessionInfo[]> {
@@ -545,4 +746,121 @@ function entryToUiMessage(
     default:
       return null;
   }
+}
+
+/**
+ * 轻量 turn 索引：活动分支上每个 user/assistant 回合的文本摘要（预览/导航用，
+ * 不含完整 content）。O(chain) 单遍扫描，只提取纯文本。
+ */
+const TURN_INDEX_USER_TEXT_MAX = 120;
+const TURN_INDEX_PREVIEW_MAX = 140;
+
+function truncateForTurnIndex(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/** 提取 user 消息纯文本预览（string 或 text blocks；纯附件消息给占位文案）。 */
+function extractUserPreview(content: string | Array<{ type: string; text?: string }>): string {
+  if (typeof content === "string") return truncateForTurnIndex(content.trim(), TURN_INDEX_USER_TEXT_MAX);
+  const text = content
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("\n")
+    .trim();
+  if (text) return truncateForTurnIndex(text, TURN_INDEX_USER_TEXT_MAX);
+  return content.length > 0 ? "[attachment]" : "";
+}
+
+/** 提取 assistant 回复纯文本预览（所有 text blocks 拼接；thinking/toolCall 不参与）。 */
+function extractAssistantPreview(content: Array<{ type: string; text?: string }>): string {
+  const text = content
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("\n\n")
+    .trim();
+  return text ? truncateForTurnIndex(text, TURN_INDEX_PREVIEW_MAX) : "";
+}
+
+/**
+ * 活动分支全量 turn 索引：从 leaf 沿 parentId 回溯到根，单遍收集 user/
+ * assistant 回合的文本摘要。O(chain)，不 cap —— 导航条需要「尽可能多」。
+ */
+export function extractTurnIndex(entries: SessionEntry[], leafId: string | null): TurnIndexItem[] {
+  const byId = new Map<string, SessionEntry>();
+  for (const e of entries) byId.set(e.id, e);
+
+  const leaf = leafId ? byId.get(leafId) : entries[entries.length - 1];
+  if (!leaf) return [];
+  const chain: SessionEntry[] = [];
+  let cur: SessionEntry | undefined = leaf;
+  while (cur) {
+    chain.push(cur);
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+  }
+  chain.reverse();
+
+  const turns: TurnIndexItem[] = [];
+  let current: TurnIndexItem | null = null;
+  for (const entry of chain) {
+    if (entry.type !== "message") continue;
+    const message = entry.message;
+    if (message.role === "user") {
+      current = { entryId: entry.id, userText: extractUserPreview(message.content), assistantPreview: "" };
+      turns.push(current);
+    } else if (message.role === "assistant" && current) {
+      const preview = extractAssistantPreview(message.content);
+      if (preview) current.assistantPreview = preview;
+    }
+  }
+  return turns;
+}
+
+/**
+ * 按 id 批量点查会话摘要（看板卡片轮询用，替代全量列表自筛）。
+ *
+ * 画布上有几张会话卡就查几个 id——先查 session_meta 拿 path（扫描器已全量
+ * 建索引，避免 resolveSessionPath 对 miss 触发全量扫盘），再 scanOneSessionFile
+ * 读头尾（name=自定义名/firstMessage/lastReply/mtime），最后 attachSessionProjectInfo
+ * 补 projectRoot/branch 等 UI 字段。查不到（id 不存在）跳过。
+ */
+export async function loadSessionSummariesByIds(ids: string[]): Promise<SessionInfo[]> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return [];
+
+  // meta 索引拿 path + title（扫描器维护；未索引的新会话走 resolveSessionPath 兜底）
+  // title 优先用 meta（与列表同源：改名写 session_meta.title），文件尾 session_info 兜底——
+  // 避免改名后继续聊超 tail 上限（16MB）时看板卡片标题与侧栏不一致。
+  const rows = new Map<string, { path: string | null; title: string | null }>();
+  try {
+    const found = getDb()
+      .prepare("SELECT session_id, path, title FROM session_meta WHERE session_id IN (" + unique.map(() => "?").join(",") + ")")
+      .all(...unique) as Array<{ session_id: string; path: string | null; title: string | null }>;
+    for (const r of found) rows.set(r.session_id, { path: r.path, title: r.title });
+  } catch {
+    // db 不可用 → 全部走 resolveSessionPath 兜底
+  }
+
+  const sessions: SessionInfo[] = [];
+  for (const id of unique) {
+    const metaRow = rows.get(id);
+    let filePath = metaRow?.path ?? null;
+    if (!filePath) filePath = await resolveSessionPath(id);
+    if (!filePath) continue;
+    const scanned = scanOneSessionFile(filePath);
+    if (!scanned) continue;
+    cacheSessionPath(id, scanned.path);
+    sessions.push({
+      path: scanned.path,
+      id: scanned.id,
+      cwd: scanned.cwd,
+      name: metaRow?.title ?? scanned.name,
+      created: scanned.created.toISOString(),
+      modified: scanned.modified.toISOString(),
+      messageCount: 0,
+      firstMessage: scanned.firstMessage || "(no messages)",
+      lastReply: scanned.lastReply || "",
+      transient: false,
+    });
+  }
+  return attachSessionProjectInfo(sessions);
 }

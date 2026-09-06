@@ -702,8 +702,21 @@ button.extension-widget-trigger:focus-visible {
   background: var(--text-dim);
 }
 
+/* 手写体（看板文字节点）：乐米小熊日记体，免费商用（乐米字库，font.leminet.cn）。
+   本地化放置，避免运行时依赖外网；仅 Regular 字重，字重 600/700 由浏览器合成加粗。 */
+@font-face {
+  font-family: 'LemiXiaoXiongRiJiTi';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/LemiXiaoXiongRiJiTi.ttf') format('truetype');
+}
+
 :root {
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'PingFang SC', 'Microsoft YaHei', monospace;
+  /* 手写体（看板文字节点）：乐米小熊日记体（LemiXiaoXiongRiJiTi，免费商用，@font-face 见下）
+     字形自带卡通感，仅 Regular 字重；文字节点以 600 合成加粗呈现保持粗感。 */
+  --font-hand: 'LemiXiaoXiongRiJiTi', 'Kaiti SC', 'STKaiti', 'KaiTi', cursive;
 }
 
 pre, code {
@@ -1603,6 +1616,14 @@ span.token.table {
   50% { opacity: 0.5; }
 }
 
+/* 看板离屏展开卡工作台占位骨架（SessionCardNode 离屏时） */
+.board-skeleton-line {
+  height: 12px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--border) 55%, transparent);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
 /* 压缩状态条：毛玻璃呼吸强调（正进行压缩时） */
 @keyframes compaction-breathe {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
@@ -2328,4 +2349,18 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
   pointer-events: none;
   float: left;
   height: 0;
+}
+
+/* === 文字节点缩放手柄（透明化）===
+   选中态 4 角手柄默认透明（不突兀，保留事件与功能），hover/拖动中淡显 accent
+   小方角，让用户知道可拖。handleStyle 不设 background，避免 inline 覆盖 hover。 */
+.board-text-resize-handle {
+  background: transparent;
+  border: none;
+}
+.board-text-resize-handle:hover,
+.board-text-resize-handle:active {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  border-radius: 3px;
 }

@@ -20,17 +20,17 @@ export const BOARD_SESSION_DELETED_EVENT = "pi-web:board-session-deleted";
 /** 看板内会话改名 → AppShell 刷新侧栏（左侧树名称同步） */
 export const BOARD_SESSION_RENAMED_EVENT = "pi-web:board-session-renamed";
 
+/** 看板内切换 cwd（新建会话卡环境条 / 激活展开会话卡）→ AppShell 调 handleCwdChange 标准切换 */
+export const BOARD_CWD_SWITCH_EVENT = "pi-web:board-cwd-switch";
+
 /** 工作台内会话运行结束 → AppShell 刷新侧栏 + 浏览器通知 */
 export const BOARD_AGENT_END_EVENT = "pi-web:board-agent-end";
 
 /** 工作台内扩展发起阻塞请求 → AppShell 浏览器通知 */
 export const BOARD_ATTENTION_NEEDED_EVENT = "pi-web:board-attention-needed";
 
-/** 看板画布结构变化（清空/清理失效）→ BoardSection 刷新节点计数 */
-export const BOARD_CANVAS_CHANGED_EVENT = "pi-web:board-canvas-changed";
-
-/** 任务卡 API 操作 bump 了 boards.updated → useBoardCanvas 刷新乐观锁基线 */
-export const BOARD_BASE_UPDATED_EVENT = "pi-web:board-base-updated";
+/** 任务卡创建/保存（派发路径）→ AppShell 刷新侧栏任务区（/api/tasks 重拉） */
+export const BOARD_TASKS_CHANGED_EVENT = "pi-web:board-tasks-changed";
 
 declare global {
   interface WindowEventMap {
@@ -39,10 +39,10 @@ declare global {
     "pi-web:board-session-created": CustomEvent<{ sessionId: string; nodeId?: string }>;
     "pi-web:board-session-deleted": CustomEvent<{ sessionId: string }>;
     "pi-web:board-session-renamed": CustomEvent<{ sessionId: string; name?: string }>;
+    "pi-web:board-cwd-switch": CustomEvent<{ cwd: string }>;
     "pi-web:board-agent-end": CustomEvent<{ sessionId: string; sessionName?: string }>;
     "pi-web:board-attention-needed": CustomEvent<{ sessionId: string; title?: string; method: string }>;
-    "pi-web:board-canvas-changed": CustomEvent<{ boardId: string }>;
-    "pi-web:board-base-updated": CustomEvent<{ boardId: string; updated: number }>;
+    "pi-web:board-tasks-changed": CustomEvent<Record<string, never>>;
   }
 }
 
@@ -66,6 +66,10 @@ export function dispatchBoardSessionRenamed(sessionId: string, name?: string): v
   window.dispatchEvent(new CustomEvent(BOARD_SESSION_RENAMED_EVENT, { detail: { sessionId, name } }));
 }
 
+export function dispatchBoardCwdSwitch(cwd: string): void {
+  window.dispatchEvent(new CustomEvent(BOARD_CWD_SWITCH_EVENT, { detail: { cwd } }));
+}
+
 export function dispatchBoardAgentEnd(sessionId: string, sessionName?: string): void {
   window.dispatchEvent(new CustomEvent(BOARD_AGENT_END_EVENT, { detail: { sessionId, sessionName } }));
 }
@@ -74,10 +78,6 @@ export function dispatchBoardAttentionNeeded(sessionId: string, request: { title
   window.dispatchEvent(new CustomEvent(BOARD_ATTENTION_NEEDED_EVENT, { detail: { sessionId, ...request } }));
 }
 
-export function dispatchBoardCanvasChanged(boardId: string): void {
-  window.dispatchEvent(new CustomEvent(BOARD_CANVAS_CHANGED_EVENT, { detail: { boardId } }));
-}
-
-export function dispatchBoardBaseUpdated(boardId: string, updated: number): void {
-  window.dispatchEvent(new CustomEvent(BOARD_BASE_UPDATED_EVENT, { detail: { boardId, updated } }));
+export function dispatchBoardTasksChanged(): void {
+  window.dispatchEvent(new CustomEvent(BOARD_TASKS_CHANGED_EVENT, { detail: {} }));
 }

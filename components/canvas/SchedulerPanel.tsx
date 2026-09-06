@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactFlow } from "@xyflow/react";
+import { boardFloatGlass } from "./board-glass";
 import { useBoardSearch } from "./BoardSearchContext";
 
 /** 与 lib/task-scheduler.ts 对齐（避免引 server 模块进 client bundle） */
@@ -29,6 +30,8 @@ interface RunningCard extends CardBrief {
 
 interface SchedulerStatus {
   started: boolean;
+  /** 本实例是否为唯一调度者（多实例共库时只有 leader 实际调度） */
+  leader: boolean;
   running: RunningCard[];
   lastAction: { type: string; cardNumber?: number; cardName?: string; at: number };
   activity: { kind: "dispatch" | "resume" | "review" | "blockcheck"; cardNumber?: number; cardName?: string; at: number } | null;
@@ -58,19 +61,23 @@ function workingSummary(s: SchedulerStatus): string | null {
   return null;
 }
 
-export function SchedulerPanel({ nodes }: {
+export function SchedulerPanel({ nodes, onViewportSave }: {
   /** 当前画布节点（用于把全局 running/队列任务映射成本画布 nodeId） */
   nodes: Array<{ id: string; type?: string; data: Record<string, unknown> }>;
+  /** 定位后把目标视口写回 yjs view map（位置记忆同源，防覆盖竞争） */
+  onViewportSave?: (vp: { x: number; y: number; zoom: number }) => void;
 }) {
-  const { setViewport, getViewport, getNodes } = useReactFlow();
+  const { setCenter, getViewport, getNodes } = useReactFlow();
   const { setHighlight } = useBoardSearch();
   const [status, setStatus] = useState<SchedulerStatus | null>(null);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // 轮询调度器状态（工作中/休眠 + 队列）—— 数据全局，任何看板一致
+  // 轮询调度器状态（工作中/休眠 + 队列）—— 数据全局，任何看板一致。
+  // 链式调度：上一次完成后再排下一次（响应慢自动降频，绝不叠加堆积）。
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const load = async () => {
       try {
         const res = await fetch("/api/task-scheduler/status", { cache: "no-store" });
@@ -79,9 +86,12 @@ export function SchedulerPanel({ nodes }: {
         if (!cancelled) setStatus(d.status);
       } catch { /* 静默 */ }
     };
-    void load();
-    const timer = setInterval(load, POLL_MS);
-    return () => { cancelled = true; clearInterval(timer); };
+    const loop = async () => {
+      await load();
+      if (!cancelled) timer = setTimeout(loop, POLL_MS);
+    };
+    void loop();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, []);
 
   // 点击外部关闭
@@ -112,8 +122,12 @@ export function SchedulerPanel({ nodes }: {
     const h = node.measured?.height ?? node.style?.height ?? 270;
     const cx = node.position.x + w / 2;
     const cy = node.position.y + h / 2;
-    const vp = getViewport();
-    setViewport({ x: -cx * vp.zoom + window.innerWidth / 2, y: -cy * vp.zoom + window.innerHeight / 2, zoom: vp.zoom }, { duration: 300 });
+    // 用 RF 的 setCenter（把指定点移到视口中心，保持缩放），替代手算 setViewport
+    const p = setCenter(cx, cy, { zoom: getViewport().zoom });
+    // 定位后把目标视口写回 yjs view map：与位置记忆同源，避免被旧值覆盖
+    void Promise.resolve(p).then(() => {
+      onViewportSave?.(getViewport());
+    });
     setHighlight(nodeId);
   };
 
@@ -133,11 +147,9 @@ export function SchedulerPanel({ nodes }: {
         aria-label="调度器状态"
         title="调度器状态"
         style={{
+          ...boardFloatGlass,
           display: "flex", alignItems: "center", gap: 7, height: 36,
           padding: "0 6px 0 14px", borderRadius: 999,
-          background: "var(--board-card-glass)",
-          backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
           border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
           boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
           color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap",
@@ -155,6 +167,7 @@ export function SchedulerPanel({ nodes }: {
         />
         <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)" }}>调度器</span>
         {s?.started === false && <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>未启动</span>}
+        {s?.started === true && s?.leader === false && <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>跟随</span>}
         {summary && <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>{summary}</span>}
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: "var(--text-muted)", transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}>
           <polyline points="6 9 12 15 18 9" />
@@ -163,12 +176,10 @@ export function SchedulerPanel({ nodes }: {
 
       {open && (
         <div style={{
+          ...boardFloatGlass,
           display: "flex", flexDirection: "column",
           marginTop: 6, padding: "8px 0", width: 340,
           borderRadius: 14,
-          background: "var(--board-card-glass)",
-          backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
           border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
           boxShadow: "0 8px 30px -8px rgba(0,0,0,0.3)",
           color: "var(--text)",
@@ -176,7 +187,7 @@ export function SchedulerPanel({ nodes }: {
           <div style={{ padding: "2px 14px 8px", borderBottom: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>调度器</span>
             <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
-              {s?.started === false ? "未启动" : busy ? "工作中" : "休眠"}
+              {s?.started === false ? "未启动" : s?.started === true && s?.leader === false ? "跟随（非调度者）" : busy ? "工作中" : "休眠"}
             </span>
           </div>
 

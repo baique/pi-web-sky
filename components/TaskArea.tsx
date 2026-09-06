@@ -6,6 +6,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { FolderIcon } from "./FileIcons";
 import { AnimatedDropdown } from "./AnimatedDropdown";
 import { dropdownDirection } from "@/lib/dropdown-direction";
+import type { SessionInfo } from "@/lib/types";
 
 /** Local mirror of lib/task-store's Task — keeps the client bundle free of
  *  server-only modules (node:sqlite). */
@@ -16,6 +17,12 @@ export interface TaskGroupUi {
   sessionIds: string[];
   pinned?: boolean;
   pinnedSessionIds?: string[];
+  /** 服务端按需下发的会话详情（置顶全量 + 非置顶当前页，含 fork 子树）。 */
+  sessions?: SessionInfo[];
+  /** 任务下根会话总数（加载更多游标基准）。 */
+  rootTotal?: number;
+  /** 含 fork 子树的全部节点数（删除确认文案用）。 */
+  sessionTotal?: number;
 }
 
 /**
@@ -26,14 +33,20 @@ export const TASK_SESSION_PREVIEW_LIMIT = 5;
 
 interface TaskGroup {
   task: TaskGroupUi;
-  /** 会话列表渲染器：showAll=true 时渲染任务下全部会话。 */
-  content: (showAll: boolean) => ReactNode;
+  /** 会话列表渲染器：渲染服务端已下发的当前页（置顶全量 + 非置顶前 N）。 */
+  content: () => ReactNode;
   /** 任务下会话根节点总数（含分叉子树），用于“加载更多”计数。 */
   sessionCount: number;
   /** 置顶会话根节点数（默认全部展示）。 */
   pinnedCount: number;
   /** 任务下全部会话数（含 fork 子树），用于删除确认文案。 */
   sessionTotal: number;
+  /** 还有更多根会话未加载（rootTotal > 已加载根数）→ 显示“加载更多”。 */
+  hasMore: boolean;
+  /** 剩余未加载根会话数（按钮文案）。 */
+  remainingCount: number;
+  /** 按 offset 追加下一页会话详情（服务端分页），返回完成信号供按钮取消 loading。 */
+  onLoadMore: () => Promise<void> | void;
 }
 
 interface Props {
@@ -116,6 +129,10 @@ function TaskCard({
   sessionCount,
   pinnedCount,
   sessionTotal,
+  hasMore,
+  remainingCount,
+  onLoadMore,
+  loadingMore,
   runningCount,
   activeSessionId,
   isActive,
@@ -134,10 +151,18 @@ function TaskCard({
   dropAfter,
 }: {
   task: TaskGroupUi;
-  content: (showAll: boolean) => ReactNode;
+  content: () => ReactNode;
   sessionCount: number;
   pinnedCount: number;
   sessionTotal: number;
+  /** 还有更多根会话未加载 → 显示“加载更多”。 */
+  hasMore: boolean;
+  /** 剩余未加载根会话数（按钮文案）。 */
+  remainingCount: number;
+  /** 按 offset 追加下一页会话详情。 */
+  onLoadMore: () => void;
+  /** 该任务正在加载更多（按钮转圈）。 */
+  loadingMore?: boolean;
   /** 任务内运行中会话数（>0 时行前显示蓝色数字徽记）。 */
   runningCount?: number;
   /** 当前选中的会话 id；属于本任务时自动展开卡片。 */
@@ -171,8 +196,8 @@ function TaskCard({
   useEffect(() => {
     if (sessionActive) setCollapsed(false);
   }, [sessionActive]);
-  /** 任务会话默认只展示置顶 + 最近 5 个；点击“加载更多”后展示全部。 */
-  const [showAllSessions, setShowAllSessions] = useState(false);
+  /** 任务会话展示服务端已下发的当前页（置顶全量 + 非置顶前 N）；
+   *  点“加载更多”由父级按 offset 追加（#15 服务端分页）。 */
   const [dragOver, setDragOver] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -339,7 +364,7 @@ function TaskCard({
         onMouseLeave={() => setHovered(false)}
         style={{
           display: "flex", alignItems: "center", gap: 4, minHeight: 38,
-          padding: "3px 8px 3px 5px",
+          padding: "0 8px 0 5px",
           borderRadius: 6,
           background: isActive ? "var(--side-active)" : hovered ? "var(--side-hover)" : "transparent",
           cursor: "pointer",
@@ -350,7 +375,7 @@ function TaskCard({
           <span
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
-            style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, minHeight: 38, padding: "3px 8px 3px 5px", boxSizing: "border-box" }}
+            style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, minHeight: 38, boxSizing: "border-box" }}
           >
             {/* 图标槽：与任务行 FolderIcon 同尺寸同起点，保持文字对齐 */}
             <span aria-hidden style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, color: "var(--text-dim)", cursor: "default", pointerEvents: "none" }}>
@@ -410,6 +435,7 @@ function TaskCard({
                 </svg>
               </span>
             )}
+            {/* 操作组（hover 显隐） */}
             {(hovered || moreOpen || confirmDelete) && !renaming && (
               <span ref={actionsRef} style={{ position: "relative", display: "flex", gap: 3, flexShrink: 0, alignItems: "center" }}>
                 {/* 打开看板（任务即看板）：首位（用户要求：进入看板优先于新建会话） */}
@@ -584,23 +610,30 @@ function TaskCard({
       {/* Task sessions */}
       {!collapsed && (
         <>
-          <div style={{ paddingBottom: 3 }}>{content(showAllSessions)}</div>
-          {!showAllSessions && sessionCount > pinnedCount + TASK_SESSION_PREVIEW_LIMIT && (
+          <div style={{ paddingBottom: 3 }}>{content()}</div>
+          {hasMore && (
             <button
               type="button"
-              onClick={() => setShowAllSessions(true)}
+              onClick={(e) => { e.stopPropagation(); onLoadMore(); }}
+              disabled={loadingMore}
               style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                 width: "100%", boxSizing: "border-box",
                 margin: "2px 0", padding: 0,
                 background: "transparent", border: "none",
-                color: "var(--text-dim)", fontSize: 11, cursor: "pointer",
-                transition: "color 0.12s",
+                color: "var(--text-dim)", fontSize: 11, cursor: loadingMore ? "default" : "pointer",
+                transition: "color 0.12s", opacity: loadingMore ? 0.7 : 1,
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+              onMouseEnter={(e) => { if (!loadingMore) e.currentTarget.style.color = "var(--text)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
             >
-              {t("sidebar.loadMoreSessions", { count: sessionCount - pinnedCount - TASK_SESSION_PREVIEW_LIMIT })}
+              {loadingMore ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true" style={{ flexShrink: 0, animation: "spin 0.9s linear infinite" }}>
+                  <path d="M21 12a9 9 0 1 1-5.7-8.4" />
+                </svg>
+              ) : (
+                t("sidebar.loadMoreSessions", { count: remainingCount })
+              )}
             </button>
           )}
         </>
@@ -637,6 +670,8 @@ export function TaskArea({
   const [createHovered, setCreateHovered] = useState(false);
   const [cancelHovered, setCancelHovered] = useState(false);
   const newTaskRef = useRef<HTMLInputElement>(null);
+  /** 正在加载更多的任务 id（按钮转圈）。 */
+  const [loadingTaskId, setLoadingTaskId] = useState<string | null>(null);
   /** 拖拽中的任务（整卡拖动）。{ id, pinned } 用于同区判断。 */
   const [dragTask, setDragTask] = useState<{ id: string; pinned: boolean } | null>(null);
   /** 当前 hover 的落点：{ targetId, before }（插到目标前/后）。state 用于渲染边框指示。 */
@@ -803,13 +838,21 @@ export function TaskArea({
         </div>
       )}
 
-      {groups.map(({ task, content, sessionCount, pinnedCount, sessionTotal }, index) => {
+      {groups.map(({ task, content, sessionCount, pinnedCount, sessionTotal, hasMore, remainingCount, onLoadMore }, index) => {
         const prev = index > 0 ? groups[index - 1].task : null;
         const divider = prev?.pinned && !task.pinned;
         // 任务内运行中会话数（徽记）：任一关联会话在运行中即显示蓝色数字
         const runningCount = runningSessionIds
           ? task.sessionIds.filter((sid) => runningSessionIds.has(sid)).length
           : 0;
+        const handleLoadMore = async () => {
+          setLoadingTaskId(task.id);
+          try {
+            await onLoadMore();
+          } finally {
+            setLoadingTaskId(null);
+          }
+        };
         return (
           <Fragment key={task.id}>
             {divider && (
@@ -821,6 +864,10 @@ export function TaskArea({
               sessionCount={sessionCount}
               pinnedCount={pinnedCount}
               sessionTotal={sessionTotal}
+              hasMore={hasMore}
+              remainingCount={remainingCount}
+              onLoadMore={handleLoadMore}
+              loadingMore={loadingTaskId === task.id}
               runningCount={runningCount}
               activeSessionId={selectedSessionId}
               isActive={activeBoardId === task.id}

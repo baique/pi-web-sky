@@ -113,9 +113,12 @@ function GlassSlider({ label, icon, value, min, max, unit, onCommit, preview }: 
   preview?: (v: number) => void;
 }) {
   const [local, setLocal] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
   // 全局值变化（重置按钮等）时同步本地显示
   useEffect(() => setLocal(value), [value]);
-  const commit = () => onCommit(local);
+  const commit = () => {
+    if (inputRef.current) onCommit(Number(inputRef.current.value));
+  };
   return (
     <div
       style={{
@@ -128,12 +131,13 @@ function GlassSlider({ label, icon, value, min, max, unit, onCommit, preview }: 
       <span style={{ width: 14, flexShrink: 0, textAlign: "center", fontSize: 12 }}>{icon}</span>
       <span style={{ flexShrink: 0 }}>{label}</span>
       <input
+        ref={inputRef}
         type="range"
         min={min}
         max={max}
-        value={local}
+        defaultValue={value}
         onChange={(e) => {
-          // 拖动中只更新本地 + 轻量预览：AppShell 不重渲染，避免每格 20ms 阻塞
+          // 拖动中只更新本地显示 + 轻量预览：input 不受控，避免拖拽重置
           const v = Number(e.target.value);
           setLocal(v);
           preview?.(v);
@@ -169,7 +173,7 @@ export function AppShell() {
  useGlassWallpaper(
    bgUrl,
    bgKind === "image",
-   { offsetX: wallSettings.offsetX, repeat: wallSettings.repeat, fill: wallSettings.fill, bubbleBlur: wallSettings.bubbleBlur },
+   { offsetX: wallSettings.offsetX, repeat: wallSettings.repeat, fill: wallSettings.fill, bubbleBlur: wallSettings.bubbleBlur, scrimBlur: wallSettings.scrimBlur },
    glassTick,
  );
  const [bgAdjusting, setBgAdjusting] = useState(false);
@@ -410,7 +414,7 @@ export function AppShell() {
     setBgMenuOpen((v) => !v);
   }, []);
 
-  // Close the background picker on outside click.
+  // Close the background picker on outside click / Escape.
   useEffect(() => {
     if (!bgMenuOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -423,8 +427,15 @@ export function AppShell() {
         setBgMenuOpen(false);
       }
     };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setBgMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
   }, [bgMenuOpen]);
   useEffect(() => {
     setMobileSidebarReady(true);
@@ -886,18 +897,23 @@ export function AppShell() {
     const token = ++workspaceRestoreTokenRef.current;
     const lastOpenSessionId = getLastOpenSession(projectKey);
     if (!lastOpenSessionId) return;
-    void fetch("/api/sessions")
-      .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
+    // 点查（D1）：用记忆的 id 直接问该会话还在不在，不再依赖全量列表。
+    // 404 → 会话已删，清记忆回欢迎页；200 → 用返回的 info 打开。
+    void fetch(`/api/sessions/${encodeURIComponent(lastOpenSessionId)}?deferThinking=1`)
+      .then((r) => {
+        if (r.status === 404) {
+          if (token === workspaceRestoreTokenRef.current) clearLastOpen(projectKey);
+          return null;
+        }
+        return r.ok
+          ? (r.json() as Promise<{ sessionId: string; info?: SessionInfo | null; filePath?: string }>)
+          : null;
+      })
       .then((d) => {
         if (token !== workspaceRestoreTokenRef.current) return; // stale switch
-        const s = d?.sessions.find((x) => x.id === lastOpenSessionId);
-        if (!s) {
-          // The list loaded but the remembered session is gone — forget it.
-          // When the list itself failed (d === null) keep the memory so a
-          // later switch retries the restore.
-          if (d) clearLastOpen(projectKey);
-          return;
-        }
+        if (!d) return;
+        const s = d.info;
+        if (!s || !s.id) return;
         if (workspaceKeyOf(s) !== projectKey) {
           // Defensive: the remembered session drifted out of this workspace.
           clearLastOpen(projectKey);
@@ -987,7 +1003,7 @@ export function AppShell() {
     // 看板模式下保留 ?board=（boardAwareUrl），否则 cwd 初始化会把看板地址清成 "/"
     router.replace(boardAwareUrl("/"), { scroll: false });
   }, [activeCwd, invalidateWorkspaceRestore, newSessionCwd, router, selectedSession, restoreWorkspaceContext]);
-
+  // 看板 cwd-switch 事件用最新引用（避免监听反复重绑）
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     invalidateWorkspaceRestore();
     activeNewSessionDraftKeyRef.current = null;
@@ -1063,6 +1079,16 @@ export function AppShell() {
     handleNewSession(crypto.randomUUID(), cwd);
   }, [selectedSession?.cwd, newSessionCwd, activeCwd, handleNewSession]);
 
+  /** 环境条 worktree 切换：新建会话 cwd 与全局有效 cwd 同步更新（任务卡 #16）。
+   *  只在空态欢迎页触达（有历史会话不显示选择器），不涉及已有会话。 */
+  const handleEnvWorktreeChange = useCallback((wtPath: string) => {
+    setNewSessionCwd(wtPath);
+    setActiveCwd(wtPath);
+  }, []);
+  // 看板 cwd-switch 事件用最新引用（避免监听反复重绑）
+  const handleEnvWorktreeChangeRef = useRef(handleEnvWorktreeChange);
+  handleEnvWorktreeChangeRef.current = handleEnvWorktreeChange;
+
   // 点任务行 → 打开该任务的看板：懒创建任务型看板后复用 handleOpenBoard。
   const handleOpenTaskBoard = useCallback((taskId: string) => {
     void fetch(`/api/tasks/${encodeURIComponent(taskId)}/board`, { cache: "no-store" })
@@ -1086,19 +1112,37 @@ export function AppShell() {
   // server-computed projectKey, which the same-project check in
   // handleCwdChange relies on. Hydrate it from the session list so switching
   // worktrees right after creating a session doesn't close the chat.
+  // 不再独立 fetch /api/sessions：SessionSidebar 的 loadSessions（已防抖）成功
+  // 后会上抛全量列表（onSessionsLoaded），此处直接复用，避免多接口重复调用。
+  const latestSessionsRef = useRef<SessionInfo[]>([]);
+  const pendingHydrateSessionIdRef = useRef<string | null>(null);
   const hydrateSelectedSession = useCallback((sessionId: string) => {
-    void fetch("/api/sessions", { cache: "no-store" })
-      .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
-      .then((d) => {
-        const full = d?.sessions.find((s) => s.id === sessionId);
-        if (!full) return;
-        setSelectedSession((prev) => (
-          prev?.id === sessionId
-            ? { ...prev, ...full, transient: full.transient ?? false }
-            : prev
-        ));
-      })
-      .catch(() => {});
+    const full = latestSessionsRef.current.find((s) => s.id === sessionId);
+    if (full) {
+      setSelectedSession((prev) => (
+        prev?.id === sessionId
+          ? { ...prev, ...full, transient: full.transient ?? false }
+          : prev
+      ));
+      return;
+    }
+    // 列表尚未包含（新建会话刚转正，防抖刷新未完成）→ 挂起等下一次全量列表。
+    pendingHydrateSessionIdRef.current = sessionId;
+  }, []);
+
+  // SessionSidebar 全量列表就绪 → 刷新缓存并补挂起的 hydrate。
+  const handleSessionsLoaded = useCallback((sessions: SessionInfo[]) => {
+    latestSessionsRef.current = sessions;
+    const pendingId = pendingHydrateSessionIdRef.current;
+    if (!pendingId) return;
+    const full = sessions.find((s) => s.id === pendingId);
+    if (!full) return;
+    pendingHydrateSessionIdRef.current = null;
+    setSelectedSession((prev) => (
+      prev?.id === pendingId
+        ? { ...prev, ...full, transient: full.transient ?? false }
+        : prev
+    ));
   }, []);
 
   // Called by ChatWindow when a new session gets its real id from pi
@@ -1302,6 +1346,11 @@ export function AppShell() {
       setRefreshKey((k) => k + 1);
       setExplorerRefreshKey((k) => k + 1);
     };
+    // 任务卡创建/保存（派发路径）→ 刷新侧栏任务区（/api/tasks 重拉，
+    // 新派发的会话落任务分组而不是聊天区）。
+    const onBoardTasksChanged = () => {
+      setRefreshKey((k) => k + 1);
+    };
     // 看板内会话改名 → 刷新侧栏（左侧树名称同步）
     const onBoardSessionRenamed = (e: Event) => {
       const detail = (e as CustomEvent<{ sessionId: string; name?: string }>).detail;
@@ -1342,17 +1391,28 @@ export function AppShell() {
         tag: `pi-extension-ui:${detail.sessionId}`,
       });
     };
+    // 看板内切换 cwd（新建会话卡环境条 / 激活展开会话卡）→ 复用环境条标准切换
+    // （handleEnvWorktreeChange：set newSessionCwd + activeCwd → 左侧 selectedCwd 链自动跟随）
+    const onBoardCwdSwitch = (e: Event) => {
+      const detail = (e as CustomEvent<{ cwd: string }>).detail;
+      if (!detail?.cwd) return;
+      handleEnvWorktreeChangeRef.current(detail.cwd);
+    };
     window.addEventListener("pi-web:board-open-file", onBoardOpenFile);
+    window.addEventListener("pi-web:board-cwd-switch", onBoardCwdSwitch);
     window.addEventListener("pi-web:board-session-forked", onBoardSessionForked);
     window.addEventListener("pi-web:board-session-created", onBoardSessionCreated);
     window.addEventListener("pi-web:board-session-renamed", onBoardSessionRenamed);
+    window.addEventListener("pi-web:board-tasks-changed", onBoardTasksChanged);
     window.addEventListener("pi-web:board-agent-end", onBoardAgentEnd);
     window.addEventListener("pi-web:board-attention-needed", onBoardAttentionNeeded);
     return () => {
       window.removeEventListener("pi-web:board-open-file", onBoardOpenFile);
+      window.removeEventListener("pi-web:board-cwd-switch", onBoardCwdSwitch);
       window.removeEventListener("pi-web:board-session-forked", onBoardSessionForked);
       window.removeEventListener("pi-web:board-session-created", onBoardSessionCreated);
       window.removeEventListener("pi-web:board-session-renamed", onBoardSessionRenamed);
+      window.removeEventListener("pi-web:board-tasks-changed", onBoardTasksChanged);
       window.removeEventListener("pi-web:board-agent-end", onBoardAgentEnd);
       window.removeEventListener("pi-web:board-attention-needed", onBoardAttentionNeeded);
     };
@@ -1473,6 +1533,7 @@ export function AppShell() {
         explorerRefreshKey={explorerRefreshKey}
         onExplorerRefresh={handleExplorerRefresh}
         onRefresh={() => setRefreshKey((k) => k + 1)}
+        onSessionsLoaded={handleSessionsLoaded}
         onAtMention={handleAtMention}
         onAtMentions={handleAtMentions}
         onBackgroundTaskDone={handleBackgroundTaskDone}
@@ -2745,7 +2806,7 @@ export function AppShell() {
               </button>
               {isMobile && (
                 <div style={{ height: "100%", flexShrink: 0 }}>
-                  <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} />
+                  <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} onOpenBoard={handleOpenBoard} />
                 </div>
               )}
               {renderSessionStatsButton(true)}
@@ -2779,7 +2840,7 @@ export function AppShell() {
           {!isMobile && (
             <>
               <div style={{ height: "100%", flexShrink: 0 }}>
-                <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} />
+                <SidebarGlobalSearch onSelectSession={handleSearchSelectSession} onOpenBoard={handleOpenBoard} />
               </div>
               {renderBackgroundButton(false)}
               {renderThemeButton(false)}
@@ -3229,6 +3290,7 @@ export function AppShell() {
               newSessionCwd={effectiveNewSessionCwd}
               newSessionDraftKey={newSessionDraftKey}
               pendingNewSessionTaskRef={pendingNewSessionTaskRef}
+              onEnvWorktreeChange={handleEnvWorktreeChange}
               onAgentEnd={handleAgentEnd}
               onAttentionNeeded={handleAttentionNeeded}
               onSessionCreated={handleSessionCreated}

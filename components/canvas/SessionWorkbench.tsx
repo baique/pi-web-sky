@@ -32,6 +32,7 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   cwd,
   taskId,
   onPromote,
+  onCwdChange,
 }: {
   sessionId: string;
   /** 新会话卡（看板新建会话）绑定目录；cwd 非空 = 会话尚未创建 */
@@ -40,6 +41,8 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   taskId?: string;
   /** 新会话卡转正回调（会话创建成功）：由父节点清 cwd 字段（写 Y.Doc） */
   onPromote?: () => void;
+  /** 新会话卡环境条切换 worktree：由父节点写卡片 cwd 字段（Y.Doc，任务卡 #16） */
+  onCwdChange?: (path: string) => void;
 }) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
@@ -64,6 +67,11 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   // 新会话卡初始 cwd：转正后卡片侧会把 cwd 字段清空（props.cwd 变 ""），但 isNew 实例
   // 仍需 cwd 作 newSessionCwd（第二条消息 ensure_session 用），这里缓存首帧值。
   const cwdRef = useRef(cwd ?? null);
+  // 环境条切换 worktree：父节点写 yjs 后 cwd prop 回灌新值（非空→非空），
+  // 同步到 cwdRef 让 ensure_session 用最新绑定目录；空值（转正）不覆盖。
+  useEffect(() => {
+    if (cwd) cwdRef.current = cwd;
+  }, [cwd]);
   // 转正标记：本实例内发过消息（prompt 正在跑，卸载/重挂 ChatWindow 会断开 SSE）。
   // 本实例生命周期内保持 isNew 模式继续，不重挂。组件重建（收合再展开 / 刷新 / 重新打开）
   // 时 wasNewSessionRef 重新按 isNewSession 初始化，转正后的卡片走回普通会话模式加载历史。
@@ -102,6 +110,10 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
   const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
   const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
+  const [systemPromptLoading, setSystemPromptLoading] = useState(false);
+  const systemPromptLoaderRef = useRef<(() => Promise<void>) | null>(null);
+  const systemPromptLoadIdRef = useRef(0);
 
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
@@ -121,6 +133,31 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   const handleTodosChange = useCallback((nextTodos: TodoItem[]) => {
     setTodos(nextTodos);
   }, []);
+
+  const handleSystemPromptChange = useCallback((prompt: string | null) => {
+    setSystemPrompt(prompt);
+    setSystemPromptLoading(false);
+  }, []);
+
+  const handleSystemPromptLoaderChange = useCallback((loader: (() => Promise<void>) | null) => {
+    systemPromptLoadIdRef.current += 1;
+    systemPromptLoaderRef.current = loader;
+    setSystemPromptLoading(false);
+  }, []);
+
+  // 系统提示词加载：面板打开时懒加载（与 AppShell 顶栏同机制）
+  useEffect(() => {
+    if (!navbarSlot) return;
+    const opening = systemPrompt === null && !systemPromptLoading;
+    if (!opening) return;
+    const load = systemPromptLoaderRef.current;
+    if (!load) return;
+    const loadId = ++systemPromptLoadIdRef.current;
+    setSystemPromptLoading(true);
+    void load().then(() => {
+      if (systemPromptLoadIdRef.current === loadId) setSystemPromptLoading(false);
+    });
+  }, [navbarSlot, systemPrompt, systemPromptLoading]);
 
   // 新会话卡转正：ChatWindow 拿到 realId 后回调。会话创建成功（文件已落盘），
   // 由父节点清 cwd 字段标记“会话已创建”转正为普通卡（写 Y.Doc，CRDT 广播），
@@ -155,8 +192,8 @@ export const SessionWorkbench = memo(function SessionWorkbench({
     });
   }, [sessionId]);
 
-  // wheel 拦截：tldraw 在 container 监听 wheel（画布 pan/zoom），工作台内的滚轮必须被会话自己消费。
-  // 不用 useEffect([])：tldraw 重渲染/resize/展开收合会替换 shape 的 DOM，[] 只在首次挂载跑，
+  // wheel 拦截：React Flow 画布在 container 监听 wheel（画布 pan/zoom），工作台内的滚轮必须被会话自己消费。
+  // 不用 useEffect([])：RF 重渲染/resize/展开收合会替换卡片 DOM，[] 只在首次挂载跑，
   // 监听会挂在被替换的旧元素上失效。用无依赖 effect —— 每次渲染后都清旧挂新，保证监听总在
   // 当前元素。判定「按需」= 状态 × 几何：卡片激活（用户当前关注此卡）且目标在可滚动容器内
   // 才拦截（stopPropagation，不 preventDefault —— 让消息区正常滚动）；未激活或不在滚动区则
@@ -165,7 +202,7 @@ export const SessionWorkbench = memo(function SessionWorkbench({
     const el = rootRef.current;
     if (!el) return;
     const stop = (e: WheelEvent) => {
-      // ctrl/meta+wheel 是缩放手势：放行给画布（tldraw 缩放），不吞
+      // ctrl/meta+wheel 是缩放手势：放行给画布（RF 缩放），不吞
       if (e.ctrlKey || e.metaKey) return;
       // 实验性去除激活态条件：内容溢出即拦（内部滚动），不再区分卡片是否激活
       const t = e.target;
@@ -179,12 +216,11 @@ export const SessionWorkbench = memo(function SessionWorkbench({
     };
   });
 
-  // copy 拦截（原生监听，bubble 阶段）：工作台内（消息区等）选中文本后 Ctrl+C 会被 tldraw 劫持——
-  // 卡片处于选中态（selectedShapeIds 非空）且焦点不在输入元素时，tldraw 的 useNativeClipboardEvents
-  // 在 document 上 preventDefault 并复制 shape，写出的 text/plain 是 shape 的文本而非选区（会话卡
-  // getText 提不出内容，实际是空/空白）。这里在事件冒泡到 document（tldraw 监听处）之前，若存在
-  // 非空文本选区就 stopPropagation，放行浏览器原生复制选区；无文本选区（shape 选中复制）则放行给
-  // tldraw 正常复制。与便笺 StickyNoteShape 同方案。无依赖 effect：DOM 随渲染替换。
+  // copy 拦截（原生监听，bubble 阶段）：RF 画布的 document keydown 处理 Ctrl+C 复制
+  // 选中节点（copySelected，见 CanvasStage）——工作台内（消息区等）选中文本时会被它劫持，
+  // 写出的剪贴板是复制的节点而非文本选区。这里在事件到达 document（RF keydown 监听处）之前，
+  // 若存在非空文本选区就 stopPropagation，放行浏览器原生复制选区；无文本选区（画布选中
+  // 复制节点）则放行给 RF 正常复制。无依赖 effect：DOM 随渲染替换。
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -201,18 +237,27 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   useEffect(() => {
     if (isNewSession) return;
     let cancelled = false;
+    // 拉会话元数据：点查 summary 单 id（读头尾，比全量列表自筛轻）。
+    const loadMeta = async (): Promise<SessionInfo | null> => {
+      const res = await fetch("/api/sessions/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [sessionId] }),
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { sessions: SessionInfo[] };
+      return data.sessions[0] ?? null;
+    };
     // 新会话转正：ChatWindow 保持 isNew 实例继续（不卸载、不重挂，避免断 SSE），
     // 仅拉 session 元数据供导航条渲染；不 setSession(null)，以免工作台闪 loading。
-    // 首条 prompt 落盘前 /api/sessions 可能查不到（会话创建即落盘，窗口极短），此时不置错，
+    // 首条 prompt 落盘前查不到（会话创建即落盘，窗口极短），此时不置错，
     // 收合再展开/刷新会走普通卡路径补上。
     if (wasNewSessionRef.current) {
       setError(null);
       void (async () => {
         try {
-          const res = await fetch("/api/sessions", { cache: "no-store" });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = (await res.json()) as { sessions: SessionInfo[] };
-          const found = data.sessions.find((s) => s.id === sessionId);
+          const found = await loadMeta();
           if (cancelled) return;
           if (found) setSession(found);
         } catch (e) {
@@ -226,10 +271,7 @@ export const SessionWorkbench = memo(function SessionWorkbench({
     setError(null);
     void (async () => {
       try {
-        const res = await fetch("/api/sessions", { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as { sessions: SessionInfo[] };
-        const found = data.sessions.find((s) => s.id === sessionId);
+        const found = await loadMeta();
         if (cancelled) return;
         if (!found) {
           setError(t("boards.sessionMissing"));
@@ -269,13 +311,11 @@ export const SessionWorkbench = memo(function SessionWorkbench({
       ref={rootRef}
       className="board-workbench"
       style={containerStyle}
-      // 工作台嵌在 tldraw 卡片内：阻止事件冒泡到画布。tldraw 画布在 pointerDown 上
-      // preventDefault（会吞掉后续 click），导致终端/模型选择器/session/通知等无法弹出。
+      // 工作台嵌在 RF 会话卡内：阻止事件冒泡到画布（RF 画布在 pointerDown 上
+      // preventDefault 会吞掉后续 click，导致终端/模型选择器等无法弹出）。
       // 冒泡阶段拦截：事件先正常到达目标（内部按钮可点击），再阻止冒泡到画布。
-      // 仅左键（button 0）拦截；右键(2)/中键(1)放行 —— 右键必须冒泡到 tldraw 打开菜单。
-      // 实验性去除激活态条件：未激活的卡片点击内容区也直接拦截左键（与便笺同模式），
-      // 修复「点按钮以为点上了、实际只是激活了还要再点一下」；tldraw 的选中/双击判定
-      // 走 capture 阶段不受影响。右键(2)/中键(1)仍放行 —— 右键必须冒泡到 tldraw 打开菜单。
+      // 仅左键（button 0）拦截；右键(2)/中键(1)放行 —— 右键必须冒泡到画布打开菜单。
+      // RF 的选中/双击判定走 capture 阶段不受影响。
       onPointerDown={(e) => { if (e.button === 0) e.stopPropagation(); }}
       onPointerUp={(e) => { if (e.button === 0) e.stopPropagation(); }}
       onClick={(e) => e.stopPropagation()}
@@ -290,6 +330,12 @@ export const SessionWorkbench = memo(function SessionWorkbench({
           stats={sessionStats}
           contextUsage={contextUsage}
           todos={todos}
+          systemPrompt={systemPrompt}
+          systemPromptLoading={systemPromptLoading}
+          cwd={session.cwd}
+          projectRoot={session.projectRoot}
+          isWorktree={session.isWorktree}
+          worktreeBranch={session.worktreeBranch}
         />,
         navbarSlot,
       )}
@@ -309,8 +355,11 @@ export const SessionWorkbench = memo(function SessionWorkbench({
         onSessionStatsPanelOpen={handleSessionStatsPanelOpen}
         onTodosChange={handleTodosChange}
         onOpenFile={handleOpenFile}
+        onSystemPromptChange={handleSystemPromptChange}
+        onSystemPromptLoaderChange={handleSystemPromptLoaderChange}
         onSessionCreated={isNewSession ? (created) => handleSessionCreated(created) : undefined}
         onSessionForked={handleSessionForked}
+        onEnvWorktreeChange={onCwdChange}
         onAgentEnd={handleAgentEnd}
         onAttentionNeeded={handleAttentionNeeded}
         soundEnabled={soundEnabled}
@@ -328,13 +377,13 @@ const containerStyle: React.CSSProperties = {
   width: "100%",
   height: "100%",
   // 展开卡容器不裁剪：卡片内元素（模型选择下拉等）超出卡片边界时保持可见，
-  // 由卡片外层 visible + tldraw 画布边界（clip）兜底，避免超高面板顶部被裁。
+  // 由卡片外层 visible + RF 画布边界（clip）兜底，避免超高面板顶部被裁。
   overflow: "visible",
   color: "var(--text)",
 };
 
 /** 从目标向上找可滚动容器（到 root 为止）：目标在可滚动容器内 → 滚轮属于它，不冒泡到画布。
- *  与 tldraw usePassThroughWheelEvents 同思路：内容溢出 + overflow 可滚动才算数。 */
+ *  与 RF 的 usePassThroughWheelEvents 同思路：内容溢出 + overflow 可滚动才算数。 */
 function hasScrollableAncestor(target: Node, root: HTMLElement): boolean {
   let elm: Element | null = target instanceof Element ? target : target.parentElement;
   while (elm && elm instanceof HTMLElement) {

@@ -33,21 +33,52 @@ task_card_questions  待回答队列（S3 用）
 ## 画布集成
 
 - **画布节点在 yjs 文档**（RF 节点 `data.cardId`，CRDT 持久化到 sync.db `yjs_documents`）。
-- 建卡/保存**不依赖 nodeId 绑定**：`POST/PATCH /api/task-cards` 直接写 `task_cards` 表；节点 `cardId` 由前端 `updateNode` 写回（建卡成功后）。后端 reconcile 也会按业务表补齐任务卡节点（`task-<cardId>`）。
+- 建卡/保存**不依赖 nodeId 绑定**：`POST/PATCH /api/task-cards` 直接写 `task_cards` 表；节点 `cardId` 由前端 `updateNode` 写回（建卡成功后）。**reconcile 不补任务卡节点**（任务卡是用户画布内容）——只孤儿删「引用了已删业务卡」的残留节点，详见 boards.md。
 - BoardIdContext（SessionCanvas 提供）：`{ boardId, defaultCwd }`——`useBoardId()` / `useBoardDefaultCwd()`（建卡 cwd 默认 = 左侧栏当前目录）。
 
 ## 依赖线
 
-- 真相源 `task_card_links`；**画布依赖线由前端 reconcile 渲染**（`useBoardCanvas.ts`）：读任务卡 links → diff 画布 → `createLinkEdge`（arrow + binding，`meta.taskLinkLabel`，缺补多删、确定性 id 幂等）。后端只写 links，不直接建线。
-- 触发：任务看板打开 + 10s 轮询 + running 快照发现新 running 卡时跑。
-- 画布 arrow 带 `meta.taskLinkLabel`（prerequisite/related）→ 右键菜单选中依赖线时只显示「依赖连线（自动生成，不可删除）」只读项（`SyncedContextMenu`），无删除。
+- 真相源 `task_card_links`；**画布依赖线由后端权威 reconcile 渲染**（`lib/board-reconcile.ts`）：读任务卡 links → diff 画布 → 建 `link-<from>-<to>-<kind>` 边（`data.taskLink = kind`，确定性 id 幂等，缺补多删）。前端只写 links 业务表，不直接建线。
+- 触发：建卡删卡 / 依赖变更 / 任务初始化 / 10s 定时兜底（`board-reconcile-scheduler`，仅 leader 实例）。
+- 派生边禁删：画布上选中依赖线（`data.taskLink`）时只显示只读提示（BoardContextMenu 判定 `edgeDerived`），无删除——手动删会被 reconcile 补回。
 
 ## 执行会话线（exec）
 
-- 真相源 `task_cards.session_id`；**画布上的 exec 线由前端 reconcile 渲染**（`useBoardCanvas.ts` 的 `reconcile`）：读任务卡 sessionId + 画布节点 diff → `createExecEdge`（arrow + binding，`meta.execLinkLabel`，缺补多删、确定性 id 幂等）。后端只写 `session_id`，不直接建线。
-- 触发：reconcile 在任务看板打开 + 10s 轮询 + running 快照发现新 running 卡时跑——任务卡绑定执行会话后 **exec 线秒级/10s 内自动出现**。
+- 真相源 `task_cards.session_id`；**画布上的 exec 线由后端权威 reconcile 渲染**（`lib/board-reconcile.ts`）：读任务卡 sessionId + 画布节点 diff → 建 `exec-<cardId>-<sessionId>` 边（`data.execLink = true`，确定性 id 幂等，缺补多删）。前端只写 `session_id`，不直接建线。
+- 触发：建卡 / 派发（sessionId 落表）/ 任务初始化 / 10s 定时兜底（仅 leader 实例）——任务卡绑定执行会话后 **exec 线秒级/10s 内自动出现**。
 - 派生禁删：手动删 exec 线会被 reconcile 补回；真正的删除 = 清 `session_id` 或删任务卡。
-- **执行会话卡必然存在**：先有会话才有关联，reconcile 补所有任务会话（含执行会话），exec 线总有落点。
+- **执行会话卡由 reconcile 补卡**（`session-<sid>`）先于 exec 线落点存在——先有会话才有关联，exec 线总有宿主卡。
+
+## 单调度者（leader election）
+
+- 多实例共库时调度动作（派发/巡检/审核/续会话/定时 reconcile）**只允许一个实例执行**：
+  sqlite 单行表 `scheduler_leader` 注册，谁先注册谁是唯一调度者，心跳 10s 续期，
+  30s 过期其他实例可接管（`lib/scheduler-leader.ts`）。
+- 卡级 owner/heartbeat 仲裁已废弃（`task_cards.owner/heartbeat` 列保留供滚动升级，
+  逻辑不再读写）；`dispatch_token` 保留作 leader 切换瞬间的派发双保险。
+- 调度状态 API 返回 `leader` 字段，面板对非 leader 实例显示「跟随」。
+
+## 调度器状态机（每 10s tick，一镜像 + 五段）
+
+`runSchedulerTick` 按序执行（前段结果影响后段）：
+
+1. **会话状态镜像**（`mirrorCardStatusFromSessions`）：卡状态 ← 关联会话真实状态。
+   不区分消息由调度器还是用户发起——会话在跑 → `running`；会话挂起等用户输入
+   （waiting_input）→ `waiting_reply`。只动非终态（not_started/running/review/waiting_reply），
+   done/failed/abandoned 不拉回。兼容「用户直接打开执行会话交流」。
+2. **自愈**（`restoreRunningReviewCards`）：review 卡但会话在跑 → 拉回 running。
+3. **结束巡检**（`reconcileEndedRunningCards`）：running 卡会话已静默结束 → review。
+4. **审核**（`processReviewCards`）：review → 程序检测失败→failed 重试；无内容→done；
+   否则 AI 判定 → done/failed/waiting_reply，冷却 `AUDIT_COOLDOWN_MS=5min`。
+5. **回复队列**（`processReplyQueue`）：waiting_reply + answered 问题 → 续会话 → running，走并发闸门。
+6. **阻塞巡检**（`checkRunningCardsBlocked`，严格版）：仅当**最后一条是命令发起**
+   （bash toolCall 未见返回）且命令已执行超 `BLOCK_IDLE_MS=5min` 才交 AI 判定；
+   确认挂起（sync_server/infinite_loop）→ abort + tmux 引导重发；rate_limit 退避；
+   asking → waiting_reply；error → review。每卡冷却 `BLOCK_COOLDOWN_MS=10min`。
+
+**性能铁律**：审核/巡检/镜像一律走 `readSessionAuditSnapshot` **尾部反读**（最后 128KB，
+不足 4 条翻倍，上限 1MB）——绝不 `SessionManager.open().getEntries()` 全量解析会话文件
+（大会话会同步阻塞事件循环，这是历史上停用审核/巡检的直接原因）。
 
 ## 删除（确认制 + 事务）
 

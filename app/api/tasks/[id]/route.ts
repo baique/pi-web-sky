@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { deleteTask, getTask, listTaskSessionIds, updateTask } from "@/lib/task-store";
+import { loadTaskSessionsPage } from "@/lib/session-reader";
 import { deleteSessionTrees } from "@/lib/session-delete";
 import { destroyBoardYjsDocument, reconcileBoard } from "@/lib/board-reconcile";
 
-// GET /api/tasks/[id] → { task: { id, name, ... } | null }
-// 会话输入框 placeholder / 详情面板用：按任务 id 取单个任务（含名称与任务下会话）。
+// GET /api/tasks/[id][?offset=0&limit=5] → { task: { ...Task, sessions, rootTotal, sessionTotal, pinnedSessionIds } }
+// 会话输入框 placeholder / 详情面板用：按任务 id 取单个任务。
+// 带 offset → 只算该任务会话详情分页（任务区“加载更多”走这里，不重扫整项目）。
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
@@ -14,6 +16,19 @@ export async function GET(
     const task = getTask(id);
     if (!task) {
       return NextResponse.json({ task: null }, { status: 404 });
+    }
+    const search = new URL(req.url).searchParams;
+    const rawOffset = Number(search.get("offset"));
+    const rawLimit = Number(search.get("limit"));
+    const hasPaging = search.has("offset") || search.has("limit");
+    if (hasPaging) {
+      const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 5;
+      const page = await loadTaskSessionsPage(id, offset, limit);
+      return NextResponse.json(
+        { task: { ...task, ...page } },
+        { headers: { "Cache-Control": "no-store" } },
+      );
     }
     return NextResponse.json({ task }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

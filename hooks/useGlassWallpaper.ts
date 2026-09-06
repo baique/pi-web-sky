@@ -6,13 +6,24 @@ import { useGlassScope } from "@/components/canvas/GlassScopeContext";
 /**
  * 消息列表预模糊壁纸切片（只针对图片壁纸）。
  *
- * 生成一张「视口对齐的模糊壁纸」图，挂到 <html> 的 --glass-bg-image：
- * 气泡用 background-attachment: fixed 引用它，显示自己视口位置那一块。
- * 滚动时图是静态的 → 浏览器只 blit，零实时 blur 计算；气泡保持完整模糊，
- * 不降级显示效果。
+ * 生成「视口对齐的模糊壁纸」图，挂到 <html> 的 CSS 变量：
+ * - --glass-bg-image        气泡档（bubbleBlur）：消息气泡背景
+ * - --glass-bg-image-heavy  chrome 档（固定 12px）：侧栏/顶栏等 chrome
+ * - --glass-bg-image-scrim  画布 scrim 档（scrimBlur）：CanvasStage 的 scrim 层
+ * - --glass-bg-image-card   卡片叠加档（bubbleBlur+scrimBlur）：画布卡片局部贴图
  *
- * 触发重新生成：换壁纸 / offsetX 拖拽 / repeat / fill / bubbleBlur 滑块 / resize。
- * 无图片壁纸（含视频）时不生成，气泡/卡片纯色跟随主题（不写 backdrop-filter）。
+ * 滚动/拖拽时图是静态的 → 浏览器只 blit，零实时 blur 计算；玻璃保持完整
+ * 模糊，不降级显示效果。
+ *
+ * 画布 scrim 混合渲染（任务卡 #17）：磨砂滑块变化时，applyWallpaperCss 先写
+ * --board-scrim-filter（实时 backdrop-filter）→ 即时反馈；本 hook 防抖异步生成
+ * scrim/card 两张图，成功后摘掉 --board-scrim-filter → 稳态零实时 blur。
+ * 滑块再动 → applyWallpaperCss 重新挂上 blur → 循环。视觉从 blur 切换到
+ * canvas 预模糊图（×0.75 校准），同一帧完成，几乎无跳变。
+ *
+ * 触发重新生成：换壁纸 / offsetX 拖拽 / repeat / fill / bubbleBlur / scrimBlur
+ * 滑块 / resize。无图片壁纸时不生成，气泡/卡片/chrome/scrim 各自回退
+ * （纯色跟随主题 / 保留 backdrop-filter）。
  */
 
 type GlassSettings = {
@@ -20,21 +31,24 @@ type GlassSettings = {
   repeat: boolean;
   fill: boolean;
   bubbleBlur: number;
+  /** 画布 scrim 磨砂强度（px）：scrim 层档 + 卡片叠加档（任务卡 #17） */
+  scrimBlur: number;
 };
 
 /** chrome 档模糊半径，与 globals.css 的 --glass-blur-heavy 保持一致（12px）。 */
 const HEAVY_BLUR = 12;
+const BLUR_ATTENUATION = 0.75;
+const PREVIEW_RENDER_SCALE = 0.25;
 
 /** 生成降采样比例：模糊图对清晰度不敏感，输出降采样后成本大幅下降（显示时
  *  100% 拉伸，模糊视觉几乎无差异）。 */
 const RENDER_SCALE = 0.5;
 
 /** 重新生成防抖间隔（ms）：拖动滑块/拖 offsetX 期间不生成，停顿后才生成一次。
- *  需要足够大：慢速拖动（每格间隔 < 该值）不会触发逐格全屏重算。 */
-const REGEN_DEBOUNCE_MS = 400;
+ *  与 PREVIEW_DEBOUNCE_MS 同档：松手后快速生效（任务卡 #17 体验优化）。 */
+const REGEN_DEBOUNCE_MS = 120;
 
-/** 拖动中气泡档实时预览的防抖间隔（ms）：停顿稍久就重算气泡模糊图，
- *  比全局提交的 400ms 更跟手，实现“边拖边预览”。 */
+/** 拖动中实时预览的防抖间隔（ms）：停顿稍久就重算，实现"边拖边预览"。 */
 const PREVIEW_DEBOUNCE_MS = 120;
 
 // 拖动中实时预览所需的模块级上下文（由 useGlassWallpaper 维护）
@@ -42,11 +56,15 @@ let lastBgUrl: string | null = null;
 let lastSettings: GlassSettings | null = null;
 let previewTimer: number | undefined;
 let previewUrl: string | null = null;
+let previewCardUrl: string | null = null;
 let previewGen = 0; // 递增版本号：旧的预览生成完成后丢弃，防止覆盖新图
 
 /**
- * 拖动磨砂滑块时的实时预览：只重算气泡档（bubble）模糊图并更新
- * --glass-bg-image，不碰 chrome（heavy 档），也不触发 AppShell 重渲染。
+ * 拖动气泡滑块时的实时预览：并行重算气泡档（bubble）与卡片叠加档（card）
+ * 模糊图，同时更新 --glass-bg-image / --glass-bg-image-card——气泡滑块同时
+ * 影响全局气泡和卡片背景，拖拽中两张图都要跟手。
+ * 不碰 chrome（heavy 档）与画布 scrim 层图（--glass-bg-image-scrim 不依赖
+ * 气泡，scrim 滑块变化时才重算），也不触发 AppShell 重渲染。
  * 防抖：连续拖动只重算最后一次；松手后的 updateWallSettings 才是最终提交。
  */
 export function previewBubbleBlur(blur: number) {
@@ -54,15 +72,29 @@ export function previewBubbleBlur(blur: number) {
   const gen = ++previewGen;
   if (previewTimer) window.clearTimeout(previewTimer);
   previewTimer = window.setTimeout(async () => {
-    const url = await generateGlassImage(lastBgUrl!, blur, lastSettings!);
-    if (!url || gen !== previewGen) {
+    const st = lastSettings!;
+    const [b, c] = await Promise.all([
+      generateGlassImage(lastBgUrl!, Math.round(blur * BLUR_ATTENUATION), st, PREVIEW_RENDER_SCALE),
+      // 卡片叠加档：拖动中的气泡值 + 当前 scrim 值
+      generateGlassImage(lastBgUrl!, Math.round((blur + st.scrimBlur) * BLUR_ATTENUATION), st, PREVIEW_RENDER_SCALE),
+    ]);
+    if (gen !== previewGen) {
       // 已有更新的预览/正式生成，丢弃这次结果
-      if (url) URL.revokeObjectURL(url);
+      if (b) URL.revokeObjectURL(b);
+      if (c) URL.revokeObjectURL(c);
       return;
     }
-    if (previewUrl && previewUrl !== url) URL.revokeObjectURL(previewUrl);
-    previewUrl = url;
-    document.documentElement.style.setProperty("--glass-bg-image", `url("${url}")`);
+    const el = document.documentElement.style;
+    if (b) {
+      if (previewUrl && previewUrl !== b) URL.revokeObjectURL(previewUrl);
+      previewUrl = b;
+      el.setProperty("--glass-bg-image", `url("${b}")`);
+    }
+    if (c) {
+      if (previewCardUrl && previewCardUrl !== c) URL.revokeObjectURL(previewCardUrl);
+      previewCardUrl = c;
+      el.setProperty("--glass-bg-image-card", `url("${c}")`);
+    }
   }, PREVIEW_DEBOUNCE_MS);
 }
 
@@ -72,6 +104,8 @@ function clearPreviewState() {
   previewTimer = undefined;
   if (previewUrl) URL.revokeObjectURL(previewUrl);
   previewUrl = null;
+  if (previewCardUrl) URL.revokeObjectURL(previewCardUrl);
+  previewCardUrl = null;
 }
 
 /** 当前是否有玻璃壁纸图（供 MessageView 切换 backdrop-filter 用）。 */
@@ -117,9 +151,10 @@ async function generateGlassImage(
   bgUrl: string,
   blur: number,
   s: GlassSettings,
+  renderScale: number = RENDER_SCALE,
 ): Promise<string | null> {
-  // dpr 含降采样：分辨率 = 视口 × devicePixelRatio × RENDER_SCALE
-  const dpr = (window.devicePixelRatio || 1) * RENDER_SCALE;
+  // dpr 含降采样：分辨率 = 视口 × devicePixelRatio × renderScale
+  const dpr = (window.devicePixelRatio || 1) * renderScale;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const pad = Math.max(1, Math.ceil(blur));
@@ -171,8 +206,14 @@ async function generateGlassImage(
   return blob ? URL.createObjectURL(blob) : null;
 }
 
+/** 摘掉画布 scrim 的实时 backdrop-filter（混合渲染：贴图就绪后切稳态）。 */
+function clearScrimFilter() {
+  const el = document.documentElement.style;
+  el.setProperty("--board-scrim-filter", "none");
+}
+
 /**
- * 生成器 hook：图片壁纸时生成模糊图并设置 --glass-bg-image，否则清除。
+ * 生成器 hook：图片壁纸时生成模糊图并设置各 CSS 变量，否则清除。
  * 同时把「有无玻璃图」同步给 useGlassActive 订阅者（气泡/卡片据此决定
  * 是否叠壁纸图；画布内由 useGlassScope 强制不叠，见 GlassScopeContext）。
  */
@@ -182,6 +223,8 @@ export function useGlassWallpaper(
   settings: GlassSettings,
   resizeTick: number = 0,
 ) {
+  // bubble 档（--glass-bg-image）：消息气泡预模糊壁纸 + 记录预览上下文。
+  // 无图时统一清理四类变量并回退 chrome 的 backdrop-filter。
   useEffect(() => {
     const html = document.documentElement;
     // 记录模块级上下文，供拖动中 previewBubbleBlur 使用
@@ -191,35 +234,26 @@ export function useGlassWallpaper(
       clearPreviewState();
       html.style.removeProperty("--glass-bg-image");
       html.style.removeProperty("--glass-bg-image-heavy");
+      html.style.removeProperty("--glass-bg-image-scrim");
+      html.style.removeProperty("--glass-bg-image-card");
       // 无图时 chrome 回退原 backdrop-filter（组件内联 blur 配方）
       setGlassActive(false);
       return;
     }
     let cancelled = false;
     let bubbleUrl: string | null = null;
-    let heavyUrl: string | null = null;
     const run = async () => {
-      const [b, h] = await Promise.all([
-        generateGlassImage(bgUrl, settings.bubbleBlur, settings),
-        generateGlassImage(bgUrl, HEAVY_BLUR, settings),
-      ]);
+      const blur = Math.round(settings.bubbleBlur * BLUR_ATTENUATION);
+      const b = await generateGlassImage(bgUrl, blur, settings);
       if (cancelled) {
         if (b) URL.revokeObjectURL(b);
-        if (h) URL.revokeObjectURL(h);
         return;
       }
-      // 平滑替换：新图就绪后替换旧图并释放旧 URL。
-      // cleanup 不清 CSS 变量——拖动中旧图一直保留，避免全局区/气泡闪烁。
       if (bubbleUrl && bubbleUrl !== b) URL.revokeObjectURL(bubbleUrl);
-      if (heavyUrl && heavyUrl !== h) URL.revokeObjectURL(heavyUrl);
       bubbleUrl = b;
-      heavyUrl = h;
       if (b) html.style.setProperty("--glass-bg-image", `url("${b}")`);
       else html.style.removeProperty("--glass-bg-image");
-      if (h) html.style.setProperty("--glass-bg-image-heavy", `url("${h}")`);
-      else html.style.removeProperty("--glass-bg-image-heavy");
-      const has = !!(b && h);
-      setGlassActive(has);
+      setGlassActive(!!b);
     };
     // 防抖：连续变化（滑块拖动/拖 offsetX）期间不生成，停顿后才生成一次
     const timer = window.setTimeout(run, REGEN_DEBOUNCE_MS);
@@ -229,6 +263,82 @@ export function useGlassWallpaper(
       clearPreviewState();
     };
   }, [bgUrl, isImage, settings.offsetX, settings.repeat, settings.fill, settings.bubbleBlur, resizeTick]);
+
+  // chrome 档（--glass-bg-image-heavy，固定 12px）：侧栏/顶栏等 chrome 预模糊壁纸。
+  // 独立 effect 且不依赖 bubbleBlur——气泡滑块变化不重算它（fixed 档与气泡无关）。
+  useEffect(() => {
+    const html = document.documentElement;
+    if (!bgUrl || !isImage) {
+      html.style.removeProperty("--glass-bg-image-heavy");
+      return;
+    }
+    let cancelled = false;
+    let heavyUrl: string | null = null;
+    const run = async () => {
+      const blur = Math.round(HEAVY_BLUR * BLUR_ATTENUATION);
+      const h = await generateGlassImage(bgUrl, blur, settings);
+      if (cancelled) {
+        if (h) URL.revokeObjectURL(h);
+        return;
+      }
+      if (heavyUrl && heavyUrl !== h) URL.revokeObjectURL(heavyUrl);
+      heavyUrl = h;
+      if (h) html.style.setProperty("--glass-bg-image-heavy", `url("${h}")`);
+      else html.style.removeProperty("--glass-bg-image-heavy");
+    };
+    const timer = window.setTimeout(run, REGEN_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [bgUrl, isImage, settings.offsetX, settings.repeat, settings.fill, resizeTick]);
+
+  // 画布 scrim 层图（--glass-bg-image-scrim，blur = scrimBlur）+ 卡片叠加图
+  // （--glass-bg-image-card，blur = bubbleBlur + scrimBlur）双图生成（任务卡 #17）。
+  // 磨砂滑块变化时两张图都重算；卡片叠加图在气泡滑块变化时也重算。
+  // 两张图都生成成功后摘掉 --board-scrim-filter（实时 blur → 稳态贴图）；
+  // 失败（无图/取消）不清 filter，保留实时 blur 兜底。
+  useEffect(() => {
+    const html = document.documentElement;
+    if (!bgUrl || !isImage) {
+      html.style.removeProperty("--glass-bg-image-scrim");
+      html.style.removeProperty("--glass-bg-image-card");
+      return;
+    }
+    let cancelled = false;
+    let scrimUrl: string | null = null;
+    let cardUrl: string | null = null;
+    const run = async () => {
+      // 0.75 为 canvas blur 相对 css blur 的视觉校准：canvas 预模糊与 css
+      // backdrop-filter 观感对齐，切换瞬间不跳变。
+      const scrimBlur = Math.round(settings.scrimBlur * BLUR_ATTENUATION);
+      const cardBlur = Math.round((settings.bubbleBlur + settings.scrimBlur) * BLUR_ATTENUATION);
+      const [s, c] = await Promise.all([
+        generateGlassImage(bgUrl, scrimBlur, settings),
+        generateGlassImage(bgUrl, cardBlur, settings),
+      ]);
+      if (cancelled) {
+        if (s) URL.revokeObjectURL(s);
+        if (c) URL.revokeObjectURL(c);
+        return;
+      }
+      if (scrimUrl && scrimUrl !== s) URL.revokeObjectURL(scrimUrl);
+      if (cardUrl && cardUrl !== c) URL.revokeObjectURL(cardUrl);
+      scrimUrl = s;
+      cardUrl = c;
+      if (s) html.style.setProperty("--glass-bg-image-scrim", `url("${s}")`);
+      else html.style.removeProperty("--glass-bg-image-scrim");
+      if (c) html.style.setProperty("--glass-bg-image-card", `url("${c}")`);
+      else html.style.removeProperty("--glass-bg-image-card");
+      // 稳态切换：两张图都就绪才摘实时 blur；任一失败保留 blur 兜底
+      if (s && c) clearScrimFilter();
+    };
+    const timer = window.setTimeout(run, REGEN_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [bgUrl, isImage, settings.offsetX, settings.repeat, settings.fill, settings.bubbleBlur, settings.scrimBlur, resizeTick]);
 }
 
 /** 视口尺寸变化（resize）时触发重新生成。由 AppShell 组合进 useGlassWallpaper。 */

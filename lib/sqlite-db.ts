@@ -88,7 +88,7 @@ export function initSchema(db: DatabaseSync): void {
  * 老库打开时自动按序补齐缺失的迁移（每个迁移一个事务，成功后推进版本号），
  * 新库建表后从 v0 一路迁到 SCHEMA_VERSION。重复打开不再执行已完成的迁移。
  */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 11;
 
 interface Migration {
   version: number;
@@ -185,6 +185,33 @@ const MIGRATIONS: Migration[] = [
       // 心跳过期被接管）才判定状态，使「谁判定某张卡」确定。
       "ALTER TABLE task_cards ADD COLUMN owner TEXT NULL;",
       "ALTER TABLE task_cards ADD COLUMN heartbeat INTEGER NOT NULL DEFAULT 0;",
+    ],
+  },
+  {
+    version: 10,
+    name: "scheduler_leader (单调度者注册)",
+    statements: [
+      // 多实例共库时改为「唯一调度者」：lib/scheduler-leader.ts 用本表单行注册，
+      // 谁先注册谁是唯一调度者，心跳续期，过期（LEADER_STALE_MS）其他实例可接管。
+      // 单一调用方，无并发写（每次间隔一个事务），不需要额外索引。
+      "CREATE TABLE IF NOT EXISTS scheduler_leader (\n  id            INTEGER PRIMARY KEY,\n  instance_id   TEXT NOT NULL,\n  registered_at INTEGER NOT NULL,\n  heartbeat     INTEGER NOT NULL\n);",
+    ],
+  },
+  {
+    version: 11,
+    name: "session_meta 升格会话完整索引（列表重构 v2）",
+    statements: [
+      // 后台扫描器全量建行后，session_meta 从「任务/置顶旁路」扩展为会话完整索引。
+      // 归属判据仍只看 task_id（看板 reconcile 兼容），普通聊天会话行 task_id=NULL 常驻。
+      "ALTER TABLE session_meta ADD COLUMN path TEXT;",
+      "ALTER TABLE session_meta ADD COLUMN cwd TEXT;",
+      "ALTER TABLE session_meta ADD COLUMN project_key TEXT;",
+      "ALTER TABLE session_meta ADD COLUMN title TEXT;",
+      "ALTER TABLE session_meta ADD COLUMN first_message TEXT;",
+      "ALTER TABLE session_meta ADD COLUMN parent_id TEXT;",
+      "ALTER TABLE session_meta ADD COLUMN created INTEGER;",
+      "ALTER TABLE session_meta ADD COLUMN modified INTEGER;",
+      "CREATE INDEX IF NOT EXISTS idx_meta_project_modified ON session_meta(project_key, modified DESC);",
     ],
   },
 ];

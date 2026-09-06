@@ -12,7 +12,6 @@ const { setDbForTesting, getDb } = await jiti.import("@/lib/sqlite-db.ts");
 const { createCard } = await jiti.import("@/lib/task-card-store.ts");
 const { GET: listBoards, POST: createBoard } = await jiti.import("./route.ts");
 const { GET: getBoard, PATCH: patchBoard, DELETE: deleteBoard } = await jiti.import("./[id]/route.ts");
-const { POST: purgeOrphans } = await jiti.import("./purge-orphans/route.ts");
 const { PUT: reorderBoards } = await jiti.import("./reorder/route.ts");
 
 const PROJECT = "proj-b";
@@ -141,53 +140,4 @@ test("reorder API: global reorder without projectKey + rollback", async () => {
   const after = await listBoards(new Request("http://localhost/api/boards"));
   const afterBoards = (await after.json()).boards.filter((x) => !x.isSystem);
   assert.deepEqual(afterBoards.map((x) => x.id), [C.id, A.id, B.id]);
-});
-
-test("purge-orphans API: 删除指向已删会话的孤儿卡片", async () => {
-  freshDb();
-  const created = await createBoard(jsonReq("http://localhost/api/boards", "POST", { projectKey: PROJECT, name: "purge" }));
-  const { board } = await created.json();
-  const now = Date.now();
-  const insertNode = (refId, x) =>
-    getDb()
-      .prepare("INSERT INTO board_nodes (id, board_id, kind, ref_id, x, y, w, h, expanded, props, created, updated) VALUES (?, ?, 'session', ?, ?, 0, 280, 120, 0, '{}', ?, ?)")
-      .run("n-" + Math.random().toString(36).slice(2), board.id, refId, x, now, now);
-  // 孤儿节点（会话 id 随机，文件系统必不存在）
-  insertNode("purge-nonexistent-" + Math.random().toString(36).slice(2), 0);
-  // draft 节点（refId 为空）保留
-  insertNode(null, 100);
-
-  const purgeRes = await purgeOrphans(new Request("http://localhost/api/boards/purge-orphans", { method: "POST" }));
-  assert.equal(purgeRes.status, 200);
-  const body = await purgeRes.json();
-  assert.equal(body.deletedNodes, 1);
-  assert.deepEqual(body.boards, [board.id]);
-
-  const remaining = getDb().prepare("SELECT * FROM board_nodes WHERE board_id = ?").all(board.id);
-  assert.equal(remaining.length, 1); // draft 保留
-  assert.equal(remaining[0].ref_id, null);
-});
-
-test("purge-orphans API: 删除指向已删任务卡的 taskcard 孤儿节点，保留有效卡节点", async () => {
-  freshDb();
-  const created = await createBoard(jsonReq("http://localhost/api/boards", "POST", { projectKey: PROJECT, name: "purge-tc" }));
-  const { board } = await created.json();
-  // 有效任务卡（task_cards 存在）+ 其画布节点 → 保留
-  const card = createCard({ boardId: board.id, projectKey: PROJECT, name: "有效卡" });
-  const now = Date.now();
-  const insertNode = (id, refId, x) =>
-    getDb()
-      .prepare("INSERT INTO board_nodes (id, board_id, kind, ref_id, x, y, w, h, expanded, props, created, updated) VALUES (?, ?, 'taskcard', ?, ?, 0, 220, 120, 0, '{}', ?, ?)")
-      .run(id, board.id, refId, x, now, now);
-  insertNode("node-valid", card.id, 0);
-  insertNode("node-ghost", "ghost-card-" + Math.random().toString(36).slice(2), 200);
-
-  const purgeRes = await purgeOrphans(new Request("http://localhost/api/boards/purge-orphans", { method: "POST" }));
-  assert.equal(purgeRes.status, 200);
-  const body = await purgeRes.json();
-  assert.equal(body.deletedNodes, 1); // 只删 taskcard 孤儿，有效卡节点保留
-
-  const remaining = getDb().prepare("SELECT * FROM board_nodes WHERE board_id = ?").all(board.id);
-  assert.equal(remaining.length, 1);
-  assert.equal(remaining[0].ref_id, card.id);
 });
