@@ -463,11 +463,31 @@ export function useBoardCanvas({
   const sessionTitlesRef = useRef<Record<string, SessionSummary>>({});
   sessionTitlesRef.current = sessionTitles;
   const summariesInFlightRef = useRef(false);
+  // 点查画布上实际存在的会话卡，不依赖外部全量列表（B 组重构）。
   const loadSessionSummaries = useCallback(async () => {
     if (summariesInFlightRef.current) return;
     summariesInFlightRef.current = true;
     try {
-      const res = await fetch("/api/sessions", { cache: "no-store" });
+      // 画布上所有 session-card 的 id（含新建占位卡 cwd 非空——占位卡无真实会话，跳过）
+      const nodesMap = nodesMapRef.current;
+      if (!nodesMap) return;
+      const ids: string[] = [];
+      for (const node of Array.from(nodesMap.values())) {
+        if (node?.type !== "session-card") continue;
+        const d = node.data as { sessionId?: string; cwd?: string } | undefined;
+        if (!d?.sessionId || d.cwd) continue; // cwd 非空 = 未落盘占位卡
+        ids.push(d.sessionId);
+      }
+      if (ids.length === 0) {
+        setSessionTitles({});
+        return;
+      }
+      const res = await fetch("/api/sessions/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+        cache: "no-store",
+      });
       if (!res.ok) return;
       const data = (await res.json()) as { sessions: Array<{ id: string; name?: string; firstMessage?: string; messageCount?: number; projectKey?: string; projectRoot?: string; cwd?: string; lastReply?: string; modified?: string; worktreeBranch?: string; isWorktree?: boolean }> };
       const map: Record<string, SessionSummary> = {};

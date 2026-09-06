@@ -781,3 +781,50 @@ export function extractTurnIndex(entries: SessionEntry[], leafId: string | null)
   }
   return turns;
 }
+
+/**
+ * 按 id 批量点查会话摘要（看板卡片轮询用，替代全量列表自筛）。
+ *
+ * 画布上有几张会话卡就查几个 id——先查 session_meta 拿 path（扫描器已全量
+ * 建索引，避免 resolveSessionPath 对 miss 触发全量扫盘），再 scanOneSessionFile
+ * 读头尾（name=自定义名/firstMessage/lastReply/mtime），最后 attachSessionProjectInfo
+ * 补 projectRoot/branch 等 UI 字段。查不到（id 不存在）跳过。
+ */
+export async function loadSessionSummariesByIds(ids: string[]): Promise<SessionInfo[]> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return [];
+
+  // meta 索引拿 path（扫描器维护；未索引的新会话走 resolveSessionPath 兜底）
+  const rows = new Map<string, string | null>();
+  try {
+    const found = getDb()
+      .prepare("SELECT session_id, path FROM session_meta WHERE session_id IN (" + unique.map(() => "?").join(",") + ")")
+      .all(...unique) as Array<{ session_id: string; path: string | null }>;
+    for (const r of found) rows.set(r.session_id, r.path);
+  } catch {
+    // db 不可用 → 全部走 resolveSessionPath 兜底
+  }
+
+  const sessions: SessionInfo[] = [];
+  for (const id of unique) {
+    let filePath = rows.get(id) ?? null;
+    if (!filePath) filePath = await resolveSessionPath(id);
+    if (!filePath) continue;
+    const scanned = scanOneSessionFile(filePath);
+    if (!scanned) continue;
+    cacheSessionPath(id, scanned.path);
+    sessions.push({
+      path: scanned.path,
+      id: scanned.id,
+      cwd: scanned.cwd,
+      name: scanned.name,
+      created: scanned.created.toISOString(),
+      modified: scanned.modified.toISOString(),
+      messageCount: 0,
+      firstMessage: scanned.firstMessage || "(no messages)",
+      lastReply: scanned.lastReply || "",
+      transient: false,
+    });
+  }
+  return attachSessionProjectInfo(sessions);
+}
