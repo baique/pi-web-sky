@@ -261,6 +261,46 @@ export function taskNameForSession(sessionId: string): string | null {
  * 使置顶/最近排序生效；会话原本在其他任务下则移动（ON CONFLICT 更新）。
  * 会话创建完成时由服务端调用，避免前端两跳 PATCH 造成的“先临时区后任务”窗口。
  */
+/** 新建会话落盘即建全列索引行（先于会话真正运行）。
+ *  调用方拿到的 path/cwd/project_key/parent 等此时全部已知——会话从出生就是
+ *  完整索引行，读取（列表/任务区/看板）不再依赖扫描器补列，也不退化扫盘。
+ *  ON CONFLICT 只补索引列、不碰 task_id/pinned/title（归属/置顶/改名各自管）。 */
+export function ensureSessionMetaRow(sessionId: string, row: {
+  path: string;
+  cwd: string;
+  projectKey: string;
+  parentId?: string;
+  firstMessage?: string;
+  title?: string;
+}): void {
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO session_meta
+       (session_id, task_id, updated, pinned, path, cwd, project_key, title, first_message, parent_id, created, modified)
+     VALUES (?, NULL, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(session_id) DO UPDATE SET
+       path = excluded.path,
+       cwd = excluded.cwd,
+       project_key = excluded.project_key,
+       first_message = excluded.first_message,
+       parent_id = excluded.parent_id,
+       created = excluded.created,
+       modified = excluded.modified`,
+  ).run(
+    sessionId,
+    now(),
+    row.path,
+    row.cwd,
+    row.projectKey,
+    row.title ?? null,
+    row.firstMessage ?? null,
+    row.parentId ?? null,
+    now(),
+    now(),
+  );
+  invalidateSessionListCache();
+}
+
 export function assignSessionToTask(sessionId: string, taskId: string): boolean {
   const db = getDb();
   const task = getTaskRow(taskId);

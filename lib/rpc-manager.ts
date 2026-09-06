@@ -13,6 +13,8 @@ import {
   preferUserBashExtension,
 } from "./project-command-env";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
+import { resolveProject } from "./worktree";
+import { ensureSessionMetaRow } from "./task-store";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
@@ -1402,7 +1404,7 @@ function trackStartingSession(cwd: string): () => void {
  * 落盘，刷新后 /api/sessions 读不到该会话，绑定就会“丢失”。
  * 调用后 manager 的后续 append 走 appendFileSync（见 SDK _persist）。
  */
-function persistNewSessionFile(manager: SessionManager, sessionId: string): void {
+async function persistNewSessionFile(manager: SessionManager, sessionId: string): Promise<void> {
   const sessionFile = manager.getSessionFile();
   if (!sessionFile || existsSync(sessionFile)) return;
   const header = manager.getHeader();
@@ -1413,6 +1415,23 @@ function persistNewSessionFile(manager: SessionManager, sessionId: string): void
   writeFileSync(sessionFile, content, { encoding: "utf8", flag: "wx" });
   (manager as unknown as { flushed: boolean }).flushed = true;
   cacheSessionPath(sessionId, sessionFile);
+
+  // 落盘即建全列索引行：会话从出生就是完整索引（先于会话真正运行）。
+  // project_key 需 resolveProject（可能 git 调用），在落盘后异步补齐；
+  // 行已落库，期间列表读取由 runtime union 覆盖，不退化扫盘。
+  // first_message 此刻恒空（刚创建无消息），由扫描器下一轮补。
+  const cwd = manager.getCwd();
+  try {
+    const project = await resolveProject(cwd ?? "");
+    ensureSessionMetaRow(sessionId, {
+      path: sessionFile,
+      cwd: cwd ?? "",
+      projectKey: project?.projectRoot ?? cwd ?? "",
+      parentId: typeof header.parentSession === "string" ? header.parentSession : undefined,
+    });
+  } catch {
+    // 建行失败不阻塞开会话：扫描器下一轮兜底补行。
+  }
 }
 
 export function getRpcSession(sessionId: string): AgentSessionWrapper | undefined {
@@ -1583,7 +1602,7 @@ export async function startRpcSession(
     const isExplicitId = sessionId.length > 0 && !sessionId.startsWith("__");
     sessionManager = SessionManager.create(cwd, undefined, isExplicitId ? { id: sessionId } : undefined);
     // 创建即落盘：会话文件从出生就在磁盘，刷新后绑定不丢（见 persistNewSessionFile）。
-    if (isExplicitId) persistNewSessionFile(sessionManager, sessionId);
+    if (isExplicitId) await persistNewSessionFile(sessionManager, sessionId);
   }
   const sessionCwd = sessionManager.getCwd();
   const finishStartingSession = trackStartingSession(sessionCwd);
