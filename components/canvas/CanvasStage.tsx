@@ -200,8 +200,9 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
       const sid = dt.getData("text/session-id");
       if (sid) {
         // 任务看板拖入 = 加入任务：addSessionNode 内部先写 session_meta 归属、成功才落卡
-        // （失败不落卡，不留无保护窗口卡）
-        void board.addSessionNode(sid, pos.x, pos.y);
+        // （失败不落卡，不留无保护窗口卡）。标题随拖拽源带来，落卡即带标题。
+        const dropTitle = dt.getData("text/session-title") || undefined;
+        void board.addSessionNode(sid, pos.x, pos.y, dropTitle);
         return;
       }
       const tool = dt.getData("text/board-tool");

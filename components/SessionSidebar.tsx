@@ -2213,6 +2213,8 @@ function SessionItem({
       onDragStart={(e) => {
         setMoreOpen(false);
         e.dataTransfer.setData("text/session-id", session.id);
+        // 拖入画布自带标题：dataTransfer 带 session 名，画布落卡直接可用（不依赖轮询）
+        e.dataTransfer.setData("text/session-title", title);
         e.dataTransfer.effectAllowed = "move";
       }}
       style={{

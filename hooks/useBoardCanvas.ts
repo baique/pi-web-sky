@@ -42,8 +42,8 @@ export type SessionSummary = {
   isWorktree?: boolean;
 };
 
-/** 卡片标题/最后回复轮询间隔（ms） */
-const SUMMARY_POLL_MS = 10000;
+/** 卡片标题/最后回复轮询间隔（ms）。卡片只展示摘要，5s 足够。 */
+const SUMMARY_POLL_MS = 5000;
 /** running 快照轮询间隔（ms） */
 const RUNNING_POLL_MS = 2500;
 
@@ -463,7 +463,7 @@ export function useBoardCanvas({
   const sessionTitlesRef = useRef<Record<string, SessionSummary>>({});
   sessionTitlesRef.current = sessionTitles;
   const summariesInFlightRef = useRef(false);
-  // 点查画布上实际存在的会话卡，不依赖外部全量列表（B 组重构）。
+  // 点查画布上实际存在的会话卡（B 组重构：替代全量 /api/sessions 轮询自筛）。
   const loadSessionSummaries = useCallback(async () => {
     if (summariesInFlightRef.current) return;
     summariesInFlightRef.current = true;
@@ -717,7 +717,7 @@ export function useBoardCanvas({
    *   归属未到”的窗口，无需任何豁免字段。
    * - 普通看板：直接落卡（无派生 reconcile，不删）。
    */
-  const addSessionNode = useCallback(async (sessionId: string, x: number, y: number) => {
+  const addSessionNode = useCallback(async (sessionId: string, x: number, y: number, dropTitle?: string) => {
     const nodesMap = nodesMapRef.current;
     if (!nodesMap) return;
     const taskId = taskIdRef.current ?? boardRef.current?.taskId ?? null;
@@ -740,6 +740,8 @@ export function useBoardCanvas({
       dispatchBoardSessionCreated(sessionId);
     }
     // 落卡（任务看板：归属已落库；普通看板：直接落）
+    // 外部拖入的标题由拖拽源经 dataTransfer 带入（CanvasStage → title 参数），
+    // 不再落卡后依赖摘要轮询补齐——拖拽源自己就有标题。
     const summary = sessionTitlesRef.current[sessionId];
     const id = `session-${sessionId}`;
     const existing = nodesMap.get(id);
@@ -756,7 +758,7 @@ export function useBoardCanvas({
       style: { width: CARD_W, height: CARD_H },
       data: {
         sessionId,
-        title: summary?.title ?? "Untitled",
+        title: dropTitle ?? summary?.title ?? "Untitled",
         emoji: "💬",
         projectName: summary?.projectName ?? "",
         messageCount: summary?.messageCount ?? 0,
