@@ -10,21 +10,10 @@
  * 必须在 ReactFlowProvider + BoardSearchProvider 内渲染（useReactFlow / setHighlight）。
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useState } from "react";
 import { useReactFlow } from "@xyflow/react";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
-import type { SessionRunningState } from "@/hooks/useBoardCanvas";
-import { useBoardSearch } from "./BoardSearchContext";
 import { boardFloatGlass } from "./board-glass";
-
-/** session-card 运行中 phase（useBoardCanvas running 快照写入；waiting_input 视为待用户，不算运行） */
-const RUNNING_PHASES = new Set(["waiting_model", "running_tools", "running_command"]);
-
-/** 进行中项：运行中 / 工作中（展开态）的会话卡 */
-interface QueueItem {
-  nodeId: string;
-  label: string;
-}
 
 export function BoardTopbar({
   boardName,
@@ -35,8 +24,6 @@ export function BoardTopbar({
   onAddSessionCard,
   wallSettings,
   updateWallSettings,
-  nodes,
-  sessionRunning,
 }: {
   boardName: string;
   /** 任务看板：清空文案与可用性提示随此变化 */
@@ -49,84 +36,9 @@ export function BoardTopbar({
   onAddSessionCard: (flowPos?: { x: number; y: number }) => void;
   wallSettings: WallpaperSettings;
   updateWallSettings: (patch: Partial<WallpaperSettings>) => void;
-  /** 当前画布节点（yjs 派生，扫描运行中卡片用） */
-  nodes: Array<{ id: string; type: string; data: Record<string, unknown> }>;
-  /** 会话卡运行态镜像（useBoardCanvas 2.5s 轮询维护；yjs data.phase 是旧值，不能用于运行中判定） */
-  sessionRunning: Record<string, SessionRunningState>;
 }) {
-  const { setViewport, getViewport, getNodes, screenToFlowPosition } = useReactFlow();
-  const { setHighlight } = useBoardSearch();
+  const { screenToFlowPosition } = useReactFlow();
   const [scrimOpen, setScrimOpen] = useState(false);
-  const [queueOpen, setQueueOpen] = useState(false);
-
-  // 主胶囊宽度测量：弹出面板宽度跟随主胶囊对齐（看板名长度变化时同步）
-  const capsuleRef = useRef<HTMLDivElement | null>(null);
-  const [capsuleWidth, setCapsuleWidth] = useState(0);
-  useEffect(() => {
-    const el = capsuleRef.current;
-    if (!el) return;
-    const measure = () => setCapsuleWidth(el.getBoundingClientRect().width);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  /** 运行中：画面中 phase ∈ 运行中的会话卡（读实时镜像，yjs data.phase 是旧值）。 */
-  const runningItems = useMemo<QueueItem[]>(() => {
-    const out: QueueItem[] = [];
-    for (const n of nodes) {
-      if (n.type !== "session-card") continue;
-      const d = n.data as { phase?: string; title?: string; sessionId?: string };
-      if (!d.sessionId) continue;
-      const st = sessionRunning[d.sessionId];
-      const phase = st ? st.phase : d.phase;
-      const running = phase !== undefined && RUNNING_PHASES.has(phase);
-      if (!running) continue;
-      const title = (d.title ?? "").trim();
-      if (!title) continue;
-      out.push({ nodeId: n.id, label: title });
-    }
-    return out;
-  }, [nodes, sessionRunning]);
-
-  /** 工作中：画面中展开态（data.expanded）但未运行中的会话卡（运行中已入上区，去重）。 */
-  const expandedItems = useMemo<QueueItem[]>(() => {
-    const out: QueueItem[] = [];
-    for (const n of nodes) {
-      if (n.type !== "session-card") continue;
-      const d = n.data as { phase?: string; title?: string; sessionId?: string; expanded?: boolean };
-      if (!d.expanded || !d.sessionId) continue;
-      const st = sessionRunning[d.sessionId];
-      const phase = st ? st.phase : d.phase;
-      const running = phase !== undefined && RUNNING_PHASES.has(phase);
-      if (running) continue;
-      const title = (d.title ?? "").trim();
-      if (!title) continue;
-      out.push({ nodeId: n.id, label: title });
-    }
-    return out;
-  }, [nodes, sessionRunning]);
-
-  /** 角标总数：运行中 + 工作中 */
-  const totalCount = runningItems.length + expandedItems.length;
-
-  /** 定位卡片：节点平移到视口中心（保持缩放）+ accent 高亮描边渐隐（同看板 Ctrl+F） */
-  const locate = (nodeId: string) => {
-    const node = (getNodes() as Array<{ id: string; position: { x: number; y: number }; measured?: { width?: number; height?: number }; style?: { width?: number; height?: number } }>).find((n) => n.id === nodeId);
-    if (!node) return;
-    const w = node.measured?.width ?? node.style?.width ?? 340;
-    const h = node.measured?.height ?? node.style?.height ?? 160;
-    const cx = node.position.x + w / 2;
-    const cy = node.position.y + h / 2;
-    const vp = getViewport();
-    setViewport({
-      x: -cx * vp.zoom + window.innerWidth / 2,
-      y: -cy * vp.zoom + window.innerHeight / 2,
-      zoom: vp.zoom,
-    }, { duration: 300 });
-    setHighlight(nodeId);
-  };
 
   const newAtViewportCenter = () => {
     const pane = document.querySelector(".react-flow__pane");
@@ -138,8 +50,8 @@ export function BoardTopbar({
 
   return (
     <div style={{ position: "absolute", top: 12, left: 12, zIndex: 40, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, maxWidth: "min(420px, calc(100% - 320px))" }}>
-      {/* 主胶囊：看板名 + 刷新 + 新建/磨砂/清空 + 展开（进行中） */}
-      <div ref={capsuleRef} style={{
+      {/* 主胶囊：看板名 + 刷新 + 新建/磨砂/清空 */}
+      <div style={{
         ...boardFloatGlass,
         display: "flex", alignItems: "center", gap: 4, height: 36,
         padding: "0 6px 0 12px", borderRadius: 999,
@@ -224,34 +136,6 @@ export function BoardTopbar({
             <path d="m6 6 12 12" />
           </svg>
         </button>
-
-        {/* 展开：进行中 */}
-        <button
-          type="button"
-          onClick={() => setQueueOpen((v) => !v)}
-          title={queueOpen ? "收起进行中" : "展开进行中"}
-          aria-label={queueOpen ? "收起进行中" : "展开进行中"}
-          aria-expanded={queueOpen}
-          style={{
-            ...btnStyle,
-            color: queueOpen ? "var(--accent)" : "var(--text-muted)",
-            background: queueOpen ? "color-mix(in srgb, var(--accent) 12%, transparent)" : undefined,
-          }}
-          {...(queueOpen ? {} : iconHoverProps())}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: queueOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-          {totalCount > 0 && (
-            <span style={{
-              minWidth: 14, height: 14, padding: "0 4px", boxSizing: "border-box",
-              display: "inline-flex", alignItems: "center", justifyContent: "center",
-              borderRadius: 999, fontSize: 9.5, fontWeight: 700, lineHeight: 1,
-              background: "color-mix(in srgb, var(--accent) 18%, transparent)",
-              color: "var(--accent)",
-            }}>{totalCount}</span>
-          )}
-        </button>
       </div>
 
       {/* 磨砂滑块（展开时显示，原右上角浮层原样移入） */}
@@ -276,61 +160,6 @@ export function BoardTopbar({
         </div>
       )}
 
-      {/* 进行中（展开时显示）：运行中 + 工作中（展开态）的会话卡，点击定位 */}
-      {queueOpen && (
-        <div style={{ ...panelStyle, maxHeight: 360, overflowY: "auto", padding: 6, width: capsuleWidth || 300 }}>
-          {totalCount === 0 ? (
-            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-muted)" }}>画面中没有运行中或展开的会话</div>
-          ) : (
-            <>
-              {runningItems.length > 0 && (
-                <div style={{ padding: "4px 10px 2px", fontSize: 10.5, fontWeight: 600, color: "var(--text-muted)", letterSpacing: 0.2 }}>
-                  运行中 · {runningItems.length}
-                </div>
-              )}
-              {runningItems.map((item) => (
-                <button
-                  key={item.nodeId}
-                  type="button"
-                  onClick={() => locate(item.nodeId)}
-                  title="点击定位到卡片"
-                  style={queueItemStyle}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 10%, transparent)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                >
-                  <span aria-hidden style={{ flexShrink: 0, color: "var(--accent)", display: "inline-flex" }}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-                  </span>
-                  <span style={{ flexShrink: 0, width: 6, height: 6, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px 1px rgba(16,185,129,0.6)", animation: "pulse 1.6s ease-in-out infinite" }} />
-                  <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.label}</span>
-                </button>
-              ))}
-              {expandedItems.length > 0 && (
-                <div style={{ padding: "4px 10px 2px", fontSize: 10.5, fontWeight: 600, color: "var(--text-muted)", letterSpacing: 0.2 }}>
-                  工作中 · {expandedItems.length}
-                </div>
-              )}
-              {expandedItems.map((item) => (
-                <button
-                  key={item.nodeId}
-                  type="button"
-                  onClick={() => locate(item.nodeId)}
-                  title="点击定位到卡片"
-                  style={queueItemStyle}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 10%, transparent)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                >
-                  <span aria-hidden style={{ flexShrink: 0, color: "var(--accent)", display: "inline-flex" }}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M21 8V5a2 2 0 0 0-2-2h-3" /><path d="M3 16v3a2 2 0 0 0 2 2h3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" /></svg>
-                  </span>
-                  <span style={{ flexShrink: 0, width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", boxShadow: "0 0 6px 1px color-mix(in srgb, var(--accent) 45%, transparent)" }} />
-                  <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.label}</span>
-                </button>
-              ))}
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -364,15 +193,7 @@ function iconHoverProps() {
   };
 }
 
-/** 进行中列表项（运行中/工作中共用） */
-const queueItemStyle: React.CSSProperties = {
-  display: "flex", alignItems: "center", gap: 8, width: "100%",
-  padding: "6px 10px", border: "none", borderRadius: 8,
-  background: "transparent", color: "var(--text)", fontSize: 12.5,
-  textAlign: "left", cursor: "pointer",
-};
-
-/** 浮层面板（磨砂/进行中）的玻璃样式 */
+/** 浮层面板（磨砂）的玻璃样式 */
 const panelStyle: React.CSSProperties = {
   ...boardFloatGlass,
   display: "flex",

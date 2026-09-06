@@ -153,8 +153,6 @@ export function SessionCanvas({
           onAddSessionCard={(pos) => board.addNewSessionCard(pos)}
           wallSettings={wallSettings}
           updateWallSettings={updateWallSettings}
-          nodes={board.nodes as never}
-          sessionRunning={board.sessionRunning}
         />
       )}
       <SchedulerPanel nodes={board.nodes as never} onViewportSave={board.saveViewport} />

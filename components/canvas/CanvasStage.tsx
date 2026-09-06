@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReactFlow, Controls, MiniMap, useReactFlow, type NodeTypes, type EdgeTypes, type OnConnect, type Node, type Viewport } from "@xyflow/react";
+import { ReactFlow, MiniMap, useReactFlow, type NodeTypes, type EdgeTypes, type OnConnect, type Node, type Viewport } from "@xyflow/react";
 import { computeSnap, type SnapResult } from "@/lib/board-align";
 import "@xyflow/react/dist/style.css";
 import type { UseBoardCanvasReturn } from "@/hooks/useBoardCanvas";
@@ -15,6 +15,7 @@ import { SendNoteEdge } from "@/components/board/SendNoteEdge";
 import { BoardCanvasProvider, type BoardCanvasOps } from "@/components/board/BoardCanvasContext";
 import { BoardContextMenu, type BoardMenuState } from "@/components/board/BoardContextMenu";
 import { BoardLoading } from "./BoardLoading";
+import { BoardControls } from "./BoardControls";
 import { uploadBoardImage } from "@/lib/board-assets";
 import { dispatchBoardCwdSwitch } from "@/lib/board-events";
 import { boardFloatGlass } from "./board-glass";
@@ -560,7 +561,6 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               proOptions={{ hideAttribution: false }} // 保留 attribution（MIT 合规，决策点③）
               defaultEdgeOptions={{ markerEnd: { type: "arrowclosed" }, style: { strokeWidth: 1.5, stroke: "#8b8fa3" } }}
             >
-              <Controls position="bottom-left" showInteractive={false} />
               <MiniMap
                 pannable
                 zoomable
@@ -598,6 +598,8 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               })()}
             </ReactFlow>
             {menu && <BoardContextMenu menu={menu} onClose={() => setMenu(null)} />}
+            {/* 左下角工具区：放大/缩小/fit/进行中（玻璃质感，替代 RF 默认 Controls） */}
+            <BoardControls nodes={board.nodes as Array<{ id: string; type: string; data: Record<string, unknown> }>} sessionRunning={board.sessionRunning} />
             {/* 工具栏：会话/便笺/任务/文字/图片（底部居中玻璃浮层）。点击=当前视口中心创建；拖拽=拖放进画布落点创建 */}
             <div style={{ position: "absolute", left: 0, right: 0, bottom: 16, margin: "0 auto", width: "fit-content", zIndex: 30, display: "flex", gap: 4, padding: 4, borderRadius: 10, ...boardFloatGlass, border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)" }}>
               <ToolbarBtn label="会话" onClick={addSessionAtViewportCenter} onDragStart={(e) => onToolDragStart(e, "session-card")} />
