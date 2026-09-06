@@ -92,16 +92,28 @@ export function useCardGlass(bgToken: string, deps: unknown[] = []) {
   useEffect(() => {
     if (!nodeId) return;
     let raf = 0;
-    const schedule = () => {
+    // 记录上次 store 快照：subscribe 对每次 store 变化都回调（含 yjs 回灌等与本卡
+    // 无关的变化），若无条件 schedule 会驱动 rAF 60fps 空转 + 合成器持续唤醒
+    // （松手后 GPU 高位残留的元凶）。这里只在本节点位置或 viewport transform
+    // 真正变化时才调度。
+    let lastT = "";
+    const scheduleIfChanged = () => {
+      const s = storeApi.getState();
+      const node = s.nodeLookup.get(nodeId);
+      if (!node) return;
+      const zoom = s.transform[2];
+      const t = `${node.position.x.toFixed(2)}|${node.position.y.toFixed(2)}|${s.transform[0].toFixed(1)}|${s.transform[1].toFixed(1)}|${zoom.toFixed(4)}`;
+      if (t === lastT) return;
+      lastT = t;
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
         syncLayer();
       });
     };
-    // 监听所有变化，内部做廉价判断：只有本节点位置或 viewport 变了才调度
-    const unsub = storeApi.subscribe(() => schedule());
-    schedule();
+    // 监听所有变化，回调内廉价判断（读 store 快照比对），只有本节点位置或 viewport 变了才调度 rAF
+    const unsub = storeApi.subscribe(scheduleIfChanged);
+    scheduleIfChanged();
     return () => {
       unsub();
       if (raf) cancelAnimationFrame(raf);
