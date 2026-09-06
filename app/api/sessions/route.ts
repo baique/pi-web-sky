@@ -3,6 +3,7 @@ import {
   attachSessionProjectInfo,
   listAllSessions,
   loadChatSessionsPage,
+  loadProjectSessions,
   mergeSessionLists,
 } from "@/lib/session-reader";
 import { getRpcSessionInfos, getRunningRpcSessionIds } from "@/lib/rpc-manager";
@@ -10,12 +11,39 @@ import { listAllTaskSessionIds } from "@/lib/task-store";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/sessions[?force=1][&offset=0&limit=20]
-//   offset/limit 同时存在 → 聊天区两阶段分页（置顶全量 + 非置顶当前页 + total）
-//   不带分页参数 → 全量列表（看板标题映射 / 会话恢复等消费方兼容）
+// GET /api/sessions[?force=1][&offset=0&limit=20]  （旧调用方，分页保留过渡）
+// GET /api/sessions?project=<key>                 （列表重构 v2：单项目无分页）
+// GET /api/sessions                              （无参全量：看板标题映射/会话恢复兼容）
 export async function GET(req: Request) {
   try {
     const search = new URL(req.url).searchParams;
+    const projectKey = search.get("project");
+
+    if (projectKey) {
+      // 列表重构 v2 主路径：单项目会话，纯查 session_meta（loadProjectSessions），
+      // union 同项目运行中/未落盘 runtime 会话，服务端一次排好序。
+      const [persisted, runtime, runningIds] = await Promise.all([
+        loadProjectSessions(projectKey),
+        attachSessionProjectInfo(getRpcSessionInfos()),
+        Promise.resolve(getRunningRpcSessionIds()),
+      ]);
+      const taskSessionIds = listAllTaskSessionIds();
+      const persistedIds = new Set(persisted.map((s) => s.id));
+      const extraRuntime = runtime.filter(
+        (s) =>
+          s.projectKey === projectKey
+          && !taskSessionIds.has(s.id)
+          && !persistedIds.has(s.id),
+      );
+      return NextResponse.json(
+        {
+          sessions: [...persisted, ...extraRuntime],
+          runningSessionIds: runningIds,
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
     const force = search.get("force") === "1";
     const rawOffset = Number(search.get("offset"));
     const rawLimit = Number(search.get("limit"));

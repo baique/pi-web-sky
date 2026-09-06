@@ -95,3 +95,11 @@ test("live detail and state routes work without a persisted JSONL file", async (
     state: { isStreaming: true },
   });
 });
+
+test("session listing supports the v2 project-scoped path (no pagination)", () => {
+  assert.match(listRoute, /search\.get\("project"\)/);
+  assert.match(listRoute, /loadProjectSessions\(projectKey\)/);
+  assert.match(listRoute, /s\.projectKey === projectKey/);
+  // 单项目路径无分页字段
+  assert.match(listRoute, /sessions: \[\.\.\.persisted, \.\.\.extraRuntime\]/);
+});
