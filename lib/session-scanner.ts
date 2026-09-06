@@ -120,6 +120,36 @@ function scanHead(path: string, size: number): { header: HeaderEntry; firstMessa
 const NAME_BLOCK_BYTES = 64 * 1024;
 const NAME_MAX_BLOCKS = 256; // 约 16MB，超出视为无名字
 
+/** 轻量头部扫描：只读 header + 首条用户消息，不读尾部（索引扫描器建行用，
+ *  区别于 scanOneSessionFile——后者还会反向读尾部拿自定义名/lastReply）。 */
+export function scanOneSessionHead(path: string): { path: string; id: string; cwd: string; created: Date; firstMessage: string; parentSessionPath: string | undefined } | null {
+  let stat;
+  try {
+    stat = statSync(path);
+  } catch {
+    return null;
+  }
+  if (!stat.isFile() || stat.size === 0) return null;
+
+  const scanned = scanHead(path, stat.size);
+  if (!scanned) return null;
+  const { header, firstMessage } = scanned;
+
+  const id = typeof header.id === "string" ? header.id : "";
+  if (!id) return null;
+  const created = new Date(typeof header.timestamp === "string" ? header.timestamp : "");
+  if (Number.isNaN(created.getTime())) created.setTime(stat.mtime.getTime());
+
+  return {
+    path,
+    id,
+    cwd: typeof header.cwd === "string" ? header.cwd : "",
+    created,
+    firstMessage: firstMessage || "",
+    parentSessionPath: typeof header.parentSession === "string" ? header.parentSession : undefined,
+  };
+}
+
 /** 读取文件尾部：最后一个 session_info 的自定义名 + 最后一条 assistant 回复。
  *  同一趟反向分块里同时取两样：名字（显式清空 → undefined）、
  *  lastReply（最后一个 text 块，完整不截断）。返回 { name, lastReply }。 */
