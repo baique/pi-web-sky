@@ -237,18 +237,27 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   useEffect(() => {
     if (isNewSession) return;
     let cancelled = false;
+    // 拉会话元数据：点查 summary 单 id（读头尾，比全量列表自筛轻）。
+    const loadMeta = async (): Promise<SessionInfo | null> => {
+      const res = await fetch("/api/sessions/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [sessionId] }),
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { sessions: SessionInfo[] };
+      return data.sessions[0] ?? null;
+    };
     // 新会话转正：ChatWindow 保持 isNew 实例继续（不卸载、不重挂，避免断 SSE），
     // 仅拉 session 元数据供导航条渲染；不 setSession(null)，以免工作台闪 loading。
-    // 首条 prompt 落盘前 /api/sessions 可能查不到（会话创建即落盘，窗口极短），此时不置错，
+    // 首条 prompt 落盘前查不到（会话创建即落盘，窗口极短），此时不置错，
     // 收合再展开/刷新会走普通卡路径补上。
     if (wasNewSessionRef.current) {
       setError(null);
       void (async () => {
         try {
-          const res = await fetch("/api/sessions", { cache: "no-store" });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = (await res.json()) as { sessions: SessionInfo[] };
-          const found = data.sessions.find((s) => s.id === sessionId);
+          const found = await loadMeta();
           if (cancelled) return;
           if (found) setSession(found);
         } catch (e) {
@@ -262,10 +271,7 @@ export const SessionWorkbench = memo(function SessionWorkbench({
     setError(null);
     void (async () => {
       try {
-        const res = await fetch("/api/sessions", { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as { sessions: SessionInfo[] };
-        const found = data.sessions.find((s) => s.id === sessionId);
+        const found = await loadMeta();
         if (cancelled) return;
         if (!found) {
           setError(t("boards.sessionMissing"));
