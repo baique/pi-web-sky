@@ -10,7 +10,6 @@ import { Markdown } from "@tiptap/markdown";
 // ProseMirror 基样式（white-space/ligatures 等），与 @xyflow 同方式按需引入
 import "prosemirror-view/style/prosemirror.css";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
-import { CardKindBadge } from "@/components/canvas/CardKindBadge";
 import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
@@ -29,28 +28,9 @@ export interface StickyNoteData extends Record<string, unknown> {
   text: string;
   /** 用户设置的 emoji（空/缺省 → 类别默认 📝）；便笺无状态跟随 */
   emoji?: string;
-  /** 徽记颜色：blue | green | red | yellow | purple */
-  badge?: string;
   /** 新建时间（ms epoch） */
   createdAt?: number;
 }
-
-/** 徽记可选色（固定色，不随主题） */
-export const BADGE_COLORS: Record<string, string> = {
-  blue: "#3184f8",
-  green: "#10b981",
-  red: "#ef4444",
-  yellow: "#f59e0b",
-  purple: "#8b5cf6",
-};
-
-export const BADGE_NAMES: Record<string, string> = {
-  blue: "蓝",
-  green: "绿",
-  red: "红",
-  yellow: "黄",
-  purple: "紫",
-};
 
 function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & { data: StickyNoteData }) {
   const { getNodes } = useReactFlow();
@@ -60,14 +40,12 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   const w = width ?? 380;
   const h = height ?? 280;
   const text = data.text ?? "";
-  const badge = data.badge ?? "blue";
 
   // 玻璃（局部贴图）：从 RF store 读节点 position
   const { setContainer } = useCardGlass("var(--assistant-card-glass)");
 
   // 本地编辑态（RF 无 tldraw editing 概念）
   const [isEditing, setIsEditing] = useState(false);
-  const [draftBadge, setDraftBadge] = useState(badge);
   const contentRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   // 编辑中的最新 markdown（同步镜像）：TipTap onUpdate 实时写这里，save/finish/blur 读它——
@@ -78,13 +56,12 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 进入编辑重置镜像 + 徽记草稿（TipTap 编辑器初始化由子组件 NoteEditor 在 mount 时完成）
+  // 进入编辑重置镜像（TipTap 编辑器初始化由子组件 NoteEditor 在 mount 时完成）
   useEffect(() => {
     if (isEditing) {
-      setDraftBadge(badge);
       latestMdRef.current = text;
     }
-  }, [isEditing, text, badge]);
+  }, [isEditing, text]);
 
   // onDraftChange：实时写 markdown 镜像
   const handleDraftChange = useCallback((md: string) => {
@@ -93,10 +70,10 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
 
   const save = useCallback(() => {
     const md = latestMdRef.current;
-    if (md !== text || draftBadge !== badge) {
-      updateNode(id, { data: { text: md, badge: draftBadge } });
+    if (md !== text) {
+      updateNode(id, { data: { text: md } });
     }
-  }, [draftBadge, text, badge, updateNode, id]);
+  }, [text, updateNode, id]);
 
   const finish = useCallback(() => {
     save();
@@ -104,10 +81,9 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   }, [save]);
 
   const cancel = useCallback(() => {
-    setDraftBadge(badge);
     latestMdRef.current = text;
     setIsEditing(false);
-  }, [text, badge]);
+  }, [text]);
 
   // 失焦自动保存：编辑器失去焦点且焦点移出卡片 → 保存并退出编辑。
   // （点画布空白/点别的节点/切走应用 → 等价 tldraw 点别处退出编辑自动保存）
@@ -234,22 +210,9 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
         className={isEditing ? "nodrag" : ""}
         style={{ flexShrink: 0, height: 32, display: "flex", alignItems: "center", gap: 6, padding: "0 var(--bubble-pad-x, 12px)", fontSize: 10, color: "var(--text-muted)", cursor: isEditing ? "default" : "grab", boxSizing: "border-box" }}
       >
-        <CardKindBadge kind="note" color={BADGE_COLORS[isEditing ? draftBadge : badge] ?? BADGE_COLORS.blue} />
         <EmojiPickerField kind="note" value={data.emoji} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
         {isEditing ? (
           <>
-            <div className="nodrag" style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              {Object.entries(BADGE_COLORS).map(([key, color]) => (
-                <button
-                  key={key}
-                  type="button"
-                  title={`徽记·${BADGE_NAMES[key] ?? key}`}
-                  className="nodrag"
-                  onClick={(e) => { e.stopPropagation(); setDraftBadge(key); }}
-                  style={{ width: 14, height: 14, padding: 0, border: "none", borderRadius: "50%", background: color, cursor: "pointer", boxShadow: draftBadge === key ? `0 0 0 2px var(--bg-panel), 0 0 0 3.5px ${color}` : `0 0 0 1px color-mix(in srgb, ${color} 45%, transparent)`, opacity: draftBadge === key ? 1 : 0.72 }}
-                />
-              ))}
-            </div>
             <div style={{ flex: 1 }} />
             <button type="button" className="nodrag" onClick={cancel} style={footerBtnStyle} title="放弃变更 (Esc)">取消</button>
             <button type="button" className="nodrag" onClick={finish} style={footerBtnStyle} title="完成 (Ctrl+Enter)">完成</button>

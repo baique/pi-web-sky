@@ -8,7 +8,7 @@ export type EmojiCardKind = "session" | "task" | "note";
 /** 新建卡片默认 emoji（按类别固定；旧卡/未设置/清除后兜底显示） */
 export const DEFAULT_EMOJI: Record<EmojiCardKind, string> = {
   session: "💬",
-  task: "✅",
+  task: "🚩",
   note: "📝",
 };
 

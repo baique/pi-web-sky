@@ -13,7 +13,6 @@ import { useTaskCardStatus, useTaskCardVisibility } from "@/hooks/useBoardCanvas
 import { ThemedSelect } from "@/components/canvas/ThemedSelect";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { TaskCardMultiSelect } from "@/components/canvas/TaskCardMultiSelect";
-import { CardKindBadge } from "@/components/canvas/CardKindBadge";
 import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
 import { WorktreePicker } from "@/components/canvas/WorktreePicker";
@@ -472,14 +471,11 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       >
       {/* 拖拽把手：不拦 pointer（RF 拖动节点）；右上角操作按钮 nodrag 独立点击 */}
       <div style={{ flexShrink: 0, height: 36, display: "flex", alignItems: "center", gap: 6, padding: "0 10px", borderBottom: "1px solid var(--bubble-hairline)", cursor: "grab", fontSize: 11, color: "var(--text-muted)" }}>
-        <span title={`执行状态：${(EXEC_BADGE[execStatus] ?? EXEC_BADGE.not_started).label}`} style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-          <CardKindBadge kind="task" color={(EXEC_BADGE[execStatus] ?? EXEC_BADGE.not_started).color} />
-        </span>
         <EmojiPickerField kind="task" value={data.emoji} status={execStatus} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
-        <span className="nodrag" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", userSelect: "text", cursor: "text" }}>
+        <span className="nodrag" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>
           {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
         </span>
-        {draft?.number ? <span className="nodrag" style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text)", marginLeft: 4, userSelect: "text", cursor: "text" }}>#{draft.number}</span> : null}
+        {draft?.number ? <span className="nodrag" style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text)", marginLeft: 4 }}>#{draft.number}</span> : null}
         <div className="nodrag" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }} onPointerDown={(e) => e.stopPropagation()}>
           {isCreating ? (
             <button type="button" style={footerBtnStyle} disabled={saving || !boardId} onClick={() => void handleCreate()} title="创建任务并派发（转待办，调度器可执行）">

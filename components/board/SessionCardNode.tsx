@@ -13,7 +13,6 @@ import { memoBoardNode } from "./memoNode";
 import { dispatchBoardSessionRenamed, dispatchBoardCwdSwitch } from "@/lib/board-events";
 import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
-import { CardKindBadge } from "@/components/canvas/CardKindBadge";
 
 /**
  * 会话卡（RF 节点版，替代 tldraw session-card shape）。
@@ -331,7 +330,6 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
           ...(expanded ? {} : { marginBottom: 2 }),
         }}
       >
-        <CardKindBadge kind="session" color={meta.dot} />
         <EmojiPickerField kind="session" value={data.emoji} status={phase} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
         {renaming ? (
           <input
@@ -347,7 +345,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
             style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
           />
         ) : (
-          <span className="nodrag" style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box", userSelect: "text", cursor: "text" }}>
+          <span className="nodrag" style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box" }}>
             {isNewSession ? "New session" : (title || "Untitled")}
           </span>
         )}
