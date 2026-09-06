@@ -2,15 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
-import { getAgentDir } from "@/lib/sqlite-db";
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
+import { boardAssetsDir } from "@/lib/board-assets-dir";
 
 export const dynamic = "force-dynamic";
-
-/** 看板图片资产根目录：~/.pi/agent/board-assets/（与 pi-web.db 同级） */
-export function boardAssetsDir(): string {
-  return path.join(getAgentDir(), "board-assets");
-}
 
 /** 允许的图片扩展名（白名单，防任意文件上传） */
 const ALLOWED_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"]);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-import { boardAssetsDir } from "../route";
+import { boardAssetsDir } from "@/lib/board-assets-dir";
 
 export const dynamic = "force-dynamic";
 
