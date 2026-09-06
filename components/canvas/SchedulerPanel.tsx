@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactFlow } from "@xyflow/react";
+import { boardFloatGlass } from "./board-glass";
 import { useBoardSearch } from "./BoardSearchContext";
 
 /** 与 lib/task-scheduler.ts 对齐（避免引 server 模块进 client bundle） */
@@ -146,11 +147,9 @@ export function SchedulerPanel({ nodes, onViewportSave }: {
         aria-label="调度器状态"
         title="调度器状态"
         style={{
+          ...boardFloatGlass,
           display: "flex", alignItems: "center", gap: 7, height: 36,
           padding: "0 6px 0 14px", borderRadius: 999,
-          background: "var(--board-card-glass)",
-          backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
           border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
           boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
           color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap",
@@ -177,12 +176,10 @@ export function SchedulerPanel({ nodes, onViewportSave }: {
 
       {open && (
         <div style={{
+          ...boardFloatGlass,
           display: "flex", flexDirection: "column",
           marginTop: 6, padding: "8px 0", width: 340,
           borderRadius: 14,
-          background: "var(--board-card-glass)",
-          backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
           border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
           boxShadow: "0 8px 30px -8px rgba(0,0,0,0.3)",
           color: "var(--text)",

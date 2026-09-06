@@ -11,6 +11,7 @@ import { useCallback, useState } from "react";
 import { NodeResizer, Handle, Position, type NodeProps } from "@xyflow/react";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { memoBoardNode } from "./memoNode";
+import { useCardGlass } from "@/hooks/useCardGlass";
 
 export interface ImageNodeData extends Record<string, unknown> {
   /** 图片 URL（服务端资产，/api/board-assets/<uuid>.<ext>） */
@@ -24,6 +25,11 @@ export interface ImageNodeData extends Record<string, unknown> {
 
 function ImageNodeImpl({ id, data, selected }: NodeProps & { data: ImageNodeData }) {
   const { updateNode } = useBoardCanvasOps();
+  const { setContainer } = useCardGlass("var(--board-card-glass)");
+  const setCardRoot = useCallback(
+    (node: HTMLDivElement | null) => setContainer(node),
+    [setContainer],
+  );
   const src = data.src ?? "";
   const [loaded, setLoaded] = useState(false);
   const [broken, setBroken] = useState(false);
@@ -57,6 +63,7 @@ function ImageNodeImpl({ id, data, selected }: NodeProps & { data: ImageNodeData
       <Handle type="target" position={Position.Left} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <Handle type="source" position={Position.Right} className="board-handle" style={{ background: "var(--text-dim)", width: 8, height: 8, border: "1px solid var(--bg-panel)", opacity: 0.85 }} />
       <div
+        ref={setCardRoot}
         data-board-node
         data-testid={`image-node-${id}`}
         className="nowheel"
@@ -66,10 +73,8 @@ function ImageNodeImpl({ id, data, selected }: NodeProps & { data: ImageNodeData
           height: "100%",
           borderRadius: 10,
           overflow: "hidden",
-          // 玻璃质感：半透明面板底 + 细边框；选中态 accent 描边
-          background: "var(--board-card-glass)",
-          backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
-          WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+          // 玻璃底：useCardGlass 注入贴图层（z-index:-1），卡根不再挂实时 blur
+          backgroundColor: "var(--board-card-glass)",
           border: selected
             ? "1px solid color-mix(in srgb, var(--accent) 70%, transparent)"
             : "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
@@ -123,7 +128,6 @@ function ImageNodeImpl({ id, data, selected }: NodeProps & { data: ImageNodeData
               padding: "1px 6px",
               borderRadius: 4,
               background: "color-mix(in srgb, var(--bg-panel) 82%, transparent)",
-              backdropFilter: "blur(6px)",
               fontSize: 10,
               color: "var(--text-muted)",
               whiteSpace: "nowrap",

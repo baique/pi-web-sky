@@ -15,6 +15,7 @@ import type { RefObject } from "react";
 import { useReactFlow } from "@xyflow/react";
 import { useI18n } from "@/hooks/useI18n";
 import { useBoardSearch } from "./BoardSearchContext";
+import { boardFloatGlass } from "./board-glass";
 
 export interface SearchableItem {
   nodeId: string;
@@ -219,7 +220,7 @@ export function BoardSearch({
 
   return (
     <div style={{ position: "relative", width: 320 }} data-testid="board-search">
-      <div style={{ display: "flex", alignItems: "center", gap: 6, height: 34, padding: "0 8px 0 10px", borderRadius: 999, background: "var(--board-card-glass)", backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, height: 34, padding: "0 8px 0 10px", borderRadius: 999, ...boardFloatGlass, border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)" }}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: "var(--text-dim)", flexShrink: 0 }}>
           <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
         </svg>
@@ -244,7 +245,7 @@ export function BoardSearch({
       </div>
 
       {showDropdown && (
-        <div data-testid="board-search-dropdown" onPointerDown={(e) => e.stopPropagation()} style={{ position: "absolute", top: 40, left: 0, right: 0, zIndex: 60, maxHeight: 320, overflowY: "auto", borderRadius: 12, padding: 4, background: "var(--board-card-glass)", backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))", border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 4px 18px -6px rgba(0,0,0,0.28)" }}>
+        <div data-testid="board-search-dropdown" onPointerDown={(e) => e.stopPropagation()} style={{ position: "absolute", top: 40, left: 0, right: 0, zIndex: 60, maxHeight: 320, overflowY: "auto", borderRadius: 12, padding: 4, ...boardFloatGlass, border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 4px 18px -6px rgba(0,0,0,0.28)" }}>
           {!nodeVisible && !bodyVisible && !bodyPending && (
             <div style={{ padding: "8px 12px", fontSize: 12, color: "var(--text-muted)" }}>{t("boards.searchNoResults")}</div>
           )}
