@@ -476,10 +476,10 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
           <CardKindBadge kind="task" color={(EXEC_BADGE[execStatus] ?? EXEC_BADGE.not_started).color} />
         </span>
         <EmojiPickerField kind="task" value={data.emoji} status={execStatus} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
-        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>
+        <span className="nodrag" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", userSelect: "text", cursor: "text" }}>
           {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
         </span>
-        {draft?.number ? <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text)", marginLeft: 4 }}>#{draft.number}</span> : null}
+        {draft?.number ? <span className="nodrag" style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text)", marginLeft: 4, userSelect: "text", cursor: "text" }}>#{draft.number}</span> : null}
         <div className="nodrag" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }} onPointerDown={(e) => e.stopPropagation()}>
           {isCreating ? (
             <button type="button" style={footerBtnStyle} disabled={saving || !boardId} onClick={() => void handleCreate()} title="创建任务并派发（转待办，调度器可执行）">

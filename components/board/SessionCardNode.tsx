@@ -347,7 +347,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
             style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
           />
         ) : (
-          <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box" }}>
+          <span className="nodrag" style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box", userSelect: "text", cursor: "text" }}>
             {isNewSession ? "New session" : (title || "Untitled")}
           </span>
         )}

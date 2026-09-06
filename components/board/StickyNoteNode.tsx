@@ -257,7 +257,7 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
         ) : (
           <>
             <div style={{ flex: 1 }} />
-            <span style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{formatNoteTime(createdAt)}</span>
+            <span className="nodrag" style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap", userSelect: "text", cursor: "text" }}>{formatNoteTime(createdAt)}</span>
             <button
               type="button"
               title={copied ? "已复制" : "复制内容"}
