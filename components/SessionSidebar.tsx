@@ -429,22 +429,40 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // 聊天区会话（列表重构 v2）：当前项目（projectKey）的全部会话，一次拉取整体替换。
   // 服务端已排好序（置顶 + mtime），前端不再维护分页/增量合并；运行时浮顶由
   // running 轮询（RUNNING_SESSIONS_POLL_MS）在渲染层本地处理（见 orderByRunning）。
+  // 在途去重：首屏 loadSessions + 项目切换 effect 可能同帧先后调 loadChatPage，
+  // 同 key 在途时复用，避免并发拉两遍；key 已变化则不等旧请求，直接开新拉取（P2-4）。
+  const chatPageInFlightRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const loadChatPage = useCallback(async () => {
     const projectKey = chatProjectKeyRef.current;
     if (!projectKey) return;
-    setChatLoading(true);
-    try {
-      const res = await fetch(`/api/sessions?project=${encodeURIComponent(projectKey)}`, { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
-      setChatSessions(data.sessions ?? []);
-      if (!runningPollAuthoritativeRef.current) {
-        setRunningSessionIds(new Set(data.runningSessionIds ?? []));
+    const inFlight = chatPageInFlightRef.current;
+    if (inFlight && inFlight.key === projectKey) return inFlight.promise;
+    const run = (async () => {
+      setChatLoading(true);
+      try {
+        const res = await fetch(`/api/sessions?project=${encodeURIComponent(projectKey)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
+        // 只有当前 key 仍匹配才写 state（旧请求迟到不覆盖新项目列表）
+        if (chatProjectKeyRef.current === projectKey) {
+          setChatSessions(data.sessions ?? []);
+          if (!runningPollAuthoritativeRef.current) {
+            setRunningSessionIds(new Set(data.runningSessionIds ?? []));
+          }
+        }
+      } catch {
+        // keep last list; next refresh retries
+      } finally {
+        setChatLoading(false);
       }
-    } catch {
-      // keep last list; next refresh retries
+    })();
+    chatPageInFlightRef.current = { key: projectKey, promise: run };
+    try {
+      await run;
     } finally {
-      setChatLoading(false);
+      if (chatPageInFlightRef.current?.key === projectKey) {
+        chatPageInFlightRef.current = null;
+      }
     }
   }, []);
 

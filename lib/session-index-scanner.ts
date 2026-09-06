@@ -174,11 +174,15 @@ export async function ensureSessionIndexReady(sessionsDir?: string): Promise<voi
 export function startSessionIndexScanner(): void {
   if (globalThis.__piSessionIndexScanner?.timer) return;
   let tickInFlight = false;
-  const firstScanPromise = runSessionIndexScan()
+  const firstScanResult = runSessionIndexScan()
     .then((summary) => {
       console.log(`[pi-web] session index scan: +${summary.inserted} ~${summary.updated} -${summary.deleted} (${summary.scanned} files)`);
+      return { ok: true as const };
     })
-    .catch((e) => console.error("[pi-web] session index first scan error:", e?.message ?? e));
+    .catch((e) => {
+      console.error("[pi-web] session index first scan error:", e?.message ?? e);
+      return { ok: false as const };
+    });
 
   const timer = setInterval(() => {
     if (tickInFlight) return;
@@ -192,8 +196,9 @@ export function startSessionIndexScanner(): void {
   const scanner: NonNullable<typeof globalThis.__piSessionIndexScanner> = {
     timer,
     firstScanDone: false,
-    firstScanPromise: firstScanPromise.then(() => {
-      scanner.firstScanDone = true;
+    firstScanPromise: firstScanResult.then((res) => {
+      // 首轮成功才置 ready；失败保持 false，ensureSessionIndexReady 会重扫一轮重试。
+      if (res.ok) scanner.firstScanDone = true;
     }),
   };
   globalThis.__piSessionIndexScanner = scanner;

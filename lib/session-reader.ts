@@ -794,20 +794,23 @@ export async function loadSessionSummariesByIds(ids: string[]): Promise<SessionI
   const unique = [...new Set(ids.filter(Boolean))];
   if (unique.length === 0) return [];
 
-  // meta 索引拿 path（扫描器维护；未索引的新会话走 resolveSessionPath 兜底）
-  const rows = new Map<string, string | null>();
+  // meta 索引拿 path + title（扫描器维护；未索引的新会话走 resolveSessionPath 兜底）
+  // title 优先用 meta（与列表同源：改名写 session_meta.title），文件尾 session_info 兜底——
+  // 避免改名后继续聊超 tail 上限（16MB）时看板卡片标题与侧栏不一致。
+  const rows = new Map<string, { path: string | null; title: string | null }>();
   try {
     const found = getDb()
-      .prepare("SELECT session_id, path FROM session_meta WHERE session_id IN (" + unique.map(() => "?").join(",") + ")")
-      .all(...unique) as Array<{ session_id: string; path: string | null }>;
-    for (const r of found) rows.set(r.session_id, r.path);
+      .prepare("SELECT session_id, path, title FROM session_meta WHERE session_id IN (" + unique.map(() => "?").join(",") + ")")
+      .all(...unique) as Array<{ session_id: string; path: string | null; title: string | null }>;
+    for (const r of found) rows.set(r.session_id, { path: r.path, title: r.title });
   } catch {
     // db 不可用 → 全部走 resolveSessionPath 兜底
   }
 
   const sessions: SessionInfo[] = [];
   for (const id of unique) {
-    let filePath = rows.get(id) ?? null;
+    const metaRow = rows.get(id);
+    let filePath = metaRow?.path ?? null;
     if (!filePath) filePath = await resolveSessionPath(id);
     if (!filePath) continue;
     const scanned = scanOneSessionFile(filePath);
@@ -817,7 +820,7 @@ export async function loadSessionSummariesByIds(ids: string[]): Promise<SessionI
       path: scanned.path,
       id: scanned.id,
       cwd: scanned.cwd,
-      name: scanned.name,
+      name: metaRow?.title ?? scanned.name,
       created: scanned.created.toISOString(),
       modified: scanned.modified.toISOString(),
       messageCount: 0,
