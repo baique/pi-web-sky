@@ -110,18 +110,18 @@ CREATE INDEX idx_meta_project_modified ON session_meta(project_key, modified DES
 | AppShell · 恢复上次会话 | `GET /api/sessions/[id]` 点查 | 切换工作区 | id 点查，404 清记忆 |
 | 聊天区 · 消息加载 | `GET /api/sessions/[id]` | 点开/切会话 | 消息内容（消息线，本次不动） |
 | 列表行 · last_reply 展示 | 尾读（沿用 scanTail / 既有 detail 读取） | 行渲染 | 最后回复预览 |
-| 看板 · 卡片摘要 | `GET /api/sessions`（无参全量） | 进看板/10s/回前台 | 卡片标题等（**记账，本次不改**，数据源自动落到新索引） |
-| 看板 · 工作台展开卡 | `GET /api/sessions`（无参全量） | 展开卡 | 元数据（记账） |
+| 看板 · 卡片摘要 | `POST /api/sessions/summary` | 进看板/5s/回前台 | 点查画布真实卡 id 的摘要（title/lastReply/消息数），替代全量轮询自筛 |
+| 看板 · 工作台展开卡 | `POST /api/sessions/summary`（单 id） | 展开卡 | 点查该会话元数据供卡内聊天/导航条 |
 | 运行态 | `GET /api/agent/running` | 2.5s 轮询 | running id，本地浮顶（G1） |
 | 行内 · 改名 | `PATCH /api/sessions/[id]` | 改名提交 | 写 jsonl + 同请求写 title；触发 refresh |
 | 行内 · 置顶/删除 | PATCH/DELETE | 操作 | 已有 + refresh |
 
-> `GET /api/sessions`（无参）保留供看板/工作台（v2 下直接读完整索引，无分页、无文件系统读取）。
+> `GET /api/sessions`（无参）保留供侧栏 allSessions（跨项目统计/项目下拉/hydrate）；分页分支已删。拖入画布标题由拖拽源经 dataTransfer 带名（落卡即带标题，不依赖轮询）。
 
-## 8. 前端收敛（Sidebar 单一事实）
+## 8. 前端收敛（Sidebar 单一事实）——已实现
 
-1. 四份 state → 单一 `sessions`（含 pinned/running 标记）。
-2. 拆分页机制（loadMoreChatSessions、哨兵 observer、offset/total、mergeChatSessions 增量合并）。
+1. 四份 state → 聊天区单一 `chatSessions`（allSessions 保留：跨项目统计/项目下拉/hydrate，与当前项目子集数据本质不同，不合并）。
+2. 拆分页机制（loadMoreChatSessions、哨兵 observer、offset/total、mergeChatSessions 增量合并）已删。
 3. 刷新入口统一 refresh()（改名/删除/新建/置顶/运行变化 → 一次拉取整体替换）。
 4. 运行态本地浮顶（G1）。
 5. 改名：正确性靠"写库 + 刷新"，乐观仅视觉。
@@ -129,17 +129,17 @@ CREATE INDEX idx_meta_project_modified ON session_meta(project_key, modified DES
 
 ## 9. 不做（记账）
 
-- 看板卡片 10s 轮询 / 工作台展开卡：数据源自动落到新索引，但"改按 id 点查"留待列表线稳定后。
 - 外部 CLI 改名：不追（title 可能旧，可接受）。
 - 虚拟滚动：未来量级到了再说。
 - last_reply 入库：不存。
+- created 列：已落 v11 且 SessionInfo.created 是接口契约字段，无 UI 消费但砍需 v12 迁移，判定保留（成本 > 空数据）。
 
 ## 10. 清理与验证
 
-- 拆分页暴露的死代码（chat-lazy-load 死导出等）。
+- 拆分页已删（route 分页分支 + loadChatSessionsPage + listPinnedSessionIds，净删 129 行）。chat-lazy-load 是聊天窗口懒加载（非侧栏分页），保留。
 - 适配测试：session-reader pagination 测试、session-scanner、新 scanner 单测（建行/删行/mtime 更新/幂等/懒初始化）、route 契约测试。
 - 回归：首屏 / 切项目 / 改名即生效 / 置顶 / 运行浮顶 / 删除消失 / 老会话（扫描建行后）显示 / 外部 CLI 新建会话被扫描发现。
 
 ## 11. 工作区遗留补丁
 
-`components/SessionSidebar.tsx` 未提交改动（分页重入锁补丁）与本次拆分页机制同段代码，实现阶段随分页拆除。实现前保持原样。
+`components/SessionSidebar.tsx` 的分页重入锁补丁已随拆分页一并删除（T5 完成）。
