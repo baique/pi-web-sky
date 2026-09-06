@@ -897,18 +897,23 @@ export function AppShell() {
     const token = ++workspaceRestoreTokenRef.current;
     const lastOpenSessionId = getLastOpenSession(projectKey);
     if (!lastOpenSessionId) return;
-    void fetch("/api/sessions")
-      .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
+    // 点查（D1）：用记忆的 id 直接问该会话还在不在，不再依赖全量列表。
+    // 404 → 会话已删，清记忆回欢迎页；200 → 用返回的 info 打开。
+    void fetch(`/api/sessions/${encodeURIComponent(lastOpenSessionId)}?deferThinking=1`)
+      .then((r) => {
+        if (r.status === 404) {
+          if (token === workspaceRestoreTokenRef.current) clearLastOpen(projectKey);
+          return null;
+        }
+        return r.ok
+          ? (r.json() as Promise<{ sessionId: string; info?: SessionInfo | null; filePath?: string }>)
+          : null;
+      })
       .then((d) => {
         if (token !== workspaceRestoreTokenRef.current) return; // stale switch
-        const s = d?.sessions.find((x) => x.id === lastOpenSessionId);
-        if (!s) {
-          // The list loaded but the remembered session is gone — forget it.
-          // When the list itself failed (d === null) keep the memory so a
-          // later switch retries the restore.
-          if (d) clearLastOpen(projectKey);
-          return;
-        }
+        if (!d) return;
+        const s = d.info;
+        if (!s || !s.id) return;
         if (workspaceKeyOf(s) !== projectKey) {
           // Defensive: the remembered session drifted out of this workspace.
           clearLastOpen(projectKey);
