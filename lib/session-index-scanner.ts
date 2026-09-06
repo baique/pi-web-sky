@@ -162,6 +162,18 @@ export async function ensureSessionIndexReady(sessionsDir?: string): Promise<voi
   if (scanner?.firstScanDone) return;
   if (scanner?.firstScanPromise) {
     await scanner.firstScanPromise;
+    // 首轮失败时 firstScanPromise 已 resolve 但 firstScanDone 仍 false → 补扫一轮重试。
+    // 补扫失败保持 not-ready（下次 ensure 再试），不向上抛：列表读取降级为空表可接受。
+    if (!globalThis.__piSessionIndexScanner?.firstScanDone) {
+      try {
+        await runSessionIndexScan(sessionsDir);
+        if (globalThis.__piSessionIndexScanner) {
+          globalThis.__piSessionIndexScanner.firstScanDone = true;
+        }
+      } catch (e) {
+        console.error("[pi-web] session index ensure retry error:", e instanceof Error ? e.message : String(e));
+      }
+    }
     return;
   }
   await runSessionIndexScan(sessionsDir);
