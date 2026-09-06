@@ -131,7 +131,7 @@ export function BoardControls({
           ) : (
             <>
               {runningItems.length > 0 && (
-                <div style={{ padding: "4px 10px 2px", fontSize: 10.5, fontWeight: 600, color: "var(--text-dim)", letterSpacing: 0.2 }}>
+                <div style={{ padding: "4px 10px 2px", fontSize: 10.5, fontWeight: 600, color: "var(--text-muted)", letterSpacing: 0.2 }}>
                   运行中 · {runningItems.length}
                 </div>
               )}
@@ -150,7 +150,7 @@ export function BoardControls({
                 </button>
               ))}
               {expandedItems.length > 0 && (
-                <div style={{ padding: "4px 10px 2px", fontSize: 10.5, fontWeight: 600, color: "var(--text-dim)", letterSpacing: 0.2 }}>
+                <div style={{ padding: "4px 10px 2px", fontSize: 10.5, fontWeight: 600, color: "var(--text-muted)", letterSpacing: 0.2 }}>
                   工作中 · {expandedItems.length}
                 </div>
               )}
