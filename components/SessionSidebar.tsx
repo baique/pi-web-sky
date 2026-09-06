@@ -246,26 +246,6 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 const SCRAMBLE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
 
 /**
- * 聊天区增量合并：保留已加载页（滚动分页不清空），与第一页去重，按 mtime
- * 降序排序（新会话浮到顶部）。aliveIds 为服务端全量聊天区会话 id 集合——
- * 传入时用于剔除已删除 / 移出聊天区（归属任务）的本地残留；undefined（运行
- * 时会话等不属于磁盘全集的情况）则只增不减。
- */
-function mergeChatSessions(
-  prev: SessionInfo[],
-  incoming: SessionInfo[],
-  aliveIds?: Set<string>,
-): SessionInfo[] {
-  const byId = new Map<string, SessionInfo>();
-  for (const s of prev) {
-    if (aliveIds && !aliveIds.has(s.id)) continue;
-    byId.set(s.id, s);
-  }
-  for (const s of incoming) byId.set(s.id, s);
-  return [...byId.values()].sort((a, b) => b.modified.localeCompare(a.modified));
-}
-
-/**
  * 任务区增量合并：以服务端返回的任务列表为骨架（任务增删/排序以服务端为准），
  * 对每个任务保留本地已加载的额外会话页（加载更多），并用服务端全量根 id
  * （sessionIds）剔除已移出该任务的会话及其子树（unassign/删除后不残留）。
@@ -390,16 +370,13 @@ function PiWebTitle() {
 export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onRefresh, onSessionsLoaded, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
-  /** 聊天区会话分页（服务端两阶段：置顶全量 + 非置顶 offset/limit）。
-   *  pinned 全量 + 已加载的非置顶页；total 为非置顶总数（滚动加载游标）。
-   *  chatSessions 只存磁盘会话页（offset/total 语义干净）；运行时会话单列
-   *  chatRuntime（每页附带的附加展示，不参与分页游标）。 */
-  const [chatPinned, setChatPinned] = useState<SessionInfo[]>([]);
+  /** 聊天区会话（列表重构 v2）：当前项目（projectKey）的全部会话，服务端
+   *  一次排好序（置顶 + mtime），无分页。运行时浮顶由 running 轮询本地处理。 */
   const [chatSessions, setChatSessions] = useState<SessionInfo[]>([]);
-  const [chatRuntime, setChatRuntime] = useState<SessionInfo[]>([]);
-  const [chatTotal, setChatTotal] = useState(0);
   const [chatLoading, setChatLoading] = useState(false);
-  const chatOffsetRef = useRef(0);
+  // 当前聊天区所属 projectKey 的 ref 镜像：loadChatPage/loadSessions 在
+  // selectedProject（hook 后声明）定义前就需引用当前 key，读 ref 避免 TDZ。
+  const chatProjectKeyRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
@@ -449,84 +426,35 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const explorerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileExplorerRef = useRef<FileExplorerHandle>(null);
 
-  // 聊天区分页（#14）：服务端两阶段——置顶全量 + 非置顶 20/页。
-  // 恒增量合并：保留用户已加载的分页数据（滚动加载的页不清空），新会话按
-  // mtime 排序浮到顶部；sessionIds（服务端全量聊天区 id）用于剔除已删除/
-  // 移出聊天区的本地残留。不再有 force 整体重置——所有刷新路径（首屏/事件/
-  // 轮询/手动）都走同一条增量合并，触发刷新不会再踢回第一页。
+  // 聊天区会话（列表重构 v2）：当前项目（projectKey）的全部会话，一次拉取整体替换。
+  // 服务端已排好序（置顶 + mtime），前端不再维护分页/增量合并；运行时浮顶由
+  // running 轮询（RUNNING_SESSIONS_POLL_MS）在渲染层本地处理（见 orderByRunning）。
   const loadChatPage = useCallback(async () => {
+    const projectKey = chatProjectKeyRef.current;
+    if (!projectKey) return;
     setChatLoading(true);
     try {
-      const res = await fetch("/api/sessions?offset=0&limit=20", { cache: "no-store" });
+      const res = await fetch(`/api/sessions?project=${encodeURIComponent(projectKey)}`, { cache: "no-store" });
       if (!res.ok) return;
-      const data = await res.json() as { pinned?: SessionInfo[]; sessions?: SessionInfo[]; runtime?: SessionInfo[]; total?: number; sessionIds?: string[] };
-      const aliveIds = Array.isArray(data.sessionIds) ? new Set(data.sessionIds) : undefined;
-      setChatPinned((prev) => mergeChatSessions(prev, data.pinned ?? [], aliveIds));
-      setChatSessions((prev) => {
-        const merged = mergeChatSessions(prev, data.sessions ?? [], aliveIds);
-        chatOffsetRef.current = merged.length;
-        return merged;
-      });
-      setChatRuntime((prev) => mergeChatSessions(prev, data.runtime ?? []));
-      if (typeof data.total === "number") setChatTotal(data.total);
+      const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
+      setChatSessions(data.sessions ?? []);
+      if (!runningPollAuthoritativeRef.current) {
+        setRunningSessionIds(new Set(data.runningSessionIds ?? []));
+      }
     } catch {
-      // keep last page; next scroll retries
+      // keep last list; next refresh retries
     } finally {
       setChatLoading(false);
     }
   }, []);
 
-  const loadMoreChatSessions = useCallback(async () => {
-    if (chatLoading || chatOffsetRef.current >= chatTotal) return;
-    setChatLoading(true);
-    try {
-      const res = await fetch(`/api/sessions?offset=${chatOffsetRef.current}&limit=20`, { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json() as { sessions?: SessionInfo[]; runtime?: SessionInfo[]; total?: number };
-      // 去重：置顶区与页间可能重叠（置顶会话也在非置顶页时服务端已过滤，
-      // 这里仅防运行时会话与磁盘扫描重叠）。
-      setChatSessions((prev) => {
-        const seen = new Set(prev.map((s) => s.id));
-        const extra = (data.sessions ?? []).filter((s) => !seen.has(s.id));
-        chatOffsetRef.current = prev.length + extra.length;
-        return [...prev, ...extra];
-      });
-      setChatRuntime((prev) => {
-        const seen = new Set(prev.map((s) => s.id));
-        return [...prev, ...(data.runtime ?? []).filter((s) => !seen.has(s.id))];
-      });
-      if (typeof data.total === "number") setChatTotal(data.total);
-    } catch {
-      // keep last page; next scroll retries
-    } finally {
-      setChatLoading(false);
-    }
-  }, [chatLoading, chatTotal]);
-
-  // 聊天区滚动分页哨兵：IntersectionObserver 观察列表底部，进入视口 → 追加下一页。
-  // 不依赖具体滚动容器（外层面板才是真滚动者，内层聊天容器从不溢出，onScroll 永不触发）。
-  const chatSentinelRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = chatSentinelRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) void loadMoreChatSessions();
-      },
-      { rootMargin: "120px 0px" },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [loadMoreChatSessions, chatSessions.length, chatPinned.length]);
-
   const loadSessions = useCallback(async (showLoading = false) => {
     try {
       if (showLoading) setLoading(true);
-      // 聊天区恒增量合并：保留已加载页，新会话按 mtime 浮顶。
+      // 聊天区：当前项目（无分页，整体替换）
       await loadChatPage();
-      // 全量列表（看板标题映射 / 会话恢复等消费方）：不再传 force=1——分页
-      // 路径本就无服务端缓存（阶段一轻量扫描），force 只对全量路径绕过 5min
-      // 缓存生效，而全量路径已被事件驱动刷新（invalidateSessionListCache）覆盖。
+      // 全量列表（看板标题映射 / 跨项目统计 / 项目选择 / hydrate 等消费方）：
+      // 无参全量仍保留——数据源已切到 session_meta 索引，一次性读表返回。
       const res = await fetch("/api/sessions", {
         cache: "no-store",
       });
@@ -559,6 +487,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       if (showLoading) setLoading(false);
     }
   }, [onSessionsLoaded, loadChatPage]);
+
 
   // Persist unread markers so they survive a browser refresh before the user
   // has actually opened the completed session.
@@ -853,6 +782,20 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   // Sessions of every worktree in the selected project are shown together
   const selectedProject = projectFor(selectedCwd);
+  // 渲染期同步当前项目 key（ref 供 loadChatPage 读，避开闭包声明顺序）
+  chatProjectKeyRef.current = selectedProject?.key ?? null;
+
+  // 项目切换 → 重拉当前项目聊天区（初次确定项目也在此加载）。
+  // selectedProject.key 变化（含从 null 到首个项目）→ loadChatPage 整体替换。
+  const prevChatProjectKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = selectedProject?.key ?? null;
+    if (prevChatProjectKeyRef.current === key) return;
+    prevChatProjectKeyRef.current = key;
+    if (!key) return;
+    // 首帧 key 确定后主动拉；后续 key 变化也拉。setTimeout 0 避开首帧 loadSessions 竞争。
+    void loadChatPage();
+  }, [selectedProject?.key, loadChatPage]);
 
   // Per-project activity counts (running / unread) for the workspace selector.
   // Uses the same stable server key as the project list and filtering.
@@ -978,17 +921,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Pin / unpin a session inside its region (task group or chat). Optimistic:
   // reorder immediately, persist in the background — no full re-scan.
   const handleToggleSessionPin = useCallback((sessionId: string, nextPinned: boolean) => {
-    // 三个渲染源同步乐观更新：全量列表（运行检测/未读清理）、聊天分页态
-    // （chatNodes 由 chatPinned+chatSessions 构建）、任务区 task.sessions
-    // （taskGroups 由 task.sessions 建树）。漏任何一个，置顶后该区不刷新。
+    // 渲染源同步乐观更新：全量列表（跨项目用途）、当前项目聊天区、任务区。
     setAllSessions((prev) => prev.map((s) => (
       s.id === sessionId ? { ...s, pinned: nextPinned ? true : undefined } : s
     )));
     const flipPinned = (s: SessionInfo) =>
       s.id === sessionId ? { ...s, pinned: nextPinned ? true : undefined } : s;
-    setChatPinned((prev) => prev.map(flipPinned));
     setChatSessions((prev) => prev.map(flipPinned));
-    setChatRuntime((prev) => prev.map(flipPinned));
     setTasks((prev) => prev.map((t) => {
       if (!t.sessionIds.includes(sessionId)) return t;
       const pinnedSet = new Set(t.pinnedSessionIds ?? []);
@@ -1080,17 +1019,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, [tasks, selectedProject?.key]);
 
-  // 改名成功：乐观更新本地 name，立即生效。三个渲染源同步（与置顶同路径）：
-  // 全量列表（运行检测/未读清理）、聊天分页态（chatNodes 由 chatPinned+
-  // chatSessions+chatRuntime 构建）、任务区 task.sessions——漏任何一个，改名后
-  // 该区不刷新。不触发 loadSessions：服务端列表扫描直接带名字，但刷新有 1-2s
-  // 延迟；本地先改，避免等。
+  // 改名成功：乐观更新本地 name，立即生效。渲染源同步：全量列表（跨项目用途）、
+  // 当前项目聊天区（chatNodes）、任务区 task.sessions。本地先改避免等扫描刷新。
   const handleSessionRenamed = useCallback((sessionId: string, newName: string) => {
     const withName = (s: SessionInfo) => (s.id === sessionId ? { ...s, name: newName } : s);
     setAllSessions((prev) => prev.map(withName));
-    setChatPinned((prev) => prev.map(withName));
     setChatSessions((prev) => prev.map(withName));
-    setChatRuntime((prev) => prev.map(withName));
     setTasks((prev) => prev.map((t) => ({
       ...t,
       sessions: (t.sessions ?? []).map(withName),
@@ -1205,14 +1139,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     });
   }, [tasks]);
 
-  // Chat region: pinned sessions first, then the rest (hairline between).
-  // #14 服务端分页：置顶全量 + 非置顶已加载页——服务端已过滤任务会话，
-  // 聊天区不再需要从 sessionTree 排除任务组（服务端分流，前端零归属判断）。
+  // Chat region: 当前项目会话（服务端已按置顶 + mtime 排序返回）。
+  // 运行中会话本地浮顶（G1）：runningSessionIds 来自轻量轮询，变化时只重排不重拉列表。
   const chatNodes = useMemo(() => {
-    const tree = orderPinnedFirst(buildSessionTree([...chatPinned, ...chatSessions, ...chatRuntime]));
+    const runningIds = runningSessionIds;
+    const running = chatSessions.filter((s) => runningIds.has(s.id));
+    const rest = chatSessions.filter((s) => !runningIds.has(s.id));
+    const tree = orderPinnedFirst(buildSessionTree([...running, ...rest]));
     // 树内按置顶段/非置顶段渲染；会话若已置顶则整棵子树留在置顶区。
     return tree;
-  }, [chatPinned, chatSessions, chatRuntime]);
+  }, [chatSessions, runningSessionIds]);
 
 
 
@@ -1800,7 +1736,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             <span>{t("sidebar.loading")}</span>
                           </div>
                         )}
-                        <div ref={chatSentinelRef} style={{ height: 1 }} aria-hidden />
                       </>
                     )}
                   </div>
