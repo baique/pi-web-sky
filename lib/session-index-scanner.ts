@@ -42,15 +42,24 @@ export const SESSION_INDEX_SCAN_INTERVAL_MS = 30_000;
 export async function runSessionIndexScan(
   sessionsDir?: string,
 ): Promise<SessionIndexScanSummary> {
-  const diskFiles = await scanSessionFileMeta(sessionsDir);
+  // 磁盘同 id 可能有多个历史文件（pi 整文件重写留旧副本）——索引只认每个
+  // id 的「最新 mtime 文件」，旧副本忽略（path 指向最新，排序用最新 mtime）。
+  const allDiskFiles = await scanSessionFileMeta(sessionsDir);
+  const newestByFile = new Map<string, { path: string; id: string; modified: Date }>();
+  for (const f of allDiskFiles) {
+    const cur = newestByFile.get(f.id);
+    if (!cur || f.modified.getTime() > cur.modified.getTime()) newestByFile.set(f.id, f);
+  }
+  const diskFiles = [...newestByFile.values()];
   const summary: SessionIndexScanSummary = { scanned: diskFiles.length, inserted: 0, updated: 0, deleted: 0 };
 
   const db = getDb();
-  const selectAll = db.prepare("SELECT session_id, modified FROM session_meta").all() as Array<{
+  const selectAll = db.prepare("SELECT session_id, modified, path FROM session_meta").all() as Array<{
     session_id: string;
     modified: number | null;
+    path: string | null;
   }>;
-  const dbRows = new Map(selectAll.map((r) => [r.session_id, r.modified]));
+  const dbRows = new Map(selectAll.map((r) => [r.session_id, { modified: r.modified, path: r.path }]));
 
   const seenOnDisk = new Set<string>();
 
@@ -58,47 +67,60 @@ export async function runSessionIndexScan(
   const pathToId = new Map<string, string>();
   for (const f of diskFiles) pathToId.set(sessionPathKey(f.path), f.id);
 
-  // 按目录分组，每目录一次 project 解析（首次惰性；目录数远小于会话数）。
+  // 同 cwd 目录的 project_key 共享一次 resolve（缓存 promise，防重复 git 调用）。
   const cwdToProjectKey = new Map<string, Promise<string>>();
 
   const insertStmt = db.prepare(
     `INSERT INTO session_meta
        (session_id, task_id, updated, pinned, path, cwd, project_key, title, first_message, parent_id, created, modified)
-     VALUES (?, NULL, ?, 0, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+     VALUES (?, NULL, ?, 0, ?, ?, ?, NULL, ?, ?, ?, ?)
+     ON CONFLICT(session_id) DO UPDATE SET
+       path = excluded.path,
+       cwd = excluded.cwd,
+       project_key = excluded.project_key,
+       first_message = excluded.first_message,
+       parent_id = excluded.parent_id,
+       created = excluded.created,
+       modified = excluded.modified`,
   );
   const updateModifiedStmt = db.prepare("UPDATE session_meta SET modified = ? WHERE session_id = ?");
   const deleteStmt = db.prepare("DELETE FROM session_meta WHERE session_id = ?");
 
+  // 读 header + resolve project + upsert（新文件或老行补全索引列共用）。
+  const upsertFromDisk = async (file: { path: string; id: string; modified: Date }): Promise<void> => {
+    const head = scanOneSessionHead(file.path);
+    if (!head) return;
+    let projectPromise = cwdToProjectKey.get(head.cwd);
+    if (!projectPromise) {
+      projectPromise = resolveProject(head.cwd).then((p) => projectIdentityKey(p?.projectRoot ?? head.cwd));
+      cwdToProjectKey.set(head.cwd, projectPromise);
+    }
+    const projectKey = await projectPromise;
+    const parentId = head.parentSessionPath
+      ? (pathToId.get(sessionPathKey(head.parentSessionPath)) ?? null)
+      : null;
+    insertStmt.run(
+      file.id,
+      Date.now(),
+      file.path,
+      head.cwd,
+      projectKey,
+      head.firstMessage || null,
+      parentId,
+      head.created.getTime(),
+      file.modified.getTime(),
+    );
+  };
+
   for (const file of diskFiles) {
     seenOnDisk.add(file.id);
-    const dbModified = dbRows.get(file.id);
-    if (dbModified === undefined) {
-      // 新文件：读 header 建行（不读尾部）。读失败/非会话文件 → 跳过。
-      const head = scanOneSessionHead(file.path);
-      if (!head) continue;
-      // 同 cwd 目录的 project_key 共享一次 resolve（缓存 promise，防重复 git 调用）。
-      let projectPromise = cwdToProjectKey.get(head.cwd);
-      if (!projectPromise) {
-        projectPromise = resolveProject(head.cwd).then((p) => projectIdentityKey(p?.projectRoot ?? head.cwd));
-        cwdToProjectKey.set(head.cwd, projectPromise);
-      }
-      const projectKey = await projectPromise;
-      const parentId = head.parentSessionPath
-        ? (pathToId.get(sessionPathKey(head.parentSessionPath)) ?? null)
-        : null;
-      insertStmt.run(
-        file.id,
-        Date.now(),
-        file.path,
-        head.cwd,
-        projectKey,
-        head.firstMessage || null,
-        parentId,
-        head.created.getTime(),
-        file.modified.getTime(),
-      );
+    const dbRow = dbRows.get(file.id);
+    if (dbRow === undefined || !dbRow.path || dbRow.path !== file.path) {
+      // 磁盘有、库无 → 建行；库行 path 空（T1 前遗留归属行）或指向旧副本 →
+      // 用磁盘最新文件 upsert 修正（path 指向最新，不保留旧副本 path）。
+      await upsertFromDisk(file);
       summary.inserted += 1;
-    } else if (dbModified === null || dbModified !== file.modified.getTime()) {
+    } else if (dbRow.modified === null || dbRow.modified !== file.modified.getTime()) {
       // mtime 变化：只刷新排序键，不读内容。
       updateModifiedStmt.run(file.modified.getTime(), file.id);
       summary.updated += 1;
