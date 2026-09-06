@@ -204,13 +204,14 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
       onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
     >
       {/* 顶部把手行（始终一行、高度固定 32——编辑/预览切换顶部不跳动）：
-          预览态 = 徽记 + 时间戳 + 复制，整条是拖拽区（不拦 pointer → RF 拖动节点）；
-          编辑态 = 徽记（草稿色）+ 5 色徽记选择 + 取消/完成，整行 nodrag 不可拖（空区也不误拖） */}
+          预览态 = 便笺标识（emoji + 标签）+ 时间戳 + 复制，整条是拖拽区（不拦 pointer → RF 拖动节点）；
+          编辑态 = 便笺标识 + 取消/完成，整行 nodrag 不可拖（空区也不误拖） */}
       <div
         className={isEditing ? "nodrag" : ""}
         style={{ flexShrink: 0, height: 32, display: "flex", alignItems: "center", gap: 6, padding: "0 var(--bubble-pad-x, 12px)", fontSize: 10, color: "var(--text-muted)", cursor: isEditing ? "default" : "grab", boxSizing: "border-box" }}
       >
         <EmojiPickerField kind="note" value={data.emoji} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
+        <span style={{ flexShrink: 0, fontSize: 10, color: "var(--text-muted)" }}>便笺</span>
         {isEditing ? (
           <>
             <div style={{ flex: 1 }} />

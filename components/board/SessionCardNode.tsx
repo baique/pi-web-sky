@@ -11,7 +11,7 @@ import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { useSessionRunning, useSessionSummary } from "@/hooks/useBoardCanvas";
 import { memoBoardNode } from "./memoNode";
 import { dispatchBoardSessionRenamed, dispatchBoardCwdSwitch } from "@/lib/board-events";
-import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
+import { resolveEmoji } from "@/lib/card-emoji";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
 
 /**
@@ -330,7 +330,11 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
           ...(expanded ? {} : { marginBottom: 2 }),
         }}
       >
-        <EmojiPickerField kind="session" value={data.emoji} status={phase} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
+        {/* emoji（只读，去掉可切换选择器）+ 执行状态圆点（emoji 后、标题前） */}
+        <span style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 2, lineHeight: 1 }}>
+          <span style={{ fontSize: 14 }}>{resolveEmoji("session", data.emoji, phase)}</span>
+          <span aria-hidden style={{ width: 8, height: 8, borderRadius: "50%", background: meta.dot, flexShrink: 0, marginTop: -2 }} />
+        </span>
         {renaming ? (
           <input
             ref={renameInputRef}
@@ -345,7 +349,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
             style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
           />
         ) : (
-          <span className="nodrag" style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box" }}>
             {isNewSession ? "New session" : (title || "Untitled")}
           </span>
         )}
