@@ -292,6 +292,17 @@ export function setSessionPinned(sessionId: string, pinned: boolean): void {
   invalidateSessionListCache();
 }
 
+/** 改名同步写 session_meta.title（列表索引的标题源）。无行则 INSERT（老会话首改，
+ *  索引列 path/project_key 等由扫描器下一轮补全）。 */
+export function setSessionTitle(sessionId: string, title: string): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO session_meta (session_id, task_id, updated, pinned, title) VALUES (?, NULL, ?, 0, ?) " +
+      "ON CONFLICT(session_id) DO UPDATE SET title = excluded.title, updated = excluded.updated",
+  ).run(sessionId, now(), title);
+  invalidateSessionListCache();
+}
+
 /** Drop all task/meta bookkeeping for a session (used on session delete). */
 export function unassignSession(sessionId: string): void {
   getDb().prepare("DELETE FROM session_meta WHERE session_id = ?").run(sessionId);
