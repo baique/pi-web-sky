@@ -574,7 +574,11 @@ export class AgentSessionWrapper {
         // fork 即建全列索引行（与 persistNewSessionFile 对齐）：文件已落盘，
         // 行建好后刷新/切走不依赖扫描器补行（否则 fork 新会话最多 30s 不在列表）。
         // parent_id 传源会话 id（列语义统一为会话 id，与扫描器反查结果一致）。
+        // 建行在 shutdown 之后：fork 后 inner 状态已变（铁律要求立即销毁 wrapper），
+        // resolveProject 的 await 不能发生在 registry 还挂着已 fork wrapper 的窗口里；
+        // 建行只用局部变量（cwd/newSessionFile/sourceSessionId），不依赖 wrapper。
         const cwd = sessionManager.getCwd();
+        await this.shutdown();
         try {
           const project = await resolveProject(cwd ?? "");
           ensureSessionMetaRow(newSessionId, {
@@ -586,7 +590,6 @@ export class AgentSessionWrapper {
         } catch {
           // 建行失败不阻塞 fork：扫描器下一轮兜底补行。
         }
-        await this.shutdown();
         return { cancelled: false, newSessionId };
       }
 

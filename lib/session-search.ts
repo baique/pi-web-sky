@@ -283,6 +283,9 @@ export async function searchSessions(
 }
 
 async function loadAllSessions(): Promise<SessionInfo[]> {
-  const { listAllSessions } = await import("./session-reader");
-  return listAllSessions();
+  // 基线吃 session_meta 索引（与 /api/sessions 无参同源）：列表重构后磁盘扫描
+  // 已不是权威数据源，这里不再整盘扫。索引 modified 由扫描器维护（≤30s 滞后），
+  // 搜索索引重建随之滞后可接受（搜索非实时）。
+  const { loadAllSessionIndex } = await import("./session-reader");
+  return loadAllSessionIndex();
 }
