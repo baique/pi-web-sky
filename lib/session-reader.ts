@@ -15,9 +15,50 @@ import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
 import { scanSessionFiles, scanSessionFileMeta, scanOneSessionFile, sessionScanner } from "./session-scanner";
+import { ensureSessionIndexReady } from "./session-index-scanner";
 import type { TurnIndexItem } from "./api-types";
 
 export { getAgentDir };
+
+/**
+ * 当前项目聊天区会话（列表重构 v2 主读取路径）。
+ *
+ * 纯查 session_meta：按 project_key 过滤 + 排除任务会话（task_id 非空交任务区管），
+ * 置顶优先 + modified 降序。不读文件内容——title 用 meta.title（本应用改名写库），
+ * 无自定义名回退 first_message；last_reply 不入库也不在此读（侧栏列表不消费，
+ * 看板卡片走独立摘要轮询）。运行时/未落盘会话由调用方 union getRpcSessionInfos。
+ */
+export async function loadProjectSessions(projectKey: string): Promise<SessionInfo[]> {
+  if (!projectKey) return [];
+  await ensureSessionIndexReady();
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = getDb()
+      .prepare(
+        `SELECT session_id, path, cwd, title, first_message, parent_id, created, modified, pinned
+         FROM session_meta
+         WHERE project_key = ? AND task_id IS NULL
+         ORDER BY pinned DESC, modified DESC`,
+      )
+      .all(projectKey) as Array<Record<string, unknown>>;
+  } catch {
+    return [];
+  }
+
+  const sessions: SessionInfo[] = rows.map((r) => ({
+    path: (r.path as string) ?? "",
+    id: r.session_id as string,
+    cwd: (r.cwd as string) ?? "",
+    name: (r.title as string | null) ?? undefined,
+    created: new Date((r.created as number) ?? 0).toISOString(),
+    modified: new Date((r.modified as number) ?? 0).toISOString(),
+    messageCount: 0,
+    firstMessage: (r.first_message as string | null) ?? "(no messages)",
+    parentSessionId: (r.parent_id as string | null) ?? undefined,
+    pinned: Boolean((r.pinned as number) ?? 0),
+  }));
+  return attachSessionProjectInfo(sessions);
+}
 
 export async function attachSessionProjectInfo(sessions: SessionInfo[]): Promise<SessionInfo[]> {
   const uniqueCwds = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
