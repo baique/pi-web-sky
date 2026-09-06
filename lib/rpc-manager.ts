@@ -13,6 +13,7 @@ import {
   preferUserBashExtension,
 } from "./project-command-env";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
+import { projectIdentityKey } from "./project-identity";
 import { resolveProject } from "./worktree";
 import { ensureSessionMetaRow } from "./task-store";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
@@ -532,6 +533,8 @@ export class AgentSessionWrapper {
         if (this.inner.isBashRunning) {
           throw new Error("Cannot fork while a shell command is running");
         }
+        // fork 前先取源会话 id：SDK fork 会原地改 inner.sessionId（见 AGENTS.md 铁律）
+        const sourceSessionId = this.inner.sessionId;
         const entryId = command.entryId as string;
         const sessionManager = this.inner.sessionManager;
         const currentSessionFile = this.inner.sessionFile;
@@ -568,6 +571,21 @@ export class AgentSessionWrapper {
         const newSessionId = SessionManager.open(newSessionFile, sessionDir).getSessionId();
         cacheSessionPath(newSessionId, newSessionFile);
         invalidateSessionListCache();
+        // fork 即建全列索引行（与 persistNewSessionFile 对齐）：文件已落盘，
+        // 行建好后刷新/切走不依赖扫描器补行（否则 fork 新会话最多 30s 不在列表）。
+        // parent_id 传源会话 id（列语义统一为会话 id，与扫描器反查结果一致）。
+        const cwd = sessionManager.getCwd();
+        try {
+          const project = await resolveProject(cwd ?? "");
+          ensureSessionMetaRow(newSessionId, {
+            path: newSessionFile,
+            cwd: cwd ?? "",
+            projectKey: projectIdentityKey(project?.projectRoot ?? cwd ?? ""),
+            parentId: sourceSessionId,
+          });
+        } catch {
+          // 建行失败不阻塞 fork：扫描器下一轮兜底补行。
+        }
         await this.shutdown();
         return { cancelled: false, newSessionId };
       }
@@ -1420,14 +1438,16 @@ async function persistNewSessionFile(manager: SessionManager, sessionId: string)
   // project_key 需 resolveProject（可能 git 调用），在落盘后异步补齐；
   // 行已落库，期间列表读取由 runtime union 覆盖，不退化扫盘。
   // first_message 此刻恒空（刚创建无消息），由扫描器下一轮补。
+  // parent_id 不在此传：新建会话无父（header.parentSession 恒空），
+  // 有父的场景（fork）由 fork 分支显式传源会话 id——列语义统一为会话 id。
   const cwd = manager.getCwd();
   try {
     const project = await resolveProject(cwd ?? "");
     ensureSessionMetaRow(sessionId, {
       path: sessionFile,
       cwd: cwd ?? "",
-      projectKey: project?.projectRoot ?? cwd ?? "",
-      parentId: typeof header.parentSession === "string" ? header.parentSession : undefined,
+      // 与扫描器同源归一化（Windows 大小写折叠等），防新建会话 project_key 与列表查询键不一致
+      projectKey: projectIdentityKey(project?.projectRoot ?? cwd ?? ""),
     });
   } catch {
     // 建行失败不阻塞开会话：扫描器下一轮兜底补行。
