@@ -140,8 +140,13 @@ export async function runSessionIndexScan(
   return summary;
 }
 
+/** 首轮是否完成（懒初始化检查用）。 */
 declare global {
-  var __piSessionIndexScanner: { timer: ReturnType<typeof setInterval>; firstScanDone: boolean } | undefined;
+  var __piSessionIndexScanner: {
+    timer?: ReturnType<typeof setInterval>;
+    firstScanDone: boolean;
+    firstScanPromise?: Promise<void>;
+  } | undefined;
 }
 
 /** 首轮是否完成（懒初始化检查用）。 */
@@ -149,26 +154,27 @@ export function isSessionIndexReady(): boolean {
   return Boolean(globalThis.__piSessionIndexScanner?.firstScanDone);
 }
 
-/** 确保索引至少跑过一轮（列表读取前调用）。 */
+/** 确保索引至少跑过一轮（列表读取前调用）。
+ *  已有扫描器（含首轮在途）→ 复用其首轮 promise，不重复扫；无扫描器
+ *  （单测/纯读取进程）→ 自己跑一轮并标记 ready。 */
 export async function ensureSessionIndexReady(sessionsDir?: string): Promise<void> {
-  if (isSessionIndexReady()) return;
-  await runSessionIndexScan(sessionsDir);
-  if (globalThis.__piSessionIndexScanner) {
-    globalThis.__piSessionIndexScanner.firstScanDone = true;
-  } else {
-    // 未启动调度器（如单测直接调 run）——标记一个瞬时 ready。
-    globalThis.__piSessionIndexScanner = {
-      timer: undefined as unknown as ReturnType<typeof setInterval>,
-      firstScanDone: true,
-    };
+  const scanner = globalThis.__piSessionIndexScanner;
+  if (scanner?.firstScanDone) return;
+  if (scanner?.firstScanPromise) {
+    await scanner.firstScanPromise;
+    return;
   }
+  await runSessionIndexScan(sessionsDir);
+  globalThis.__piSessionIndexScanner = {
+    firstScanDone: true,
+  };
 }
 
 /** 启动定时扫描（instrumentation 注册；globalThis 防热重载重复启动）。 */
 export function startSessionIndexScanner(): void {
-  if (globalThis.__piSessionIndexScanner) return;
+  if (globalThis.__piSessionIndexScanner?.timer) return;
   let tickInFlight = false;
-  const firstScan = runSessionIndexScan()
+  const firstScanPromise = runSessionIndexScan()
     .then((summary) => {
       console.log(`[pi-web] session index scan: +${summary.inserted} ~${summary.updated} -${summary.deleted} (${summary.scanned} files)`);
     })
@@ -183,15 +189,14 @@ export function startSessionIndexScanner(): void {
   }, SESSION_INDEX_SCAN_INTERVAL_MS);
   timer.unref?.();
 
-  globalThis.__piSessionIndexScanner = { timer, firstScanDone: false };
-  // 首轮完成即置 ready（懒初始化 await 的是 ensureSessionIndexReady 自己跑的轮次，
-  // 这里异步置位，避免竞态：ensure 在启动瞬间调用时 firstScanDone 仍 false 会自跑一次，
-  // 幂等无害）。
-  void firstScan.then(() => {
-    if (globalThis.__piSessionIndexScanner) {
-      globalThis.__piSessionIndexScanner.firstScanDone = true;
-    }
-  });
+  const scanner: NonNullable<typeof globalThis.__piSessionIndexScanner> = {
+    timer,
+    firstScanDone: false,
+    firstScanPromise: firstScanPromise.then(() => {
+      scanner.firstScanDone = true;
+    }),
+  };
+  globalThis.__piSessionIndexScanner = scanner;
   console.log(`[pi-web] session index scanner started (interval ${SESSION_INDEX_SCAN_INTERVAL_MS}ms)`);
 }
 

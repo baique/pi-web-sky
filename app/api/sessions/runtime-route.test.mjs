@@ -15,9 +15,10 @@ const jiti = createJiti(import.meta.url, {
 const { GET: getSessionDetail } = await jiti.import("./[id]/route.ts");
 const { GET: getSessionState } = await jiti.import("./[id]/state/route.ts");
 
-test("session listing merges live registry snapshots and honors force refresh", () => {
-  assert.match(listRoute, /search\.get\("force"\) === "1"/);
-  assert.match(listRoute, /listAllSessions\(\{ force \}\)/);
+test("session listing merges live registry snapshots (no pagination)", () => {
+  // 分页已删（马尾辫：无调用方链路不保留）
+  assert.ok(!listRoute.includes("loadChatSessionsPage"), "分页分支已移除");
+  assert.ok(!/offset/.test(listRoute), "offset 分页参数已移除");
   assert.match(listRoute, /attachSessionProjectInfo\(getRpcSessionInfos\(\)\)/);
   assert.match(listRoute, /mergeSessionLists\(persistedSessions, runtimeSessions\)/);
   assert.match(listRoute, /"Cache-Control": "no-store"/);
