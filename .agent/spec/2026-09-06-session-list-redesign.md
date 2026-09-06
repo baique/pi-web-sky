@@ -1,39 +1,41 @@
-# 会话列表管理重构 · 设计定稿
+# 会话列表管理重构 · 设计定稿（v2：后台扫描 + 完整索引）
 
 日期：2026-09-06
 分支：dev/0905
 
 ## 1. 背景与目标
 
-左栏"聊天"会话列表当前存在结构性问题：
+左栏"聊天"会话列表存在结构性问题：
 
-- 列表接口每次**全量扫所有项目的会话文件**（按目录扫、读头尾），多项目累积后刷新变慢；
-- 列表**没有按当前项目隔离**——"聊天"区展示的是所有项目混排的会话，单项目语义未立起来；
-- 6 个前端消费方各自拉全量 `/api/sessions`（侧栏分页+全量、AppShell 恢复、工作台展开卡、看板 10s 轮询、未读清理），数据副本分散、各刷各的；
-- 标题依赖"尾读文件找 session_info"，大会话改名记录被挤出尾窗时会读到旧标题。
+- 列表接口每次**全量扫所有项目会话文件**（读头尾），多项目累积后刷新变慢；
+- 列表**未按项目隔离**，"聊天"区展示所有项目混排会话；
+- 6 个前端消费方各自拉全量 `/api/sessions`，副本分散、各刷各的；
+- 标题靠"尾读文件找 session_info"，大会话改名记录被挤出尾窗读到旧标题；
+- 单项目会话数（几十~一两百）本不必分页，分页是"全量扫多项目"的补丁。
 
-本次目标（限定范围：**只治列表线**，聊天窗口消息加载不碰）：
+**核心转向（v2）**：不再纠结"读取时扫哪些目录"。由 pi-web **承担会话发现职责**——服务端**启动时 + 定期全量扫描**磁盘会话目录，把所有发现的会话**全量写入 session_meta**，使 session_meta 成为**完整会话索引**。列表读取退化为**纯单表查询**。
 
-> 左栏"聊天"列表 = **当前项目**的会话；数据来自 **stat 文件 + session_meta 结合**；应用内改动（改名/归属/置顶/新建/删除）实时写库；标题不靠每次挖文件、不受文件大小影响。列表稳定后，未来再考虑让 session_meta 升格为唯一事实源。
+> 目标：左栏"聊天"列表 = **当前项目**的会话；session_meta 是完整索引（启动+定期扫描维护）；标题改名实时写库；列表读取不碰文件系统、不受文件大小影响。
 
-**不纳入本次范围**：看板跨项目聚合、聊天窗口消息加载、未读红点机制、任务区列表（`/api/tasks` 已独立下发）。
+**范围**：只治列表线。聊天窗口消息加载、看板跨项目聚合、未读红点、任务区列表不纳入。
 
 ## 2. 核心决策记录
 
 | 代号 | 决策 | 理由 |
 |---|---|---|
-| A | 聊天区列表 = **只显示当前项目**（selectedCwd 所在工作区）的会话 | 会话文件磁盘上按项目分目录存储（`sessions/<encoded-cwd>/`），天然可只扫单目录 |
-| 分页 | **去掉分页、不做兼容**；未来量级到了再考虑虚拟滚动 | 单项目会话量几十~一两百，一次全量毫秒级；分页是全量扫多项目时代引入的补丁，前提消失 |
-| A1 | 在现有 `session_meta` 上**加列**，不新建表 | 会话级旁路状态应收敛为一个聚合根 |
-| M1 | 会话**首次被本应用操作（新建/改名/归属/置顶）建行**，之后常驻；归属判据一律看 `task_id` 列，**不看行有无** | 看板补卡 reconcile 依赖"task_id=某任务"判定归属，普通聊天会话行（task_id=NULL）不得混入 |
-| — | 沿用表名 `session_meta` | 避免大范围改名风险；代码注释说明职责扩展 |
-| — | 列表读取 = **文件与 meta 结合使用**，不是单一事实源 | 文件 stat 永远是"存在性"事实源（pi 引擎/外部可能随时建文件）；meta 是"我们认识并操作过的会话"的标题持久层 |
-| 改名 | 改名 = 写 jsonl + **同请求内 UPDATE session_meta.title**（原子，不依赖乐观更新兜正确性） | 标题新鲜度实时保证；乐观更新退居视觉反馈层 |
-| 消息增长 | **不更新 meta**（不影响标题）；不做外部改动兜底扫描 | 消息增长不影响名称；外部改动管不了，做自己能做的 |
-| last_reply | **不落库**，列表按需**尾读文件** | 库不背"内容"债；尾读（scanTail）对非关键展示足够 |
-| 无 meta 行 | **读取时不主动补行**（列表 stat 见文件无 meta → 读头部首条消息降级展示）；但改名/置顶/归属等本应用操作会建行（M1：首次被本应用操作即建行，含老会话首改） | 列表读取不做扫描兜底建行；写入入口天然建行，两者不冲突 |
-| 排序 | 服务端排好：**运行中 → 置顶 → mtime 降序**；前端只对运行态做本地微调（浮顶） | E1；运行态是易变信号，本地重排不重拉列表（G1） |
-| 恢复上次会话 | AppShell 用记忆的 id **点查** `GET /api/sessions/[id]`（404 则忘记），脱离列表依赖 | D1 |
+| A | 聊天区列表 = **当前项目**（projectKey）的会话 | projectKey 把主仓库 + worktree 会话归到同一项目；切换 worktree 会话不丢 |
+| 分页 | **去掉分页、不做兼容**；未来量级到了再考虑虚拟滚动 | 单项目量级一次全量毫秒级 |
+| v2-M1 | **session_meta 升格为完整会话索引**：启动 + 定期全量扫描磁盘，所有会话（含老/外部新建）全量建行 | 会话发现从"请求路径"挪到"后台路径"，读取退化为纯单表查 |
+| v2-scan | 新增**会话扫描器**：instrumentation 启动注册 + 定期（模板复用 board-reconcile-scheduler 的 globalThis 防重入模式） | 发现磁盘新文件/已删文件，更新 mtime |
+| A1 | 在现有 `session_meta` 上加列，不新建表；沿用表名 | 会话旁路状态收敛为一个聚合根 |
+| 归属判据 | 一律看 `task_id` 列，不看行有无 | 看板补卡 reconcile 兼容（普通聊天会话行 task_id=NULL 不混入） |
+| 排序键 | **mtime 入库**（新增 `modified` 列，扫描时写入）；列表读表排序 | 列表读取不再现场 stat |
+| 改名 | 写 jsonl + **同请求内 UPDATE title**（原子） | 标题实时；不靠扫描/懒更新 |
+| last_reply | **不落库**，列表按需**尾读文件** | 库不背"内容"债 |
+| 扫描粒度 | 扫描器 **stat + header（id/cwd/首条消息）**，**不读尾部**；title 只在改名/建行时写 | 外部改名不追（管不了）；last_reply 列表尾读 |
+| 运行中 | registry 提供（getRpcSessionInfos），与磁盘列表 union；前端 G1 浮顶 | 运行态实时性由 registry 保证，不等扫描周期 |
+| 恢复上次会话 | AppShell 用记忆 id **点查** `GET /api/sessions/[id]` | 脱离列表依赖 |
+| 索引初始化 | 读取前确保扫描器至少跑过一轮（懒初始化 + 后台周期续） | 避免启动首请求打到空索引 |
 
 ## 3. Schema（sqlite，SCHEMA_VERSION 10 → 11）
 
@@ -41,89 +43,103 @@
 
 ```sql
 ALTER TABLE session_meta ADD COLUMN path         TEXT;   -- jsonl 完整路径
-ALTER TABLE session_meta ADD COLUMN cwd          TEXT;   -- 会话所属项目目录
-ALTER TABLE session_meta ADD COLUMN project_key  TEXT;   -- 归一化项目标识
-ALTER TABLE session_meta ADD COLUMN title        TEXT;   -- 最新标题（自定义名；无则 NULL，展示读首条消息）
-ALTER TABLE session_meta ADD COLUMN first_message TEXT;  -- 首条用户消息（建行时写一次）
-ALTER TABLE session_meta ADD COLUMN parent_id    TEXT;   -- fork 父会话（根为 NULL）
+ALTER TABLE session_meta ADD COLUMN cwd          TEXT;   -- 会话所属 cwd 目录
+ALTER TABLE session_meta ADD COLUMN project_key  TEXT;   -- 归一化项目标识（resolveProject 推算）
+ALTER TABLE session_meta ADD COLUMN title        TEXT;   -- 最新标题（本应用改名写；无则 NULL 展示读首条消息）
+ALTER TABLE session_meta ADD COLUMN first_message TEXT;  -- 首条用户消息（建行时读 header 写入）
+ALTER TABLE session_meta ADD COLUMN parent_id    TEXT;   -- fork 父会话 id（header.parentSession 反查，根为 NULL）
 ALTER TABLE session_meta ADD COLUMN created      INTEGER; -- 创建时间(ms)
+ALTER TABLE session_meta ADD COLUMN modified     INTEGER; -- 文件 mtime(ms)，扫描器维护，列表排序键
 
-CREATE INDEX idx_meta_project ON session_meta(project_key);
+CREATE INDEX idx_meta_project_modified ON session_meta(project_key, modified DESC);
 ```
 
 **说明**：
-- `title` 仅改名时写；无自定义名会话 title=NULL，展示层回退读头部首条消息。
-- `last_reply` 不入库（见决策表）。
-- **不新增 modified 列**：排序的 mtime 来自 stat 文件，无需入库。现有 `updated` 列语义不变（任务归属/置顶时间，任务区排序用）。
-- `task_id` / `pinned` 语义不变，归属判据只看 `task_id`（看板 reconcile 兼容）。
+- `title` 仅在"本应用改名 / 建行"时写；无自定义名 title=NULL，展示层读 first_message 兜底。
+- `last_reply` 不入库。
+- `task_id`/`pinned`/`updated` 语义不变（归属判据只看 task_id）。
+- 每行 `path` 唯一性：同一会话文件被扫描多次 → upsert（ON CONFLICT(session_id)），天然幂等。
 
-## 4. 写入点（事件驱动，无兜底扫描）
+## 4. 会话扫描器（新增，核心）
+
+**文件**：`lib/session-index-scanner.ts`（新）+ `instrumentation.ts` 注册。
+
+**职责（一轮 tick）**：
+1. 全量 `readdir + stat` 磁盘会话目录（复用/扩展 `session-scanner.scanSessionFileMeta`，O(项目目录数)，不读内容）；
+2. 对每个磁盘文件：
+   - meta 无此行 → 读 header（id/cwd/首条消息）+ resolveProject(cwd) 算 project_key → **INSERT**（created=header.timestamp、modified=mtime、first_message=首条）；
+   - meta 有行 → 仅当 mtime 变化时 **UPDATE modified**（不读内容）；
+3. 对 meta 里存在但磁盘已无此文件的会话 → **DELETE 行**；
+4. 幂等（upsert），可重入；globalThis 防热重载重复启动（复用 board-reconcile-scheduler 模板）。
+
+**调度**：
+- `startSessionIndexScanner()`：启动即跑首轮 + 定期（建议 30s，可调）续跑；`tickInFlight` 防重叠；`timer.unref()` 不阻塞退出。
+- 懒初始化：列表读取函数先检查"首轮是否完成"标志，未完成则 `await` 首轮，避免首请求空索引。
+
+**不做的**：扫描不读文件尾部（不追外部改名、不存 last_reply）；不 resolveProject 缓存之外的开销（复用 60s TTL）。
+
+## 5. 写入点（事件驱动，与扫描器互补）
 
 | 时机 | 入口 | 动作 |
 |---|---|---|
-| 新会话首条消息落盘 | `lib/rpc-manager.ts` `persistNewSessionFile` | INSERT 行：path/cwd/project_key/first_message/title(=首条)/created/updated |
-| 改名 | `app/api/sessions/[id]/route.ts` PATCH name 分支 | 写 jsonl（append session_info）后**同请求内** UPDATE title（原子）。若该会话无 meta 行（老会话首改），INSERT title 行 |
-| 置顶 / 取消 | PATCH pinned 分支 | UPDATE pinned（已有 `setSessionPinned`，确认同一行） |
-| 归属任务 / 取消 | `lib/task-store.ts` | UPDATE task_id + updated（已有，确认同一行） |
-| 删除会话 | `DELETE /api/sessions/[id]` | DELETE 行（已有） |
+| 新会话首条消息落盘 | `rpc-manager.ts` `persistNewSessionFile` | upsert 行（title=首条，立即可见，不必等扫描周期） |
+| 改名 | `app/api/sessions/[id]` PATCH name | 写 jsonl + 同请求 UPDATE title（无行则 INSERT，M1 含老会话首改） |
+| 置顶 | PATCH pinned | UPDATE pinned（已有） |
+| 归属/取消 | `task-store.ts` | UPDATE task_id（已有） |
+| 删除 | DELETE | DELETE 行（已有）；磁盘文件删除由扫描器下一轮确认 |
+| 外部新建/改动/删除 | 无入口 | **扫描器**兜底（建行/更新 mtime/删行） |
 
-> 改名 INSERT（老会话首改无行）时：path 从 `resolveSessionPath(id)` 拿；cwd/project_key 从该文件 header 首行读（`readSessionHeader`）；first_message/created 可留 NULL（列表展示时头部降级兜底），title 写本次改的名。
+## 6. 读取（列表 = 纯查 session_meta + runtime union）
 
-外部进程/CLI 改动 jsonl：**不管**（无兜底扫描，不做主动补行）。
+服务端 `GET /api/sessions?project=<key>`：
+1. 确保索引已初始化（懒初始化 await 首轮，见 §4）；
+2. `SELECT * FROM session_meta WHERE project_key=? ORDER BY pinned DESC, modified DESC`（置顶优先 + mtime）；
+3. union `getRpcSessionInfos()` 中同 projectKey 的运行中/未落盘会话（前端已按 runtime 机制处理，服务端返回 runningSessionIds）；
+4. 每行 title：`meta.title` 非空用之；NULL 则 `first_message`；两者皆空则读 header 首条消息兜底（极端：扫描刚建行但 first_message 空）；
+5. last_reply 不入返回主体——前端按需对可见行**尾读**（单独点查或渲染时请求，沿用 scanTail）。
 
-## 5. 读取（列表 = stat + meta 结合）
+**排序**：服务端一次排好（置顶 → mtime 降序）；运行中由前端本地浮顶（G1）。
 
-服务端 `GET /api/sessions?project=<key>` 流程：
-
-1. **stat 扫描**当前项目目录（只 readdir+stat，不读内容）→ id + mtime + 存在性
-2. 用这些 id **批量查 session_meta** → title/pinned/task_id/parent_id/created（排序 mtime 用 stat，不入库）
-   - 有 meta 行 → 用 meta.title
-   - 无 meta 行 → 读该文件头部首条消息降级展示（不建行）
-3. **last_reply** → 尾读文件（复用 `session-scanner.scanTail`）
-4. **排序**：运行中（registry）→ 置顶 → mtime 降序，服务端一次排好
-5. 返回当前项目完整列表（**无分页**）
-
-## 6. 接口与调用矩阵（新）
+## 7. 接口与调用矩阵（新）
 
 | 调用方 · 功能 | 接口 | 调用时机 | 调用结果 |
 |---|---|---|---|
-| 侧栏 · 聊天会话列表 | `GET /api/sessions?project=<key>` | 首屏；切项目；刷新事件统一走 refresh() | 填充**唯一** sessions state，一次整体替换 |
+| 侧栏 · 聊天会话列表 | `GET /api/sessions?project=<key>` | 首屏；切项目；刷新事件统一 refresh() | 填充**唯一** sessions state，整体替换 |
 | 侧栏 · 未读红点清理 | 不请求，消费 state | 列表刷新后 | 过滤已删会话红点 |
-| AppShell · hydrate 转正会话 | 不请求，消费 Sidebar 上抛 state | Sidebar 列表就绪 | 补全选中会话 projectKey 等字段 |
-| AppShell · 恢复上次打开会话 | `GET /api/sessions/[id]`（点查） | 切换工作区后 | id 记忆点查，404 则清记忆；200 则打开 |
-| 主聊天区 · 消息加载 | `GET /api/sessions/[id]` | 点开/切换会话 | 消息内容（消息线，本次不动） |
-| 看板 · 会话卡片摘要 | `GET /api/sessions`（无参全量） | 进看板/每 10s/回前台 | 卡片标题等刷新（**记账，本次不改**） |
-| 看板 · 工作台展开会话卡 | `GET /api/sessions`（无参全量） | 展开卡时一次 | 取元数据（**记账，本次不改**） |
-| 侧栏/看板 · 运行态 | `GET /api/agent/running` | 2.5s 轮询 | running id，本地浮顶（G1） |
-| 行内 · 改名 | `PATCH /api/sessions/[id]` | 改名提交 | 写 jsonl + 同请求写 meta.title；触发 refresh |
-| 行内 · 置顶 | `PATCH /api/sessions/[id]` | 点置顶 | 写 meta.pinned；触发 refresh |
-| 行内/画布 · 删除 | `DELETE /api/sessions/[id]` | 删会话/删卡 | 删 jsonl + 删 meta 行；触发 refresh |
+| AppShell · hydrate | 不请求，消费 Sidebar state | 列表就绪 | 补全选中会话字段 |
+| AppShell · 恢复上次会话 | `GET /api/sessions/[id]` 点查 | 切换工作区 | id 点查，404 清记忆 |
+| 聊天区 · 消息加载 | `GET /api/sessions/[id]` | 点开/切会话 | 消息内容（消息线，本次不动） |
+| 列表行 · last_reply 展示 | 尾读（沿用 scanTail / 既有 detail 读取） | 行渲染 | 最后回复预览 |
+| 看板 · 卡片摘要 | `GET /api/sessions`（无参全量） | 进看板/10s/回前台 | 卡片标题等（**记账，本次不改**，数据源自动落到新索引） |
+| 看板 · 工作台展开卡 | `GET /api/sessions`（无参全量） | 展开卡 | 元数据（记账） |
+| 运行态 | `GET /api/agent/running` | 2.5s 轮询 | running id，本地浮顶（G1） |
+| 行内 · 改名 | `PATCH /api/sessions/[id]` | 改名提交 | 写 jsonl + 同请求写 title；触发 refresh |
+| 行内 · 置顶/删除 | PATCH/DELETE | 操作 | 已有 + refresh |
 
-## 7. 前端收敛（Sidebar 单一事实）
+> `GET /api/sessions`（无参）保留供看板/工作台（v2 下直接读完整索引，无分页、无文件系统读取）。
 
-1. **四份 state → 单一 `sessions`**：`chatPinned`/`chatSessions`/`chatRuntime`/`allSessions` 合并成一份（含 pinned/running 标记），无分页接口一次填充。
-2. **拆掉分页机制**：`loadMoreChatSessions`、聊天区滚动哨兵 observer、`chatOffset/chatTotal`、`mergeChatSessions` 增量合并全部删除。
-3. **刷新入口统一**：改名/删除/新建/置顶/运行轮询发现变化 → 同一 `refresh()`（一次拉取 + 整体替换），不再分散 loadChatPage/乐观改五份副本。
-4. **运行态本地浮顶**：2.5s `/api/agent/running` 轮询保留，本地把 running 会话浮到最前（不重拉列表）。
-5. **改名**：`handleSessionRenamed` 不再维护五份副本做正确性兜底；正确性靠"改名写库 + 刷新"，本地乐观仅视觉反馈。
-6. **AppShell hydrate**：消费 Sidebar 单一 state（`onSessionsLoaded` 通道补全），不自拉全量。
-7. **恢复上次会话**：改点查 `GET /api/sessions/[id]`（见矩阵）。
+## 8. 前端收敛（Sidebar 单一事实）
 
-## 8. 不做（记账，本次不实现）
+1. 四份 state → 单一 `sessions`（含 pinned/running 标记）。
+2. 拆分页机制（loadMoreChatSessions、哨兵 observer、offset/total、mergeChatSessions 增量合并）。
+3. 刷新入口统一 refresh()（改名/删除/新建/置顶/运行变化 → 一次拉取整体替换）。
+4. 运行态本地浮顶（G1）。
+5. 改名：正确性靠"写库 + 刷新"，乐观仅视觉。
+6. AppShell hydrate 消费 Sidebar state；恢复上次会话改点查。
 
-- 看板卡片 10s 轮询全量：本次不动；列表线稳定后改"按 id 批量点查摘要"。
-- 工作台展开卡找 session：同上，改点查。
-- 外部进程改动 jsonl：不管。
-- stat 见文件无 meta：不补行，头部降级。
-- meta 升格唯一事实源：等数据兼容期过后再切。
+## 9. 不做（记账）
+
+- 看板卡片 10s 轮询 / 工作台展开卡：数据源自动落到新索引，但"改按 id 点查"留待列表线稳定后。
+- 外部 CLI 改名：不追（title 可能旧，可接受）。
 - 虚拟滚动：未来量级到了再说。
+- last_reply 入库：不存。
 
-## 9. 清理与验证
+## 10. 清理与验证
 
-- 拆分页暴露的死代码（如 `lib/chat-lazy-load.ts` 死导出）。
-- 适配测试：`session-reader.pagination.test.mjs`、`session-scanner.test.mjs` 及 sidebar 相关按新无分页契约改。
-- 回归清单：首屏加载 / 切项目换列表 / 改名即生效 / 置顶置底 / 运行浮顶 / 删除消失 / 老会话（无 meta 行）仍显示。
+- 拆分页暴露的死代码（chat-lazy-load 死导出等）。
+- 适配测试：session-reader pagination 测试、session-scanner、新 scanner 单测（建行/删行/mtime 更新/幂等/懒初始化）、route 契约测试。
+- 回归：首屏 / 切项目 / 改名即生效 / 置顶 / 运行浮顶 / 删除消失 / 老会话（扫描建行后）显示 / 外部 CLI 新建会话被扫描发现。
 
-## 10. 工作区遗留补丁说明
+## 11. 工作区遗留补丁
 
-`components/SessionSidebar.tsx` 存在一份未提交的本地改动（聊天区滚动分页重入锁补丁，针对"加载不出下一页"颤抖），与本次重构拆分的分页机制是同一段代码，将在实现阶段随分页一并拆除。实现开始前保持原样不动。
+`components/SessionSidebar.tsx` 未提交改动（分页重入锁补丁）与本次拆分页机制同段代码，实现阶段随分页拆除。实现前保持原样。
