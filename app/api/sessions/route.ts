@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   attachSessionProjectInfo,
-  listAllSessions,
+  loadAllSessionIndex,
   loadProjectSessions,
   mergeSessionLists,
 } from "@/lib/session-reader";
@@ -43,7 +43,7 @@ export async function GET(req: Request) {
     }
 
     const [persistedSessions, runtimeSessions] = await Promise.all([
-      listAllSessions(),
+      loadAllSessionIndex(),
       attachSessionProjectInfo(getRpcSessionInfos()),
     ]);
     const sessions = mergeSessionLists(persistedSessions, runtimeSessions);

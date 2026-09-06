@@ -60,6 +60,39 @@ export async function loadProjectSessions(projectKey: string): Promise<SessionIn
   return attachSessionProjectInfo(sessions);
 }
 
+/** 全项目会话索引读取（无参 /api/sessions：跨项目统计/项目下拉/hydrate/红点清理用）。
+ *  纯查 session_meta 全表（含任务会话、含各项目），不再整盘扫文件——
+ *  lastReply 消费方已改走摘要点查，侧栏 allSessions 不需要它。 */
+export async function loadAllSessionIndex(): Promise<SessionInfo[]> {
+  await ensureSessionIndexReady();
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = getDb()
+      .prepare(
+        `SELECT session_id, path, cwd, title, first_message, parent_id, created, modified, pinned
+         FROM session_meta
+         ORDER BY modified DESC`,
+      )
+      .all() as Array<Record<string, unknown>>;
+  } catch {
+    return [];
+  }
+
+  const sessions: SessionInfo[] = rows.map((r) => ({
+    path: (r.path as string) ?? "",
+    id: r.session_id as string,
+    cwd: (r.cwd as string) ?? "",
+    name: (r.title as string | null) ?? undefined,
+    created: new Date((r.created as number) ?? 0).toISOString(),
+    modified: new Date((r.modified as number) ?? 0).toISOString(),
+    messageCount: 0,
+    firstMessage: (r.first_message as string | null) ?? "(no messages)",
+    parentSessionId: (r.parent_id as string | null) ?? undefined,
+    pinned: Boolean((r.pinned as number) ?? 0),
+  }));
+  return attachSessionProjectInfo(sessions);
+}
+
 export async function attachSessionProjectInfo(sessions: SessionInfo[]): Promise<SessionInfo[]> {
   const uniqueCwds = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
   const projectByCwd = new Map<string, ProjectInfo>();
