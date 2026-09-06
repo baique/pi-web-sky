@@ -163,12 +163,17 @@ export function SessionCanvas({
           style={{
             position: "absolute",
             top: 12,
-            left: "50%",
-            transform: "translateX(-50%)",
+            left: 0,
+            right: 0,
+            display: "flex",
+            justifyContent: "center",
+            pointerEvents: "none",
             zIndex: 40,
           }}
         >
-          <BoardSearch inputRef={searchBoxRef} nodes={board.nodes as never} onViewportSave={board.saveViewport} />
+          <div style={{ pointerEvents: "auto" }}>
+            <BoardSearch inputRef={searchBoxRef} nodes={board.nodes as never} onViewportSave={board.saveViewport} />
+          </div>
         </div>
       )}
       <CanvasStage
