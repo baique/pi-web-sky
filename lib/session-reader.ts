@@ -14,11 +14,54 @@ import { normalizeToolCalls } from "./normalize";
 import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
-import { scanSessionFiles, scanSessionFileMeta, scanOneSessionFile, sessionScanner } from "./session-scanner";
+import { scanSessionFileMeta, scanOneSessionFile, sessionScanner } from "./session-scanner";
 import { ensureSessionIndexReady } from "./session-index-scanner";
 import type { TurnIndexItem } from "./api-types";
 
 export { getAgentDir };
+
+type SessionMetaRow = Record<string, unknown>;
+
+/** 单个 session_meta 行 → SessionInfo（聊天列表与任务列表共用的唯一映射）。 */
+function mapSessionMetaRow(r: SessionMetaRow): SessionInfo {
+  return {
+    path: (r.path as string) ?? "",
+    id: r.session_id as string,
+    cwd: (r.cwd as string) ?? "",
+    name: (r.title as string | null) ?? undefined,
+    created: new Date((r.created as number) ?? 0).toISOString(),
+    modified: new Date((r.modified as number) ?? 0).toISOString(),
+    messageCount: 0,
+    firstMessage: (r.first_message as string | null) ?? "(no messages)",
+    parentSessionId: (r.parent_id as string | null) ?? undefined,
+    pinned: Boolean((r.pinned as number) ?? 0),
+  };
+}
+
+/** 按 id 集合查 session_meta 映射 SessionInfo（返回顺序与入参一致，无行 id 跳过）。
+ *  任务列表详情与聊天列表 loadProjectSessions 完全同源——标题/首条消息不再依赖
+ *  读文件（旧 readSessionDetails → scanOneSessionFile），统一由 session_meta 供给。 */
+export async function loadSessionDetailsFromMeta(ids: string[]): Promise<SessionInfo[]> {
+  if (ids.length === 0) return [];
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = getDb()
+      .prepare(
+        `SELECT session_id, path, cwd, title, first_message, parent_id, created, modified, pinned
+         FROM session_meta WHERE session_id IN (${ids.map(() => "?").join(",")})`,
+      )
+      .all(...ids) as Array<Record<string, unknown>>;
+  } catch {
+    return [];
+  }
+  const byId = new Map(rows.map((r) => [r.session_id as string, r]));
+  const sessions: SessionInfo[] = [];
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (row) sessions.push(mapSessionMetaRow(row));
+  }
+  return sessions;
+}
 
 /**
  * 当前项目聊天区会话（列表重构 v2 主读取路径）。
@@ -45,18 +88,7 @@ export async function loadProjectSessions(projectKey: string): Promise<SessionIn
     return [];
   }
 
-  const sessions: SessionInfo[] = rows.map((r) => ({
-    path: (r.path as string) ?? "",
-    id: r.session_id as string,
-    cwd: (r.cwd as string) ?? "",
-    name: (r.title as string | null) ?? undefined,
-    created: new Date((r.created as number) ?? 0).toISOString(),
-    modified: new Date((r.modified as number) ?? 0).toISOString(),
-    messageCount: 0,
-    firstMessage: (r.first_message as string | null) ?? "(no messages)",
-    parentSessionId: (r.parent_id as string | null) ?? undefined,
-    pinned: Boolean((r.pinned as number) ?? 0),
-  }));
+  const sessions = rows.map(mapSessionMetaRow);
   return attachSessionProjectInfo(sessions);
 }
 
@@ -78,18 +110,7 @@ export async function loadAllSessionIndex(): Promise<SessionInfo[]> {
     return [];
   }
 
-  const sessions: SessionInfo[] = rows.map((r) => ({
-    path: (r.path as string) ?? "",
-    id: r.session_id as string,
-    cwd: (r.cwd as string) ?? "",
-    name: (r.title as string | null) ?? undefined,
-    created: new Date((r.created as number) ?? 0).toISOString(),
-    modified: new Date((r.modified as number) ?? 0).toISOString(),
-    messageCount: 0,
-    firstMessage: (r.first_message as string | null) ?? "(no messages)",
-    parentSessionId: (r.parent_id as string | null) ?? undefined,
-    pinned: Boolean((r.pinned as number) ?? 0),
-  }));
+  const sessions: SessionInfo[] = rows.map(mapSessionMetaRow);
   return attachSessionProjectInfo(sessions);
 }
 
@@ -165,33 +186,6 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
   });
   return attachSessionProjectInfo(sessions);
 }
-
-/** 阶段二：批量读详情（只读需要的子集）。返回顺序与入参一致。 */
-async function readSessionDetails(metas: Array<{ path: string; id: string; modified: Date }>): Promise<SessionInfo[]> {
-  const pathToId = new Map<string, string>();
-  for (const m of metas) pathToId.set(sessionPathKey(m.path), m.id);
-  const sessions: SessionInfo[] = [];
-  for (const meta of metas) {
-    const scanned = scanOneSessionFile(meta.path);
-    if (!scanned) continue;
-    cacheSessionPath(scanned.id, scanned.path);
-    sessions.push({
-      path: scanned.path,
-      id: scanned.id,
-      cwd: scanned.cwd,
-      name: scanned.name,
-      created: scanned.created.toISOString(),
-      modified: scanned.modified.toISOString(),
-      messageCount: 0,
-      firstMessage: scanned.firstMessage || "(no messages)",
-      lastReply: scanned.lastReply || "",
-      parentSessionId: scanned.parentSessionPath ? pathToId.get(sessionPathKey(scanned.parentSessionPath)) : undefined,
-      transient: false,
-    });
-  }
-  return sessions;
-}
-
 
 /** 任务会话详情按需分页（侧栏任务区）。
  *
@@ -283,8 +277,9 @@ export async function loadTaskSessionsPageWithIndex(
   for (const rid of pageRootIds) {
     for (const id of collectSubtree(rid)) wantedIds.add(id);
   }
-  const orderedMetas = [...wantedIds].map((id) => metaById.get(id)).filter((m): m is NonNullable<typeof m> => Boolean(m));
-  const sessions = await attachSessionProjectInfo(await readSessionDetails(orderedMetas));
+  // 详情走 session_meta（与聊天列表 loadProjectSessions 同源）——标题/首条消息
+  // 由索引供给，不再读文件；不存在/未入索引的 id 自然跳过。
+  const sessions = await attachSessionProjectInfo(await loadSessionDetailsFromMeta([...wantedIds]));
 
   // sessionTotal：任务下全部根 + 子树节点数（删除确认文案）。
   const allIds = new Set<string>();

@@ -2199,7 +2199,12 @@ function SessionItem({
     setConfirmDelete(false);
     setDeleting(true);
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      // 后端失败（500）不算删除成功：不触发 onDeleted（列表不假装消失），
+      // 保持原状让用户看到删除未生效。
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
       onDeleted?.(session.id);
     } catch {
       setDeleting(false);

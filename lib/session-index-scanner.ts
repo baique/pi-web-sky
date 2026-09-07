@@ -56,13 +56,14 @@ export async function runSessionIndexScan(
   const summary: SessionIndexScanSummary = { scanned: diskFiles.length, inserted: 0, updated: 0, deleted: 0 };
 
   const db = getDb();
-  const selectAll = db.prepare("SELECT session_id, modified, path, parent_id FROM session_meta").all() as Array<{
+  const selectAll = db.prepare("SELECT session_id, modified, path, parent_id, first_message FROM session_meta").all() as Array<{
     session_id: string;
     modified: number | null;
     path: string | null;
     parent_id: string | null;
+    first_message: string | null;
   }>;
-  const dbRows = new Map(selectAll.map((r) => [r.session_id, { modified: r.modified, path: r.path, parent_id: r.parent_id }]));
+  const dbRows = new Map(selectAll.map((r) => [r.session_id, { modified: r.modified, path: r.path, parent_id: r.parent_id, first_message: r.first_message }]));
 
   const seenOnDisk = new Set<string>();
 
@@ -88,6 +89,7 @@ export async function runSessionIndexScan(
   );
   const updateModifiedStmt = db.prepare("UPDATE session_meta SET modified = ? WHERE session_id = ?");
   const updateParentStmt = db.prepare("UPDATE session_meta SET parent_id = ? WHERE session_id = ?");
+  const updateFirstMessageStmt = db.prepare("UPDATE session_meta SET first_message = ? WHERE session_id = ?");
   const deleteStmt = db.prepare("DELETE FROM session_meta WHERE session_id = ?");
 
   // 读 header + resolve project + upsert（新文件或老行补全索引列共用）。
@@ -116,6 +118,26 @@ export async function runSessionIndexScan(
     );
   };
 
+  // 从磁盘读 head 并收敛派生列（parent_id 重挂 + first_message 回填）。
+  // first_message 是内容派生列：文件写入了首条消息，索引必须跟随——
+  // 否则 persist 建行的会话（first_message 恒 NULL）标题永远冻结。
+  // 返回是否更新了 first_message（供 NULL 欠账补跑计数）。
+  const reconcileFromHead = (file: { path: string; id: string }, dbRow: { parent_id: string | null; first_message: string | null }): boolean => {
+    const head = scanOneSessionHead(file.path);
+    if (!head) return false;
+    const parentId = head.parentSessionPath
+      ? (pathToId.get(sessionPathKey(head.parentSessionPath)) ?? null)
+      : null;
+    if (parentId !== dbRow.parent_id) {
+      updateParentStmt.run(parentId, file.id);
+    }
+    if (head.firstMessage && head.firstMessage !== dbRow.first_message) {
+      updateFirstMessageStmt.run(head.firstMessage, file.id);
+      return true;
+    }
+    return false;
+  };
+
   for (const file of diskFiles) {
     seenOnDisk.add(file.id);
     const dbRow = dbRows.get(file.id);
@@ -125,21 +147,18 @@ export async function runSessionIndexScan(
       await upsertFromDisk(file);
       summary.inserted += 1;
     } else if (dbRow.modified === null || dbRow.modified !== file.modified.getTime()) {
-      // mtime 变化：刷新排序键；同时校验 parent 链——删除会话级联重挂/外部
-      // 重挂会改 header.parentSession 但行内 parent_id 不会自己变。读 header
-      // 首行（与 buildTaskSessionIndex 同成本）比对，不一致则更新：磁盘
-      // header 是父链唯一权威，任何来源的重挂都在这里收敛。
-      const head = scanOneSessionHead(file.path);
-      if (head) {
-        const parentId = head.parentSessionPath
-          ? (pathToId.get(sessionPathKey(head.parentSessionPath)) ?? null)
-          : null;
-        if (parentId !== dbRow.parent_id) {
-          updateParentStmt.run(parentId, file.id);
-        }
-      }
+      // mtime 变化：刷新排序键；同时收敛派生列——parent 链（删除会话级联
+      // 重挂/外部重挂会改 header.parentSession）与 first_message（内容写入
+      // 后标题必须跟随）。磁盘 header 是父链唯一权威，文件头是标题事实源。
+      reconcileFromHead(file, dbRow);
       updateModifiedStmt.run(file.modified.getTime(), file.id);
       summary.updated += 1;
+    } else if (!dbRow.first_message) {
+      // first_message 欠账补跑：persist 建行的老会话（first_message 恒 NULL）
+      // 在 mtime 已同步后仍需回填一次；文件已有首条消息则写入，否则保持 NULL。
+      if (reconcileFromHead(file, dbRow)) {
+        summary.updated += 1;
+      }
     }
   }
 
