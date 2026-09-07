@@ -145,8 +145,12 @@ export const SessionWorkbench = memo(function SessionWorkbench({
     setSystemPromptLoading(false);
   }, []);
 
-  // 系统提示词加载：面板打开时懒加载（与 AppShell 顶栏同机制）
+  // 系统提示词加载：面板打开时懒加载（与 AppShell 顶栏同机制）。
+  // 新会话卡（cwd 非空 = 会话未创建）必须跳过：get_state 会触发
+  // ensureNewSession 创建空会话，导致“未发消息就落盘 nomessage 会话”。
+  // 转正（cwd 清空）后 isNewSession 变 false，此 effect 重跑正常加载。
   useEffect(() => {
+    if (isNewSession) return;
     if (!navbarSlot) return;
     const opening = systemPrompt === null && !systemPromptLoading;
     if (!opening) return;
@@ -157,7 +161,7 @@ export const SessionWorkbench = memo(function SessionWorkbench({
     void load().then(() => {
       if (systemPromptLoadIdRef.current === loadId) setSystemPromptLoading(false);
     });
-  }, [navbarSlot, systemPrompt, systemPromptLoading]);
+  }, [navbarSlot, systemPrompt, systemPromptLoading, isNewSession]);
 
   // 新会话卡转正：ChatWindow 拿到 realId 后回调。会话创建成功（文件已落盘），
   // 由父节点清 cwd 字段标记“会话已创建”转正为普通卡（写 Y.Doc，CRDT 广播），

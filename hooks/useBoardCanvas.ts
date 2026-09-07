@@ -782,8 +782,20 @@ export function useBoardCanvas({
     if (!nodesMap || !edgesMap) return;
     if (node.type === "session-card") {
       const d = node.data as { sessionId?: string; cwd?: string };
-      // 新会话卡（cwd 非空）：直接删（会话未创建）
+      // 新会话卡（cwd 非空 = 标记“会话未创建”）：但斜杠菜单/系统提示词面板等
+      // 预热路径仍可能已让会话落盘（ensureNewSession → persistNewSessionFile），
+      // 这里不能直接删节点——先兕底调删除 API（文件不存在时幂等空操作，
+      // 同时清 session_meta 残留），再删节点。
       if (!d.sessionId || d.cwd) {
+        if (d.sessionId) {
+          try {
+            const res = await fetch(`/api/sessions/${encodeURIComponent(d.sessionId)}`, { method: "DELETE" });
+            if (res.ok) dispatchBoardSessionDeleted(d.sessionId);
+            else console.warn(`[board] 清理新会话卡关联会话 ${d.sessionId} 失败 HTTP ${res.status}`);
+          } catch (e) {
+            console.warn(`[board] 清理新会话卡关联会话 ${d.sessionId} 异常`, e);
+          }
+        }
         nodesMap.delete(node.id);
         for (const e of Array.from(edgesMap.values())) {
           if (e.source === node.id || e.target === node.id) edgesMap.delete(e.id);
