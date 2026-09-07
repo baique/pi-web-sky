@@ -48,9 +48,11 @@ const EPR_VARS: Record<string, string> = {
   "--epr-dark-category-label-text-color": "var(--text-muted)",
   "--epr-category-icon-active-color": "var(--accent)",
   "--epr-dark-category-icon-active-color": "var(--accent)",
-  "--epr-emoji-size": "22px",
-  "--epr-emoji-padding": "3px",
-  "--epr-category-navigation-button-size": "26px",
+  "--epr-emoji-size": "18px",
+  "--epr-emoji-padding": "2px",
+  "--epr-category-navigation-button-size": "22px",
+  "--epr-search-input-height": "30px",
+  "--epr-category-label-height": "26px",
   "--epr-header-padding": "6px 8px 0",
   "--epr-horizontal-padding": "8px",
   "--epr-category-padding": "6px",
@@ -96,6 +98,9 @@ export function EmojiPickerField({
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       if (panelRef.current?.contains(e.target as Node)) return;
+      // 触发钮不交给全局监听：点击钮的开/关完全由 handleToggle 决定，
+      // 否则 mousedown 先关、click 再开 → 面板闪烁保持弹出（toggle 竞态）。
+      if (anchorRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {

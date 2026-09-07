@@ -11,7 +11,7 @@ import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { useSessionRunning, useSessionSummary } from "@/hooks/useBoardCanvas";
 import { memoBoardNode } from "./memoNode";
 import { dispatchBoardSessionRenamed, dispatchBoardCwdSwitch } from "@/lib/board-events";
-import { resolveEmoji } from "@/lib/card-emoji";
+import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
 
 /**
@@ -330,8 +330,8 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
           ...(expanded ? {} : { marginBottom: 2 }),
         }}
       >
-        {/* emoji（只读，去掉可切换选择器） */}
-        <span style={{ flexShrink: 0, fontSize: 14, lineHeight: 1 }}>{resolveEmoji("session", data.emoji, phase)}</span>
+        {/* emoji：点击切换面板开/关（EmojiPickerField 原生 toggle）；不传 status → 不随运行状态自动切换 */}
+        <EmojiPickerField kind="session" value={data.emoji} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
         {renaming ? (
           <input
             ref={renameInputRef}
