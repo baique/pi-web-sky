@@ -80,6 +80,9 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
     const el = cardRootRef.current;
     if (!el) return;
     const root = el.closest(".react-flow") as HTMLElement | null;
+    // 观察 RF 的稳定节点容器而非卡片内部 div：内部 div 可能被 RF 重建/几何异常，
+    // 导致 IO 回调永久停止（骨架屏"进入后永不退出"的根因之一）。
+    const target = (el.closest(".react-flow__node") as HTMLElement | null) ?? el;
     const io = new IntersectionObserver(
       (entries) => {
         const visible = entries[0]?.isIntersecting ?? true;
@@ -90,6 +93,24 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
           }
           setWorkbenchMounted(true);
         } else if (!workbenchTimerRef.current) {
+          // 二次确认：IO 观察的 target 可能已被 RF 重建（detached 旧节点 rect 全 0，
+          // 恒报 false）——用当前 DOM 节点（ref 回调随重建更新）的几何复核，
+          // 仍在视口+缓冲内则是误判，不启动卸载 timer，避免"视口内莫名骨架屏"。
+          const cur = cardRootRef.current;
+          if (cur) {
+            const r = cur.getBoundingClientRect();
+            const v = root?.getBoundingClientRect();
+            if (
+              v &&
+              r.right > v.left - WORKBENCH_NEAR_MARGIN &&
+              r.left < v.right + WORKBENCH_NEAR_MARGIN &&
+              r.bottom > v.top - WORKBENCH_NEAR_MARGIN &&
+              r.top < v.bottom + WORKBENCH_NEAR_MARGIN
+            ) {
+              setWorkbenchMounted(true);
+              return;
+            }
+          }
           workbenchTimerRef.current = setTimeout(() => {
             workbenchTimerRef.current = null;
             setWorkbenchMounted(false);
@@ -98,7 +119,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
       },
       { root, rootMargin: `${WORKBENCH_NEAR_MARGIN}px` },
     );
-    io.observe(el);
+    io.observe(target);
     return () => {
       io.disconnect();
       if (workbenchTimerRef.current) {
@@ -107,6 +128,29 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
       }
     };
   }, []);
+  // 回屏轮询兜底：IO 回调可能因节点重建/几何异常不再触发（"一旦进入骨架屏永不退出"）。
+  // 骨架屏期间每 1s 检查卡片是否回到视口+缓冲，回到即恢复挂载——无论 IO 状态如何都保证退出。
+  useEffect(() => {
+    if (workbenchMounted) return;
+    const root = cardRootRef.current?.closest(".react-flow") as HTMLElement | null;
+    const el = cardRootRef.current;
+    if (!root || !el) return;
+    const margin = WORKBENCH_NEAR_MARGIN;
+    const iv = setInterval(() => {
+      const r = el.getBoundingClientRect();
+      const v = root.getBoundingClientRect();
+      const near =
+        r.right > v.left - margin &&
+        r.left < v.right + margin &&
+        r.bottom > v.top - margin &&
+        r.top < v.bottom + margin;
+      if (near) {
+        clearInterval(iv);
+        setWorkbenchMounted(true);
+      }
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [workbenchMounted]);
   // 组合 ref：玻璃层 setContainer 与 IO 观察目标 cardRootRef 都挂卡根
   const setCardRoot = useCallback(
     (node: HTMLDivElement | null) => {
@@ -332,6 +376,9 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
       >
         {/* emoji：点击切换面板开/关（EmojiPickerField 原生 toggle）；不传 status → 不随运行状态自动切换 */}
         <EmojiPickerField kind="session" value={data.emoji} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
+        {/* 状态圆点：容器层直接子元素——emoji→圆点、圆点→标题 统一由容器 gap(6) 控制，
+            不再被标题 span 的 padding 叠加出额外间距 */}
+        <span aria-hidden style={{ width: 8, height: 8, borderRadius: "50%", background: meta.dot, flexShrink: 0 }} />
         {renaming ? (
           <input
             ref={renameInputRef}
@@ -343,13 +390,12 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
             }}
             onBlur={() => void commitRename()}
             className="nodrag"
-            style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
+            style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px 2px 2px", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
           />
         ) : (
-          /* 圆点并入标题元素（同 flex 容器，间距由 gap 单独控制） */
-          <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, minWidth: 0, overflow: "hidden", fontSize: 12.5, fontWeight: 600, color: "var(--text)", padding: "2px 6px", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box" }}>
-            <span aria-hidden style={{ width: 8, height: 8, borderRadius: "50%", background: meta.dot, flexShrink: 0 }} />
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{isNewSession ? "New session" : (title || "Untitled")}</span>
+          /* 标题：圆点已移出，左间距由容器 gap 提供，此处不再留 padding-left */
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", padding: "2px 6px 2px 0", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box" }}>
+            {isNewSession ? "New session" : (title || "Untitled")}
           </span>
         )}
         {stale && (
