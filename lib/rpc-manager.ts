@@ -16,6 +16,7 @@ import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
 import { projectIdentityKey } from "./project-identity";
 import { resolveProject } from "./worktree";
 import { ensureSessionMetaRow } from "./task-store";
+import { reconcileForkBoard } from "./board-reconcile";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
@@ -566,6 +567,16 @@ export class AgentSessionWrapper {
           const forkedPath = sourceManager.createBranchedSession(entry.parentId);
           if (!forkedPath) throw new Error("Failed to create forked session");
           newSessionFile = forkedPath;
+          // SDK 惰性落盘契约：fork 点之前无 assistant 消息时不写文件（flushed=false），
+          // 只返回路径字符串。若不强制落盘，后续 open 不存在文件会 newSession 生成新 id，
+          // meta 行指向不存在的文件——列表/看板卡片读不到，30s 扫描器删行 → “会话不存在”。
+          if (!existsSync(newSessionFile)) {
+            const content = [sourceManager.getHeader(), ...sourceManager.getEntries()]
+              .map((entry) => JSON.stringify(entry))
+              .join("\n") + "\n";
+            writeFileSync(newSessionFile, content, { encoding: "utf8", flag: "wx" });
+            (sourceManager as unknown as { flushed: boolean }).flushed = true;
+          }
         }
 
         const newSessionId = SessionManager.open(newSessionFile, sessionDir).getSessionId();
@@ -587,6 +598,10 @@ export class AgentSessionWrapper {
             projectKey: projectIdentityKey(project?.projectRoot ?? cwd ?? ""),
             parentId: sourceSessionId,
           });
+          // fork 卡即时入板：源会话归属任务 → 精准 reconcile 该任务看板。
+          // await 保证卡先落 yjs 再返回（前端响应到达时卡已存在，无并发写窗口）；
+          // 失败不阻塞 fork，10s 定时兜底。
+          await reconcileForkBoard(sourceSessionId);
         } catch {
           // 建行失败不阻塞 fork：扫描器下一轮兜底补行。
         }

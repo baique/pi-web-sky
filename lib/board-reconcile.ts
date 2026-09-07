@@ -15,6 +15,7 @@
 import { getBoard, listAllBoards } from "./board-store";
 import { listTaskSessionIds } from "./task-store";
 import { listCards, listLinks } from "./task-card-store";
+import { getDb } from "./sqlite-db";
 
 // ---- yjs maps 类型 + mutateBoard（由 server.mjs 通过 globalThis 注入，避免 Next 打包 node:sqlite）----
 interface BoardMaps {
@@ -113,20 +114,20 @@ function overlapsSessionCards(nodes: DocNode[], x: number, y: number, width: num
 }
 
 /**
- * 任务执行会话卡落点：锚定任务卡右侧（y 与任务卡齐平），右侧被占则回退 findFreeSpot。
- * 任务卡节点已存在才锚定（补齐顺序保证先补任务卡再补会话卡）。
+ * 派生卡落点：锚定锚点节点右侧（y 与锚点齐平），右侧被占则回退 findFreeSpot。
+ * 锚点为任务卡（exec 执行会话卡）或源会话卡（fork 会话卡），补齐顺序保证先补锚点。
  */
-function findSpotNearTaskCard(
+function findSpotNearAnchor(
   nodes: DocNode[],
-  taskNode: DocNode | undefined,
+  anchorNode: DocNode | undefined,
   width: number,
   height: number,
 ): { x: number; y: number } {
-  if (taskNode?.position) {
+  if (anchorNode?.position) {
     const STEP = 24;
-    const taskW = taskNode.style?.width ?? TASK_CARD_W;
-    const x = taskNode.position.x + taskW + STEP;
-    const y = taskNode.position.y;
+    const anchorW = anchorNode.style?.width ?? TASK_CARD_W;
+    const x = anchorNode.position.x + anchorW + STEP;
+    const y = anchorNode.position.y;
     if (!overlapsSessionCards(nodes, x, y, width, height)) return { x, y };
   }
   return findFreeSpot(nodes, width, height);
@@ -153,6 +154,15 @@ export async function reconcileBoard(boardId: string): Promise<void> {
   const allSessionIds = new Set<string>();
   if (isTaskBoard) for (const sid of listTaskSessionIds(board.taskId!)) allSessionIds.add(sid);
   for (const c of cards) if (c.sessionId) allSessionIds.add(c.sessionId);
+  // fork 会话派生：fork（parent_id 非空）会话的源会话归属本任务 → 本任务看板补 fork 卡。
+  // fork 会话自身不继承 task_id，需经源会话归属定位；普通看板 board.taskId 为空天然不参与。
+  const forkBySid = new Map<string, string>(); // forkSid -> parentSid
+  if (isTaskBoard) {
+    for (const { sessionId, parentId } of listTaskForkedSessions(board.taskId!)) {
+      allSessionIds.add(sessionId);
+      forkBySid.set(sessionId, parentId);
+    }
+  }
 
   await mutateBoard(boardId, (maps) => {
     const nodesMap = maps.nodes;
@@ -226,8 +236,12 @@ export async function reconcileBoard(boardId: string): Promise<void> {
         // 执行会话卡无条件补：会话是业务派生的独立展示（真实会话的存在性），
         // 不依赖宿主任务卡节点在不在画布——任务卡是画布管理，执行会话卡是业务派生，
         // 两者解耦。任务卡不在时落点回退 findFreeSpot（findSpotNearTaskCard 内部处理）。
-        const taskNode = card ? remaining.find((n) => n?.id === `task-${card.id}`) : undefined;
-        const spot = findSpotNearTaskCard(remaining, taskNode, SESSION_CARD_W, SESSION_CARD_H);
+        const parentSid = forkBySid.get(sid);
+        // 锚点：fork 会话卡锚定源会话卡右侧；执行会话卡锚定宿主任务卡右侧；无锚点回退 4 列布局
+        const anchor = parentSid
+          ? remaining.find((n) => n?.id === `session-${parentSid}`)
+          : card ? remaining.find((n) => n?.id === `task-${card.id}`) : undefined;
+        const spot = findSpotNearAnchor(remaining, anchor, SESSION_CARD_W, SESSION_CARD_H);
         nodesMap.set(id, {
           id,
           type: "session-card",
@@ -301,7 +315,37 @@ export async function reconcileBoard(boardId: string): Promise<void> {
       });
     }
 
-    // ---- 3) 依赖线：task_card_links → 建线（缺补多删）----
+    // ---- 3) fork 线：源会话卡 → fork 会话卡（forkLink，同 exec 蓝虚线）----
+    const existingForkEdges = new Map<string, string>(); // "src->tgt" -> edgeId
+    for (const e of Array.from(edgesMap.values())) {
+      if (!e.data?.forkLink) continue;
+      if (e.source && e.target) existingForkEdges.set(`${e.source}->${e.target}`, e.id);
+    }
+    const wantForkEdges = new Set<string>();
+    for (const [sid, parentSid] of forkBySid) {
+      const srcId = `session-${parentSid}`;
+      const tgtId = `session-${sid}`;
+      // 两端节点在画布才连线（补卡循环已补 fork 卡；源卡归属任务恒存在/本轮补）
+      if (!sessionShapes.has(parentSid) || !sessionShapes.has(sid)) continue;
+      const key = `${srcId}->${tgtId}`;
+      wantForkEdges.add(key);
+      if (!existingForkEdges.has(key)) {
+        edgesMap.set(`fork-${parentSid}-${sid}`, {
+          id: `fork-${parentSid}-${sid}`,
+          source: srcId,
+          target: tgtId,
+          type: "default",
+          data: { forkLink: true, parentId: parentSid, sessionId: sid },
+          markerEnd: { type: "arrowclosed" },
+          style: { strokeWidth: 1.5, stroke: "#3184f8", strokeDasharray: "6 4" },
+        });
+      }
+    }
+    for (const [key, edgeId] of existingForkEdges) {
+      if (!wantForkEdges.has(key)) edgesMap.delete(edgeId);
+    }
+
+    // ---- 4) 依赖线：task_card_links → 建线（缺补多删）----
     const existingLinks = new Map(); // "<from>-><to>:<kind>" -> edgeId
     for (const e of Array.from(edgesMap.values())) {
       if (!e.data?.taskLink) continue;
@@ -337,6 +381,36 @@ export async function reconcileBoard(boardId: string): Promise<void> {
       if (!wantLinks.has(key)) edgesMap.delete(edgeId);
     }
   });
+}
+
+/** 源会话归属指定任务的 fork 会话（fork 关系 = session_meta.parent_id → 源会话 id）。
+ *  仅任务看板补 fork 卡：fork 卡是任务派生元素，经源会话的归属定位到任务看板。 */
+function listTaskForkedSessions(taskId: string): Array<{ sessionId: string; parentId: string }> {
+  return getDb()
+    .prepare(
+      `SELECT f.session_id AS sessionId, f.parent_id AS parentId
+       FROM session_meta f
+       JOIN session_meta s ON s.session_id = f.parent_id
+       WHERE f.parent_id IS NOT NULL AND s.task_id = ?`,
+    )
+    .all(taskId) as Array<{ sessionId: string; parentId: string }>;
+}
+
+/**
+ * fork 后精准触发：源会话归属任务 → reconcile 该任务看板（fork 卡即时出现）。
+ * 源会话不归属任何任务（普通看板）→ 无操作。单板 reconcile，毫秒级；
+ * 失败不阻塞 fork，由 10s 定时兜底。
+ */
+export async function reconcileForkBoard(sourceSessionId: string): Promise<void> {
+  const row = getDb()
+    .prepare("SELECT task_id AS taskId FROM session_meta WHERE session_id = ? AND task_id IS NOT NULL")
+    .get(sourceSessionId) as { taskId: string } | undefined;
+  if (!row?.taskId) return;
+  const boardRow = getDb()
+    .prepare("SELECT id FROM boards WHERE task_id = ?")
+    .get(row.taskId) as { id: string } | undefined;
+  if (!boardRow?.id) return;
+  await reconcileBoard(boardRow.id);
 }
 
 /**

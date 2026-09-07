@@ -633,6 +633,7 @@ export function useBoardCanvas({
         // 派生边（exec/依赖）禁删：由后端 reconcile 兜底补回；这里跳过
         const e = edgesMap.get(c.id);
         if (e && (e.data as { execLink?: boolean; taskLink?: boolean } | undefined)?.execLink) continue;
+        if (e && (e.data as { forkLink?: boolean } | undefined)?.forkLink) continue;
         if (e && (e.data as { taskLink?: string } | undefined)?.taskLink) continue;
         edgesMap.delete(c.id);
       } else {
