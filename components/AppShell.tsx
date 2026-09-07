@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useGlassWallpaper, useGlassResizeTrigger, previewBubbleBlur } from "@/hooks/useGlassWallpaper";
 import { SessionSidebar } from "./SessionSidebar";
+import type { WorktreeProject } from "./WorktreeSelector";
 import { ChatWindow } from "./ChatWindow";
 import { BoardLoading } from "./canvas/BoardLoading";
 import { FileViewer } from "./FileViewer";
@@ -825,6 +826,9 @@ export function AppShell() {
 
   const initialSessionId = initialNavigation.sessionId;
   const [activeCwd, setActiveCwd] = useState<string | null>(null);
+  // 当前激活项目的 worktree 身份（欢迎页环境条上抛）：侧栏把任一 worktree 路径
+  // 解析回项目根用——worktree 是项目(cwd)的子级，切换/新建后路径选择器显示不变。
+  const [activeWorktreeProject, setActiveWorktreeProject] = useState<WorktreeProject | null>(null);
   const activeProjectKeyRef = useRef<string | null>(null);
   // True once the initial ?session= URL param has been resolved (or confirmed absent)
   const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !initialSessionId);
@@ -1080,10 +1084,13 @@ export function AppShell() {
   }, [selectedSession?.cwd, newSessionCwd, activeCwd, handleNewSession]);
 
   /** 环境条 worktree 切换：新建会话 cwd 与全局有效 cwd 同步更新（任务卡 #16）。
-   *  只在空态欢迎页触达（有历史会话不显示选择器），不涉及已有会话。 */
-  const handleEnvWorktreeChange = useCallback((wtPath: string) => {
+   *  只在空态欢迎页触达（有历史会话不显示选择器），不涉及已有会话。
+   *  携带项目身份（projectRoot/projectKey/worktreePaths）供侧栏把所选 worktree
+   *  解析回项目根——worktree 是项目(cwd)的子级，切换/新建后 cwd 显示不变。 */
+  const handleEnvWorktreeChange = useCallback((wtPath: string, project?: WorktreeProject) => {
     setNewSessionCwd(wtPath);
     setActiveCwd(wtPath);
+    if (project) setActiveWorktreeProject(project);
   }, []);
   // 看板 cwd-switch 事件用最新引用（避免监听反复重绑）
   const handleEnvWorktreeChangeRef = useRef(handleEnvWorktreeChange);
@@ -1528,6 +1535,7 @@ export function AppShell() {
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
+        activeWorktreeProject={activeWorktreeProject}
         onCwdChange={handleCwdChange}
         onOpenFile={handleOpenFile}
         explorerRefreshKey={explorerRefreshKey}

@@ -11,6 +11,15 @@ interface WorktreeEntry {
   isMain: boolean;
 }
 
+/** 当前 cwd 所属项目的身份信息（来自 /api/worktrees 响应）。
+ *  父级用它把「任一 worktree 路径」解析回项目根——worktree 是项目(cwd)的子级，
+ *  选中/新建 worktree 后项目身份不变，路径选择器显示的项目根也不应变。 */
+export interface WorktreeProject {
+  projectRoot: string;
+  projectKey: string;
+  worktreePaths: string[];
+}
+
 interface WorktreeState {
   /** The cwd this data was fetched for — guards against stale responses */
   forCwd: string;
@@ -61,8 +70,9 @@ function PathLabel({ text, style }: { text: string; style?: CSSProperties }) {
 interface WorktreeSelectorProps {
   /** 用于解析 worktree 列表的当前有效 cwd（项目根或任一 worktree 路径均可） */
   cwd: string;
-  /** 切换/新建成功后回调（父级更新 activeCwd / newSessionCwd） */
-  onSelect?: (wtPath: string) => void;
+  /** 切换/新建成功后回调（父级更新 activeCwd / newSessionCwd）；
+   *  第二参携带该项目身份，父级据此把所选 worktree 解析回项目根（显示层不随 worktree 跳）。 */
+  onSelect?: (wtPath: string, project?: WorktreeProject) => void;
   /** 触发按钮外壳样式覆盖（欢迎页玻璃 / 任务卡侧边栏紧凑各自传入） */
   style?: CSSProperties;
   /** 分支名文字样式覆盖 */
@@ -172,8 +182,12 @@ export function WorktreeSelector({ cwd, onSelect, style, labelStyle, onOpenChang
     setOpen(false);
     setError(null);
     setFilter("");
-    onSelect?.(path);
-  }, [onSelect]);
+    onSelect?.(path, state ? {
+      projectRoot: state.projectRoot,
+      projectKey: state.projectKey,
+      worktreePaths: state.worktrees.map((w) => w.path),
+    } : undefined);
+  }, [onSelect, state]);
 
   const handleCreate = useCallback(async () => {
     const branch = newBranch.trim();
@@ -197,17 +211,24 @@ export function WorktreeSelector({ cwd, onSelect, style, labelStyle, onOpenChang
       // identity resolves before any refetch lands.
       setState((prev) => prev ? {
         ...prev,
-        forCwd: data.path!,
-        currentWorktreePath: data.path!,
         worktrees: [...prev.worktrees, { path: data.path!, branch, isMain: false }],
       } : prev);
-      handleSelect(data.path);
+      // 新建即切 worktree（checkout 跟随），但项目身份不变：将新 path 一并上报，
+      // 父级仍能把它解析回项目根——路径选择器显示的项目根不随新建 worktree 跳。
+      setOpen(false);
+      setError(null);
+      setFilter("");
+      onSelect?.(data.path, state ? {
+        projectRoot: state.projectRoot,
+        projectKey: state.projectKey,
+        worktreePaths: [...state.worktrees.map((w) => w.path), data.path!],
+      } : undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [newBranch, busy, state, handleSelect]);
+  }, [newBranch, busy, state, onSelect]);
 
   const handleRemove = useCallback(async (path: string, force: boolean) => {
     if (!state || busy) return;
@@ -231,14 +252,23 @@ export function WorktreeSelector({ cwd, onSelect, style, labelStyle, onOpenChang
       }
       setConfirmRemove(null);
       setState((prev) => prev ? { ...prev, worktrees: prev.worktrees.filter((w) => w.path !== path) } : prev);
-      // 删的是当前 worktree → 回主工作区
-      if (currentWorktree?.path === path) handleSelect(state.projectRoot);
+      // 删的是当前 worktree → 回主工作区（项目身份不变）
+      if (currentWorktree?.path === path) {
+        setOpen(false);
+        setError(null);
+        setFilter("");
+        onSelect?.(state.projectRoot, state ? {
+          projectRoot: state.projectRoot,
+          projectKey: state.projectKey,
+          worktreePaths: state.worktrees.filter((w) => w.path !== path).map((w) => w.path),
+        } : undefined);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [state, busy, currentWorktree?.path, handleSelect]);
+  }, [state, busy, currentWorktree?.path, onSelect]);
 
   // Close dropdowns on outside click（面板已 portal 到 body，需单独检查）
   useEffect(() => {

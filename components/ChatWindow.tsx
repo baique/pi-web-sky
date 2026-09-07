@@ -20,7 +20,7 @@ import { phaseLabel, orbModeForPhase } from "@/lib/agent-phase";
 import { NoticeDrawer } from "./NoticeDrawer";
 import { QuotaView, NOTICE_COLOR } from "./ComposerHeader";
 import { formatTokenCount } from "./ChatInput";
-import { WorktreeSelector } from "./WorktreeSelector";
+import { WorktreeSelector, type WorktreeProject } from "./WorktreeSelector";
 import { useAgentSession, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -48,7 +48,7 @@ interface Props {
   onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;
   onSessionForked?: (newSessionId: string) => void;
   /** 空态欢迎页环境条 worktree 切换（会话未创建时决定运行目录，任务卡 #16） */
-  onEnvWorktreeChange?: (wtPath: string) => void;
+  onEnvWorktreeChange?: (wtPath: string, project?: WorktreeProject) => void;
   modelsRefreshKey?: number;
   chatInputRef?: React.RefObject<ChatInputHandle | null>;
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;

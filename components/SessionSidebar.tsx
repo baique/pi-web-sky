@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
-import { WorktreeSelector } from "./WorktreeSelector";
+import { WorktreeSelector, type WorktreeProject } from "./WorktreeSelector";
 import type { SessionInfo } from "@/lib/types";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
@@ -122,6 +122,9 @@ interface Props {
   onOpenTaskBoard?: (taskId: string) => void;
   /** 当前激活看板 id（看板模式下高亮） */
   activeBoardId?: string | null;
+  /** 当前激活项目的 worktree 身份（欢迎页环境条上抛）：把任一 worktree 路径
+   *  解析回项目根用——worktree 是项目(cwd)的子级，切换/新建后路径选择器显示不变。 */
+  activeWorktreeProject?: WorktreeProject | null;
 }
 
 interface ProjectSelection {
@@ -367,7 +370,7 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onRefresh, onSessionsLoaded, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onRefresh, onSessionsLoaded, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId, activeWorktreeProject: activeWorktreeProjectProp }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   /** 聊天区会话（列表重构 v2）：当前项目（projectKey）的全部会话，服务端
@@ -389,6 +392,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [customPathError, setCustomPathError] = useState<string | null>(null);
   const [customPathValidating, setCustomPathValidating] = useState(false);
   const [validatedProject, setValidatedProject] = useState<ValidatedProject | null>(null);
+  // 侧栏自身 worktree 选择器上抛的项目身份（欢迎页通道由 activeWorktreeProject prop 进入）；
+  // projectFor 用它把所选 worktree 路径解析回项目根（原版 worktreeState 分支，抽取时丢失）。
+  const [localWorktreeProject, setLocalWorktreeProject] = useState<WorktreeProject | null>(null);
+  const activeWorktreeProject = activeWorktreeProjectProp ?? localWorktreeProject;
   const dropdownRef = useRef<HTMLDivElement>(null);
   // 视图持久化状态：初始值固定为 SSR 默认。localStorage 仅客户端存在——
   // 若在 useState 初始化时读取，服务端默认值与客户端持久化值不一致会触发
@@ -644,13 +651,22 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (validatedProject?.cwd === cwd) {
       return projectSelection(validatedProject.root, validatedProject.key);
     }
+    // worktree 是项目(cwd)的子级：列表里任一 worktree 路径都解析回项目根（覆盖
+    // 新建/切换后尚无会话的 worktree——allSessions 匹配不到，但项目身份不变，
+    // 路径选择器显示的项目根也不应变）。原版 worktreeState 分支，抽取组件时丢失，此处恢复。
+    if (activeWorktreeProject && (
+      cwd === activeWorktreeProject.projectRoot
+      || activeWorktreeProject.worktreePaths.includes(cwd)
+    )) {
+      return projectSelection(activeWorktreeProject.projectRoot, activeWorktreeProject.projectKey);
+    }
     const match = allSessions.find((session) => (
       session.cwd === cwd || (session.projectRoot ?? session.cwd) === cwd
     ));
     return match
       ? projectSelection(match.projectRoot ?? match.cwd, workspaceKeyOf(match))
       : projectSelection(cwd, cwd);
-  }, [validatedProject, allSessions, projectSelection]);
+  }, [validatedProject, activeWorktreeProject, allSessions, projectSelection]);
 
   // A worktree/session refresh can hydrate the stable key without changing
   // cwd, so notify when either changes. The parent treats same-cwd key changes
@@ -1371,7 +1387,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               <span aria-hidden style={{ flexShrink: 0, width: 1, alignSelf: "stretch", margin: "5px 0", background: "color-mix(in srgb, var(--border) 55%, transparent)" }} />
               <WorktreeSelector
                 cwd={selectedCwd}
-                onSelect={(path) => { setSelectedCwd(path); setDropdownOpen(false); }}
+                onSelect={(path, project) => {
+                  if (project) setLocalWorktreeProject(project);
+                  setSelectedCwd(path);
+                  setDropdownOpen(false);
+                }}
                 onOpenChange={(open) => { if (open) setDropdownOpen(false); }}
                 showMainLabel={false}
                 compact
