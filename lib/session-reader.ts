@@ -14,7 +14,7 @@ import { normalizeToolCalls } from "./normalize";
 import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
-import { scanSessionFileMeta, scanOneSessionFile, sessionScanner } from "./session-scanner";
+import { scanSessionFileMeta, scanOneSessionFile, scanOneSessionHead, sessionScanner } from "./session-scanner";
 import { ensureSessionIndexReady } from "./session-index-scanner";
 import type { TurnIndexItem } from "./api-types";
 
@@ -60,7 +60,33 @@ export async function loadSessionDetailsFromMeta(ids: string[]): Promise<Session
     const row = byId.get(id);
     if (row) sessions.push(mapSessionMetaRow(row));
   }
-  return sessions;
+  return fillFirstMessageFromFile(sessions);
+}
+
+/**
+ * lazy 回填：列表读取时对 first_message 为空的会话读文件头补真实首条消息
+ * （文件是内容事实源），并批量写回 session_meta（后台收敛，下次免读文件）。
+ * 真·空会话（文件无消息）保持 NULL → 显示 no messages。
+ * 列表（聊天/任务/全量）共用同一逻辑，保证各处标题一致。
+ */
+function fillFirstMessageFromFile(sessions: SessionInfo[]): SessionInfo[] {
+  const pending = sessions.filter((s) => s.firstMessage === "(no messages)" && s.path);
+  if (pending.length === 0) return sessions;
+  const updateStmt = getDb().prepare("UPDATE session_meta SET first_message = ? WHERE session_id = ?");
+  return sessions.map((s) => {
+    if (s.firstMessage !== "(no messages)" || !s.path) return s;
+    let firstMessage = s.firstMessage;
+    try {
+      const head = scanOneSessionHead(s.path);
+      if (head?.firstMessage) {
+        firstMessage = head.firstMessage;
+        updateStmt.run(firstMessage, s.id);
+      }
+    } catch {
+      // 文件不可读（丢失/权限）→ 保持 no messages
+    }
+    return firstMessage === s.firstMessage ? s : { ...s, firstMessage };
+  });
 }
 
 /**
@@ -88,7 +114,7 @@ export async function loadProjectSessions(projectKey: string): Promise<SessionIn
     return [];
   }
 
-  const sessions = rows.map(mapSessionMetaRow);
+  const sessions = fillFirstMessageFromFile(rows.map(mapSessionMetaRow));
   return attachSessionProjectInfo(sessions);
 }
 
@@ -110,7 +136,7 @@ export async function loadAllSessionIndex(): Promise<SessionInfo[]> {
     return [];
   }
 
-  const sessions: SessionInfo[] = rows.map(mapSessionMetaRow);
+  const sessions = fillFirstMessageFromFile(rows.map(mapSessionMetaRow));
   return attachSessionProjectInfo(sessions);
 }
 
