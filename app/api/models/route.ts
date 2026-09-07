@@ -11,6 +11,7 @@ import {
 import { resolveVisibleModels, selectInitialModelScope } from "@/lib/model-scope";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { projectTrustReloadOptions } from "@/lib/project-trust";
+import { resolveCwdOrProjectRoot } from "@/lib/worktree";
 
 export const dynamic = "force-dynamic";
 
@@ -99,7 +100,8 @@ const EMPTY_MODELS: ModelsData = {
 
 export async function GET(req: Request) {
   const requestedCwd = new URL(req.url).searchParams.get("cwd") || process.cwd();
-  const cwd = resolve(requestedCwd);
+  // worktree 目录已删除时回退主项目根：会话仍可用（可切回主分支），而非 400 卡死页面
+  const cwd = await resolveCwdOrProjectRoot(resolve(requestedCwd));
 
   let cwdStat;
   try {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { existsSync } from "fs";
-import { addWorktree, findCurrentWorktreePath, listWorktrees, removeWorktree, resolveProject } from "@/lib/worktree";
+import { addWorktree, findCurrentWorktreePath, listWorktrees, removeWorktree, resolveCwdOrProjectRoot, resolveProject } from "@/lib/worktree";
 import { allowFileRoot, getAllowedFileRoots, isExistingFilePathAllowed, isFilePathAllowed } from "@/lib/file-access";
 import { projectIdentityKey } from "@/lib/project-identity";
 
@@ -8,7 +8,10 @@ import { projectIdentityKey } from "@/lib/project-identity";
  *  allowed dirs may be inspected or mutated through this endpoint. */
 async function checkCwdAllowed(cwd: string): Promise<NextResponse | null> {
   const allowedRoots = await getAllowedFileRoots();
-  if (!isFilePathAllowed(cwd, allowedRoots) || !isExistingFilePathAllowed(cwd, allowedRoots)) {
+  // cwd 可能指向已删除的 worktree 目录：存在性校验回退到主项目根，
+  // 让分支选择器仍能列出 worktree 供用户切回主分支，而不是 403 卡死页面。
+  const existing = existsSync(cwd) ? cwd : await resolveCwdOrProjectRoot(cwd);
+  if (!isFilePathAllowed(cwd, allowedRoots) || !isExistingFilePathAllowed(existing, allowedRoots)) {
     return NextResponse.json({ error: "Access denied" }, { status: 403 });
   }
   return null;

@@ -6,6 +6,7 @@ import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-acces
 import { invalidateModelsCache } from "@/lib/models-cache";
 import { getProjectTrustStatus, trustProject } from "@/lib/project-trust";
 import { destroyRpcSessionsForCwd, hasBusyRpcSessionForCwd } from "@/lib/rpc-manager";
+import { resolveCwdOrProjectRoot } from "@/lib/worktree";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,8 @@ async function validateCwd(value: unknown): Promise<
     return { response: NextResponse.json({ error: "cwd required" }, { status: 400 }) };
   }
 
-  const cwd = resolve(value);
+  // worktree 目录已删除时回退主项目根（会话仍可用，可切回主分支）
+  const cwd = await resolveCwdOrProjectRoot(resolve(value));
   try {
     if (!(await stat(cwd)).isDirectory()) {
       return { response: NextResponse.json({ error: "cwd must be a directory" }, { status: 400 }) };

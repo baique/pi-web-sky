@@ -49,6 +49,15 @@ export function invalidateProjectCache(): void {
   globalThis.__piProjectCache?.clear();
 }
 
+/** cwd 指向已删除的 worktree（目录不存在）时回退到主项目根；目录存在则原样返回。
+ *  会话 cwd 落盘即锁定，worktree 目录被删后，模型/信任/git/分支操作应继续按主
+ *  checkout 可用（让用户能切回主分支），而不是 4xx 把页面卡死。 */
+export async function resolveCwdOrProjectRoot(cwd: string): Promise<string> {
+  if (existsSync(cwd)) return cwd;
+  const project = await resolveProject(cwd);
+  return project.projectRoot || cwd;
+}
+
 async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], {
     timeout: 10_000,
