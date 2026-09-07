@@ -335,8 +335,10 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
         left: dropdownPos.left,
         width: dropdownPos.width,
         zIndex: 500,
-        borderRadius: 12,
+        // 普通顶栏贴栏展开：只保底部圆角、去掉上边框（对齐 AppShell glass-top-panel）。
+        borderRadius: "0 0 12px 12px",
         border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+        borderTop: "none",
       }} className="glass-panel">
         {hasContent ? (
           <div style={{ padding: "4px 12px 8px 12px", maxHeight: 260, overflowY: "auto" }}>

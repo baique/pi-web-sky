@@ -456,11 +456,14 @@ body {
 /* Left: the TUI extension shelf (widget triggers + status line). Fills all
    space up to the right button slot so the two halves stay flush and the
    internal layout (panels spanning 100%, 70/30 widget/status split) keeps
-   behaving exactly like the pre-split shelf. */
+   behaving exactly like the pre-split shelf.
+   nowrap：内容多（widget + 状态 + 通知/额度）时强制单行，不把控件挤到下一行；
+   压缩交给子项自己（triggers 横向滚动、status 省略号、右区通知可收缩）。
+   看板工作台另有 .board-workbench 覆盖，行为不变。 */
 .extension-status-left {
   display: flex;
   flex: 1 1 auto;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: stretch;
   min-width: 0;
 }

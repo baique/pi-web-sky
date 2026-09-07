@@ -30,6 +30,8 @@ export interface StickyNoteData extends Record<string, unknown> {
   emoji?: string;
   /** 新建时间（ms epoch） */
   createdAt?: number;
+  /** 创建后直接进入编辑（双击画布创建便笺时置位，首次保存/取消/失焦清除） */
+  autofocus?: boolean;
 }
 
 function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & { data: StickyNoteData }) {
@@ -44,8 +46,8 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   // 玻璃（局部贴图）：从 RF store 读节点 position
   const { setContainer } = useCardGlass("var(--assistant-card-glass)");
 
-  // 本地编辑态（RF 无 tldraw editing 概念）
-  const [isEditing, setIsEditing] = useState(false);
+  // 本地编辑态（RF 无 tldraw editing 概念）；autofocus：双击画布创建便笺后直接进入编辑
+  const [isEditing, setIsEditing] = useState(Boolean(data.autofocus));
   const contentRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   // 编辑中的最新 markdown（同步镜像）：TipTap onUpdate 实时写这里，save/finish/blur 读它——
@@ -75,23 +77,31 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     }
   }, [text, updateNode, id]);
 
+  // autofocus 一次性标记：进入编辑后首次保存/取消/失焦时清除（防止 yjs 残留导致每次回灌都进编辑）
+  const clearAutofocus = useCallback(() => {
+    if (data.autofocus) updateNode(id, { data: { autofocus: undefined } });
+  }, [data.autofocus, updateNode, id]);
+
   const finish = useCallback(() => {
     save();
+    clearAutofocus();
     setIsEditing(false);
-  }, [save]);
+  }, [save, clearAutofocus]);
 
   const cancel = useCallback(() => {
     latestMdRef.current = text;
+    clearAutofocus();
     setIsEditing(false);
-  }, [text]);
+  }, [text, clearAutofocus]);
 
   // 失焦自动保存：编辑器失去焦点且焦点移出卡片 → 保存并退出编辑。
   // （点画布空白/点别的节点/切走应用 → 等价 tldraw 点别处退出编辑自动保存）
   // 点卡内按钮（徽记/取消/完成）焦点仍在卡内，NoteEditor 的 onBlur 内判断后不触发。
   const handleBlurExit = useCallback(() => {
     save();
+    clearAutofocus();
     setIsEditing(false);
-  }, [save]);
+  }, [save, clearAutofocus]);
 
   const copyContent = useCallback(
     (e: React.MouseEvent) => {

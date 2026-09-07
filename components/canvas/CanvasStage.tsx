@@ -9,7 +9,6 @@ import { useI18n } from "@/hooks/useI18n";
 import { SessionCardNode } from "@/components/board/SessionCardNode";
 import { StickyNoteNode } from "@/components/board/StickyNoteNode";
 import { TaskCardNode } from "@/components/board/TaskCardNode";
-import { TextNode } from "@/components/board/TextNode";
 import { ImageNode } from "@/components/board/ImageNode";
 import { SendNoteEdge } from "@/components/board/SendNoteEdge";
 import { BoardCanvasProvider, type BoardCanvasOps } from "@/components/board/BoardCanvasContext";
@@ -32,7 +31,7 @@ const nodeTypes: NodeTypes = {
   "task-card": TaskCardNode,
   "sticky-note": StickyNoteNode,
   text: StickyNoteNode, // 旧 tldraw text shape 降级为便笺渲染（data.text）
-  "text-node": TextNode,
+  "text-node": StickyNoteNode, // 旧手写体文字节点降级为便笺渲染（data.text，功能不再保留）
   "image-node": ImageNode,
 };
 
@@ -42,7 +41,7 @@ const edgeTypes: EdgeTypes = {
 };
 
 // 工具栏可创建的「自由元素」类型（无业务表依赖，纯画布内容）
-export type FreeNodeType = "sticky-note" | "text-node" | "task-card" | "image-node";
+export type FreeNodeType = "sticky-note" | "task-card" | "image-node";
 
 // 剪贴板数据标记：看板节点复制
 const BOARD_CLIP_MIME = "application/x-pi-board-nodes";
@@ -101,9 +100,8 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   const addNodeAt = useCallback((type: FreeNodeType, flowPos: { x: number; y: number }, extra?: { src?: string; naturalW?: number; naturalH?: number; name?: string }) => {
     const id = crypto.randomUUID();
     if (type === "sticky-note") {
-      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 280 }, data: { text: "", badge: "blue", emoji: "📝" } });
-    } else if (type === "text-node") {
-      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 240, height: 60 }, data: { text: "", autofocus: true } });
+      // autofocus：创建即进入编辑（双击画布/工具栏一致：快速记录心智）
+      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 280 }, data: { text: "", badge: "blue", emoji: "📝", autofocus: true } });
     } else if (type === "task-card") {
       ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 270 }, data: { cardId: "", number: 0, name: "新建任务", description: "", readyStatus: "draft", priority: 0, expanded: false, w: 380, h: 270, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0, emoji: "✅" } });
     } else if (type === "image-node" && extra?.src) {
@@ -207,7 +205,6 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
       }
       const tool = dt.getData("text/board-tool");
       if (tool === "sticky-note") addNodeAt("sticky-note", pos);
-      else if (tool === "text-node") addNodeAt("text-node", pos);
       else if (tool === "task-card") addNodeAt("task-card", pos);
       else if (tool === "image-node") {
         // 图片工具按钮拖拽：打开文件选择（拖拽本身不携带文件）
@@ -238,7 +235,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     return false; // 阻止 RF 默认删除，由我们处理
   }, [board]);
 
-  // 双击空白 → 添加文字（替代 RF 默认双击缩放 / 旧逻辑的便笺）。
+  // 双击空白 → 添加便笺（替代 RF 默认双击缩放 / 旧逻辑的文字节点）：
   // RF 12 无 onPaneDoubleClick，用 onPaneClick 手动判连续两次快速点击（只在空白触发，天然排除节点）。
   const lastPaneClickRef = useRef<{ t: number } | null>(null);
   const onPaneClick = useCallback((e: React.MouseEvent) => {
@@ -248,7 +245,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     if (last && now - last.t < 320) {
       lastPaneClickRef.current = null;
       const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      addNodeAt("text-node", pos);
+      addNodeAt("sticky-note", pos);
       return;
     }
     lastPaneClickRef.current = { t: now };
@@ -601,13 +598,12 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
             {menu && <BoardContextMenu menu={menu} onClose={() => setMenu(null)} />}
             {/* 左下角工具区：放大/缩小/fit/进行中（玻璃质感，替代 RF 默认 Controls） */}
             <BoardControls nodes={board.nodes as Array<{ id: string; type: string; data: Record<string, unknown> }>} sessionRunning={board.sessionRunning} />
-            {/* 工具栏：会话/便笺/任务/文字/图片（底部居中玻璃浮层）。点击=当前视口中心创建；拖拽=拖放进画布落点创建 */}
+            {/* 工具栏：会话/便笺/任务/图片（底部居中玻璃浮层）。点击=当前视口中心创建；拖拽=拖放进画布落点创建 */}
             <div style={{ position: "absolute", left: 0, right: 0, bottom: 16, margin: "0 auto", width: "fit-content", zIndex: 30, display: "flex", gap: 4, padding: 4, borderRadius: 10, ...boardFloatGlass, border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)", boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)" }}>
               <ToolbarBtn label="会话" onClick={addSessionAtViewportCenter} onDragStart={(e) => onToolDragStart(e, "session-card")} />
               <span style={{ width: 1, height: 18, background: "color-mix(in srgb, var(--border) 70%, transparent)", margin: "0 2px" }} />
               <ToolbarBtn label="便笺" onClick={() => addNodeAtViewport("sticky-note")} onDragStart={(e) => onToolDragStart(e, "sticky-note")} />
               <ToolbarBtn label="任务" onClick={() => addNodeAtViewport("task-card")} onDragStart={(e) => onToolDragStart(e, "task-card")} />
-              <ToolbarBtn label="文字" onClick={() => addNodeAtViewport("text-node")} onDragStart={(e) => onToolDragStart(e, "text-node")} />
               <ToolbarBtn label="图片" onClick={() => fileInputRef.current?.click()} onDragStart={(e) => onToolDragStart(e, "image-node")} />
               <span style={{ width: 1, height: 18, background: "color-mix(in srgb, var(--border) 70%, transparent)", margin: "0 2px" }} />
               <ToolbarBtn label="撤销" onClick={() => board.undo?.()} draggable={false} />

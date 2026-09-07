@@ -33,7 +33,7 @@ const now = () => Date.now();
  */
 function invalidateSessionListCache(): void {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     require("./session-reader").invalidateSessionListCache();
   } catch {
     // 循环加载/不可用时忽略——下一次 force 刷新会重建缓存

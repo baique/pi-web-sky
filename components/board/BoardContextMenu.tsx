@@ -4,7 +4,7 @@
  * 看板右键菜单（玻璃配方）—— 替代 tldraw SyncedContextMenu。
  * - 节点右键：删除（会话/任务卡走确认制，便笺/文字/图片直接删）
  * - 派生边右键：只读提示（exec/依赖线由后端 reconcile 权威维护，不可删）
- * - 空白右键：新建便笺 / 新建任务卡 / 新建文字 / 新建图片
+ * - 空白右键：新建便笺 / 新建任务卡 / 新建图片
  */
 import { useCallback, useEffect, useRef } from "react";
 import type { Node } from "@xyflow/react";
@@ -60,19 +60,8 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
       id: crypto.randomUUID(),
       type: "sticky-note",
       position: { x: flowX ?? 0, y: flowY ?? 0 },
-      style: { width: 338, height: 230 },
-      data: { text: "", badge: "blue", emoji: "📝" },
-    });
-    onClose();
-  }, [ops, flowX, flowY, onClose]);
-
-  const addText = useCallback(() => {
-    ops.addNode({
-      id: crypto.randomUUID(),
-      type: "text-node",
-      position: { x: flowX ?? 0, y: flowY ?? 0 },
-      style: { width: 240, height: 60 },
-      data: { text: "", autofocus: true },
+      style: { width: 380, height: 280 },
+      data: { text: "", badge: "blue", emoji: "📝", autofocus: true },
     });
     onClose();
   }, [ops, flowX, flowY, onClose]);
@@ -105,10 +94,9 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
   const nodeType = node?.type ?? null;
   const isSession = nodeType === "session-card";
   const isTask = nodeType === "task-card";
-  const isNote = nodeType === "sticky-note" || nodeType === "text";
-  const isTextNode = nodeType === "text-node";
+  const isNote = nodeType === "sticky-note" || nodeType === "text" || nodeType === "text-node"; // text-node 旧数据降级为便笺渲染
   const isImage = nodeType === "image-node";
-  const isFreeElement = isNote || isTextNode || isImage;
+  const isFreeElement = isNote || isImage;
 
   const deleteLabel = isSession
     ? (ops.isTaskBoard ? "删除会话" : "移除会话卡片")
@@ -152,7 +140,6 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
       )}
       {!node && !edgeId && (
         <>
-          <MenuItem label="新建文字" onClick={addText} />
           <MenuItem label="新建便笺" onClick={addNote} />
           <MenuItem label="新建图片" onClick={addImage} />
           <MenuItem label="新建任务卡" onClick={addTaskCard} />
