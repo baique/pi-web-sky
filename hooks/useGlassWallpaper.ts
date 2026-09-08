@@ -298,6 +298,10 @@ export function useGlassWallpaper(
   // 磨砂滑块变化时两张图都重算；卡片叠加图在气泡滑块变化时也重算。
   // 两张图都生成成功后摘掉 --board-scrim-filter（实时 blur → 稳态贴图）；
   // 失败（无图/取消）不清 filter，保留实时 blur 兜底。
+  //
+  // 磨砂为 0（默认）：scrim 层不挂切片图——0.5× 降采样切片被拉伸放大后比
+  // 原始壁纸糊（RENDER_SCALE 半分辨率）；此时层只留透明底色
+  // （--board-scrim-alpha=0），壁纸原样透出。卡片叠加图仍按气泡值生成。
   useEffect(() => {
     const html = document.documentElement;
     if (!bgUrl || !isImage) {
@@ -313,6 +317,19 @@ export function useGlassWallpaper(
       // backdrop-filter 观感对齐，切换瞬间不跳变。
       const scrimBlur = Math.round(settings.scrimBlur * BLUR_ATTENUATION);
       const cardBlur = Math.round((settings.bubbleBlur + settings.scrimBlur) * BLUR_ATTENUATION);
+      // 磨砂为 0：只生成卡片叠加图，scrim 层图保持摘除（壁纸原样透出）
+      if (settings.scrimBlur <= 0) {
+        const c = await generateGlassImage(bgUrl, cardBlur, settings);
+        if (cancelled) {
+          if (c) URL.revokeObjectURL(c);
+          return;
+        }
+        if (cardUrl && cardUrl !== c) URL.revokeObjectURL(cardUrl);
+        cardUrl = c;
+        if (c) html.style.setProperty("--glass-bg-image-card", `url("${c}")`);
+        else html.style.removeProperty("--glass-bg-image-card");
+        return;
+      }
       const [s, c] = await Promise.all([
         generateGlassImage(bgUrl, scrimBlur, settings),
         generateGlassImage(bgUrl, cardBlur, settings),
@@ -333,6 +350,10 @@ export function useGlassWallpaper(
       // 稳态切换：两张图都就绪才摘实时 blur；任一失败保留 blur 兜底
       if (s && c) clearScrimFilter();
     };
+    // 磨砂为 0：立即摘 scrim 层图（不等防抖），避免残留切片拉伸发糊
+    if (settings.scrimBlur <= 0) {
+      html.style.removeProperty("--glass-bg-image-scrim");
+    }
     const timer = window.setTimeout(run, REGEN_DEBOUNCE_MS);
     return () => {
       cancelled = true;

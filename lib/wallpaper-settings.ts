@@ -142,29 +142,6 @@ export async function sampleEdgeColors(
 
 export type WallpaperDims = { width: number; height: number };
 
-/** Natural dimensions of an image or video URL (video reads metadata only). */
-export function loadMediaDims(
-  url: string,
-  isVideo: boolean,
-): Promise<WallpaperDims | null> {
-  if (isVideo) {
-    return new Promise((resolve) => {
-      const v = document.createElement("video");
-      v.preload = "metadata";
-      v.onloadedmetadata = () =>
-        resolve({ width: v.videoWidth, height: v.videoHeight });
-      v.onerror = () => resolve(null);
-      v.src = url;
-    });
-  }
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
-}
-
 /** Load, persist and live-apply wallpaper display settings. */
 export function useWallpaperSettings(hasImage: boolean) {
   // 惰性初始化直接读 localStorage：首帧即存储值（无存储时为默认）。

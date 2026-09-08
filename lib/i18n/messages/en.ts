@@ -326,7 +326,7 @@ export const enLocale: LocalePlugin = {
     "bg.choose": "Choose image…",
     "bg.replace": "Replace image…",
     "bg.remove": "Remove wallpaper",
-    "bg.hint": "The original file is stored locally in your browser — never re-encoded or uploaded.",
+    "bg.hint": "Images are stored locally in your browser — never uploaded. Large images are auto-compressed to your screen size.",
     "bg.repeat": "Tile horizontally",
     "bg.fill": "Edge colour fill",
     "bg.adjust": "Adjust horizontal position…",

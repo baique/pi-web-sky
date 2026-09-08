@@ -327,7 +327,7 @@ export const zhCNLocale: LocalePlugin = {
     "bg.choose": "选择图片…",
     "bg.replace": "更换图片…",
     "bg.remove": "移除背景图",
-    "bg.hint": "原图保存在浏览器本地，不重新编码、不上传。",
+    "bg.hint": "图片保存在浏览器本地，不上传。大图会按屏幕尺寸自动压缩。",
     "bg.repeat": "平铺（横向重复）",
     "bg.fill": "边缘色彩填充",
     "bg.adjust": "调整横向位置…",

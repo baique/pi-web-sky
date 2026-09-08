@@ -178,70 +178,6 @@ export function AppShell() {
    glassTick,
  );
  const [bgAdjusting, setBgAdjusting] = useState(false);
- const bgVideoRef = useRef<HTMLVideoElement>(null);
- const bgCanvasRef = useRef<HTMLCanvasElement>(null);
- const bgOffsetRef = useRef(0);
- bgOffsetRef.current = wallSettings.offsetX;
- useEffect(() => {
-   const v = bgVideoRef.current;
-   if (!v) return;
-   v.muted = true;
-   v.preload = "auto";
-   let cancelled = false;
-   // Some Chrome builds defer/freeze autoplay for elements they deem
-   // occluded (symptom: video starts the moment DevTools inspects it).
-   // Fight it: kick playback at every readiness milestone and resume
-   // whenever something external pauses us — muted playback is always
-   // policy-allowed, so retrying cannot be blocked.
-   const tryPlay = () => {
-     if (!cancelled && v.paused) void v.play().catch(() => {});
-   };
-   v.addEventListener("loadeddata", tryPlay);
-   v.addEventListener("canplay", tryPlay);
-   v.addEventListener("pause", tryPlay);
-   tryPlay();
-   return () => {
-     cancelled = true;
-     v.removeEventListener("loadeddata", tryPlay);
-     v.removeEventListener("canplay", tryPlay);
-     v.removeEventListener("pause", tryPlay);
-   };
- }, [bgUrl]);
- // Canvas rendering path: Chromium sometimes decodes+plays a composited
- // <video> layer but never paints it (pipeline kPlaying, zero visible
- // frames). A canvas is ordinary page raster — same paint path as the
- // image wallpaper, immune to the video-occlusion quirk. The hidden
- // <video> element keeps doing decode + loop + autoplay; we blit its
- // frames into the canvas every animation frame, with cover maths +
- // horizontal pan applied in the draw call.
- useEffect(() => {
-   const v = bgVideoRef.current;
-   const c = bgCanvasRef.current;
-   if (!v || !c || bgKind !== "video") return;
-   const ctx = c.getContext("2d");
-   if (!ctx) return;
-   let raf = 0;
-   const draw = () => {
-     raf = requestAnimationFrame(draw);
-     if (!v.videoWidth || !v.videoHeight) return;
-     const w = c.clientWidth;
-     const h = c.clientHeight;
-     const dpr = window.devicePixelRatio || 1;
-     if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
-       c.width = Math.round(w * dpr);
-       c.height = Math.round(h * dpr);
-     }
-     const scale = Math.max(c.width / v.videoWidth, c.height / v.videoHeight);
-     const dw = v.videoWidth * scale;
-     const dh = v.videoHeight * scale;
-     const dx = (c.width - dw) / 2 + bgOffsetRef.current * dpr;
-     const dy = (c.height - dh) / 2;
-     ctx.clearRect(0, 0, c.width, c.height);
-     ctx.drawImage(v, dx, dy, dw, dh);
-   };
-   raf = requestAnimationFrame(draw);
-   return () => cancelAnimationFrame(raf);
- }, [bgUrl, bgKind]);
  // Adjust mode quality guards: dragging must never select passing text,
  // and Escape leaves adjust mode like the done button.
  useEffect(() => {
@@ -2414,7 +2350,7 @@ export function AppShell() {
           <input
             ref={bgFileInputRef}
             type="file"
-            accept="image/*,video/mp4,video/webm"
+            accept="image/jpeg,image/png,image/webp,image/avif"
             style={{ display: "none" }}
             onChange={async (e) => {
               const f = e.target.files?.[0];
@@ -2609,29 +2545,6 @@ export function AppShell() {
           </div>
         </div>
       )}
-      {/* Video wallpaper: the hidden <video> drives decode/loop/autoplay;
-          a canvas above it repaints every frame (see rAF effect) so the
-          wallpaper renders on the ordinary page layer — immune to the
-          video-compositor occlusion quirk. Scrim keeps text legible. */}
-      {bgKind === "video" && bgUrl && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none" }}>
-          <video
-            ref={bgVideoRef}
-            src={bgUrl}
-            autoPlay
-            loop
-            playsInline
-            preload="auto"
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0 }}
-          />
-          <canvas
-            ref={bgCanvasRef}
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }}
-          />
-          <div style={{ position: "absolute", inset: 0, background: "var(--app-bg-scrim)" }} />
-        </div>
-      )}
-
       {/* Wallpaper horizontal drag-adjust mode: full-screen capture layer,
           pointer-drag updates offsetX (clamped to the wallpaper's slack),
           click anywhere finishes. */}
