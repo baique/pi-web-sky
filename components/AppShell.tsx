@@ -1485,6 +1485,7 @@ export function AppShell() {
         onNewSessionFromTask={handleNewSessionFromTask}
         onOpenBoard={handleOpenBoard}
         onOpenTaskBoard={handleOpenTaskBoard}
+        onExitBoard={() => setActiveBoardId(null)}
         activeBoardId={activeBoardId}
       />
       <div

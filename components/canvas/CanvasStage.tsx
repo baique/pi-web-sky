@@ -9,6 +9,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { SessionCardNode } from "@/components/board/SessionCardNode";
 import { StickyNoteNode } from "@/components/board/StickyNoteNode";
 import { TaskCardNode } from "@/components/board/TaskCardNode";
+import { formatNoteDefaultTitle } from "@/lib/note-time";
 import { ImageNode } from "@/components/board/ImageNode";
 import { SendNoteEdge } from "@/components/board/SendNoteEdge";
 import { BoardCanvasProvider, type BoardCanvasOps } from "@/components/board/BoardCanvasContext";
@@ -50,10 +51,12 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   const { t } = useI18n();
   // RF 坐标转换：屏幕坐标（clientX/Y）→ flow 坐标（节点 position）。
   // 新建节点/拖放落点都经它换算，保证放到“鼠标所指/视口中心”的位置。
-  const { screenToFlowPosition, setViewport, getNodes, getViewport } = useReactFlow();
+  const { screenToFlowPosition, setViewport, getNodes, getViewport, fitView } = useReactFlow();
   const [dragOver, setDragOver] = useState(false);
   // 右键菜单 state
   const [menu, setMenu] = useState<BoardMenuState | null>(null);
+  // 小地图展开/收起（默认收起，不再常驻）
+  const [minimapOpen, setMinimapOpen] = useState(false);
   // 对齐参考线
   const [snapLines, setSnapLines] = useState<SnapResult["lines"]>([]);
   // 图片文件选择 input（工具栏「图片」按钮触发）
@@ -100,8 +103,9 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   const addNodeAt = useCallback((type: FreeNodeType, flowPos: { x: number; y: number }, extra?: { src?: string; naturalW?: number; naturalH?: number; name?: string }) => {
     const id = crypto.randomUUID();
     if (type === "sticky-note") {
-      // autofocus：创建即进入编辑（双击画布/工具栏一致：快速记录心智）
-      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 280 }, data: { text: "", badge: "blue", emoji: "📝", autofocus: true } });
+      // autofocus：创建即进入编辑（双击画布/工具栏一致：快速记录心智）；标题默认创建日期
+      const now = Date.now();
+      ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 280 }, data: { text: "", badge: "blue", emoji: "📝", autofocus: true, createdAt: now, title: formatNoteDefaultTitle(now) } });
     } else if (type === "task-card") {
       ops.addNode({ id, type, position: { x: flowPos.x, y: flowPos.y }, style: { width: 380, height: 270 }, data: { cardId: "", number: 0, name: "新建任务", description: "", readyStatus: "draft", priority: 0, expanded: false, w: 380, h: 270, expandedW: 0, expandedH: 0, collapsedW: 0, collapsedH: 0, emoji: "✅" } });
     } else if (type === "image-node" && extra?.src) {
@@ -455,6 +459,72 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [board, copySelected, pasteNodes]);
 
+  // 画布导航快捷键（焦点在输入框/编辑器内时不触发，避免干扰输入）：
+  //   Ctrl+Space     —— 选中元素占据视口（fit 选中节点；无选中则 fit 全部）
+  //   Ctrl+方向键    —— 该方向上离视口中心最近的元素 fit 进视口（类似 Ctrl+Space）
+  useEffect(() => {
+    const isTypingTarget = () => {
+      const ae = document.activeElement as HTMLElement | null;
+      if (!ae) return false;
+      const tag = ae.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || ae.isContentEditable;
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget()) return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      // Ctrl+Space：选中元素 fit 进视口
+      if (e.key === " " || e.code === "Space") {
+        e.preventDefault();
+        const selected = board.nodes.filter((n) => (n as Node & { selected?: boolean }).selected);
+        if (selected.length > 0) {
+          fitView({ nodes: selected, padding: 0.3, duration: 400 });
+        } else {
+          fitView({ padding: 0.2, duration: 400 });
+        }
+        return;
+      }
+      // Ctrl+方向键：按方向找视口外/视口内最近节点 fit
+      const dirMap: Record<string, "left" | "right" | "up" | "down"> = {
+        ArrowLeft: "left",
+        ArrowRight: "right",
+        ArrowUp: "up",
+        ArrowDown: "down",
+      };
+      const dir = dirMap[e.key];
+      if (!dir) return;
+      e.preventDefault();
+      const nodeList = getNodes() as Array<Node & { measured?: { width?: number; height?: number }; style?: { width?: number; height?: number } }>;
+      if (nodeList.length === 0) return;
+      // 视口中心（flow 坐标）
+      const pane = document.querySelector(".react-flow__pane");
+      const rect = pane?.getBoundingClientRect();
+      if (!rect) return;
+      const center = screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+      // 候选：该方向上离视口中心最近的节点
+      let best: Node | null = null;
+      let bestDist = Infinity;
+      for (const n of nodeList) {
+        const w = n.measured?.width ?? n.style?.width ?? 340;
+        const h = n.measured?.height ?? n.style?.height ?? 160;
+        const cx = n.position.x + w / 2;
+        const cy = n.position.y + h / 2;
+        const dx = cx - center.x;
+        const dy = cy - center.y;
+        let ok = false;
+        if (dir === "left") ok = dx < 0;
+        else if (dir === "right") ok = dx > 0;
+        else if (dir === "up") ok = dy < 0;
+        else if (dir === "down") ok = dy > 0;
+        if (!ok) continue;
+        const dist = dx * dx + dy * dy;
+        if (dist < bestDist) { bestDist = dist; best = n; }
+      }
+      if (best) fitView({ nodes: [best], padding: 0.3, duration: 400 });
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [fitView, getNodes, screenToFlowPosition, board.nodes]);
+
   // 剪贴板粘贴外部图片（Ctrl+V）：非输入框焦点时拦截 paste，检测到图片文件 → 上传贴图。
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -559,20 +629,24 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               proOptions={{ hideAttribution: false }} // 保留 attribution（MIT 合规，决策点③）
               defaultEdgeOptions={{ markerEnd: { type: "arrowclosed" }, style: { strokeWidth: 1.5, stroke: "#8b8fa3" } }}
             >
-              <MiniMap
-                pannable
-                zoomable
-                style={{
-                  ...boardFloatGlass,
-                  border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
-                  borderRadius: 12,
-                  boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
-                  overflow: "hidden",
-                }}
-                maskColor="color-mix(in srgb, var(--board-card-glass) 78%, transparent)"
-                nodeColor={() => "color-mix(in srgb, var(--accent) 50%, transparent)"}
-                nodeStrokeColor={() => "var(--accent)"}
-              />
+              {minimapOpen && (
+                <MiniMap
+                  pannable
+                  zoomable
+                  style={{
+                    ...boardFloatGlass,
+                    border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+                    borderRadius: 12,
+                    boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
+                    overflow: "hidden",
+                    // 上移避开右下角收起按钮
+                    bottom: 52,
+                  }}
+                  maskColor="color-mix(in srgb, var(--board-card-glass) 78%, transparent)"
+                  nodeColor={() => "color-mix(in srgb, var(--accent) 50%, transparent)"}
+                  nodeStrokeColor={() => "var(--accent)"}
+                />
+              )}
               {snapLines.length > 0 && (() => {
                 const vp = getViewport();
                 return (
@@ -620,6 +694,48 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               aria-hidden
               tabIndex={-1}
             />
+            {/* 小地图开关（右下角，玻璃浮层；默认收起） */}
+            <button
+              type="button"
+              onClick={() => setMinimapOpen((v) => !v)}
+              title={minimapOpen ? "收起小地图" : "展开小地图"}
+              aria-label={minimapOpen ? "收起小地图" : "展开小地图"}
+              aria-expanded={minimapOpen}
+              style={{
+                position: "absolute",
+                right: 12,
+                bottom: 12,
+                zIndex: 30,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 30,
+                height: 30,
+                padding: 0,
+                borderRadius: 8,
+                border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
+                background: minimapOpen ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "var(--board-card-glass)",
+                backdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+                WebkitBackdropFilter: "blur(var(--board-blur)) saturate(var(--glass-saturate))",
+                boxShadow: "0 2px 12px -6px rgba(0,0,0,0.18)",
+                color: minimapOpen ? "var(--accent)" : "var(--text-muted)",
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 12%, transparent)"; e.currentTarget.style.color = "var(--accent)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = minimapOpen ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "var(--board-card-glass)"; e.currentTarget.style.color = minimapOpen ? "var(--accent)" : "var(--text-muted)"; }}
+            >
+              {minimapOpen ? (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <path d="M9 3v18" /><path d="M15 3v18" /><path d="M3 9h18" /><path d="M3 15h18" />
+                </svg>
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <path d="M3 9h18" /><path d="M9 21V9" />
+                </svg>
+              )}
+            </button>
           </BoardCanvasProvider>
         )}
       </div>

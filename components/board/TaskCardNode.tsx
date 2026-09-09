@@ -21,6 +21,7 @@ import { dispatchBoardCwdSwitch } from "@/lib/board-events";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { useBoardId, useBoardDefaultCwd } from "./BoardIdContext";
 import { memoBoardNode } from "./memoNode";
+import { formatCardTime } from "@/lib/card-time";
 
 /**
  * 任务卡（RF 节点版，替代 tldraw task-card shape）。
@@ -276,6 +277,28 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     setNameError(null);
   };
 
+  // 标题内联编辑态（点击标题进入；与会话/便笺一致的标题编辑方式：无独立图标）
+  const [titleEditing, setTitleEditing] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const startTitleEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setTitleEditing(true);
+    requestAnimationFrame(() => { titleInputRef.current?.focus(); titleInputRef.current?.select(); });
+  };
+  // 标题编辑结束：有内容且 dirty → 保存；无内容则还原（表单已同步还原）
+  const commitTitleEdit = () => {
+    setTitleEditing(false);
+    if (!draft?.name.trim()) {
+      handleCancelEdit();
+      return;
+    }
+    if (isDirty) void handleSave();
+  };
+  const cancelTitleEdit = () => {
+    setTitleEditing(false);
+    handleCancelEdit();
+  };
+
   // 离开节点自动保存（选中 → 未选中且 dirty）
   const wasSelectedRef = useRef(selected);
   const dirtyRef = useRef(isDirty);
@@ -472,9 +495,30 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       {/* 拖拽把手：不拦 pointer（RF 拖动节点）；右上角操作按钮 nodrag 独立点击 */}
       <div style={{ flexShrink: 0, height: 36, display: "flex", alignItems: "center", gap: 6, padding: "0 10px", borderBottom: "1px solid var(--bubble-hairline)", cursor: "grab", fontSize: 11, color: "var(--text-muted)" }}>
         <EmojiPickerField kind="task" value={data.emoji} status={execStatus} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
-        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>
-          {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
-        </span>
+        {titleEditing ? (
+          <input
+            ref={titleInputRef}
+            value={draft?.name ?? ""}
+            onChange={(e) => set("name", e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") commitTitleEdit();
+              if (e.key === "Escape") cancelTitleEdit();
+            }}
+            onBlur={commitTitleEdit}
+            className="nodrag"
+            style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px 2px 0", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
+          />
+        ) : (
+          <span
+            onClick={isCreating ? undefined : startTitleEdit}
+            title={isCreating ? undefined : "点击改名"}
+            className="nodrag"
+            style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", cursor: isCreating ? "default" : "text", padding: "2px 6px 2px 0", boxSizing: "border-box" }}
+          >
+            {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
+          </span>
+        )}
         {draft?.number ? <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text)", marginLeft: 4 }}>#{draft.number}</span> : null}
         <div className="nodrag" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }} onPointerDown={(e) => e.stopPropagation()}>
           {isCreating ? (
@@ -506,6 +550,13 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
           {formBody}
         </div>
       </div>
+      {/* 底栏时间（收起态；与会话/便笺一致）：当天仅时间，跨天日期 + 时间 */}
+      {!expanded && (
+        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text-muted)", borderTop: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", padding: "3px 12px" }}>
+          <span aria-hidden style={{ flexShrink: 0 }}>🕒</span>
+          <span>{formatCardTime(draft?.updated ?? draft?.created ?? 0)}</span>
+        </div>
+      )}
       </div>
     </>
   );

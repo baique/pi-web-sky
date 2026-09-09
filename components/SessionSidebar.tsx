@@ -120,6 +120,8 @@ interface Props {
   onOpenBoard?: (boardId: string) => void;
   /** 点任务行 → 打开该任务的看板（任务即看板）。 */
   onOpenTaskBoard?: (taskId: string) => void;
+  /** 删除当前激活看板后无可用看板时退出看板模式（回会话/欢迎页） */
+  onExitBoard?: () => void;
   /** 当前激活看板 id（看板模式下高亮） */
   activeBoardId?: string | null;
   /** 当前激活项目的 worktree 身份（欢迎页环境条上抛）：把任一 worktree 路径
@@ -370,7 +372,7 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onRefresh, onSessionsLoaded, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, activeBoardId, activeWorktreeProject: activeWorktreeProjectProp }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onRefresh, onSessionsLoaded, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onNewSessionFromTask, onOpenBoard, onOpenTaskBoard, onExitBoard, activeBoardId, activeWorktreeProject: activeWorktreeProjectProp }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   /** 聊天区会话（列表重构 v2）：当前项目（projectKey）的全部会话，服务端
@@ -1579,6 +1581,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 refreshKey={refreshKey}
                 onToggleCollapsed={() => { const next = !boardsCollapsed; setBoardsCollapsed(next); saveCollapsedFlag(BOARDS_COLLAPSED_KEY, next); }}
                 onOpenBoard={(id) => onOpenBoard?.(id)}
+                onExitBoard={onExitBoard}
               />
 
               {/* Tasks section — fluid up to a cap (GPT-style), scrolls inside

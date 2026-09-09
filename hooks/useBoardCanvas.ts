@@ -50,6 +50,8 @@ const RUNNING_POLL_MS = 2500;
 /** 收合卡默认尺寸 */
 export const CARD_W = 340;
 export const CARD_H = 160;
+/** 看板加载最小展示时长（ms）：yjs 同步快的看板也至少显示这么久的加载反馈 */
+const MIN_LOADING_MS = 450;
 /** 展开工作台默认尺寸 */
 export const WORKBENCH_W = 760;
 export const WORKBENCH_H = 600;
@@ -131,6 +133,15 @@ export function useBoardCanvas({
   const [board, setBoard] = useState<BoardInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  // 最小 loading 展示时长：yjs 本地同步极快（尤其切回已打开过的看板），
+  // ready 瞬间翻转会让 BoardLoading 一闪而过，用户感知不到“正在加载”。
+  // 看板切换（boardId 变化）起至少展示 MIN_LOADING_MS，避免闪烁式加载。
+  const [minLoadingElapsed, setMinLoadingElapsed] = useState(false);
+  useEffect(() => {
+    setMinLoadingElapsed(false);
+    const t = setTimeout(() => setMinLoadingElapsed(true), MIN_LOADING_MS);
+    return () => clearTimeout(t);
+  }, [boardId]);
 
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -983,7 +994,7 @@ export function useBoardCanvas({
     undoManagerRef.current?.redo();
   }, []);
 
-  const loading = !ready;
+  const loading = !ready || !minLoadingElapsed;
 
   const saveViewport = useCallback((vp: { x: number; y: number; zoom: number }) => {
     const vm = viewMapRef.current;

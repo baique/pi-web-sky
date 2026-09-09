@@ -10,6 +10,7 @@ import { useCardGlass } from "@/hooks/useCardGlass";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { useSessionRunning, useSessionSummary } from "@/hooks/useBoardCanvas";
 import { memoBoardNode } from "./memoNode";
+import { formatCardTime } from "@/lib/card-time";
 import { dispatchBoardSessionRenamed, dispatchBoardCwdSwitch } from "@/lib/board-events";
 import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
@@ -284,7 +285,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
   const sessionFooter = (
     <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text-muted)", borderTop: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", paddingTop: 3, marginTop: 2 }}>
       <span aria-hidden style={{ flexShrink: 0 }}>🕒</span>
-      <span>{formatTime(lastActivityAt)}</span>
+      <span>{formatCardTime(lastActivityAt)}</span>
       {!isNewSession && isWorktree && worktreeBranch && (
         <span title={`Worktree: ${worktreeBranch}`} style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "var(--text-muted)", minWidth: 0, flexShrink: 0 }}>
           <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -385,27 +386,26 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
             onKeyDown={(e) => {
+              e.stopPropagation();
               if (e.key === "Enter") { cancelRenameRef.current = false; void commitRename(); }
               if (e.key === "Escape") cancelRename();
             }}
             onBlur={() => void commitRename()}
             className="nodrag"
-            style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px 2px 2px", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
+            style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px 2px 0", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
           />
         ) : (
-          /* 标题：圆点已移出，左间距由容器 gap 提供，此处不再留 padding-left */
-          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", padding: "2px 6px 2px 0", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box" }}>
+          /* 标题：点击进入改名（Esc 取消 / Enter 保存 / 失焦保存，空则还原）——不再提供独立图标 */
+          <span
+            onClick={isNewSession ? undefined : startRename}
+            className="nodrag"
+            style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", padding: "2px 6px 2px 0", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box", cursor: isNewSession ? "default" : "text" }}
+          >
             {isNewSession ? "New session" : (title || "Untitled")}
           </span>
         )}
         {stale && (
           <span style={{ flexShrink: 0, fontSize: 9.5, color: "var(--text-dim)", border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)", borderRadius: 4, padding: "0 4px" }}>stale</span>
-        )}
-        {/* 右侧操作区最左：会话标题编辑（历史按钮左侧） */}
-        {!isNewSession && !renaming && (
-          <button type="button" onClick={startRename} title="Rename" aria-label="Rename" className="nodrag" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, border: "none", borderRadius: 5, background: "transparent", color: "var(--text-muted)", cursor: "pointer" }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>
-          </button>
         )}
         {/* 导航条 portal 挂载点 */}
         <div data-session-navbar-slot className="nodrag" style={{ display: "flex", alignItems: "center" }} />
@@ -513,15 +513,6 @@ function formatDuration(ms: number): string {
   if (min < 60) return `${min}m${sec % 60}s`;
   const h = Math.floor(min / 60);
   return `${h}h${min % 60}m`;
-}
-
-function formatTime(lastActivityAt: number): string {
-  if (lastActivityAt <= 0) return "";
-  const d = new Date(lastActivityAt);
-  const now = new Date();
-  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 /** memo 化导出：忽略拖拽/位置类 props 每帧变化，避免拖拽时整卡重渲染 */

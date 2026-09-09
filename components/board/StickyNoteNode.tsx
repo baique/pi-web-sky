@@ -14,6 +14,8 @@ import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { useCardGlass } from "@/hooks/useCardGlass";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { memoBoardNode } from "./memoNode";
+import { formatNoteDefaultTitle } from "@/lib/note-time";
+import { formatCardTime } from "@/lib/card-time";
 
 /**
  * 自研 markdown 便笺（RF 节点版，替代 tldraw sticky-note shape）。
@@ -32,6 +34,8 @@ export interface StickyNoteData extends Record<string, unknown> {
   createdAt?: number;
   /** 创建后直接进入编辑（双击画布创建便笺时置位，首次保存/取消/失焦清除） */
   autofocus?: boolean;
+  /** 标题：默认取创建日期（2026-01-01 12:00:11），可改名 */
+  title?: string;
 }
 
 function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & { data: StickyNoteData }) {
@@ -48,6 +52,10 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
 
   // 本地编辑态（RF 无 tldraw editing 概念）；autofocus：双击画布创建便笺后直接进入编辑
   const [isEditing, setIsEditing] = useState(Boolean(data.autofocus));
+  // 标题内联编辑态（点击标题进入；与会话/任务卡一致的标题编辑方式：无独立图标）
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   // 编辑中的最新 markdown（同步镜像）：TipTap onUpdate 实时写这里，save/finish/blur 读它——
@@ -55,6 +63,8 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
   const latestMdRef = useRef(text);
   // 旧便笺无 createdAt 时兜底（惰性初始化，不 render 期 Date.now）
   const [createdAt] = useState(() => data.createdAt ?? Date.now());
+  // 标题兜底：旧便笺无 title 时回退创建日期（与会话/任务卡一致的展示逻辑）
+  const title = data.title?.trim() || formatNoteDefaultTitle(createdAt);
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -87,6 +97,25 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     clearAutofocus();
     setIsEditing(false);
   }, [save, clearAutofocus]);
+
+  // ---- 标题编辑：点击标题进入，Esc 取消、Enter 保存、失焦保存；空标题还原为创建日期 ----
+  const startTitleEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    // 初始值用当前展示标题（含旧便笺无 title 时兜底的创建日期），编辑时保留
+    setTitleDraft(title);
+    setTitleEditing(true);
+    requestAnimationFrame(() => { titleInputRef.current?.focus(); titleInputRef.current?.select(); });
+  };
+  const commitTitleEdit = () => {
+    const v = titleDraft.trim();
+    // 无内容 → 还原为创建日期（写空串，展示兜底 formatNoteDefaultTitle）
+    updateNode(id, { data: { ...data, title: v } });
+    setTitleEditing(false);
+  };
+  const cancelTitleEdit = () => {
+    setTitleDraft(title);
+    setTitleEditing(false);
+  };
 
   const cancel = useCallback(() => {
     latestMdRef.current = text;
@@ -141,8 +170,9 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     userSelect: "none",
     // 卡根默认箭头：非可移动区域（内容区）不用抓手；可拖的顶部把手行单独 grab
     cursor: "default",
-    // 统一预留内边距：连线 Handle 呼吸空间 + 贴边按下可拖拽移动（RF 可拖区）+ 内容与 resize 边界留间距
-    padding: 6,
+    // 统一预留内边距：连线 Handle 呼吸空间 + 贴边按下可拖拽移动（RF 可拖区）+ 内容与 resize 边界留间距。
+    // 编辑态四周留更宽的可拖边框（内容区 nodrag 隔离，卡根 padding 内缘即拖拽区）——与会话/任务卡一致。
+    padding: isEditing ? 10 : 6,
   };
 
   // 非编辑态内容交互：阻止事件冒泡到 RF（避免触发节点拖动/画布平移）
@@ -211,27 +241,57 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
       // 根可拖（RF 默认）：顶部把手行即拖拽把手；内容区/编辑控件各自 nodrag 隔离。
       // 原地双击（不移动）不启动拖动，dblclick 正常触发进入编辑。
       className="nowheel"
-      onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        // 阻止浏览器默认 dblclick 文本选中：进入编辑态后 TipTap focus 会再清选区，
+        // 叠加产生“瞬间大量选中又取消”的闪烁。先取消选中再进编辑。
+        e.preventDefault();
+        window.getSelection()?.removeAllRanges();
+        setIsEditing(true);
+      }}
     >
       {/* 顶部把手行（始终一行、高度固定 32——编辑/预览切换顶部不跳动）：
           预览态 = 便笺标识（emoji + 标签）+ 时间戳 + 复制，整条是拖拽区（不拦 pointer → RF 拖动节点）；
-          编辑态 = 便笺标识 + 取消/完成，整行 nodrag 不可拖（空区也不误拖） */}
+          编辑态 = 便笺标识 + 取消/保存，整行保持可拖（与会话/任务卡一致），仅交互元素
+          （emoji/取消/保存）各自 nodrag 隔离，行内空白区仍可拖拽移动 */}
       <div
-        className={isEditing ? "nodrag" : ""}
-        style={{ flexShrink: 0, height: 32, display: "flex", alignItems: "center", gap: 6, padding: "0 var(--bubble-pad-x, 12px)", fontSize: 10, color: "var(--text-muted)", cursor: isEditing ? "default" : "grab", boxSizing: "border-box" }}
+        style={{ flexShrink: 0, height: 32, display: "flex", alignItems: "center", gap: 6, padding: "0 var(--bubble-pad-x, 12px)", fontSize: 10, color: "var(--text-muted)", cursor: "grab", boxSizing: "border-box" }}
       >
         <EmojiPickerField kind="note" value={data.emoji} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
-        <span style={{ flexShrink: 0, fontSize: 10, color: "var(--text-muted)" }}>便笺</span>
+        {/* 标题：点击进入编辑（Esc 取消 / Enter 保存 / 失焦保存；空则还原创建日期） */}
+        {titleEditing ? (
+          <input
+            ref={titleInputRef}
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") commitTitleEdit();
+              if (e.key === "Escape") cancelTitleEdit();
+            }}
+            onBlur={commitTitleEdit}
+            className="nodrag"
+            style={{ flex: 1, minWidth: 0, fontSize: 11, fontWeight: 600, padding: "1px 5px 1px 0", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
+          />
+        ) : (
+          <span
+            className="nodrag"
+            onClick={startTitleEdit}
+            title="点击改名"
+            style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 600, color: "var(--text)", cursor: "text", padding: "1px 5px 1px 0", boxSizing: "border-box" }}
+          >
+            {title}
+          </span>
+        )}
         {isEditing ? (
           <>
             <div style={{ flex: 1 }} />
             <button type="button" className="nodrag" onClick={cancel} style={footerBtnStyle} title="放弃变更 (Esc)">取消</button>
-            <button type="button" className="nodrag" onClick={finish} style={footerBtnStyle} title="完成 (Ctrl+Enter)">完成</button>
+            <button type="button" className="nodrag" onClick={finish} style={footerBtnStyle} title="保存 (Ctrl+Enter)">保存</button>
           </>
         ) : (
           <>
             <div style={{ flex: 1 }} />
-            <span className="nodrag" style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap", userSelect: "text", cursor: "text" }}>{formatNoteTime(createdAt)}</span>
             <button
               type="button"
               title={copied ? "已复制" : "复制内容"}
@@ -267,7 +327,12 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
           style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px var(--bubble-pad-x, 12px) var(--bubble-pad-y, 8px)", textAlign: "left", cursor: "text", userSelect: "text" }}
           onPointerDown={isolateContent}
           onPointerUp={isolateContent}
-          onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            window.getSelection()?.removeAllRanges();
+            setIsEditing(true);
+          }}
         >
           {text.trim() ? (
             <div className="markdown-body" style={{ wordBreak: "break-word" }}>
@@ -278,6 +343,14 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
           )}
         </div>
       )}
+      {/* 底栏时间（与会话/任务卡一致）：当天仅时间，跨天日期 + 时间 */}
+      <div
+        className="nodrag"
+        style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text-muted)", borderTop: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", padding: "3px var(--bubble-pad-x, 12px)" }}
+      >
+        <span aria-hidden style={{ flexShrink: 0 }}>🕒</span>
+        <span>{formatCardTime(createdAt)}</span>
+      </div>
     </div>
     </>
   );
@@ -292,15 +365,6 @@ const footerBtnStyle: React.CSSProperties = {
   fontSize: 11,
   cursor: "pointer",
 };
-
-/** 便笺时间：今天显示时:分，否则 月/日 */
-function formatNoteTime(ts: number): string {
-  const d = new Date(ts);
-  const now = new Date();
-  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
 
 /**
  * 便笺编辑态的 TipTap WYSIWYG 编辑器。
@@ -358,6 +422,9 @@ function NoteEditor({
   // 进入编辑立即聚焦（textarea 时代 focus 在首行；contenteditable focus 置于文档开头）
   useEffect(() => {
     requestAnimationFrame(() => {
+      // 双击进入时浏览器可能残留选区（即使外层已 removeAllRanges，contenteditable 初始化
+      // 也可能重新选中），聚焦前再清一次，避免编辑态闪现整段选中。
+      window.getSelection()?.removeAllRanges();
       editor?.commands.focus("start");
     });
   }, [editor]);

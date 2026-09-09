@@ -10,7 +10,7 @@
  * 必须在 ReactFlowProvider + BoardSearchProvider 内渲染（useReactFlow / setHighlight）。
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useReactFlow } from "@xyflow/react";
 import type { WallpaperSettings } from "@/lib/wallpaper-settings";
 import { boardFloatGlass } from "./board-glass";
@@ -39,14 +39,23 @@ export function BoardTopbar({
 }) {
   const { screenToFlowPosition } = useReactFlow();
   const [scrimOpen, setScrimOpen] = useState(false);
+  // 新建会话 pending：同步写 yjs 本身极快，给短暂反馈防连点 + 明确“已受理”
+  const [creatingSession, setCreatingSession] = useState(false);
+  const creatingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const newAtViewportCenter = () => {
+    if (creatingSession) return;
     const pane = document.querySelector(".react-flow__pane");
     const rect = pane?.getBoundingClientRect();
     if (!rect) return;
     const flowPos = screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    setCreatingSession(true);
+    if (creatingTimerRef.current) clearTimeout(creatingTimerRef.current);
+    creatingTimerRef.current = setTimeout(() => setCreatingSession(false), 600);
     onAddSessionCard(flowPos);
   };
+
+  useEffect(() => () => { if (creatingTimerRef.current) clearTimeout(creatingTimerRef.current); }, []);
 
   return (
     <div style={{ position: "absolute", top: 12, left: 12, zIndex: 40, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, maxWidth: "min(420px, calc(100% - 320px))" }}>
@@ -90,13 +99,18 @@ export function BoardTopbar({
           onClick={newAtViewportCenter}
           title="新建会话"
           aria-label="新建会话"
-          style={btnStyle}
-          {...iconHoverProps()}
+          disabled={creatingSession}
+          style={{ ...btnStyle, opacity: creatingSession ? 0.7 : 1 }}
+          {...(creatingSession ? {} : iconHoverProps())}
         >
-          {/* 与左侧栏新建会话同款聊天气泡图标 */}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
+          {creatingSession ? (
+            <span aria-hidden style={{ width: 13, height: 13, borderRadius: "50%", border: "2px solid color-mix(in srgb, var(--accent) 25%, transparent)", borderTopColor: "var(--accent)", animation: "spin 0.8s linear infinite" }} />
+          ) : (
+            /* 与左侧栏新建会话同款聊天气泡图标 */
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          )}
         </button>
 
         {/* 磨砂调节 */}

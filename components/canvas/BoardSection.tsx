@@ -16,12 +16,15 @@ export function BoardSection({
   collapsed,
   onToggleCollapsed,
   onOpenBoard,
+  onExitBoard,
   refreshKey,
 }: {
   activeBoardId: string | null;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onOpenBoard: (boardId: string) => void;
+  /** 删除当前激活看板后无可用看板可切时，退出看板模式（回会话/欢迎页） */
+  onExitBoard?: () => void;
   /** 外部刷新信号（与任务/会话同源）：变化时重新拉取看板列表 */
   refreshKey?: number;
 }) {
@@ -40,14 +43,16 @@ export function BoardSection({
   const newInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<BoardInfo[] | null> => {
     try {
       const res = await fetch("/api/boards", { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) return null;
       const data = (await res.json()) as { boards: BoardInfo[] };
       setBoards(data.boards);
+      return data.boards;
     } catch {
       // keep last list
+      return null;
     } finally {
       setLoading(false);
     }
@@ -118,7 +123,14 @@ export function BoardSection({
       const res = await fetch(`/api/boards/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (res.ok) {
         setConfirmDeleteId(null);
-        await load();
+        const list = await load();
+        // 删除的是当前激活看板 → 切到下一个可用看板；没有可用看板则退出看板模式
+        // （避免主区域继续显示已删除看板的内容）
+        if (activeBoardId === id) {
+          const next = (list ?? []).find((b) => !b.isSystem && b.taskId == null && b.id !== id);
+          if (next) onOpenBoard(next.id);
+          else onExitBoard?.();
+        }
       }
     } finally {
       setBusy(false);
@@ -360,9 +372,12 @@ export function BoardSection({
                 type="button"
                 onClick={() => void remove(confirmDeleteId)}
                 disabled={busy}
-                style={{ padding: "5px 12px", border: "none", borderRadius: 6, background: "#dc2626", color: "#fff", cursor: busy ? "default" : "pointer", fontSize: 12, opacity: busy ? 0.6 : 1 }}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", border: "none", borderRadius: 6, background: "#dc2626", color: "#fff", cursor: busy ? "default" : "pointer", fontSize: 12, opacity: busy ? 0.7 : 1 }}
               >
-                {t("boards.delete")}
+                {busy && (
+                  <span aria-hidden style={{ width: 10, height: 10, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.35)", borderTopColor: "#fff", animation: "spin 0.8s linear infinite" }} />
+                )}
+                {busy ? t("boards.deleting") : t("boards.delete")}
               </button>
             </div>
           </div>

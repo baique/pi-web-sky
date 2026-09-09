@@ -170,6 +170,7 @@ export const enLocale: LocalePlugin = {
     "boards.new": "New board…",
     "boards.rename": "Rename",
     "boards.delete": "Delete",
+    "boards.deleting": "Deleting…",
     "boards.deleteConfirmTitle": "Delete board?",
     "boards.deleteConfirm": "This deletes the board and its nodes/edges. Sessions themselves are not touched.",
     "boards.cancel": "Cancel",

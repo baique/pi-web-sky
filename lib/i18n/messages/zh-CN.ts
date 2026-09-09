@@ -171,6 +171,7 @@ export const zhCNLocale: LocalePlugin = {
     "boards.new": "新建看板…",
     "boards.rename": "改名",
     "boards.delete": "删除",
+    "boards.deleting": "删除中…",
     "boards.deleteConfirmTitle": "删除看板？",
     "boards.deleteConfirm": "将删除看板及其节点/连线，会话本身不受影响。",
     "boards.cancel": "取消",
