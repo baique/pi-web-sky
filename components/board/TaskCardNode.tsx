@@ -492,7 +492,8 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
           padding: 6,
         }}
       >
-      {/* 拖拽把手：不拦 pointer（RF 拖动节点）；右上角操作按钮 nodrag 独立点击 */}
+      {/* 拖拽把手：不拦 pointer（RF 拖动节点）；右上角操作按钮 nodrag 独立点击；
+          标题文本不挂 nodrag（标题栏中段拖拽面） */}
       <div style={{ flexShrink: 0, height: 36, display: "flex", alignItems: "center", gap: 6, padding: "0 10px", borderBottom: "1px solid var(--bubble-hairline)", cursor: "grab", fontSize: 11, color: "var(--text-muted)" }}>
         <EmojiPickerField kind="task" value={data.emoji} status={execStatus} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
         {titleEditing ? (
@@ -512,9 +513,10 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
         ) : (
           <span
             onClick={isCreating ? undefined : startTitleEdit}
-            title={isCreating ? undefined : "点击改名"}
-            className="nodrag"
-            style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", cursor: isCreating ? "default" : "text", padding: "2px 6px 2px 0", boxSizing: "border-box" }}
+            title={isCreating ? undefined : "点击改名 · 按住拖动移卡"}
+            // 不挂 nodrag：标题区是标题栏唯一的拖拽面（flex:1 已吃满中段），挂了 nodrag 整条标题栏就拖不动卡。
+            // 点击 vs 拖动由浏览器原生区分（指针移动超 ~4px 不再派发 click）→ 原地点击=改名，拖动=移卡。
+            style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", cursor: "inherit", padding: "2px 6px 2px 0", boxSizing: "border-box" }}
           >
             {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
           </span>

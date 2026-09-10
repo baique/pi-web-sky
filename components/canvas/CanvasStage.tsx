@@ -620,6 +620,9 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
               onNodeDrag={onNodeDrag}
               onNodeDragStop={onNodeDragStop}
               zoomOnDoubleClick={false}
+              // 拖拽启动阈值对齐浏览器的点击阈值（~4px）：消掉 1–4px 灰带（微拖既不开拖又仍派发 click，
+              // 会误开改名）。不影响选中时机（默认阈值 1 已 >0，走同一分支）。
+              nodeDragThreshold={4}
               minZoom={0.1}
               maxZoom={2}
               colorMode={isDark ? "dark" : "light"}

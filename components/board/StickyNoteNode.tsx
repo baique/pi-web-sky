@@ -275,10 +275,12 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
           />
         ) : (
           <span
-            className="nodrag"
+            // 不挂 nodrag：标题区是把手行唯一的拖拽面，挂了 nodrag 整条把手行就只能拖动 gap 缝隙。
+            // 点击 vs 拖动由浏览器原生区分（指针移动超 ~4px 不再派发 click）→ 原地点击=改名，拖动=移卡，无需自写阈值判断。
+            // cursor 交给把手行（继承 grab）——可拖是这一条的主要语义。
             onClick={startTitleEdit}
-            title="点击改名"
-            style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 600, color: "var(--text)", cursor: "text", padding: "1px 5px 1px 0", boxSizing: "border-box" }}
+            title="点击改名 · 按住拖动移卡"
+            style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 600, color: "var(--text)", cursor: "inherit", padding: "1px 5px 1px 0", boxSizing: "border-box" }}
           >
             {title}
           </span>

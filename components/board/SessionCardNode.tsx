@@ -358,7 +358,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
     >
 
       {/* 标题栏 = 恒可拖拽层（展开/收起都保留可拖）：不拦 pointer → RF 拖动节点。
-          内部交互（改名输入/按钮/导航槽）各自 nodrag 隔离。 */}
+          内部交互（改名输入/按钮/导航槽）各自 nodrag 隔离；标题文本本身不挂 nodrag（拖拽面）。 */}
       <div
         data-session-titlebar
         style={{
@@ -395,11 +395,13 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
             style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px 2px 0", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
           />
         ) : (
-          /* 标题：点击进入改名（Esc 取消 / Enter 保存 / 失焦保存，空则还原）——不再提供独立图标 */
+          /* 标题：点击进入改名（Esc 取消 / Enter 保存 / 失焦保存，空则还原）——不再提供独立图标。
+             不挂 nodrag：标题区是标题栏唯一的拖拽面（flex:1 已吃满中段），挂了 nodrag 整条标题栏就拖不动卡。
+             点击 vs 拖动由浏览器原生区分（指针移动超 ~4px 不再派发 click）→ 原地点击=改名，拖动=移卡。 */
           <span
             onClick={isNewSession ? undefined : startRename}
-            className="nodrag"
-            style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", padding: "2px 6px 2px 0", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box", cursor: isNewSession ? "default" : "text" }}
+            title={isNewSession ? undefined : "点击改名 · 按住拖动移卡"}
+            style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", padding: "2px 6px 2px 0", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box", cursor: "inherit" }}
           >
             {isNewSession ? "New session" : (title || "Untitled")}
           </span>
