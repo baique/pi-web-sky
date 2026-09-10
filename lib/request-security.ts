@@ -104,7 +104,7 @@ export function isApiRequestOriginAllowed(request: Request): boolean {
 
   // Chromium 150+ strips the port from the Origin header for same-origin
   // requests on non-default ports. Strict canonical-origin comparison would
-  // therefore reject those legitimate requests ("http://127.0.0.1:30141"
+  // therefore reject those legitimate requests ("http://127.0.0.1:30143"
   // vs. the browser-sent "http://127.0.0.1"). The Host header is the
   // authoritative source for where the request actually went, so accept any
   // Origin whose hostname matches it. Hostnames are case-insensitive, which

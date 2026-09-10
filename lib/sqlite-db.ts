@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { mkdirSync } from "fs";
 import { homedir } from "os";
 import { join, normalize } from "path";
 
@@ -40,6 +41,10 @@ export function setDbForTesting(db: DatabaseSync): void {
  */
 export function getDb(): DatabaseSync {
   if (globalThis.__piWebDb) return globalThis.__piWebDb;
+  // SQLite 打不开不存在的父目录（unable to open database file）。全新机器上
+  // ~/.pi/agent 尚未被 SDK 创建，惰性打开也会炸——与 lib/yjs-room-server.mjs
+  // 的顶层打开是同类隐患，打开前必须确保目录存在。
+  mkdirSync(getAgentDir(), { recursive: true });
   const db = new DatabaseSync(dbPath());
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
