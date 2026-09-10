@@ -170,9 +170,9 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     userSelect: "none",
     // 卡根默认箭头：非可移动区域（内容区）不用抓手；可拖的顶部把手行单独 grab
     cursor: "default",
-    // 统一预留内边距：连线 Handle 呼吸空间 + 贴边按下可拖拽移动（RF 可拖区）+ 内容与 resize 边界留间距。
-    // 编辑态四周留更宽的可拖边框（内容区 nodrag 隔离，卡根 padding 内缘即拖拽区）——与会话/任务卡一致。
-    padding: isEditing ? 10 : 6,
+    // 统一预留内边距（编辑/预览同值，与会话/任务卡一致）：连线 Handle 呼吸空间 + 贴边按下可拖拽移动（RF 可拖区）+ 内容与 resize 边界留间距。
+    // 上方有把手行（grab 可拖），两侧与下方靠卡根 padding 留拖拽区。
+    padding: 6,
   };
 
   // 非编辑态内容交互：阻止事件冒泡到 RF（避免触发节点拖动/画布平移）
@@ -324,7 +324,8 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
           ref={contentRef}
           className="nowheel nodrag"
           // 预览态 markdown 必须显式恢复文本选中：卡根 userSelect:none 会抑制整卡选中（编辑态已单独恢复）
-          style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px var(--bubble-pad-x, 12px) var(--bubble-pad-y, 8px)", textAlign: "left", cursor: "text", userSelect: "text" }}
+          // 内容区 padding 与编辑态 NoteEditor 完全一致（8px 上下 / 12px 左右），编辑/预览切换内容起始位置不跳
+          style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "var(--bubble-pad-y, 8px) var(--bubble-pad-x, 12px)", textAlign: "left", cursor: "text", userSelect: "text" }}
           onPointerDown={isolateContent}
           onPointerUp={isolateContent}
           onDoubleClick={(e) => {
