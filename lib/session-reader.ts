@@ -7,7 +7,8 @@ import {
 import { closeSync, existsSync, openSync, readSync } from "fs";
 import { readdir } from "fs/promises";
 import { join as joinPath, normalize as normalizePath } from "path";
-import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext, TodoItem } from "./types";
+import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
+import { parseTodoSnapshot, TODO_STATE_CUSTOM_TYPE, type Todo } from "./todo-store";
 import type { SessionEntry as PiSessionEntry } from "@earendil-works/pi-coding-agent";
 import { getDb } from "./sqlite-db";
 import { normalizeToolCalls } from "./normalize";
@@ -529,18 +530,20 @@ export function getSessionEntries(filePath: string): SessionEntry[] {
   return entries as unknown as SessionEntry[];
 }
 
-export function extractTodosFromEntries(entries: SessionEntry[]): TodoItem[] {
-  // pi todo state is stored as {"type":"custom","customType":"pi-todo.state","data":{"todos":[...]}}
-  // entries appended to the session file — pick the latest snapshot. Todo
-  // entries are otherwise dropped from chat history (entryToUiMessage returns null).
-  let todos: TodoItem[] = [];
+/**
+ * 取活动分支上最后一条 `pi-todo.state` 快照。解析规则完全交给
+ * `todo-store.parseTodoSnapshot`（与扩展共用一套校验：id/content/status 全合法才收），
+ * 否则面板与工具会对同一份脏数据给出不同答案。
+ *
+ * 调用方必须传入**活动分支**（`sliceActiveBranch` / `getBranch`）而不是全量 entries：
+ * 全量里混着别的分支（fork / 旧分支）的快照，面板会显示不属于当前会话的 todo。
+ */
+export function extractTodosFromEntries(entries: SessionEntry[]): Todo[] {
+  let todos: Todo[] = [];
   for (const entry of entries) {
-    if (entry.type !== "custom" || entry.customType !== "pi-todo.state") continue;
-    const data = (entry as { data?: unknown }).data;
-    if (!isRecord(data) || !Array.isArray(data.todos)) continue;
-    todos = data.todos.filter((t: unknown): t is TodoItem => (
-      isRecord(t) && typeof t.content === "string"
-    ));
+    if (entry.type !== "custom" || entry.customType !== TODO_STATE_CUSTOM_TYPE) continue;
+    const parsed = parseTodoSnapshot((entry as { data?: unknown }).data);
+    if (parsed) todos = parsed.todos;
   }
   return todos;
 }

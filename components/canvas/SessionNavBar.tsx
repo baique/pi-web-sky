@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
-import type { TodoItem } from "@/lib/types";
+import { formatTodoProgress, type Todo } from "@/lib/todo-store";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { SessionStatsSummary } from "@/components/SessionStatsSummary";
 import { TodoList } from "@/components/TodoList";
@@ -25,7 +25,7 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
   sessionId: string;
   stats: SessionStatsInfo | null;
   contextUsage: { percent: number | null; contextWindow: number; tokens: number | null } | null;
-  todos: TodoItem[];
+  todos: Todo[];
   systemPrompt: string | null;
   systemPromptLoading: boolean;
   /** 工作目录（统计弹层展示，任务卡 #16） */
@@ -46,8 +46,7 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
   worktreeBranch,
 }, ref) {
   const { t } = useI18n();
-  const completedTodoCount = todos.filter((todo) => todo.status === "completed").length;
-  const todoLabel = `${t("todo.title")} · ${completedTodoCount}/${todos.length} ${t("todo.completed")}`;
+  const todoLabel = `${t("todo.title")} · ${formatTodoProgress(todos)} ${t("todo.completed")}`;
   const [statsOpen, setStatsOpen] = useState(false);
   const [todoOpen, setTodoOpen] = useState(false);
   const [systemOpen, setSystemOpen] = useState(false);
@@ -592,7 +591,7 @@ function TodoPopover({
 }: {
   navRef: React.RefObject<HTMLDivElement | null>;
   navWidth: number;
-  todos: TodoItem[];
+  todos: Todo[];
   onClose: () => void;
 }) {
   const { t } = useI18n();

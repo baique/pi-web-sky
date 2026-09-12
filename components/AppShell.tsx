@@ -32,6 +32,7 @@ import { SidebarGlobalSearch } from "./SidebarGlobalSearch";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { TodoList } from "@/components/TodoList";
+import { formatTodoProgress, type Todo } from "@/lib/todo-store";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
@@ -71,7 +72,7 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
 } from "@/lib/panel-layout";
-import type { BlockingExtensionUiRequest, SessionInfo, SessionTreeNode, TodoItem } from "@/lib/types";
+import type { BlockingExtensionUiRequest, SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ProjectTrustStatus } from "@/lib/api-types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -429,7 +430,7 @@ export function AppShell() {
   const [liveTaskName, setLiveTaskName] = useState<string | null>(null);
   // Session todo list — populated by ChatWindow from pi-todo.state, shown as a
   // narrow panel pinned to the top-right (moved from pi's TUI bottom-left).
-  const [sessionTodos, setSessionTodos] = useState<TodoItem[]>([]);
+  const [sessionTodos, setSessionTodos] = useState<Todo[]>([]);
   const [todoPanelOpen, setTodoPanelOpen] = useState(false);
   const [todoPanelPos, setTodoPanelPos] = useState<{ top: number; right: number } | null>(null);
   const todoBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -439,7 +440,7 @@ export function AppShell() {
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
   }, []);
-  const handleTodosChange = useCallback((todos: TodoItem[]) => {
+  const handleTodosChange = useCallback((todos: Todo[]) => {
     setSessionTodos(todos);
   }, []);
 
@@ -451,7 +452,7 @@ export function AppShell() {
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/todos`);
       if (!res.ok) return;
-      const data = await res.json() as { todos?: TodoItem[] };
+      const data = await res.json() as { todos?: Todo[] };
       if (Array.isArray(data.todos)) setSessionTodos(data.todos);
     } catch { /* transient network error — keep last known todos */ }
   }, []);
@@ -2066,8 +2067,7 @@ export function AppShell() {
   // 改由 tooltip / aria-label 携带，鼠标悬停可见进度。
   const renderTodoButton = (mobile: boolean) => {
     if (sessionTodos.length === 0) return null;
-    const completedCount = sessionTodos.filter((t) => t.status === "completed").length;
-    const label = `${translate("todo.title")} · ${completedCount}/${sessionTodos.length} ${translate("todo.completed")}`;
+    const label = `${translate("todo.title")} · ${formatTodoProgress(sessionTodos)} ${translate("todo.completed")}`;
     const open = todoPanelOpen && !mobile;
     return (
       <button

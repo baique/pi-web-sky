@@ -9,6 +9,12 @@
 /** 会话文件里的快照 entry 类型（custom entry，不进 LLM 上下文）。 */
 export const TODO_STATE_CUSTOM_TYPE = "pi-todo.state";
 
+/**
+ * 工具名。放数据层是为了让客户端 hooks 与扩展共用同一个字面量：从
+ * `todo-extension.ts` import 会把 typebox / pi SDK 拽进客户端包。
+ */
+export const TODO_TOOL_NAME = "todo";
+
 export const VALID_STATUSES = ["pending", "in_progress", "completed"] as const;
 
 export type TodoStatus = (typeof VALID_STATUSES)[number];
@@ -77,8 +83,6 @@ export function parseTodoSnapshot(data: unknown): TodoSnapshot | null {
   return { todos, nextId };
 }
 
-// ── 增量推送 ──────────────────────────────────────
-
 // ── 格式化 ───────────────────────────────────────────
 
 export function formatTodoLine(todo: Todo): string {
@@ -88,6 +92,12 @@ export function formatTodoLine(todo: Todo): string {
 
 export function formatTodoList(todos: readonly Todo[]): string {
   return todos.length > 0 ? todos.map(formatTodoLine).join("\n") : "No todos";
+}
+
+/** 顶栏按钮 / 看板卡片 / 面板表头共用的进度文案（`3/5`）。 */
+export function formatTodoProgress(todos: readonly Todo[]): string {
+  const completed = todos.filter((t) => t.status === "completed").length;
+  return `${completed}/${todos.length}`;
 }
 
 // ── 动作 ─────────────────────────────────────────────
@@ -193,16 +203,14 @@ export function dispatchTodoAction(
       if (params.text !== undefined && params.texts !== undefined) {
         throw new Error('add only accepts texts array; do not also pass singular "text"');
       }
-      if (params.texts === undefined || params.texts.length === 0) {
-        if (params.text !== undefined) {
-          throw new Error(
-            'add needs texts (array). You passed singular "text" — that field is for update. '
-            + 'Correct: {"action":"add","texts":["<your text>"]}',
-          );
-        }
-        throw new Error('add requires texts parameter (non-empty array). Correct: {"action":"add","texts":["..."]}');
+      if (params.text !== undefined) {
+        throw new Error(
+          'add needs texts (array). You passed singular "text" — that field is for update. '
+          + 'Correct: {"action":"add","texts":["<your text>"]}',
+        );
       }
-      const { snapshot: next, resultText } = addTodos(snapshot, params.texts);
+      // 缺失/空数组交给 addTodos 的必填校验（文案只有一处）。
+      const { snapshot: next, resultText } = addTodos(snapshot, params.texts ?? []);
       return { action: "add", snapshot: next, resultText };
     }
 

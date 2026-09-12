@@ -3,7 +3,9 @@
 pi-web-sky **自带**会话 todo：装好即用，不需要用户安装任何 pi 包。工具给 LLM 用，顶栏右上角的面板给人看。
 
 ```
-lib/todo-store.ts        纯数据层：三态模型 + 快照解析 + 4 个 action（可单测，不依赖 pi）
+lib/todo-store.ts        纯数据层：三态模型 + 快照解析 + 4 个 action（可单测，不依赖 pi）；
+                         同时是 `TODO_TOOL_NAME`（客户端 hooks 与扩展共用的工具名常量）
+                         与 `formatTodoProgress`（三处进度文案）的家
 lib/todo-extension.ts    内联扩展：注册 todo 工具 / 落盘快照 / 回放 / auto-clear / 节奏提醒
 lib/rpc-manager.ts       createTodoExtension() 进 extensionFactories（注入点）
 lib/session-reader.ts    extractTodosFromEntries() 读快照（面板数据源）
@@ -39,7 +41,8 @@ todo({ action: "list" | "add" | "update" | "delete",
 
 - 每次**变更**（add/update/delete/auto-clear）写一条 custom entry：
   `{"type":"custom","customType":"pi-todo.state","data":{"todos":[{id,content,status}],"nextId":N}}`
-- 字段名是 **`content`**（不是 pi 插件惯用的 `text`）—— `lib/session-reader.ts` 只认 `content` 为 string 的项。改字段名会静默清空面板。
+- 字段名是 **`content`**（不是 pi 插件惯用的 `text`）。**解析只有一份实现**：`todo-store.parseTodoSnapshot`（校验 `id` 数字 / `content` 非空 / `status` 三态之一，脏项逐条降级跳过），`lib/session-reader.ts:extractTodosFromEntries` 与扩展回放都调它 —— 两处各自解析会让面板与工具对同一份脏数据给出不同答案。改字段名/校验规则只改这里。
+- `TodoItem` 已并入 `todo-store.Todo`（面板、`SessionContext.todos`、工具细节全用同一个型别）：面板不再接受字符串 id 或非法 status 的历史快照，与工具保持一致。
 - 快照式（非增量）→ 回放只取最后一条；`pi.appendEntry` 不参与 LLM 上下文。
 - `session_start` / `session_tree`（切分支）时从**当前分支**回放重建；状态存在扩展工厂闭包内，**每个 AgentSession 一份 → 会话隔离天然成立**。
 - auto-clear 必须落盘**空快照**，否则面板残留旧列表。
@@ -59,14 +62,18 @@ todo({ action: "list" | "add" | "update" | "delete",
 
 为什么不记内存计数器：pi-web 的 AgentSession 空闲 10 分钟即销毁（见 `lib/rpc-manager.ts` 的 idle timer），扩展闭包里的计数活不过两次交互的间隔 —— 交互式使用（隔几分钟问一句）永远数不满 2 轮。分支是持久的，重算 O(分支长度)，而 `agent_end` 每轮只跑一次。
 
+`agent_end` 入口先看内存态（`state.todos` 为空或还有未完成项 → 直接返回），挡掉大多数会话的全分支遍历 —— 末尾快照就是 `state.todos`，这两种情况下 `shouldAutoClear` 必为 false。
+
 UI 侧：列表清空 → 按钮消失（`renderTodoButton` 在 `length === 0` 时返回 null）→ `AppShell` 的 effect 顺手收起浮层（否则入口没了、浮层还开着，且下次有 todo 时会自己弹开）。
 
 ## 节奏提醒（不落盘）
 
 连续 **4 轮**（`REMINDER_INTERVAL`）没用过 todo 工具、且仍有未完成项时，在 `context` 事件里向**当次请求的 messages** 追加一条 `<system-reminder>`：列出未完成项，点名 `in_progress` 那项（已完成就立刻标 completed 并把下一项置 in_progress）。
 
-- **求值点只能在 `context`**（`shouldInjectReminder`）。曾经照搬参考实现，只在 `tool_result` 里 arm、到 `context` 再 drain —— 那是错的：纯文本轮（模型没调任何工具）根本不发 `tool_result`，那样的回合永远不触发提醒。探针实测：模型连续 5 轮不调工具时旧版零注入，改单点求值后第 4 轮如期注入。
-- 用了 todo 工具即重置节奏（`noteToolResult`）；注入后把计时器推到当前轮 —— 这两条共同保证一个周期只提醒一次。
+- **"轮" = 模型回合**（`turn_start` = 一次模型往返），不是 user 消息。一次提问里模型可能连着跑十几个回合，按 user 消息数永远数不满 —— 而这个提醒要盯的正是「一次长任务里模型自己跑偏了」。分支侧的对应计数器是 `turnsSinceLastTodoUse(entries)`（数最后一条快照之后的 assistant 消息，同一个单位）。
+- **求值点只能在 `context`**（`takeReminderSlot`，名字不叫 `should*` 是因为它会写 `state.lastTodoToolUseTurn`）。曾经照搬参考实现，只在 `tool_result` 里 arm、到 `context` 再 drain —— 那是错的：纯文本轮（模型没调任何工具）根本不发 `tool_result`，那样的回合永远不触发提醒。探针实测：模型连续 5 轮不调工具时旧版零注入，改单点求值后第 4 轮如期注入。
+- 用了 todo 工具即重置节奏（`noteToolResult`）；取走配额后把计时器推到当前轮 —— 这两条共同保证一个周期只提醒一次。`noteToolResult` 只覆盖同一实例内的即时重置（含不落盘的 `todo list`）；跨实例靠下面的续算。
+- **跨实例续算**：`reconstruct`（session_start / session_tree）除回放快照外，还把 `reminder.currentTurn` 设为 `turnsSinceLastTodoUse(分支)`。不续算的话，AgentSession 空闲 10 分钟一销毁计数就归零，「隔几分钟问一句」永远数不到 4 轮 —— 提醒静默失效（auto-clear 踩过同一个坑，修法见上一节）。
 - 全部完成时不注入（静默 2 轮 → auto-clear）。
 - **必须走 `context` 瞬时注入，绝不能改成 `before_agent_start` 返回 `custom_message`**：后者会落盘成 entry，而 `components/MessageView.tsx` 的 `CustomMessageView` **会把它渲染成聊天气泡**（`display:false` 只是半透明 + 折叠，不是隐藏）—— 那就是「每轮多一张卡片」的来源。`lib/todo-extension.test.mjs` 有源码级断言锁住这一点。
 - 参考对比：`@zhushanwen/pi-todo` 用落盘 `custom_message`（每轮，pi-web 里可见为卡片）；`@tintinweb/pi-tasks` / `@nguyenquangthai/pi-todo` 用 `context` 瞬时注入 + 4 轮 cadence（我们采用后者，但求值点更靠前）。

@@ -14,7 +14,8 @@ import {
   dispatchBoardSessionCreated,
   dispatchBoardSessionForked,
 } from "@/lib/board-events";
-import type { SessionInfo, TodoItem } from "@/lib/types";
+import type { SessionInfo } from "@/lib/types";
+import type { Todo } from "@/lib/todo-store";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 
 /**
@@ -109,7 +110,7 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   // 会话统计 + Context 用量 + TODO（经 ChatWindow 回调捕获，卡片内自渲染）
   const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
   const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
-  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [todos, setTodos] = useState<Todo[]>([]);
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
   const [systemPromptLoading, setSystemPromptLoading] = useState(false);
   const systemPromptLoaderRef = useRef<(() => Promise<void>) | null>(null);
@@ -130,7 +131,7 @@ export const SessionWorkbench = memo(function SessionWorkbench({
     setContextUsage(usage);
   }, []);
 
-  const handleTodosChange = useCallback((nextTodos: TodoItem[]) => {
+  const handleTodosChange = useCallback((nextTodos: Todo[]) => {
     setTodos(nextTodos);
   }, []);
 

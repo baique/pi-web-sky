@@ -1,6 +1,6 @@
 "use client";
 
-import type { TodoItem } from "@/lib/types";
+import { formatTodoProgress, type Todo } from "@/lib/todo-store";
 import { useI18n } from "@/hooks/useI18n";
 
 /**
@@ -12,9 +12,8 @@ import { useI18n } from "@/hooks/useI18n";
  *
  * 只渲染内容，定位和玻璃外壳留在调用方。改圆点/删除线/空态文案只改这里。
  */
-export function TodoList({ todos }: { todos: TodoItem[] }) {
+export function TodoList({ todos }: { todos: Todo[] }) {
   const { t } = useI18n();
-  const completedCount = todos.filter((todo) => todo.status === "completed").length;
 
   return (
     <>
@@ -26,7 +25,7 @@ export function TodoList({ todos }: { todos: TodoItem[] }) {
       }}>
         {t("todo.title")}
         <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-meta)", fontWeight: 500 }}>
-          {completedCount}/{todos.length} {t("todo.completed")}
+          {formatTodoProgress(todos)} {t("todo.completed")}
         </span>
       </div>
       {todos.length === 0 ? (

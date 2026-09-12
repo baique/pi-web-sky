@@ -25,7 +25,7 @@ import { useAgentSession, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SessionStatsInfo } from "@/lib/pi-types";
-import type { TodoItem } from "@/lib/types";
+import type { Todo } from "@/lib/todo-store";
 import type { AppUpdateResponse } from "@/lib/api-types";
 import type { TurnIndexItem } from "@/lib/api-types";
 import {
@@ -56,7 +56,7 @@ interface Props {
   onSystemPromptLoaderChange?: (loader: (() => Promise<void>) | null) => void;
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
   onSessionStatsPanelOpen?: () => void;
-  onTodosChange?: (todos: TodoItem[]) => void;
+  onTodosChange?: (todos: Todo[]) => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string) => void;
   /** Completion sound state + controls, owned by AppShell so tasks finishing in

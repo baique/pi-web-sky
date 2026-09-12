@@ -1,5 +1,7 @@
 // Types mirrored from pi-mono coding-agent session-manager
 
+import type { Todo } from "./todo-store";
+
 export interface SessionHeader {
   type: "session";
   version?: number;
@@ -330,13 +332,6 @@ export interface SessionInfo {
   taskName?: string;
 }
 
-export interface TodoItem {
-  /** 内建 todo 工具用数字 id；历史快照里可能是字符串。 */
-  id?: string | number;
-  content: string;
-  status?: string;
-}
-
 export interface SessionContext {
   messages: AgentMessage[];
   entryIds: string[]; // parallel to messages — the session entry id for each message
@@ -344,6 +339,7 @@ export interface SessionContext {
   parentIds: (string | null)[];
   thinkingLevel: string;
   model: { provider: string; modelId: string } | null;
-  // Latest todo list published by pi (pi-todo.state custom entries), empty when none.
-  todos: TodoItem[];
+  // Latest todo list published by the built-in todo tool (pi-todo.state custom
+  // entries), empty when none. 型别就是 todo-store 的 Todo —— 面板与工具共用一套。
+  todos: Todo[];
 }

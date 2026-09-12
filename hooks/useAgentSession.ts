@@ -9,7 +9,6 @@ import type {
   ExtensionWidgetItem,
   SessionInfo,
   SessionTreeNode,
-  TodoItem,
   UserMessage,
 } from "@/lib/types";
 import { isBlockingExtensionUiRequest } from "@/lib/browser-notifications";
@@ -24,7 +23,7 @@ import { AgentEventConnection } from "@/lib/agent-event-connection";
 import { parseSubagentInspectReply, SUBAGENT_INSPECT_WIDGET_KEY } from "@/lib/subagent-widget";
 import { dispatchInspectReply } from "@/lib/extension-command";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
-import { parseTodoSnapshot } from "@/lib/todo-store";
+import { parseTodoSnapshot, TODO_TOOL_NAME, type Todo } from "@/lib/todo-store";
 import {
   CHAT_SCROLL_REATTACH_TOLERANCE,
   CHAT_SCROLL_TAIL_TOLERANCE,
@@ -48,7 +47,7 @@ export interface SessionData {
     parentIds: (string | null)[];
     thinkingLevel: string;
     model: { provider: string; modelId: string } | null;
-    todos?: TodoItem[];
+    todos?: Todo[];
   };
   /** Whether there is older history beyond the current paging window. */
   hasMore?: boolean;
@@ -356,7 +355,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [entryIds, setEntryIds] = useState<string[]>([]);
   const [parentIds, setParentIds] = useState<(string | null)[]>([]);
-  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [todos, setTodos] = useState<Todo[]>([]);
   const [streamState, dispatch] = useReducer(streamReducer, INITIAL_STREAMING_STATE);
   const [agentRunning, setAgentRunning] = useState(false);
   const [bashRunning, setBashRunning] = useState(false);
@@ -620,7 +619,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const url = `/api/sessions/${encodeURIComponent(sid)}/context?${params}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[]; parentIds?: (string | null)[]; todos?: TodoItem[] }; hasMore?: boolean };
+      const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[]; parentIds?: (string | null)[]; todos?: Todo[] }; hasMore?: boolean };
       setHasOlderChat(d.hasMore ?? false);
       const parentFallback = (p?: (string | null)[]) => p ?? d.context.entryIds.map(() => null);
       if (before) {
@@ -1334,7 +1333,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const id = event.toolCallId as string;
         // 内建 todo：工具结果带回完整快照 → 顶栏面板立即跟上（增量推送），
         // 无需等 6s 轮询或 agent_end 重拉。
-        if (event.toolName === "todo" && event.isError !== true) {
+        if (event.toolName === TODO_TOOL_NAME && event.isError !== true) {
           const snapshot = parseTodoSnapshot((event.result as { details?: unknown } | undefined)?.details);
           if (snapshot) setTodos(snapshot.todos);
         }
