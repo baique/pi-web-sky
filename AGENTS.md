@@ -8,7 +8,7 @@ npm run dev   # port 30143
 
 Typecheck: `node_modules/.bin/tsc --noEmit`  
 Lint: `npm run lint`  
-**Never run `next build` during dev** — pollutes `.next/` and breaks `npm run dev`.  
+`npm run dev` 与 `next build` 共用 `.next` 但**互不干扰**（Next 16 的 dev 产物在 `.next/dev`，2026-09-12 实测同目录并发运行正常，成品与 dev 各自服务自己的产物）—— 不必为跑 build 先停 dev。（曾有一版笔记写“build 会污染 dev”，已作废。）
 
 ## 发布 npm
 

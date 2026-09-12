@@ -90,7 +90,7 @@ npm run lint
 npm test             # 单元测试
 ```
 
-开发期不要跑 `next build`（会污染 `.next/` 影响 dev）。
+`npm run dev` 与 `next build` 共用 `.next`，但互不干扰，可在开发中直接构建。
 
 ## 维护
 

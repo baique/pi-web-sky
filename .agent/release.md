@@ -10,7 +10,7 @@
 - 包名带 scope（`@baique/`），publish 必须带 `--access public`，否则报私有错误。
 - 版本命令用 `--no-git-tag-version`：npm **不会自动提交、不会自动打 tag**。发布后需手动提交版本变更（步骤 5）、手动打版本 tag（步骤 6）。
 - **版本 tag 触发 GitHub Release**：推送 `v*` tag 到 GitHub 会触发 `.github/workflows/release.yml`，自动把该 tag 的源码打包成 `pi-web-sky-<tag>.tar.gz` 并创建 GitHub Release。tag 即版本快照，必须打在本版本提交上。
-- 发布产物包含 `.next`（见 `files`），所以发布前必须 build。**build 会污染 dev 的 `.next`**，发布后如需继续 `npm run dev`，重启 dev 命令即可。
+- 发布产物包含 `.next`（见 `files`），所以发布前必须 build。build 与 dev 共用 `.next` **互不干扰**（Next 16 的 dev 产物在 `.next/dev`，2026-09-12 实测同目录并发运行正常：dev 仍服务 dev 产物、成品文件未被改动），发布时不必先停 dev。
 - **npm 版本号与 git 必须同步**：每次发布后 package.json / package-lock.json 的版本变更必须提交并推送。npm 上存在而 git 里不存在的版本号，说明上次发布没提交——先修复同步，再继续下一次发布。
 
 ## 步骤
@@ -31,7 +31,6 @@
 | `npm whoami` 报错 / publish 401 | `~/.npmrc` token 失效 | 到 npmjs.com 重新生成 token，写回 `~/.npmrc` 的 `//registry.npmjs.org/:_authToken=`，不要放进仓库 |
 | publish 报私有包错误 | 忘了 `--access public` | 用 `npm publish --access public` |
 | `npm view` 版本比本地大 | 之前发布未提交 | 先同步 git（按版本号补提交），再继续 |
-| 发布后 `npm run dev` 异常 | build 污染了 `.next` | 重启 dev，或删除 `.next` 后重跑 dev |
 | `next build` 报 `Multiple bundler flags set: TURBOPACK=auto, --webpack` | 进程环境带了 `TURBOPACK=auto`（npm exec / 某些 shell 注入），与 build 脚本的 `--webpack` 冲突 | 用 `env -u TURBOPACK npm run release` 重跑；重跑前先 `git checkout -- package.json package-lock.json` 把已 patch 的版本号还原，避免留半次发布的脏状态 |
 | GitHub Release 失败，日志报 `no matches found for ''`（老版 gh 报 `stat 错误`） | 工作流 env 变量大小写不一致，`gh release create` 收到空文件参数 | release.yml 已改为文件名直接由 `GITHUB_REF_NAME` 拼出（`pi-web-sky-${GITHUB_REF_NAME}.tar.gz`），不再跨步骤传环境变量；勿回退为 env 传递写法 |
 | workflow 修改后重跑仍失败 | GitHub Actions rerun 用的是触发时的旧 workflow 快照 | 不要 rerun；重打 tag 重新推送触发（`git push origin v0.1.x --force`，或删 tag 重打重推） |
