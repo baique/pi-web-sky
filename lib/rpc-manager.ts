@@ -12,6 +12,7 @@ import {
   createProjectCommandBashOperations,
   preferUserBashExtension,
 } from "./project-command-env";
+import { createTodoExtension } from "./todo-extension";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
 import { projectIdentityKey } from "./project-identity";
 import { resolveProject } from "./worktree";
@@ -1679,6 +1680,9 @@ export async function startRpcSession(
             cwd: sessionCwd,
             settings: settingsManager,
           }),
+          // 内建会话 TODO（工具 + pi-todo.state 快照），装 pi-web-sky 即自带，
+          // 无需用户安装任何 pi 包。工具重名时用户扩展优先（见 pi-todo 文档）。
+          createTodoExtension(),
         ],
         extensionsOverride: preferUserBashExtension,
       },

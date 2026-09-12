@@ -56,3 +56,6 @@ next-env.d.ts
 /manual.gif
 /test-anim.gif
 /test-wallpaper-8000x4000.jpg
+
+# 本地运行日志（dev server 等），不入库
+/.agent/logs/

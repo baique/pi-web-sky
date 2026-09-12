@@ -78,6 +78,8 @@ session-index-scanner.ts  后台扫描器：30s 全量扫磁盘建/刷 session_m
 session-scanner.ts 轻量会话文件扫描（头尾定向读：header/首条消息/自定义名/lastReply）
 tool-presets.ts     PRESET_NONE/READ_ONLY/DEFAULT/FULL + getPresetFromTools()
 tool-preset-preference.ts  browser-persisted default for fresh sessions
+todo-store.ts       内建 todo 纯数据层（三态 + 快照解析 + 4 action 校验，可单测）
+todo-extension.ts   内建 todo 内联扩展（注册 `todo` 工具 / 落盘 pi-todo.state / 回放 / auto-clear / 节奏提醒）
 types.ts            shared TypeScript types
 normalize.ts        normalizeToolCalls() — field name mismatch between file format and our types
 worktree.ts         project/worktree resolution and git worktree operations
@@ -89,6 +91,7 @@ worktree.ts         project/worktree resolution and git worktree operations
 AppShell.tsx        layout + URL state + tab management
 SessionSidebar.tsx  session tree + FileExplorer
 SessionStatsSummary.tsx  session stats compact summary（统计弹层第一行，复用 AppShell 顶栏格式）
+TodoList.tsx        会话 TODO 面板内容本体（表头/空态/条目），顶栏右上角与看板卡片顶栏两处共用
 ChatWindow.tsx      chat composition + completion sound wrapper
 canvas/             board mode components：SessionCanvas / SessionWorkbench / SessionNavBar /
                     CanvasStage / BoardSearch / ThemedSelect / BoardSection / BoardContextMenu /

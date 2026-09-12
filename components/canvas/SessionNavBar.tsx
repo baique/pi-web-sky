@@ -6,6 +6,7 @@ import { useI18n } from "@/hooks/useI18n";
 import type { TodoItem } from "@/lib/types";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { SessionStatsSummary } from "@/components/SessionStatsSummary";
+import { TodoList } from "@/components/TodoList";
 
 /**
  * 卡片顶部导航条（会话内部 UI，看板工作台专用）。
@@ -45,6 +46,8 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
   worktreeBranch,
 }, ref) {
   const { t } = useI18n();
+  const completedTodoCount = todos.filter((todo) => todo.status === "completed").length;
+  const todoLabel = `${t("todo.title")} · ${completedTodoCount}/${todos.length} ${t("todo.completed")}`;
   const [statsOpen, setStatsOpen] = useState(false);
   const [todoOpen, setTodoOpen] = useState(false);
   const [systemOpen, setSystemOpen] = useState(false);
@@ -79,7 +82,6 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
     ? `${contextUsage.percent.toFixed(0)}% / ${formatCompact(contextUsage.contextWindow)}`
     : t("nav.stats");
 
-  const activeTodoCount = todos.filter((todo) => todo.status !== "completed").length;
 
   // 弹层宽度 = 标题栏可视宽：弹层展开在标题栏下方，与标题同宽同左。
   // 注：标题栏是卡片外壳内、工作台上方的元素；卡片外壳含 padding 8 左右 + 边框，比标题栏宽（会超宽）。
@@ -212,17 +214,19 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
         <span style={navBtnText}>{statsLabel}</span>
       </button>
 
-      {/* TODO */}
+      {/* TODO —— 纯图标（卡片顶栏横向空间紧），进度移到 tooltip */}
       {todos.length > 0 && (
         <button
           ref={todoBtnRef}
           type="button"
           onClick={() => openOne(todoOpen ? "none" : "todo")}
-          title={t("todo.title")}
-          aria-label={t("todo.title")}
+          title={todoLabel}
+          aria-label={todoLabel}
           aria-expanded={todoOpen}
           style={{
             ...navBtnStyle,
+            width: 26,
+            padding: 0,
             background: todoOpen ? navBgActive : "transparent",
             color: todoOpen ? "var(--accent)" : "var(--text-muted)",
           }}
@@ -233,8 +237,6 @@ export const SessionNavBar = forwardRef<SessionNavBarHandle, {
             <rect x="3" y="4" width="18" height="16" rx="3" />
             <path d="M8 9h8M8 13h5" />
           </svg>
-          <span style={navBtnText}>{t("nav.todo")}</span>
-          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>{activeTodoCount > 0 ? activeTodoCount : "✓"}</span>
         </button>
       )}
 
@@ -654,69 +656,7 @@ function TodoPopover({
         border: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
       }}
     >
-      <div style={{
-        display: "flex", alignItems: "center", gap: 8,
-        padding: "9px 12px",
-        borderBottom: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
-        fontSize: 12, fontWeight: 650, color: "var(--text)",
-      }}>
-        {t("todo.title")}
-        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-meta)", fontWeight: 500 }}>
-          {todos.filter((todo) => todo.status === "completed").length}/{todos.length} {t("todo.completed")}
-        </span>
-      </div>
-      {todos.length === 0 ? (
-        <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
-          {t("todo.empty")}
-        </div>
-      ) : (
-        <div style={{ maxHeight: 330, overflowY: "auto" }}>
-          {todos.map((todo) => {
-            const done = todo.status === "completed";
-            const priorityColor = todo.priority === "high" ? "#ef4444"
-              : todo.priority === "medium" ? "rgba(234,179,8,0.9)"
-              : "var(--text-meta)";
-            return (
-              <div
-                key={todo.id ?? todo.content}
-                style={{
-                  display: "flex", alignItems: "flex-start", gap: 8,
-                  padding: "7px 12px",
-                  borderBottom: "1px solid color-mix(in srgb, var(--border) 45%, transparent)",
-                }}
-              >
-                <span
-                  aria-hidden="true"
-                  style={{
-                    flexShrink: 0, marginTop: 2,
-                    width: 13, height: 13, borderRadius: 4,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 10, fontWeight: 800, lineHeight: 1,
-                    color: done ? "#fff" : "transparent",
-                    background: done ? "#16a34a" : "color-mix(in srgb, var(--border) 70%, transparent)",
-                    border: done ? "none" : "1px solid color-mix(in srgb, var(--border) 80%, transparent)",
-                  }}
-                >
-                  ✓
-                </span>
-                <span style={{
-                  flex: 1, minWidth: 0,
-                  fontSize: 12, lineHeight: 1.4,
-                  color: done ? "var(--text-meta)" : "var(--text)",
-                  textDecoration: done ? "line-through" : "none",
-                  wordBreak: "break-word",
-                }}>
-                  {todo.content}
-                </span>
-                <span
-                  aria-hidden="true"
-                  style={{ flexShrink: 0, marginTop: 5, width: 7, height: 7, borderRadius: "50%", background: priorityColor }}
-                />
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <TodoList todos={todos} />
     </div>
   );
 

@@ -24,6 +24,7 @@ import { AgentEventConnection } from "@/lib/agent-event-connection";
 import { parseSubagentInspectReply, SUBAGENT_INSPECT_WIDGET_KEY } from "@/lib/subagent-widget";
 import { dispatchInspectReply } from "@/lib/extension-command";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
+import { parseTodoSnapshot } from "@/lib/todo-store";
 import {
   CHAT_SCROLL_REATTACH_TOLERANCE,
   CHAT_SCROLL_TAIL_TOLERANCE,
@@ -1331,6 +1332,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       case "tool_execution_end": {
         const id = event.toolCallId as string;
+        // 内建 todo：工具结果带回完整快照 → 顶栏面板立即跟上（增量推送），
+        // 无需等 6s 轮询或 agent_end 重拉。
+        if (event.toolName === "todo" && event.isError !== true) {
+          const snapshot = parseTodoSnapshot((event.result as { details?: unknown } | undefined)?.details);
+          if (snapshot) setTodos(snapshot.todos);
+        }
         setAgentPhase((prev) => {
           if (prev?.kind !== "running_tools") return prev;
           const tools = prev.tools.filter((t) => t.id !== id);

@@ -20,7 +20,6 @@ export const enLocale: LocalePlugin = {
     "history.unsaved": "History is available after the session is saved",
     "history.label": "History",
     "nav.stats": "Stats",
-    "nav.todo": "TODO",
     "title.generating": "Generating...",
     "title.updated": "Title updated",
     "title.failed": "Generation failed",

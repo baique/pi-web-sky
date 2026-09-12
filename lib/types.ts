@@ -331,10 +331,10 @@ export interface SessionInfo {
 }
 
 export interface TodoItem {
-  id?: string;
+  /** 内建 todo 工具用数字 id；历史快照里可能是字符串。 */
+  id?: string | number;
   content: string;
   status?: string;
-  priority?: string;
 }
 
 export interface SessionContext {

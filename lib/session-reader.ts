@@ -583,8 +583,14 @@ export function buildSessionContext(
     }
   }
 
-  // Collect the latest pi-todo.state snapshot from the active branch.
-  const todos = extractTodosFromEntries(contextEntries as unknown as SessionEntry[]);
+  // Collect the latest pi-todo.state snapshot from the **whole active branch** —
+  // not from compaction-truncated contextEntries: compaction trims the LLM
+  // context, not the UI's data source. Reading the truncated list made the
+  // top-bar todo panel go empty mid-task while /todos (which walks getEntries)
+  // still showed items — two sources disagreeing.
+  const todos = extractTodosFromEntries(
+    sliceActiveBranch(entries, leafId ?? null, entries.length) as unknown as SessionEntry[],
+  );
 
   return {
     messages,

@@ -31,6 +31,7 @@ import { BranchNavigator } from "./BranchNavigator";
 import { SidebarGlobalSearch } from "./SidebarGlobalSearch";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
+import { TodoList } from "@/components/TodoList";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
@@ -443,6 +444,9 @@ export function AppShell() {
   }, []);
 
   // Lightweight fetch of the session's latest todo snapshot (pi-todo.state).
+  // 只在「会话切换」和「打开面板」两个时点拉一次快照。运行中的变化不靠轮询：
+  // todo 工具调用的结果经 SSE 直达（useAgentSession 的 tool_execution_end），
+  // auto-clear 落在 agent_end（扩展先跑、SSE 后发），前端 agent_end 会重拉会话。
   const refreshTodos = useCallback(async (sessionId: string) => {
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/todos`);
@@ -1177,24 +1181,12 @@ export function AppShell() {
     if (sid) void refreshTodos(sid);
   }, [selectedSession?.id, refreshTodos]);
 
-  // Poll todos every few seconds while the current agent run is active, so the
-  // Tasks badge + open panel track pi-todo.state changes made mid-run.
-  const sessionRunning = Boolean(selectedSession?.id && runningSessionIds.has(selectedSession.id));
+  // auto-clear 把列表清空后收起浮层：否则入口按钮消失、浮层还开着，且下次
+  // 有 todo 时会“自己弹开”（todoPanelOpen 残留 true）。
   useEffect(() => {
-    const sid = selectedSession?.id;
-    if (!sid || !sessionRunning) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const tick = async () => {
-      await refreshTodos(sid);
-      if (!cancelled) timer = setTimeout(tick, 6000);
-    };
-    void tick();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [selectedSession?.id, sessionRunning, refreshTodos]);
+    if (sessionTodos.length === 0) setTodoPanelOpen(false);
+  }, [sessionTodos.length]);
+
 
   const handleExplorerRefresh = useCallback(() => {
     setExplorerRefreshKey((k) => k + 1);
@@ -2070,31 +2062,33 @@ export function AppShell() {
     );
   };
 
+  // 顶栏 todo 入口：只有图标（与旁边 36px 图标按钮同尺寸）。计数不再占位，
+  // 改由 tooltip / aria-label 携带，鼠标悬停可见进度。
   const renderTodoButton = (mobile: boolean) => {
     if (sessionTodos.length === 0) return null;
-    const activeCount = sessionTodos.filter((t) => t.status !== "completed").length;
+    const completedCount = sessionTodos.filter((t) => t.status === "completed").length;
+    const label = `${translate("todo.title")} · ${completedCount}/${sessionTodos.length} ${translate("todo.completed")}`;
     const open = todoPanelOpen && !mobile;
     return (
       <button
         type="button"
         ref={todoBtnRef}
         onClick={toggleTodoPanel}
-        title={translate("todo.title")}
-        aria-label={translate("todo.title")}
+        title={label}
+        aria-label={label}
         aria-expanded={todoPanelOpen}
         style={{
           display: "flex", alignItems: "center", justifyContent: "center",
-          gap: 6,
-          height: "100%",
-          padding: mobile ? "0 8px" : "0 12px",
+          width: mobile ? undefined : TOP_BAR_ICON_BUTTON_SIZE,
+          height: TOP_BAR_ICON_BUTTON_SIZE,
+          padding: mobile ? "0 8px" : 0,
           background: open ? "var(--bg-selected)" : "none",
           border: "none",
           borderTop: open ? "2px solid var(--accent)" : "2px solid transparent",
           borderLeft: "1px solid var(--border)",
           color: "var(--text-muted)",
           cursor: "pointer",
-          fontSize: 11,
-          whiteSpace: "nowrap",
+          flexShrink: 0,
           transition: "color 0.1s, background 0.1s",
         }}
         onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
@@ -2102,10 +2096,9 @@ export function AppShell() {
           event.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)";
         }}
       >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="4" width="18" height="16" rx="3" /><path d="M8 9h8M8 13h5" />
         </svg>
-        <span>{activeCount > 0 ? activeCount : "✓"}</span>
       </button>
     );
   };
@@ -3096,7 +3089,7 @@ export function AppShell() {
           {/* Todo panel — narrow, pinned to top-right, drops down like the
               session stats popover. Lists the session's pi-todo.state.
               Portaled to <body> — see the position-tracking effect above. */}
-          {todoPanelOpen && todoPanelPos && createPortal((
+          {todoPanelOpen && todoPanelPos && sessionTodos.length > 0 && createPortal((
             <div
               ref={todoPanelRef}
               role="menu"
@@ -3121,69 +3114,7 @@ export function AppShell() {
                 fontFamily: "inherit",
               }}
             >
-              <div style={{
-                display: "flex", alignItems: "center", gap: 8,
-                padding: "9px 12px",
-                borderBottom: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
-                fontSize: 12, fontWeight: 650, color: "var(--text)",
-              }}>
-                {translate("todo.title")}
-                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-meta)", fontWeight: 500 }}>
-                  {sessionTodos.filter((t) => t.status === "completed").length}/{sessionTodos.length} {translate("todo.completed")}
-                </span>
-              </div>
-              {sessionTodos.length === 0 ? (
-                <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
-                  {translate("todo.empty")}
-                </div>
-              ) : (
-                <div style={{ maxHeight: 330, overflowY: "auto" }}>
-                  {sessionTodos.map((todo) => {
-                    const done = todo.status === "completed";
-                    const priorityColor = todo.priority === "high" ? "#ef4444"
-                      : todo.priority === "medium" ? "rgba(234,179,8,0.9)"
-                      : "var(--text-meta)";
-                    return (
-                      <div
-                        key={todo.id ?? todo.content}
-                        style={{
-                          display: "flex", alignItems: "flex-start", gap: 8,
-                          padding: "7px 12px",
-                          borderBottom: "1px solid color-mix(in srgb, var(--border) 45%, transparent)",
-                        }}
-                      >
-                        <span
-                          aria-hidden="true"
-                          style={{
-                            flexShrink: 0, marginTop: 2,
-                            width: 13, height: 13, borderRadius: 4,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: 10, fontWeight: 800, lineHeight: 1,
-                            color: done ? "#fff" : "transparent",
-                            background: done ? "#16a34a" : "color-mix(in srgb, var(--border) 70%, transparent)",
-                            border: done ? "none" : "1px solid color-mix(in srgb, var(--border) 80%, transparent)",
-                          }}
-                        >
-                          ✓
-                        </span>
-                        <span style={{
-                          flex: 1, minWidth: 0,
-                          fontSize: 12, lineHeight: 1.4,
-                          color: done ? "var(--text-meta)" : "var(--text)",
-                          textDecoration: done ? "line-through" : "none",
-                          wordBreak: "break-word",
-                        }}>
-                          {todo.content}
-                        </span>
-                        <span
-                          aria-hidden="true"
-                          style={{ flexShrink: 0, marginTop: 5, width: 7, height: 7, borderRadius: "50%", background: priorityColor }}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              <TodoList todos={sessionTodos} />
             </div>
           ), document.body)}
 

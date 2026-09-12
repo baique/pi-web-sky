@@ -527,7 +527,9 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   // Push todo list up to AppShell (top-bar todo button).
   const todosRef = useRef(todos);
   todosRef.current = todos;
-  const todosKey = todos.map((t) => t.id ?? t.content).join("\u0000");
+  // key 必须带 status：todo 从 pending 变 completed 时 id/content 不变，
+  // 只按 id/content 算 key 会让 effect 不触发，顶栏面板停在旧状态。
+  const todosKey = todos.map((t) => `${t.id ?? t.content}:${t.status ?? ""}`).join("\u0000");
   useEffect(() => {
     onTodosChange?.(todosRef.current);
   }, [todosKey, onTodosChange]);

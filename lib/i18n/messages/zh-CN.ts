@@ -21,7 +21,6 @@ export const zhCNLocale: LocalePlugin = {
     "history.unsaved": "会话保存后才能查看历史",
     "history.label": "历史",
     "nav.stats": "统计",
-    "nav.todo": "TODO",
     "title.generating": "正在生成...",
     "title.updated": "标题已更新",
     "title.failed": "生成失败",
