@@ -21,6 +21,7 @@ import {
 import { resolveDirentIsDirectory } from "@/lib/file-dirent";
 import { isFilePathReferencedBySession } from "@/lib/session-file-references";
 import { isApiRequestAllowed } from "@/lib/request-security";
+import { writeFileAtomicSync } from "@/lib/atomic-file";
 import {
   inspectUploadTargets,
   parseUploadConflictStrategy,
@@ -44,6 +45,14 @@ const MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_UPLOAD_TOTAL_BYTES = 100 * 1024 * 1024;
 // Multipart boundaries and headers are not file bytes, but must be bounded too.
 const MAX_UPLOAD_REQUEST_BYTES = MAX_UPLOAD_TOTAL_BYTES + 1024 * 1024;
+
+/** Cap for editor saves. Small enough that a runaway client cannot write a disk-filling blob. */
+const MAX_WRITE_BYTES = 1024 * 1024;
+
+/** True for files the text editor is allowed to replace (i.e. not media or binary documents). */
+function isEditablePath(filePath: string): boolean {
+  return !getImageMime(filePath) && !getAudioMime(filePath) && !getDocumentMime(filePath);
+}
 
 // Bounded recursive search: hard caps keep large projects from runaway scans.
 const SEARCH_MAX_ENTRIES = 20_000;
@@ -286,6 +295,77 @@ export async function POST(
       { uploaded, skipped, errors },
       { status: errors.length > 0 ? 207 : 200 },
     );
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
+}
+
+/**
+ * Editor save. Only replaces an existing regular text file inside the allowed
+ * roots — it never creates files or directories, so a stale editor tab cannot
+ * resurrect a deleted path.
+ */
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  if (!isApiRequestAllowed(request)) {
+    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
+  }
+
+  try {
+    const { path: segments } = await params;
+    const filePath = filePathFromSegments(segments);
+    const allowedRoots = await getAllowedFileRoots();
+    if (!isFilePathAllowed(filePath, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(filePath);
+    } catch {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (!stat.isFile()) {
+      return NextResponse.json({ error: "Not a file" }, { status: 400 });
+    }
+    if (!isExistingFilePathAllowed(filePath, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+    if (!isEditablePath(filePath)) {
+      return NextResponse.json({ error: "Binary files are not editable" }, { status: 400 });
+    }
+
+    // Reject obviously oversized bodies before parsing them into memory.
+    const declaredLength = Number(request.headers.get("content-length") ?? "0");
+    if (declaredLength > MAX_WRITE_BYTES + 64 * 1024) {
+      return NextResponse.json({ error: "File too large to save (>1MB)" }, { status: 413 });
+    }
+
+    const body = await request.json().catch(() => null) as
+      | { content?: unknown; baseMtimeMs?: unknown }
+      | null;
+    if (!body || typeof body.content !== "string") {
+      return NextResponse.json({ error: "content must be a string" }, { status: 400 });
+    }
+    if (Buffer.byteLength(body.content, "utf8") > MAX_WRITE_BYTES) {
+      return NextResponse.json({ error: "File too large to save (>1MB)" }, { status: 413 });
+    }
+
+    // Optimistic concurrency: the editor sends back the mtime it loaded from, so
+    // a write from the agent (or another tab) between load and save is reported
+    // instead of silently clobbered.
+    if (typeof body.baseMtimeMs === "number" && body.baseMtimeMs !== stat.mtimeMs) {
+      return NextResponse.json(
+        { error: "File changed on disk", mtimeMs: stat.mtimeMs, size: stat.size },
+        { status: 409 },
+      );
+    }
+
+    writeFileAtomicSync(filePath, body.content);
+    const saved = fs.statSync(filePath);
+    return NextResponse.json({ size: saved.size, mtimeMs: saved.mtimeMs });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
@@ -537,7 +617,13 @@ export async function GET(
       }
       const content = fs.readFileSync(filePath, "utf-8");
       const language = getLanguage(filePath);
-      return NextResponse.json({ content, language, size: stat.size });
+      return NextResponse.json({
+        content,
+        language,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        editable: isEditablePath(filePath),
+      });
     }
 
     if (type === "download") {
