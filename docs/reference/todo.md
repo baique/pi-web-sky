@@ -55,7 +55,9 @@ todo({ action: "list" | "add" | "update" | "delete",
 
 ## auto-clear
 
-`agent_start` 计数 +1；`agent_end` 时若全部 `completed`，记住当时的计数，**再过 2 轮**（`AUTO_CLEAR_DELAY_ROUNDS`）清空 todos 且 `nextId = 1`。任何变更都会让计时重新起算。
+`agent_end` 时**从活动分支重算**（`shouldAutoClear(entries)`）：取分支上最后一条 `pi-todo.state` 快照，数它之后又过了几条 user 消息 —— 快照处于「全部 completed」且其后已满 **2 条**（`AUTO_CLEAR_DELAY_ROUNDS`）→ 清空 todos、`nextId = 1`，并落盘**空快照**（不落盘的话面板会残留旧列表）。任何变更都会重写快照，计时自然重新起算。
+
+为什么不记内存计数器：pi-web 的 AgentSession 空闲 10 分钟即销毁（见 `lib/rpc-manager.ts` 的 idle timer），扩展闭包里的计数活不过两次交互的间隔 —— 交互式使用（隔几分钟问一句）永远数不满 2 轮。分支是持久的，重算 O(分支长度)，而 `agent_end` 每轮只跑一次。
 
 UI 侧：列表清空 → 按钮消失（`renderTodoButton` 在 `length === 0` 时返回 null）→ `AppShell` 的 effect 顺手收起浮层（否则入口没了、浮层还开着，且下次有 todo 时会自己弹开）。
 

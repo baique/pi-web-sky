@@ -23,9 +23,9 @@ export async function GET(
     }
 
     const sm = liveRpc?.inner.sessionManager ?? SessionManager.open(filePath!);
-    // 只读**活动分支**（getBranch = leaf→root 路径），与 buildSessionContext 同源：
-    // 读全量 getEntries 会把别的分支（fork / 旧分支）的 todo 当成当前会话的，
-    // 顶栏按钮与面板两个数据源就会打架。
+    // 只读**活动分支**（getBranch 返回 root→leaf，已按时间序，故「最后一条」= 最新），
+    // 与 buildSessionContext 同源：读全量 getEntries 会把别的分支（fork / 旧分支）
+    // 的 todo 当成当前会话的，顶栏按钮与面板两个数据源就会打架。
     const branch = sm.getBranch() as unknown as SessionEntry[];
     return NextResponse.json({ todos: extractTodosFromEntries(branch) });
   } catch (error) {

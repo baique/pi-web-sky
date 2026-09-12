@@ -24,6 +24,7 @@ import {
   parseTodoSnapshot,
   TODO_STATE_CUSTOM_TYPE,
   VALID_STATUSES,
+  type Todo,
   type TodoActionParams,
   type TodoSnapshot,
 } from "./todo-store";
