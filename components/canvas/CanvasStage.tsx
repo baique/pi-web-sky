@@ -62,14 +62,16 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
   // 图片文件选择 input（工具栏「图片」按钮触发）
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 画布位置记忆：只在看板 ready（进入/切换）时恢复 yjs 记住的位置一次。
+  // 画布位置记忆：看板 ready 且画布真正渲染出来时恢复一次 yjs 记住的位置。
+  // 必须等 !loading：<ReactFlow> 是条件渲染（loading 期间只渲染占位），提前 setViewport
+  // 会被 RF 挂载时的默认视口 (0,0,1) 覆盖掉（文档变小/同步变快后稳定踩中）。
   // 不做持续覆盖（不监听 board.viewport 变化）——否则 running 轮询等 yjs 回灌
   // 会触发本 effect 用旧值 setViewport，覆盖用户拖拽/定位的当前视口（回跳/定位失效）。
   useEffect(() => {
-    if (!board.ready) return;
+    if (board.loading || !board.ready) return;
     setViewport(board.viewport);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅 ready 时恢复一次
-  }, [board.ready]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 画布渲染出来时恢复一次
+  }, [board.loading, board.ready]);
 
   // BoardCanvasOps：把 Y.Doc 写操作暴露给节点组件
   const ops = useMemo<BoardCanvasOps>(() => ({
