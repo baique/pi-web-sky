@@ -4,6 +4,7 @@ import {
   SYSTEM_RUNNING_BOARD_ID,
   type BoardInfo,
 } from "./board-types";
+import { unbindCardSession } from "./task-card-store";
 
 const now = () => Date.now();
 
@@ -255,8 +256,9 @@ export interface RemoveSessionFromBoardsResult {
  * （枚举 yjs 文档删会话卡/占位卡）负责；board_nodes/edges 表为 tldraw 遗留，无生产写入。
  */
 export function removeSessionFromBoards(sessionId: string): RemoveSessionFromBoardsResult {
-  const ts = now();
-  getDb().prepare("UPDATE task_cards SET session_id = NULL, updated = ? WHERE session_id = ?").run(ts, sessionId);
+  // 解绑 + 结算状态：删会话后卡收不到结束信号（订阅先被拆）、巡检也需要 sessionId 才能接手，
+  // 所以必须在这一步把卡落地（非终态记「放弃」），否则卡永久停在原状态里（进行中还会占住并发位）。
+  unbindCardSession(sessionId);
   getDb().prepare("DELETE FROM task_card_questions WHERE session_id = ?").run(sessionId);
   return { removedNodes: 0, boards: [] };
 }

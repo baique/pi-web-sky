@@ -286,6 +286,26 @@ export function deleteCard(id: string): void {
   }
 }
 
+/** 解绑「卡 → 执行会话」并结算状态（删会话、普通看板移除执行会话卡 两条路径共用）。
+ *  不清绑定：后端 reconcile 会把执行会话卡补回来；
+ *  不结算：卡会停在「进行中 / 等回复 / 待审核」——分别表现为占着并发位不放、
+ *  回答完没人续跑、被当成空执行直接判完成。
+ *  非终态一律记为「放弃」（会话/卡片被移除 = 不再自动管这次执行）；
+ *  终态（完成/失败/放弃）不动，不覆盖已有结论。 */
+export function unbindCardSession(sessionId: string): void {
+  getDb()
+    .prepare(
+      `UPDATE task_cards
+          SET session_id = NULL,
+              exec_status = CASE
+                WHEN exec_status IN ('done', 'failed', 'abandoned') THEN exec_status
+                ELSE 'abandoned' END,
+              updated = ?
+        WHERE session_id = ?`,
+    )
+    .run(now(), sessionId);
+}
+
 // ============================================================================
 // 依赖（前置/关联）—— 同看板，真相源在 task_card_links，画布边由 syncCardEdges 派生
 // ============================================================================

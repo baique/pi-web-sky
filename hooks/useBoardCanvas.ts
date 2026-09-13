@@ -69,6 +69,23 @@ const SYNC_BASE =
     ? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`
     : "");
 
+// 文档版本核对：服务端压历史时重建文档（struct 身份全变）。本地若还持着旧副本，重连时
+// 会被当成「服务端缺失的更新」合并回来（历史复活、重建白做）。版本不一致 → 强刷页面丢弃本地副本。
+const DOC_VERSION_KEY = "pi-web:yjs-doc-version";
+
+async function checkDocVersion() {
+  try {
+    const res = await fetch("/api/yjs-version", { cache: "no-store" });
+    if (!res.ok) return;
+    const { version } = (await res.json()) as { version: number };
+    const seen = localStorage.getItem(DOC_VERSION_KEY);
+    localStorage.setItem(DOC_VERSION_KEY, String(version));
+    if (seen !== null && seen !== String(version)) location.reload();
+  } catch {
+    // 版本拿不到不阻断画布
+  }
+}
+
 export type CanvasPhase = "waiting_model" | "running_tools" | "running_command" | "waiting_input" | "idle" | "just-ended";
 
 /** 会话卡运行态镜像（DB/调度器真相的展示快照，不写 yjs——高频展示态与 CRDT 分离） */
@@ -263,6 +280,7 @@ export function useBoardCanvas({
     const onSynced = () => {
       syncView();
       setReady(true);
+      void checkDocVersion();
     };
     nodesMap.observe(syncNodes as (e: unknown) => void);
     edgesMap.observe(syncEdges);
@@ -826,6 +844,14 @@ export function useBoardCanvas({
         // 普通看板：卡片是引用，只删卡不删会话
         const ok = await confirm({ message: "移除该会话卡片？\n会话本身将保留在会话列表中，可随时重新拖入。" });
         if (!ok) return;
+        // 派生卡（任务卡的执行会话）还要解绑 + 结算状态：
+        // 不清绑定 → 后端 reconcile 会把卡补回来；不结算状态 → 卡停在执行中/等回答/待审核。
+        // 会话本体不动（仍留在会话列表）。
+        await fetch("/api/task-cards/unbind", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: d.sessionId }),
+        }).catch(() => {});
       }
       nodesMap.delete(node.id);
       for (const e of Array.from(edgesMap.values())) {

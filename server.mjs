@@ -34,8 +34,8 @@ server.listen(port, hostname, () => {
 });
 
 // ---- yjs 文档历史定期压缩（治理看板卡顿）----
-// 启动后跑一次 + 每天定时跑；只压无活跃连接的看板（不踢正在编辑的用户），防重叠。
-const YJS_COMPACT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// 启动后跑一次 + 每 5 分钟一轮（严格窗口：有连接就跳过，命中窗口即执行）。
+const YJS_COMPACT_INTERVAL_MS = 5 * 60 * 1000;
 setTimeout(() => {
   compactYjsDocuments().catch((e) => console.warn("[yjs] compact 启动扫描异常:", e?.message ?? e));
 }, 15_000).unref?.();

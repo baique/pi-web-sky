@@ -32,6 +32,7 @@ declare global {
   var __yjsBoard: {
     mutateBoard: (boardId: string, transaction: (maps: BoardMaps) => void) => Promise<unknown>;
     destroyBoardDocument: (boardId: string) => Promise<void>;
+    getYjsVersion?: () => number;
   } | undefined;
 }
 
@@ -143,9 +144,28 @@ function findSpotNearAnchor(
  *   - 任务看板专属：任务根会话补齐（listTaskSessionIds）+ 会话卡孤儿删。
  *     普通看板不做会话卡孤儿删——普通看板的会话卡由用户拖入/新建管理，不归业务表。
  */
-export async function reconcileBoard(boardId: string): Promise<void> {
+/** 业务输入指纹：reconcile 是纯函数（输入不变 → 派生结果必然不变），输入没变就不必
+ *  打开文档——省掉一轮全量 load + store（实测 10 个看板 ≈4s 同步 CPU）。
+ *  只取参与派生的字段，排除 heartbeat / dispatchToken / updated 这类每轮都变的噪声字段。 */
+const lastFingerprints = new Map<string, string>();
+
+function inputFingerprint(boardId: string, taskId: string | null): string {
+  const cards = listCards(boardId);
+  return JSON.stringify([
+    taskId,
+    cards.map((c) => [c.id, c.sessionId ?? ""]),
+    taskId ? listTaskSessionIds(taskId) : [],
+    taskId ? listTaskForkedSessions(taskId).map((f) => [f.sessionId, f.parentId]) : [],
+    cards.flatMap((c) => listLinks(c.id).map((l) => [c.id, l.targetCardId, l.kind])),
+  ]);
+}
+
+export async function reconcileBoard(boardId: string, force = false): Promise<void> {
   const board = getBoard(boardId);
   if (!board) return;
+  const fingerprint = inputFingerprint(boardId, board.taskId ?? null);
+  // 输入未变 → 不打开文档。force 给手动端点用（用户点「刷新画布」要能重建派生元素）。
+  if (!force && lastFingerprints.get(boardId) === fingerprint) return;
   const isTaskBoard = Boolean(board.taskId);
 
   const cards = listCards(boardId);
@@ -381,6 +401,7 @@ export async function reconcileBoard(boardId: string): Promise<void> {
       if (!wantLinks.has(key)) edgesMap.delete(edgeId);
     }
   });
+  lastFingerprints.set(boardId, fingerprint);
 }
 
 /** 源会话归属指定任务的 fork 会话（fork 关系 = session_meta.parent_id → 源会话 id）。

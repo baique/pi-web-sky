@@ -17,7 +17,7 @@ export async function POST(
     if (!board) {
       return NextResponse.json({ error: "Board not found" }, { status: 404 });
     }
-    await reconcileBoard(id);
+    await reconcileBoard(id, true); // force：手动刷新必须真跑（脏检查只管定时兜底）
     return NextResponse.json({ ok: true, updated: board.updated ?? null });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
