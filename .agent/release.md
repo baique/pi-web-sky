@@ -16,7 +16,7 @@
 ## 步骤
 
 1. **确认工作区干净**：`git status` 无未提交改动（发布产物只该来自已提交的代码）。若有，先提交。
-2. **确认 token 有效**：`npm whoami` 输出 `baique`。不是 → 换 token（见故障）。
+2. **确认 token 有效**：`npm_config_registry=https://registry.npmjs.org/ npm whoami` 输出 `baique`。不是 → 换 token（见故障）。前缀不能省：环境里的 `npm_config_registry` 会盖掉 `~/.npmrc`，直接跑 `npm whoami` 报的是 `need auth`。
 3. **发布**：`npm run release`。内部依次完成：版本号 patch +1 → `next build` → `npm publish --access public`。
 4. **验证发布成功**：`npm view @baique/pi-web-sky version` 输出必须等于 package.json 的 `version`。
    - **注意**：npm 新后端对 publish 返回 `PUT 202 Accepted` 并在日志打印 `+ @baique/pi-web-sky@0.1.x`，但版本要**几分钟后才会出现在 registry 的 versions 列表**。日志成功行出现后别急着验证；等 2–5 分钟再查，或直接用 `curl -s https://registry.npmjs.org/@baique%2Fpi-web-sky` 检查 `dist-tags.latest`。期间 `npm view` 仍显示上一版是正常的传播延迟，不是发布失败。
@@ -28,7 +28,7 @@
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| `npm whoami` 报错 / publish 401 | `~/.npmrc` token 失效 | 到 npmjs.com 重新生成 token，写回 `~/.npmrc` 的 `//registry.npmjs.org/:_authToken=`，不要放进仓库 |
+| `npm whoami` 报错 / publish 401 / `need auth` | 两种：① `~/.npmrc` token 失效；② 进程环境带了 `npm_config_registry`，指向公司 Nexus（`https://maven.hljzj.tech/repository/npm/`）——它**优先于** `~/.npmrc` 的 `registry=` 和 `//registry.npmjs.org/:_authToken=`（2026-09-12 实录） | 先区分：`npm_config_registry=https://registry.npmjs.org/ npm whoami` → 输出 `baique` 就是 ②，发布一律带前缀（`env -u TURBOPACK npm_config_registry=https://registry.npmjs.org/ npm run release`）；仍报 401 就是 ①，到 npmjs.com 重生成 token 写回 `~/.npmrc`（不进仓库）。**绝不要在 Nexus 上 publish** |
 | publish 报私有包错误 | 忘了 `--access public` | 用 `npm publish --access public` |
 | `npm view` 版本比本地大 | 之前发布未提交 | 先同步 git（按版本号补提交），再继续 |
 | `next build` 报 `Multiple bundler flags set: TURBOPACK=auto, --webpack` | 进程环境带了 `TURBOPACK=auto`（npm exec / 某些 shell 注入），与 build 脚本的 `--webpack` 冲突 | 用 `env -u TURBOPACK npm run release` 重跑；重跑前先 `git checkout -- package.json package-lock.json` 把已 patch 的版本号还原，避免留半次发布的脏状态 |
