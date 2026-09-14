@@ -7,6 +7,7 @@ import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
+import { newId } from "@/lib/id";
 
 interface MermaidBlockProps {
   code: string;
@@ -50,10 +51,7 @@ export function MermaidBlock({ code, isStreaming, defaultPreview = false }: Merm
       const parsed = await mermaid.parse(code, { suppressErrors: true });
       if (!parsed) throw new Error("Invalid Mermaid diagram");
 
-      const id =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? `mermaid-${crypto.randomUUID()}`
-          : `mermaid-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const id = `mermaid-${newId()}`;
       const result = await mermaid.render(id, code);
       if (!cancelled) {
         setRenderState({ key: currentKey, status: "ready", svg: result.svg });

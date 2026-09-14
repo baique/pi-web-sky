@@ -9,6 +9,7 @@ import type { BoardInfo, RunningSnapshot, TaskCardRunningState } from "@/lib/boa
 import { dispatchBoardSessionCreated, dispatchBoardSessionDeleted } from "@/lib/board-events";
 import { confirm } from "@/components/canvas/ConfirmDialog";
 import { isNoteNode } from "@/components/board/SendNoteEdge";
+import { newId } from "@/lib/id";
 
 // ============================================================================
 // 看板画布数据层（yjs 版，替代 tldraw useSync）
@@ -136,6 +137,22 @@ function cleanNode(node: Node): Node {
   void dragging;
   void resizing;
   return clean;
+}
+
+/** 删除「新会话卡」关联的会话。
+ *
+ * 新会话卡（cwd 非空）本意是“会话尚未创建”，但预热路径（斜杠菜单 / 系统提示词面板）
+ * 仍可能已让它落盘。卡片是它存在的唯一理由——删卡时必须连会话一起删，否则会话列表里
+ * 会多出一个没内容的孤儿会话。文件不存在时为幂等空操作（同时清 session_meta 残留）。
+ * 调用方：deleteNodeWithConfirm（删卡）/ clearBoard（清空画布）。 */
+async function deletePendingCardSession(sessionId: string): Promise<void> {
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+    if (res.ok) dispatchBoardSessionDeleted(sessionId);
+    else console.warn(`[board] 清理新会话卡关联会话 ${sessionId} 失败 HTTP ${res.status}`);
+  } catch (e) {
+    console.warn(`[board] 清理新会话卡关联会话 ${sessionId} 异常`, e);
+  }
 }
 
 export function useBoardCanvas({
@@ -702,7 +719,7 @@ export function useBoardCanvas({
     if (!nodesMap) return;
     const w = NEW_SESSION_CARD_W;
     const h = NEW_SESSION_CARD_H;
-    const sessionId = crypto.randomUUID();
+    const sessionId = newId();
     // 统一节点 id 锚：新会话卡出生即确定性 id（与拖入/补卡/转正一致），
     // reconcile 补卡/幂等/exec 线 target 全部依赖该锚，不再有随机 id 分裂。
     const id = `session-${sessionId}`;
@@ -817,15 +834,7 @@ export function useBoardCanvas({
       // 这里不能直接删节点——先兕底调删除 API（文件不存在时幂等空操作，
       // 同时清 session_meta 残留），再删节点。
       if (!d.sessionId || d.cwd) {
-        if (d.sessionId) {
-          try {
-            const res = await fetch(`/api/sessions/${encodeURIComponent(d.sessionId)}`, { method: "DELETE" });
-            if (res.ok) dispatchBoardSessionDeleted(d.sessionId);
-            else console.warn(`[board] 清理新会话卡关联会话 ${d.sessionId} 失败 HTTP ${res.status}`);
-          } catch (e) {
-            console.warn(`[board] 清理新会话卡关联会话 ${d.sessionId} 异常`, e);
-          }
-        }
+        if (d.sessionId) await deletePendingCardSession(d.sessionId);
         nodesMap.delete(node.id);
         for (const e of Array.from(edgesMap.values())) {
           if (e.source === node.id || e.target === node.id) edgesMap.delete(e.id);
@@ -1003,6 +1012,16 @@ export function useBoardCanvas({
     if (!nodesMap || !edgesMap) return;
     const isTaskBoard = Boolean(taskIdRef.current ?? boardRef.current?.taskId);
     const toDelete = Array.from(nodesMap.values()).filter((n) => (isTaskBoard ? n.type !== "session-card" : true));
+    // 普通看板：新会话卡（cwd 非空）的会话可能已被预热路径（斜杠菜单 / 系统面板）落盘。
+    // 它因卡而生，删卡必须连会话一起删（与 deleteNodeWithConfirm 同一规则）——
+    // 否则清空画布会在会话列表里留下一个空会话孤儿。
+    if (!isTaskBoard) {
+      for (const n of toDelete) {
+        if (n.type !== "session-card") continue;
+        const d = n.data as { sessionId?: string; cwd?: string };
+        if (d.sessionId && d.cwd) await deletePendingCardSession(d.sessionId);
+      }
+    }
     for (const n of toDelete) {
       nodesMap.delete(n.id);
       for (const e of Array.from(edgesMap.values())) {

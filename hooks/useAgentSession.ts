@@ -21,6 +21,7 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import { userMessageKey } from "@/lib/prompt-recovery";
 import { AgentEventConnection } from "@/lib/agent-event-connection";
 import { parseSubagentInspectReply, SUBAGENT_INSPECT_WIDGET_KEY } from "@/lib/subagent-widget";
+import { newId } from "@/lib/id";
 import { dispatchInspectReply } from "@/lib/extension-command";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
 import { parseTodoSnapshot, TODO_TOOL_NAME, type Todo } from "@/lib/todo-store";
@@ -169,7 +170,7 @@ export interface UseAgentSessionOptions {
   /** 从任务行/看板新会话卡发起时携带的关联信息（创建请求附带，服务端原子归属任务）。
    *  taskId：服务端把会话挂到任务。看板卡片 sessionId 发起时即确定（前端生成 UUID，
    *  在 CRDT 文档里），无需服务端写回 ref_id。 */
-  pendingNewSessionTaskRef?: React.MutableRefObject<{ taskId?: string; projectKey?: string; nodeId?: string } | null>;
+  pendingNewSessionTaskRef?: React.MutableRefObject<{ taskId?: string; projectKey?: string; nodeId?: string; draftId?: string } | null>;
 }
 
 export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -192,10 +193,7 @@ const NOTICE_HISTORY_TTL_MS = 10 * 60 * 1000;
 /** 通知历史上限 */
 const MAX_NOTICE_HISTORY = 50;
 function createNoticeId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return newId();
 }
 
 function delay(ms: number): Promise<void> {
@@ -681,7 +679,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // 会话 ID 发起时即确定：复用已有 draft key（= 卡片 sessionId / AppShell 生成的 UUID），
     // 确保「卡片/路由/草稿用的 ID」与「服务端创建的会话 ID」一致。
     // 无 draft key 时（理论上不发生，兜底）才新生成。
-    const desiredId = newSessionDraftKey ?? crypto.randomUUID();
+    const desiredId = newSessionDraftKey ?? newId();
     sessionIdRef.current = desiredId;
 
     const promise = (async () => {
@@ -692,6 +690,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (selectedModel) setPendingModel(selectedModel);
       const toolNames = getToolNamesForPreset(toolPreset);
       const pendingTask = opts.pendingNewSessionTaskRef?.current;
+      // 任务归属只在「同一次新建」内生效：ref 带 draftId 时必须与本次会话 id 一致。
+      // ref 只在创建成功后清空（AppShell 的 onSessionCreated），中途被放弃会残留——没它
+      // 这一校验，残留的 taskId 会把后续任何一条新会话挂到那个任务下。
+      const pendingTaskId = pendingTask?.taskId
+        && (!pendingTask.draftId || pendingTask.draftId === desiredId)
+        ? pendingTask.taskId
+        : undefined;
       const res = await fetch("/api/agent/new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -700,7 +705,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           type: "ensure_session",
           id: desiredId,
           toolNames,
-          ...(pendingTask ? { taskId: pendingTask.taskId } : {}),
+          ...(pendingTaskId ? { taskId: pendingTaskId } : {}),
           ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
           ...(selectedThinkingLevel
             ? { thinkingLevel: selectedThinkingLevel }

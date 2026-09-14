@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { Node } from "@xyflow/react";
 import { useBoardCanvasOps } from "@/components/board/BoardCanvasContext";
 import { dispatchBoardRenameNode } from "@/lib/board-events";
+import { newId } from "@/lib/id";
 
 export interface BoardMenuState {
   /** 菜单渲染位置（screen 坐标，用于 fixed 定位菜单本体） */
@@ -64,7 +65,7 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
 
   const addNote = useCallback(() => {
     ops.addNode({
-      id: crypto.randomUUID(),
+      id: newId(),
       type: "sticky-note",
       position: { x: flowX ?? 0, y: flowY ?? 0 },
       style: { width: 380, height: 280 },
@@ -82,7 +83,7 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
 
   const addTaskCard = useCallback(() => {
     ops.addNode({
-      id: crypto.randomUUID(),
+      id: newId(),
       type: "task-card",
       position: { x: flowX ?? 0, y: flowY ?? 0 },
       style: { width: 380, height: 270 },

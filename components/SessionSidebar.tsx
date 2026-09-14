@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import { WorktreeSelector, type WorktreeProject } from "./WorktreeSelector";
 import type { SessionInfo } from "@/lib/types";
+import { newId } from "@/lib/id";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
 import { getProjectActivity, getRecentProjects } from "@/lib/project-groups";
@@ -804,9 +805,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (!selectedCwd) return;
     // Generate a temporary UUID client-side — no backend call needed.
     // Pi will be spawned lazily when the user sends the first message.
-    const tempId = typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    const tempId = newId();
     onNewSession?.(tempId, selectedCwd);
   }, [selectedCwd, onNewSession]);
 
@@ -1129,7 +1128,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       body: JSON.stringify({ sessionId }),
     });
     await persistTasks();
-  }, [tasks, persistTasks]);
+    // 归属变了，聊天区列表也得重拉：/api/sessions 只返回 task_id IS NULL 的会话，
+    // 不重拉的话被拖入任务的会话仍旧挂在聊天区（要等下一次 refreshKey 才消失）。
+    void loadChatPage();
+  }, [tasks, persistTasks, loadChatPage]);
 
   const handleUnassignSession = useCallback(async (sessionId: string) => {
     const task = tasks.find((t) => t.sessionIds.includes(sessionId));
@@ -1140,7 +1142,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       body: JSON.stringify({ sessionIds: task.sessionIds.filter((s) => s !== sessionId) }),
     });
     await persistTasks();
-  }, [tasks, persistTasks]);
+    // 反向同理：移出任务后应立即出现在聊天区，不能等下一次全量刷新。
+    void loadChatPage();
+  }, [tasks, persistTasks, loadChatPage]);
 
   // Region-internal order: pinned segment first, then the rest — both sorted
   // by the session's last-modified time (desc). Pinning never changes position

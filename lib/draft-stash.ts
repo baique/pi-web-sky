@@ -2,6 +2,8 @@
 // 跨会话、浏览器全局存在；内容只增不自动删，删除仅靠手动。
 // 与 lib/draft-store.ts（会话级单条输入框草稿）完全独立，互不干扰。
 
+import { newId } from "./id";
+
 export interface DraftItem {
   id: string;
   content: string;
@@ -24,12 +26,9 @@ function isDraftItem(value: unknown): value is DraftItem {
   );
 }
 
-/** 生成草稿 id（优先 crypto.randomUUID，退化到时间戳+随机） */
+/** 生成草稿 id（统一走 lib/id 的兜底实现，安全上下文外也能用） */
 export function newDraftId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return newId();
 }
 
 /** 读取全部草稿，按最近活动（updatedAt）降序；存储缺失/损坏时返回空数组 */

@@ -18,6 +18,7 @@ import { BoardLoading } from "./BoardLoading";
 import { BoardControls } from "./BoardControls";
 import { uploadBoardImage } from "@/lib/board-assets";
 import { dispatchBoardCwdSwitch, dispatchBoardRenameNode } from "@/lib/board-events";
+import { newId } from "@/lib/id";
 import { boardFloatGlass } from "./board-glass";
 
 /**
@@ -103,7 +104,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
 
   /** 新建自由元素（便笺/文字/任务卡/图片）：拖放落点或视口中心（flow 坐标） */
   const addNodeAt = useCallback((type: FreeNodeType, flowPos: { x: number; y: number }, extra?: { src?: string; naturalW?: number; naturalH?: number; name?: string }) => {
-    const id = crypto.randomUUID();
+    const id = newId();
     if (type === "sticky-note") {
       // autofocus：创建即进入编辑（双击画布/工具栏一致：快速记录心智）；标题默认创建日期
       const now = Date.now();
@@ -422,7 +423,7 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
         clean.collapsedH = 0;
       }
       board.addNode?.({
-        id: crypto.randomUUID(),
+        id: newId(),
         type: n.type,
         position: { x: offsetX, y: offsetY },
         style: (n.style as Record<string, unknown> | undefined) ?? {},

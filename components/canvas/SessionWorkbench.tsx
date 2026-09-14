@@ -68,8 +68,10 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   const isNewSession = Boolean(cwd);
   // 新会话卡目标任务 ref（服务端创建会话时原子归属任务，消费一次后清空）。
   // 不需要 nodeId：卡片 sessionId 发起时即确定（在 CRDT 文档里），无需服务端写回。
-  const pendingTaskRef = useRef<{ taskId?: string; projectKey?: string } | null>(null);
-  pendingTaskRef.current = isNewSession ? (taskId ? { taskId } : null) : null;
+  const pendingTaskRef = useRef<{ taskId?: string; projectKey?: string; draftId?: string } | null>(null);
+  // draftId = 本卡 sessionId（= 新建会话的 draft key）：与 useAgentSession 里的校验对齐，
+  // 卡内这次创建的会话才享有任务归属。
+  pendingTaskRef.current = isNewSession ? (taskId ? { taskId, draftId: sessionId } : null) : null;
   // 新会话卡草稿 key = 会话 UUID（卡片 sessionId）：与 ensureNewSession 生成的
   // 指定 id 恒等，草稿持久化从出生起就用真实会话 ID。
   const draftKeyRef = useRef(sessionId);

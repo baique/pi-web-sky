@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useGlassWallpaper, useGlassResizeTrigger, previewBubbleBlur } from "@/hooks/useGlassWallpaper";
 import { SessionSidebar } from "./SessionSidebar";
+import { newId } from "@/lib/id";
 import type { WorktreeProject } from "./WorktreeSelector";
 import { ChatWindow } from "./ChatWindow";
 import { BoardLoading } from "./canvas/BoardLoading";
@@ -393,7 +394,10 @@ export function AppShell() {
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
   const [branchActiveLeafId, setBranchActiveLeafId] = useState<string | null>(null);
   const branchLeafChangeFnRef = useRef<((leafId: string | null) => void) | null>(null);
-  const pendingNewSessionTaskRef = useRef<{ taskId: string; projectKey?: string } | null>(null);
+  // 任务行「+」发起的新建会话把 taskId 带给创建请求。**必须带 draftId 并校验**：
+  // ref 只在会话创建成功时清空，中间被放弃（没发消息就点了别的会话）或被抛错打断时
+  // 会残留，若无校验，之后任何一次新建会话都会被悄悄挂到这个任务下（任务下凭空多出会话）。
+  const pendingNewSessionTaskRef = useRef<{ taskId: string; projectKey?: string; draftId?: string } | null>(null);
   const suppressWorkspaceRestoreRef = useRef(false);
 
   const handleBranchDataChange = useCallback((tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => {
@@ -914,9 +918,7 @@ export function AppShell() {
     }
     // Close any session that belongs to a different project — it no longer
     // matches the selected project directory.
-    const draftId = typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const draftId = newId();
     setNewSessionDraftId(draftId);
     activeNewSessionDraftKeyRef.current = `new:${draftId}:${cwd}`;
     setSelectedSession(null);
@@ -1020,8 +1022,11 @@ export function AppShell() {
   const handleNewSessionFromTask = useCallback((taskId: string, projectKey?: string) => {
     const cwd = selectedSession?.cwd ?? newSessionCwd ?? activeCwd;
     if (!cwd) return;
-    pendingNewSessionTaskRef.current = { taskId, projectKey };
-    handleNewSession(crypto.randomUUID(), cwd);
+    // draftId = 本次新建的会话 id（draft key）：只有这条会话才享受任务归属，
+    // 其它新建会话看到 ref 里的 draftId 不匹配就忽略（见 useAgentSession.ensureNewSession）。
+    const draftId = newId();
+    pendingNewSessionTaskRef.current = { taskId, projectKey, draftId };
+    handleNewSession(draftId, cwd);
   }, [selectedSession?.cwd, newSessionCwd, activeCwd, handleNewSession]);
 
   /** 环境条 worktree 切换：新建会话 cwd 与全局有效 cwd 同步更新（任务卡 #16）。
@@ -1217,9 +1222,7 @@ export function AppShell() {
     setRefreshKey((k) => k + 1);
     if (selectedSession?.id === sessionId) {
       const cwd = selectedSession.cwd;
-      const draftId = typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      const draftId = newId();
       setNewSessionDraftId(draftId);
       activeNewSessionDraftKeyRef.current = cwd ? `new:${draftId}:${cwd}` : null;
       setSelectedSession(null);
