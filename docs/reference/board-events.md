@@ -38,6 +38,17 @@ React Flow 原生提供三个 CSS class，挂在节点内元素上即隔离画�
 <button className="nodrag" onClick={...}>...</button>
 <input className="nodrag nowheel" ... />
 ```
+
+### 2b. 展开的会话工作台：整块无条件拦截滚轮（`SessionWorkbench`）
+
+工作台内嵌整个 `ChatWindow`，RF 的 `nowheel` 无法逐元素覆盖全场景，因此工作台根节点
+（`.board-workbench`）自己装一个无依赖 effect 的原生 wheel 监听，**无条件** `stopPropagation`
+（不 preventDefault，可滚动容器照常内部滚动；`ctrl/meta+wheel` 放行给画布缩放）。
+
+**陷阱**：别把拦截条件写成「目标在可滚动容器内才拦」（曾经的 `hasScrollableAncestor` 判定）。
+内容不足以出现滚动条时（空输入框、短消息列表 —— 绝大多数时刻）条件不成立，滚轮直接冒泡到
+`.react-flow__pane` 触发画布缩放。不可滚动的交互区不该退化成画布手势区。回归守卫见
+`components/canvas/SessionWorkbench.wheel.test.mjs`。
 - `nodrag`：不触发节点拖动（tldraw 时代按钮要单独 stopPropagation，RF 用 class 即可）。
 - 输入框加 `nowheel` 可选（输入时滚轮不缩放画布）。
 

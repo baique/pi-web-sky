@@ -200,20 +200,17 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   // wheel 拦截：React Flow 画布在 container 监听 wheel（画布 pan/zoom），工作台内的滚轮必须被会话自己消费。
   // 不用 useEffect([])：RF 重渲染/resize/展开收合会替换卡片 DOM，[] 只在首次挂载跑，
   // 监听会挂在被替换的旧元素上失效。用无依赖 effect —— 每次渲染后都清旧挂新，保证监听总在
-  // 当前元素。判定「按需」= 状态 × 几何：卡片激活（用户当前关注此卡）且目标在可滚动容器内
-  // 才拦截（stopPropagation，不 preventDefault —— 让消息区正常滚动）；未激活或不在滚动区则
-  // 放行给画布平移/缩放 —— 展开卡未激活时滚轮应作用于画布（常见：展开会话看内容但想移画布）。
+  // 当前元素。
+  // **无条件拦截**：工作台内任何位置都算工作台消费滚轮（stopPropagation，不 preventDefault ——
+  // 可滚动容器照常内部滚动，不可滚动的区域照旧什么都不发生）。曾经按「目标在可滚动容器内」
+  // 判定，输入框内容不足不出现滚动条时就漏给画布缩放 —— 不可滚动的交互区不该退化成画布手势区。
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
     const stop = (e: WheelEvent) => {
       // ctrl/meta+wheel 是缩放手势：放行给画布（RF 缩放），不吞
       if (e.ctrlKey || e.metaKey) return;
-      // 实验性去除激活态条件：内容溢出即拦（内部滚动），不再区分卡片是否激活
-      const t = e.target;
-      if (t instanceof Node && el.contains(t) && hasScrollableAncestor(t, el)) {
-        e.stopPropagation();
-      }
+      e.stopPropagation();
     };
     el.addEventListener("wheel", stop);
     return () => {
@@ -387,26 +384,3 @@ const containerStyle: React.CSSProperties = {
   color: "var(--text)",
 };
 
-/** 从目标向上找可滚动容器（到 root 为止）：目标在可滚动容器内 → 滚轮属于它，不冒泡到画布。
- *  与 RF 的 usePassThroughWheelEvents 同思路：内容溢出 + overflow 可滚动才算数。 */
-function hasScrollableAncestor(target: Node, root: HTMLElement): boolean {
-  let elm: Element | null = target instanceof Element ? target : target.parentElement;
-  while (elm && elm instanceof HTMLElement) {
-    if (elm === root) break;
-    const overflowsY = elm.scrollHeight > elm.clientHeight;
-    const overflowsX = elm.scrollWidth > elm.clientWidth;
-    if (overflowsY || overflowsX) {
-      const style = getComputedStyle(elm);
-      const oy = style.overflowY;
-      const ox = style.overflowX;
-      if (
-        (overflowsY && (oy === "auto" || oy === "scroll" || oy === "overlay")) ||
-        (overflowsX && (ox === "auto" || ox === "scroll" || ox === "overlay"))
-      ) {
-        return true;
-      }
-    }
-    elm = elm.parentElement;
-  }
-  return false;
-}
