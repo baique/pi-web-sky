@@ -1601,6 +1601,27 @@ span.token.table {
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
+/* 看板卡标题栏的改名铅笔：标题栏 hover 才淡入（隐藏时 visibility:hidden —— 不吃指针、不进 tab 序、
+   不偷走标题栏的拖拽面）。卡已选中或正在改名时常显（节点加 .is-visible）。 */
+.board-node-titlebar .board-rename-btn {
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 120ms ease, visibility 0s linear 120ms;
+}
+
+.board-node-titlebar:hover .board-rename-btn,
+.board-rename-btn.is-visible {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-node-titlebar .board-rename-btn {
+    transition: none;
+  }
+}
+
 /* 看板搜索命中高亮：accent 描边 + 泛光，1.8s 渐隐（与 BoardSearchContext HIGHLIGHT_MS 同步）。
    挂在命中 shape 的 box-shadow 上：box-shadow 绘制于元素盒子外侧，
    即使卡片容器 overflow:hidden 也不被裁剪，安全作为高亮层。 */

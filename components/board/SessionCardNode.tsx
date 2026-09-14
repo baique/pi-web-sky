@@ -11,7 +11,8 @@ import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { useSessionRunning, useSessionSummary } from "@/hooks/useBoardCanvas";
 import { memoBoardNode } from "./memoNode";
 import { formatCardTime } from "@/lib/card-time";
-import { dispatchBoardSessionRenamed, dispatchBoardCwdSwitch } from "@/lib/board-events";
+import { dispatchBoardSessionRenamed, dispatchBoardCwdSwitch, onBoardRenameNode } from "@/lib/board-events";
+import { RenameButton } from "./RenameButton";
 import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
 
@@ -172,6 +173,11 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
   const cancelRenameRef = useRef(false);
   const startRename = (e: React.MouseEvent) => {
     e.stopPropagation();
+    enterRename();
+  };
+  // 进入改名态（铅笔 / 右键菜单「重命名」/ F2 共用；不再由标题单击触发 ——
+  // 单击改名与双击展开、拖拽移卡压在同一个元素上，误触率永远压不下去）。
+  const enterRename = () => {
     setRenameValue(title || "");
     setRenaming(true);
     cancelRenameRef.current = false;
@@ -205,6 +211,13 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
     cancelRenameRef.current = true; // 取消中：随后的 blur 不再提交
     setRenaming(false);
   };
+
+  // 外部改名入口（右键菜单 / F2）→ 本卡进入改名态。新会话占位卡无会话可改名，忽略。
+  // enterRename 依赖 title，随 title 变化重订阅（开销可忽略）。
+  useEffect(() => onBoardRenameNode((nodeId) => {
+    if (nodeId === id && !isNewSession) enterRename();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [id, isNewSession, title]);
 
   // 独立展开/收起：切换 expanded + 尺寸（两态手动尺寸保留）
   // 新建占位卡（cwd 非空）：双击禁止收起（也不删卡）——占位卡保持展开等待输入；
@@ -361,6 +374,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
           内部交互（改名输入/按钮/导航槽）各自 nodrag 隔离；标题文本本身不挂 nodrag（拖拽面）。 */}
       <div
         data-session-titlebar
+        className="board-node-titlebar"
         style={{
           flexShrink: 0,
           display: "flex",
@@ -395,16 +409,18 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
             style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px 2px 0", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
           />
         ) : (
-          /* 标题：点击进入改名（Esc 取消 / Enter 保存 / 失焦保存，空则还原）——不再提供独立图标。
-             不挂 nodrag：标题区是标题栏唯一的拖拽面（flex:1 已吃满中段），挂了 nodrag 整条标题栏就拖不动卡。
-             点击 vs 拖动由浏览器原生区分（指针移动超 ~4px 不再派发 click）→ 原地点击=改名，拖动=移卡。 */
-          <span
-            onClick={isNewSession ? undefined : startRename}
-            title={isNewSession ? undefined : "点击改名 · 按住拖动移卡"}
-            style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", padding: "2px 6px 2px 0", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box", cursor: "inherit" }}
-          >
-            {isNewSession ? "New session" : (title || "Untitled")}
-          </span>
+          /* 标题：不挂 nodrag —— 标题文本 + 后面的 flex 占位是标题栏的拖拽面。
+             改名走铅笔（hover 淡入）/ 右键菜单 / F2，单击本身不再有副作用。 */
+          <>
+            <span
+              title={isNewSession ? undefined : "按住拖动移卡"}
+              style={{ flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", padding: "2px 6px 2px 0", border: "1px solid transparent", borderRadius: 5, boxSizing: "border-box", cursor: "inherit" }}
+            >
+              {isNewSession ? "New session" : (title || "Untitled")}
+            </span>
+            {!isNewSession && <RenameButton isVisible={Boolean(selected)} onClick={startRename} />}
+            <div style={{ flex: 1, minWidth: 0 }} />
+          </>
         )}
         {stale && (
           <span style={{ flexShrink: 0, fontSize: 9.5, color: "var(--text-dim)", border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)", borderRadius: 4, padding: "0 4px" }}>stale</span>

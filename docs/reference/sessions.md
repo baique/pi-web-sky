@@ -50,6 +50,11 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 ## Running state polling + reconciliation
 
 - The sidebar polls `/api/agent/running` every 2.5 seconds while the tab is visible and pauses polling in background tabs. The session-list response remains the initial fallback.
+- **`sessionRunning` prop is the reattach signal — every `ChatWindow` host must pass it.** `useAgentSession`只在该 prop 为 true 时 `maintainEventsConnected()`（再加一个 30s grace）。会话空闲后 SSE 被关掉，之后子代理完成通知 / 别的客户端把这个会话重新跑起来时，唯一的重接信号就是这个 prop。
+  - 主聊天（AppShell）传 `runningSessionIds.has(id)` ✓。
+  - 看板卡（`SessionWorkbench`）曾**漏传** → 展开的会话卡在子代理通知唤醒后永不再接、内容停在断流那一刻，直到手动刷新/新发消息（2026-09-14 修）。看板的轮询快照在 `SessionRunningContext`（`useSessionRunning(sid)`），卡里 `phase !== "idle"` 即 running，把它传给 `ChatWindow` 即可。
+  - 已知残留：唤醒轮次短于一个 2.5s 轮询节拍（或 tab 在后台、轮询暂停）时可能整个错过 → 仍会停住；外部发起的 `!bash` 也不会进消息列表（消息列表只由 `loadSession` 读文件刷新）。
+
 - `useAgentSession` treats per-session SSE as primary for chat events and opens it before each prompt. `prompt_done` completes the current UI stage and notification immediately, but the idle SSE stays open for a 30-second grace window and is reused by the next prompt. `agent_start` cancels that close timer; `agent_settled` finishes extension-injected runs that have no wrapper-level `prompt_done` and starts a fresh grace window. Do not close on the first `agent_end`: retries, compaction, and extension-queued messages can continue the same logical prompt.
 - While a run is active, `useAgentSession` periodically calls `GET /api/agent/[id]` and also reconciles on `visibilitychange`/`online`. This fixes missed terminal events from background tabs or half-open connections.
 - Prompt runs use a monotonic run id; late SSE or slow reconciliation responses from an old run must be ignored so they cannot resurrect stale streaming bubbles.

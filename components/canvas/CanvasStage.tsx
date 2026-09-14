@@ -17,7 +17,7 @@ import { BoardContextMenu, type BoardMenuState } from "@/components/board/BoardC
 import { BoardLoading } from "./BoardLoading";
 import { BoardControls } from "./BoardControls";
 import { uploadBoardImage } from "@/lib/board-assets";
-import { dispatchBoardCwdSwitch } from "@/lib/board-events";
+import { dispatchBoardCwdSwitch, dispatchBoardRenameNode } from "@/lib/board-events";
 import { boardFloatGlass } from "./board-glass";
 
 /**
@@ -473,6 +473,17 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (isTypingTarget()) return;
+      // F2：单选一张有标题的卡（会话卡/便笺）→ 进入标题改名。
+      // 任务卡名称在表单里改（无独立改名功能），其余类型无标题。
+      if (e.key === "F2") {
+        const selected = getNodes().filter((n) => n.selected);
+        if (selected.length !== 1) return;
+        const type = selected[0].type;
+        if (type !== "session-card" && type !== "sticky-note") return;
+        e.preventDefault();
+        dispatchBoardRenameNode(selected[0].id);
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
       // Ctrl+Space：选中元素 fit 进视口
       if (e.key === " " || e.code === "Space") {

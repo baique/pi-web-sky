@@ -99,6 +99,11 @@ GET/PATCH/DELETE /api/task-cards/[id]          详情(links+inbound)/改字段(�
 ## 表单控件（TaskCardShape）
 
 - 右上角「派发」按钮：空卡 = 建卡向导（派发即建卡 todo）；已建卡 draft = 转 todo（可调度）；已建卡 todo = 执行状态徽章（只读，不再可回退草稿）。
+- **需求说明（description）必填**：空值拦下并提示（`descError` 红框 + 文案，同任务名称那套）。拦截点三处：
+  （创建）派发 / 保存（完成）/ 派发（转 todo）—— 调度器把 description 当任务提示词，空描述 = 没活可干。
+  服务端不做校验（该字段只由本表单产生）。
+- **标题不做改名**：任务名称就在表单里改，标题单击只选中卡（无铅笔 / 无右键「重命名」/ F2 空操作），
+  详见 [board-events.md](board-events.md) 第 6 节。
 - **需求说明（description）**：`MarkdownField`（TipTap ProseMirror 内核，受控桥 value/onChange 驱动、外源变化防回写光标跳动、Placeholder 空态）；存储为 markdown 字符串。与便笺 WYSIWYG 同栈（`@tiptap/*`）。
 - 预计截止：`DuePicker`（年/月/日三 ThemedSelect 联动，ms epoch）。
 - 执行状态：只读徽章。

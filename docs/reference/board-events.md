@@ -38,6 +38,8 @@ React Flow 原生提供三个 CSS class，挂在节点内元素上即隔离画�
 <button className="nodrag" onClick={...}>...</button>
 <input className="nodrag nowheel" ... />
 ```
+- `nodrag`：不触发节点拖动（tldraw 时代按钮要单独 stopPropagation，RF 用 class 即可）。
+- 输入框加 `nowheel` 可选（输入时滚轮不缩放画布）。
 
 ### 2b. 展开的会话工作台：整块无条件拦截滚轮（`SessionWorkbench`）
 
@@ -49,8 +51,6 @@ React Flow 原生提供三个 CSS class，挂在节点内元素上即隔离画�
 内容不足以出现滚动条时（空输入框、短消息列表 —— 绝大多数时刻）条件不成立，滚轮直接冒泡到
 `.react-flow__pane` 触发画布缩放。不可滚动的交互区不该退化成画布手势区。回归守卫见
 `components/canvas/SessionWorkbench.wheel.test.mjs`。
-- `nodrag`：不触发节点拖动（tldraw 时代按钮要单独 stopPropagation，RF 用 class 即可）。
-- 输入框加 `nowheel` 可选（输入时滚轮不缩放画布）。
 
 ### 3. 拖拽把手（节点可拖动区域）
 - **不加** nodrag：让 RF 默认拖动整个节点。
@@ -65,6 +65,26 @@ React Flow 原生提供三个 CSS class，挂在节点内元素上即隔离画�
 - 双击进编辑（便笺）/ 切换展开（会话卡/任务卡）：节点组件 onDoubleClick + stopPropagation。
 - 右键菜单：CanvasStage 的 onNodeContextMenu / onPaneContextMenu / onEdgeContextMenu 给屏幕坐标 →
   自绘玻璃菜单（BoardContextMenu）。无需 radix / 无需失同步修复。
+
+### 6. 标题改名：显式入口，不做「单击标题=改名」
+
+**痛点**：标题上同时压着三个手势——单击改名、双击展开/收起（卡根）、按住拖拽移卡（标题是标题栏
+唯一的拖拽面）。双击的第一下会先触发改名；想拖卡时位移小于浏览器 ~4px 阈值就变成改名。不管怎么调阈值
+都治不了，所以改名换成显式入口：
+
+| 入口 | 位置 |
+|---|---|
+| 铅笔 | 标题文字尾部（贴省略号），`RenameButton`，标题栏 hover 淡入 / 已选中常显 |
+| 右键菜单 | `BoardContextMenu` 的「重命名」（仅会话卡 / 便笺） |
+| F2 | `CanvasStage` 快捷键：**只选中一个**会话卡/便笺时触发 |
+
+- 三个入口走同一条路：`lib/board-events.ts` 的 `dispatchBoardRenameNode / onBoardRenameNode`（全局事件，
+  节点监听自己的 id）。**改名态只存在于节点组件内部，不写 Y.Doc** —— 否则多端会一起弹输入框。
+- 标题 `onClick` 已删除（单击回归「选中卡」），标题 + 后面的 `flex:1` 空占位仍是拖拽面。
+- 铅笔样式在 `globals.css` 的 `.board-node-titlebar .board-rename-btn`：隐藏用 `visibility: hidden`
+  （不吃指针 / 不进 tab 序 / 不偷拖拽面），标题栏需要带 `board-node-titlebar` class。
+- 任务卡**无**改名入口（名称在表单里改），也没挂 `board-node-titlebar`，F2 对它是空操作。
+- 「New session」占位卡不渲染铅笔，事件监听也忽略（`isNewSession`）。
 
 ## 三、删除语义（onBeforeDelete）
 

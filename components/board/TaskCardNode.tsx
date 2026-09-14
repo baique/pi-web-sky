@@ -161,6 +161,8 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
   const savingRef = useRef(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
+  // 需求说明必填（调度器把它当任务提示词；空描述=没活可干）
+  const [descError, setDescError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   useEffect(() => { setAdvancedOpen(expanded); }, [expanded]);
 
@@ -186,6 +188,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
   const handleCreate = async () => {
     if (!boardId) { setSaveError("缺少看板上下文，无法创建"); return; }
     if (!draft?.name.trim()) { setNameError("请填写任务名称"); return; }
+    if (!draft?.description?.trim()) { setDescError("请填写需求说明"); return; }
     if (savingRef.current) return;
     setSaving(true);
     savingRef.current = true;
@@ -220,6 +223,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
   // 编辑保存（已建卡）
   const handleSave = async () => {
     if (!draft?.name.trim()) { setNameError("请填写任务名称"); return; }
+    if (!draft?.description?.trim()) { setDescError("请填写需求说明"); return; }
     if (savingRef.current) return;
     setSaving(true);
     savingRef.current = true;
@@ -246,8 +250,10 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     }
   };
 
-  // 就绪状态即时生效
+  // 就绪状态即时生效。派发（→ todo）前必须已填需求说明：本卡草稿为空则拦下（
+  // 草稿未保存时也拦：空描述派发=调度器拿到空提示词）
   const handleReadyChange = (v: string) => {
+    if (v === "todo" && !draft?.description?.trim()) { setDescError("请填写需求说明后再派发"); return; }
     set("readyStatus", v as ReadyStatus);
     if (!isCreating && cardId) void saveCard({ readyStatus: v as ReadyStatus });
   };
@@ -275,28 +281,7 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
     setWtPath(null);
     setSaveError(null);
     setNameError(null);
-  };
-
-  // 标题内联编辑态（点击标题进入；与会话/便笺一致的标题编辑方式：无独立图标）
-  const [titleEditing, setTitleEditing] = useState(false);
-  const titleInputRef = useRef<HTMLInputElement | null>(null);
-  const startTitleEdit = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setTitleEditing(true);
-    requestAnimationFrame(() => { titleInputRef.current?.focus(); titleInputRef.current?.select(); });
-  };
-  // 标题编辑结束：有内容且 dirty → 保存；无内容则还原（表单已同步还原）
-  const commitTitleEdit = () => {
-    setTitleEditing(false);
-    if (!draft?.name.trim()) {
-      handleCancelEdit();
-      return;
-    }
-    if (isDirty) void handleSave();
-  };
-  const cancelTitleEdit = () => {
-    setTitleEditing(false);
-    handleCancelEdit();
+    setDescError(null);
   };
 
   // 离开节点自动保存（选中 → 未选中且 dirty）
@@ -413,9 +398,11 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
       </div>
       <MarkdownField
         value={draft.description}
-        onChange={(md) => set("description", md)}
+        onChange={(md) => { set("description", md); if (descError) setDescError(null); }}
         placeholder="任务描述"
+        invalid={Boolean(descError)}
       />
+      {descError && <div style={{ color: "#f87171", fontSize: 11, marginTop: 3 }}>{descError}</div>}
       <CollapsibleSection title="高级" open={advancedOpen} onToggle={() => setAdvancedOpen((v) => !v)}>
         <label style={LABEL_STYLE}>工作目录</label>
         <div style={{ display: "flex", gap: 6 }}>
@@ -493,34 +480,16 @@ function TaskCardNodeImpl({ id, data, selected, width, height }: NodeProps & { d
         }}
       >
       {/* 拖拽把手：不拦 pointer（RF 拖动节点）；右上角操作按钮 nodrag 独立点击；
-          标题文本不挂 nodrag（标题栏中段拖拽面） */}
+          标题文本不挂 nodrag（标题栏中段拖拽面）。
+          任务卡标题不给改名入口（名称在表单里改，不需要第二套）：不挂 onClick / 无铅笔 / 不响应 F2。 */}
       <div style={{ flexShrink: 0, height: 36, display: "flex", alignItems: "center", gap: 6, padding: "0 10px", borderBottom: "1px solid var(--bubble-hairline)", cursor: "grab", fontSize: 11, color: "var(--text-muted)" }}>
         <EmojiPickerField kind="task" value={data.emoji} status={execStatus} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
-        {titleEditing ? (
-          <input
-            ref={titleInputRef}
-            value={draft?.name ?? ""}
-            onChange={(e) => set("name", e.target.value)}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === "Enter") commitTitleEdit();
-              if (e.key === "Escape") cancelTitleEdit();
-            }}
-            onBlur={commitTitleEdit}
-            className="nodrag"
-            style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "2px 6px 2px 0", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
-          />
-        ) : (
-          <span
-            onClick={isCreating ? undefined : startTitleEdit}
-            title={isCreating ? undefined : "点击改名 · 按住拖动移卡"}
-            // 不挂 nodrag：标题区是标题栏唯一的拖拽面（flex:1 已吃满中段），挂了 nodrag 整条标题栏就拖不动卡。
-            // 点击 vs 拖动由浏览器原生区分（指针移动超 ~4px 不再派发 click）→ 原地点击=改名，拖动=移卡。
-            style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", cursor: "inherit", padding: "2px 6px 2px 0", boxSizing: "border-box" }}
-          >
-            {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
-          </span>
-        )}
+        <span
+          title="按住拖动移卡"
+          style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600, color: "var(--text)", cursor: "inherit", padding: "2px 6px 2px 0", boxSizing: "border-box" }}
+        >
+          {draft?.name || (isCreating ? "新建任务卡" : "任务卡")}
+        </span>
         {draft?.number ? <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text)", marginLeft: 4 }}>#{draft.number}</span> : null}
         <div className="nodrag" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }} onPointerDown={(e) => e.stopPropagation()}>
           {isCreating ? (
@@ -654,10 +623,13 @@ function MarkdownField({
   value,
   onChange,
   placeholder,
+  invalid,
 }: {
   value: string;
   onChange: (md: string) => void;
   placeholder?: string;
+  /** 必填未填：红框（与任务名称 nameError 同款） */
+  invalid?: boolean;
 }) {
   const editor = useEditor({
     extensions: [
@@ -706,6 +678,7 @@ function MarkdownField({
       className="nodrag nowheel task-card-md-wrap"
       style={{
         ...FIELD_STYLE,
+        ...(invalid ? { borderColor: "#f87171", boxShadow: "0 0 0 1px #f87171" } : {}),
         flex: 1,
         minHeight: 70,
         overflowY: "auto",

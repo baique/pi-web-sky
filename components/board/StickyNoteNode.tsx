@@ -16,6 +16,8 @@ import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { memoBoardNode } from "./memoNode";
 import { formatNoteDefaultTitle } from "@/lib/note-time";
 import { formatCardTime } from "@/lib/card-time";
+import { onBoardRenameNode } from "@/lib/board-events";
+import { RenameButton } from "./RenameButton";
 
 /**
  * 自研 markdown 便笺（RF 节点版，替代 tldraw sticky-note shape）。
@@ -98,13 +100,17 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     setIsEditing(false);
   }, [save, clearAutofocus]);
 
-  // ---- 标题编辑：点击标题进入，Esc 取消、Enter 保存、失焦保存；空标题还原为创建日期 ----
-  const startTitleEdit = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  // ---- 标题编辑：铅笔 / 右键菜单「重命名」/ F2 进入，Esc 取消、Enter 保存、失焦保存；空标题还原为创建日期 ----
+  // （不再由标题单击触发：单击与双击进编辑、按住拖拽移卡压在同一个元素上）
+  const enterTitleEdit = () => {
     // 初始值用当前展示标题（含旧便笺无 title 时兜底的创建日期），编辑时保留
     setTitleDraft(title);
     setTitleEditing(true);
     requestAnimationFrame(() => { titleInputRef.current?.focus(); titleInputRef.current?.select(); });
+  };
+  const startTitleEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    enterTitleEdit();
   };
   const commitTitleEdit = () => {
     const v = titleDraft.trim();
@@ -116,6 +122,13 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
     setTitleDraft(title);
     setTitleEditing(false);
   };
+
+  // 外部改名入口（右键菜单 / F2）→ 本便笺进入标题改名态。正在编辑正文时不抢（把手行那时是取消/保存）。
+  useEffect(() => onBoardRenameNode((nodeId) => {
+    if (nodeId !== id || isEditing) return;
+    enterTitleEdit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [id, isEditing, title]);
 
   const cancel = useCallback(() => {
     latestMdRef.current = text;
@@ -255,6 +268,7 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
           编辑态 = 便笺标识 + 取消/保存，整行保持可拖（与会话/任务卡一致），仅交互元素
           （emoji/取消/保存）各自 nodrag 隔离，行内空白区仍可拖拽移动 */}
       <div
+        className="board-node-titlebar"
         style={{ flexShrink: 0, height: 32, display: "flex", alignItems: "center", gap: 6, padding: "0 var(--bubble-pad-x, 12px)", fontSize: 10, color: "var(--text-muted)", cursor: "grab", boxSizing: "border-box" }}
       >
         <EmojiPickerField kind="note" value={data.emoji} onChange={(emoji) => updateNode(id, { data: { emoji } })} />
@@ -274,16 +288,18 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
             style={{ flex: 1, minWidth: 0, fontSize: 11, fontWeight: 600, padding: "1px 5px 1px 0", border: "1px solid transparent", borderRadius: 5, outline: "none", background: "transparent", color: "var(--text)", boxSizing: "border-box" }}
           />
         ) : (
-          <span
-            // 不挂 nodrag：标题区是把手行唯一的拖拽面，挂了 nodrag 整条把手行就只能拖动 gap 缝隙。
-            // 点击 vs 拖动由浏览器原生区分（指针移动超 ~4px 不再派发 click）→ 原地点击=改名，拖动=移卡，无需自写阈值判断。
-            // cursor 交给把手行（继承 grab）——可拖是这一条的主要语义。
-            onClick={startTitleEdit}
-            title="点击改名 · 按住拖动移卡"
-            style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 600, color: "var(--text)", cursor: "inherit", padding: "1px 5px 1px 0", boxSizing: "border-box" }}
-          >
-            {title}
-          </span>
+          <>
+            <span
+              // 不挂 nodrag：标题区是把手行唯一的拖拽面，挂了 nodrag 整条把手行就只能拖动 gap 缝隙。
+              // cursor 交给把手行（继承 grab）——可拖是这一条的主要语义。
+              title="按住拖动移卡"
+              style={{ minWidth: 0, flex: "0 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 600, color: "var(--text)", cursor: "inherit", padding: "1px 5px 1px 0", boxSizing: "border-box" }}
+            >
+              {title}
+            </span>
+            {/* 改名铅笔：便笺编辑态不出现（那时把手行是取消/保存） */}
+            {!isEditing && <RenameButton isVisible={Boolean(selected)} onClick={startTitleEdit} />}
+          </>
         )}
         {isEditing ? (
           <>

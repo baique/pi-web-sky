@@ -32,6 +32,10 @@ export const BOARD_ATTENTION_NEEDED_EVENT = "pi-web:board-attention-needed";
 /** 任务卡创建/保存（派发路径）→ AppShell 刷新侧栏任务区（/api/tasks 重拉） */
 export const BOARD_TASKS_CHANGED_EVENT = "pi-web:board-tasks-changed";
 
+/** 标题改名入口（铅笔 / 右键菜单「重命名」/ F2）→ 目标节点进入改名态。
+ *  改名态只存在于节点组件内部（不进 Y.Doc，否则多端会一起弹输入框）。 */
+export const BOARD_RENAME_NODE_EVENT = "pi-web:board-rename-node";
+
 declare global {
   interface WindowEventMap {
     "pi-web:board-open-file": CustomEvent<{ sessionId: string; filePath: string }>;
@@ -43,6 +47,7 @@ declare global {
     "pi-web:board-agent-end": CustomEvent<{ sessionId: string; sessionName?: string }>;
     "pi-web:board-attention-needed": CustomEvent<{ sessionId: string; title?: string; method: string }>;
     "pi-web:board-tasks-changed": CustomEvent<Record<string, never>>;
+    "pi-web:board-rename-node": CustomEvent<{ nodeId: string }>;
   }
 }
 
@@ -80,4 +85,16 @@ export function dispatchBoardAttentionNeeded(sessionId: string, request: { title
 
 export function dispatchBoardTasksChanged(): void {
   window.dispatchEvent(new CustomEvent(BOARD_TASKS_CHANGED_EVENT, { detail: {} }));
+}
+
+/** 让指定节点进入标题改名态（铅笔 / 右键菜单 / F2 共用）。 */
+export function dispatchBoardRenameNode(nodeId: string): void {
+  window.dispatchEvent(new CustomEvent(BOARD_RENAME_NODE_EVENT, { detail: { nodeId } }));
+}
+
+/** 订阅「节点进入改名态」：handler 收到目标 nodeId（各节点自行判断是不是自己）。返回取消订阅。 */
+export function onBoardRenameNode(handler: (nodeId: string) => void): () => void {
+  const listener = (event: Event) => handler((event as CustomEvent<{ nodeId: string }>).detail.nodeId);
+  window.addEventListener(BOARD_RENAME_NODE_EVENT, listener);
+  return () => window.removeEventListener(BOARD_RENAME_NODE_EVENT, listener);
 }

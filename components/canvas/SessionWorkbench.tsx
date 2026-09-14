@@ -17,6 +17,7 @@ import {
 import type { SessionInfo } from "@/lib/types";
 import type { Todo } from "@/lib/todo-store";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import { useSessionRunning } from "@/hooks/useBoardCanvas";
 
 /**
  * 工作台本体 = 复用 ChatWindow（消息 + 输入 + 底栏 widget/通知/quota 完整一套）。
@@ -49,6 +50,13 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
 
   const [session, setSession] = useState<SessionInfo | null>(null);
+  // 运行态快照（看板 2.5s 轮询）→ 当场喂给 ChatWindow 的「重连信号」。
+  // 会话空闲时 useAgentSession 会关掉 SSE；随后子代理完成通知 / 别的客户端把这个会话
+  // 重新跑起来时，只有这个 prop 翻真才会重新挂上事件流（与 AppShell 主聊天同一机制：
+  // "The sidebar's lightweight running-state poll gives us a cheap signal to attach
+  // to the existing SSE stream"）。不传 → 看板卡永远不重连，会话内容停在断流那一刻。
+  const runningSnapshot = useSessionRunning(sessionId);
+  const sessionRunning = Boolean(runningSnapshot && runningSnapshot.phase !== "idle");
   const [error, setError] = useState<string | null>(null);
   const [chatKey, setChatKey] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -347,6 +355,7 @@ export const SessionWorkbench = memo(function SessionWorkbench({
         // 转正后保持 isNew 实例（首条 prompt 正在跑，重挂会断 SSE）；
         // 后续刷新/展开由摘要轮询 + 卡片标题接管，本实例不再切换
         session={isNewSession || wasNewSessionRef.current ? null : session}
+        sessionRunning={sessionRunning}
         newSessionCwd={isNewSession || wasNewSessionRef.current ? (cwdRef.current ?? null) : null}
         newSessionDraftKey={isNewSession || wasNewSessionRef.current ? draftKeyRef.current : null}
         pendingNewSessionTaskRef={isNewSession || wasNewSessionRef.current ? pendingTaskRef : undefined}

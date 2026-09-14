@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { Node } from "@xyflow/react";
 import { useBoardCanvasOps } from "@/components/board/BoardCanvasContext";
+import { dispatchBoardRenameNode } from "@/lib/board-events";
 
 export interface BoardMenuState {
   /** 菜单渲染位置（screen 坐标，用于 fixed 定位菜单本体） */
@@ -49,6 +50,12 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
     if (node) ops.deleteNode(node.id);
     onClose();
   }, [node, ops, onClose]);
+
+  // 重命名：节点本体监听事件进入改名态（改名态不写 Y.Doc，多端不互相弹输入框）
+  const handleRenameNode = useCallback(() => {
+    if (node) dispatchBoardRenameNode(node.id);
+    onClose();
+  }, [node, onClose]);
 
   const handleDeleteEdge = useCallback(() => {
     if (edgeId && !isDerivedEdge) ops.deleteEdge(edgeId);
@@ -97,6 +104,8 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
   const isNote = nodeType === "sticky-note" || nodeType === "text" || nodeType === "text-node"; // text-node 旧数据降级为便笺渲染
   const isImage = nodeType === "image-node";
   const isFreeElement = isNote || isImage;
+  // 标题改名：会话卡/便笺有标题可改；任务卡名称在表单里改（没有独立改名功能），图片无标题
+  const canRename = isSession || isNote;
 
   const deleteLabel = isSession
     ? (ops.isTaskBoard ? "删除会话" : "移除会话卡片")
@@ -132,11 +141,14 @@ export function BoardContextMenu({ menu, onClose }: { menu: BoardMenuState; onCl
           <MenuItem danger label="删除连线" onClick={handleDeleteEdge} />
         ))}
       {node && (
-        <MenuItem
-          label={deleteLabel}
-          danger
-          onClick={handleDeleteNode}
-        />
+        <>
+          {canRename && <MenuItem label="重命名" onClick={handleRenameNode} />}
+          <MenuItem
+            label={deleteLabel}
+            danger
+            onClick={handleDeleteNode}
+          />
+        </>
       )}
       {!node && !edgeId && (
         <>
