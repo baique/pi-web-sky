@@ -32,8 +32,6 @@ import type { AppUpdateResponse } from "@/lib/api-types";
 import type { TurnIndexItem } from "@/lib/api-types";
 import {
   captureScrollDistance,
-  CHAT_STREAM_BOTTOM_GAP,
-  getPromptAnchorSpacerHeight,
   getVisibleRenderWindow,
   isScrollAtTail,
   restoreScrollTop,
@@ -323,12 +321,12 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     agentPhase,
     isNew,
     sessionIdRef, messagesEndRef, scrollContainerRef,
-    lastUserMsgRef, promptAnchorActive,
+    lastUserMsgRef, isNearBottomRef,
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
     handleBuiltinSlashCommand,
-    handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, scrollUserMsgToTop, scrollToBottom, loadContext, activeLeafId, hasOlderChat,
+    handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, scrollToBottom, loadContext, activeLeafId, hasOlderChat,
   } = useAgentSession({
     session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsPanelOpen,
@@ -773,104 +771,16 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   const hasStreamingContent = Boolean(streamState.streamingMessage?.content.length);
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
   const messageContentRef = useRef<HTMLDivElement | null>(null);
-  const promptAnchorSpacerRef = useRef<HTMLDivElement | null>(null);
-  const promptAnchorSpacerHeightRef = useRef(0);
-  const promptAnchorMeasureFrameRef = useRef<number | null>(null);
-  const promptAnchorAdjustmentDoneRef = useRef(false);
-  const promptAnchorUpdateRef = useRef<(() => void) | null>(null);
 
+  // 跟发必须与「内容长高」落在同一次提交里：在布局阶段（浏览器绘制之前）把视口钉到新的底部，
+  // 高度长多少、滚动位置就同步补多少——屏幕上已有内容不动，也不落后于吐字。
+  // 不用动画追：动画时长恒大于两次吐字的间隔，每来一块就重启一次，看到的必然是一停一抽。
   useLayoutEffect(() => {
-    const spacer = promptAnchorSpacerRef.current;
-    if (!agentRunning || !promptAnchorActive) {
-      promptAnchorUpdateRef.current = null;
-      promptAnchorSpacerHeightRef.current = 0;
-      promptAnchorAdjustmentDoneRef.current = false;
-      // 流式期间底部留安全间距：最新内容不贴视口底边，吐字时留出呼吸区。
-      if (spacer) spacer.style.height = agentRunning ? `${CHAT_STREAM_BOTTOM_GAP}px` : "";
-      return;
-    }
-
+    if (!agentRunning || !isNearBottomRef.current) return;
     const container = scrollContainerRef.current;
-    const messageContent = messageContentRef.current;
-    const userMessage = lastUserMsgRef.current;
-    if (!container || !messageContent || !userMessage || !spacer) return;
-
-    let disposed = false;
-    const updatePromptAnchorSpacer = () => {
-      if (
-        disposed
-        || scrollContainerRef.current !== container
-        || messageContentRef.current !== messageContent
-        || lastUserMsgRef.current !== userMessage
-        || promptAnchorSpacerRef.current !== spacer
-      ) return;
-
-      const containerTop = container.getBoundingClientRect().top;
-      const userMessageTop = userMessage.getBoundingClientRect().top
-        - containerTop
-        + container.scrollTop;
-      const targetTop = Math.max(0, userMessageTop - 16);
-      const contentEnd = spacer.getBoundingClientRect().top
-        - containerTop
-        + container.scrollTop;
-      const nextPromptAnchorSpacerHeight = Math.max(
-        getPromptAnchorSpacerHeight(targetTop, contentEnd, container.clientHeight),
-        CHAT_STREAM_BOTTOM_GAP,
-      );
-
-      const isInitialMeasurement = !promptAnchorAdjustmentDoneRef.current;
-      const needsInitialAdjustment = isInitialMeasurement
-        && nextPromptAnchorSpacerHeight > 0;
-      if (isInitialMeasurement) promptAnchorAdjustmentDoneRef.current = true;
-      if (nextPromptAnchorSpacerHeight === promptAnchorSpacerHeightRef.current) return;
-
-      promptAnchorSpacerHeightRef.current = nextPromptAnchorSpacerHeight;
-      spacer.style.height = nextPromptAnchorSpacerHeight > 0
-        ? `${nextPromptAnchorSpacerHeight}px`
-        : "";
-      if (needsInitialAdjustment) scrollUserMsgToTop();
-    };
-
-    promptAnchorUpdateRef.current = updatePromptAnchorSpacer;
-    const schedulePromptAnchorMeasure = () => {
-      if (disposed || promptAnchorMeasureFrameRef.current !== null) return;
-      promptAnchorMeasureFrameRef.current = requestAnimationFrame(() => {
-        promptAnchorMeasureFrameRef.current = null;
-        updatePromptAnchorSpacer();
-      });
-    };
-
-    updatePromptAnchorSpacer();
-    const observer = typeof ResizeObserver === "undefined"
-      ? null
-      : new ResizeObserver(schedulePromptAnchorMeasure);
-    observer?.observe(container);
-    observer?.observe(messageContent);
-    observer?.observe(userMessage);
-    return () => {
-      disposed = true;
-      if (promptAnchorUpdateRef.current === updatePromptAnchorSpacer) {
-        promptAnchorUpdateRef.current = null;
-      }
-      observer?.disconnect();
-      if (promptAnchorMeasureFrameRef.current !== null) {
-        cancelAnimationFrame(promptAnchorMeasureFrameRef.current);
-        promptAnchorMeasureFrameRef.current = null;
-      }
-    };
-  }, [
-    agentRunning,
-    lastUserMsgRef,
-    messages.length,
-    promptAnchorActive,
-    scrollContainerRef,
-    scrollUserMsgToTop,
-  ]);
-
-  useLayoutEffect(() => {
-    promptAnchorUpdateRef.current?.();
-  }, [streamState.streamingMessage]);
-
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }, [streamState.streamingMessage, agentRunning, isNearBottomRef, scrollContainerRef]);
   const availableThinkingLevels = displayModelValue
     ? (modelThinkingLevels[`${displayModelValue.provider}:${displayModelValue.modelId}`] ?? null)
     : null;
@@ -1304,8 +1214,6 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 sessionId={session?.id ?? sessionIdRef.current ?? undefined}
               />
             )}
-
-            <div ref={promptAnchorSpacerRef} aria-hidden="true" />
 
             <div ref={messagesEndRef} />
             </div>
