@@ -10,6 +10,8 @@ import { SessionSidebar } from "./SessionSidebar";
 import { newId } from "@/lib/id";
 import type { WorktreeProject } from "./WorktreeSelector";
 import { ChatWindow } from "./ChatWindow";
+import { PinnedBubble } from "./PinnedBubble";
+import { usePins, closePin, movePin, activatePin } from "@/lib/pin-store";
 import { BoardLoading } from "./canvas/BoardLoading";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
@@ -227,6 +229,8 @@ export function AppShell() {
     }
     if (soundEnabledRef.current) playDoneSound();
   }, [playDoneSound, soundEnabledRef]);
+  // 全局钉浮窗：跨会话存活（lib/pin-store 模块级状态），刷新不持久化
+  const pins = usePins();
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   // 看板模式：activeBoardId 非空时主区域替换为画布（含系统看板 __running__）。
@@ -2324,6 +2328,18 @@ export function AppShell() {
 
   return (
     <>
+      {/* 全局钉浮窗：fixed 定位，跨会话存活（不随 ChatWindow key 重挂载） */}
+      {pins.map((pin, idx) => (
+        <PinnedBubble
+          key={pin.id}
+          item={pin}
+          zIndex={3000 + idx}
+          active={idx === pins.length - 1}
+          onClose={closePin}
+          onActivate={activatePin}
+          onMove={movePin}
+        />
+      ))}
     <style>{`
       @keyframes session-info-pop {
         0% {

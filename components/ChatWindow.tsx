@@ -10,7 +10,7 @@ import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantB
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
 import { MessageView } from "./MessageView";
-import { PinnedBubble, type PinnedMessageItem } from "./PinnedBubble";
+import { pin as pinStore } from "@/lib/pin-store";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
@@ -38,6 +38,20 @@ import {
   restoreScrollTop,
   VISIBLE_PAGE_SIZE,
 } from "@/lib/chat-lazy-load";
+
+/** 选中浮窗菜单项统一样式（钉 / 当前对话 / 新对话，平权） */
+const menuItemStyle: React.CSSProperties = {
+  padding: "6px 12px",
+  border: "none",
+  borderRadius: 6,
+  background: "transparent",
+  color: "var(--text)",
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 500,
+  textAlign: "left",
+  whiteSpace: "nowrap",
+};
 
 interface Props {
   session: SessionInfo | null;
@@ -549,53 +563,12 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     }, 150);
   }, []);
 
-  // Pinned message windows — floating snapshot copies of individual bubbles.
-  // Session-scoped and ephemeral: live in React state only, cleared on refresh
-  // by design (no localStorage). Array order = stacking; last = on top.
-  const [pins, setPins] = useState<PinnedMessageItem[]>([]);
-  const pinCountRef = useRef(0);
-
-  const handlePin = useCallback((message: AgentMessage, entryId?: string, anchorY?: number) => {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    // Default pin size 300×500, shrunk only when the viewport is smaller
-    // than that (keeps the initial bubble fully on screen).
-    const w = Math.min(300, Math.max(240, vw - 40));
-    const h = Math.min(500, Math.max(200, vh - 60));
-    const offset = (pinCountRef.current % 8) * 22;
-    pinCountRef.current += 1;
-    setPins((prev) => [...prev, {
-      id: `pin-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      message,
-      entryId,
-      x: Math.max(0, vw - w - 20 - offset),
-      // Float's top follows the message's current y on screen, so the pin
-      // appears to pop out of the message rather than at a fixed corner.
-      y: Math.min(Math.max(0, anchorY ?? 16), Math.max(0, vh - h)),
-      w,
-      h,
-    }]);
+  // 全局钉：状态在 lib/pin-store（跨会话存活，刷新不持久化），此处只转发
+  const handlePin = useCallback((content: string, clientX: number, clientY: number) => {
+    pinStore(content, clientX, clientY);
   }, []);
 
-  const handleClosePin = useCallback((id: string) => {
-    setPins((prev) => prev.filter((p) => p.id !== id));
-  }, []);
 
-  const handleMovePin = useCallback((id: string, patch: Partial<PinnedMessageItem>) => {
-    setPins((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
-  }, []);
-
-  const handleActivatePin = useCallback((id: string) => {
-    setPins((prev) => {
-      if (prev.length <= 1) return prev;
-      const idx = prev.findIndex((p) => p.id === id);
-      if (idx === -1 || idx === prev.length - 1) return prev;
-      const next = [...prev];
-      const [item] = next.splice(idx, 1);
-      next.push(item);
-      return next;
-    });
-  }, []);
 
   // IntersectionObserver on the sentinel div at the top of the message list.
   // When it becomes visible, fetch the previous page of older messages from the
@@ -618,6 +591,15 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
         prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
         void loadContext(sid, activeLeafId, oldestId).finally(() => {
           loadingOlderRef.current = false;
+          // 兜底：若本次加载未产生新消息（消息数不变 → 恢复 effect 不触发），
+          // 在下一帧强制恢复并清空残留距离，防止过期距离污染后续滚动。
+          requestAnimationFrame(() => {
+            if (prevScrollDistanceRef.current == null) return;
+            const c = scrollContainerRef.current;
+            if (!c) return;
+            c.scrollTop = restoreScrollTop(c.scrollHeight, prevScrollDistanceRef.current);
+            prevScrollDistanceRef.current = null;
+          });
         });
       },
       { root: container, threshold: 0 }
@@ -634,13 +616,23 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
   // After visibleCount increases (more messages prepended), restore the
   // scroll position so the viewport doesn't jump.
-  useEffect(() => {
+  // 分页 prepend 后恢复滚动位置：useLayoutEffect 在渲染提交前同步恢复，消除“DOM 已变高、
+  // scrollTop 未恢复”的中间窗口（窗口期顶部哨兵仍可见 → IO 重复触发连续加载）；
+  // 依赖 messages.length/entryIds 而非 visibleCount，避免 UI 消息增量为 0 时恢复完全不执行。
+  // 分页 prepend 后恢复滚动位置：useLayoutEffect 在渲染提交前同步恢复，消除“DOM 已变高、
+  // scrollTop 未恢复”的中间窗口（窗口期顶部哨兵仍可见 → IO 重复触发连续加载）；
+  // 依赖 messages.length/entryIds 而非 visibleCount，避免 UI 消息增量为 0 时恢复完全不执行。
+  // 分页 prepend 后恢复滚动位置：useLayoutEffect 在渲染提交前同步恢复，消除“DOM 已变高、
+  // scrollTop 未恢复”的中间窗口（窗口期顶部哨兵仍可见 → IO 重复触发连续加载）；
+  // 依赖 messages.length/entryIds 而非 visibleCount，避免 UI 消息增量为 0 时恢复完全不执行。
+  // 分页 prepend 后恢复滚动位置：useLayoutEffect 在渲染提交前同步恢复（消除顶部哨兵中间窗口）；依赖 messages.length/entryIds 而非 visibleCount。
+  useLayoutEffect(() => {
     if (prevScrollDistanceRef.current == null) return;
     const container = scrollContainerRef.current;
     if (!container) return;
     container.scrollTop = restoreScrollTop(container.scrollHeight, prevScrollDistanceRef.current);
     prevScrollDistanceRef.current = null;
-  }, [visibleCount, scrollContainerRef]);
+  }, [messages.length, entryIds, scrollContainerRef]);
   // Push session stats up to AppShell for the top bar.
   // Compare scalar fields to avoid loops from new object identity each render.
   const statsKey = sessionStats
@@ -1137,6 +1129,10 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 const isVisible = msg.role === "user" || msg.role === "assistant";
                 const currentRefIdx = visibleRefIndexByMessage.get(idx);
                 const keyPrefix = options.keyPrefix ?? "message";
+                // 消息 key 用稳定 entryId（prepend 历史后下标 +N 但 entryId 不变），避免全量重挂载导致闪烁。
+                const stableKey = entryIds[idx] ?? `${keyPrefix}-${idx}`;
+                // 消息 key 用稳定 entryId（prepend 历史后下标 +N 但 entryId 不变）：
+                // 避免全量重挂载导致 DOM 重建、图片/代码块重渲染、折叠状态丢失（闪烁/布局跳变）。
                 let showTimestamp = false;
                 if (msg.role === "assistant") {
                   showTimestamp = true;
@@ -1153,7 +1149,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 if (options.showTimestamp !== undefined) showTimestamp = options.showTimestamp;
                 const view = (
                   <MessageView
-                    key={`${keyPrefix}-view-${idx}`}
+                    key={`${keyPrefix}-view-${stableKey}`}
                     message={msg}
                     toolResults={toolResultsMap}
                     modelNames={modelNames}
@@ -1175,7 +1171,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 );
                 if (!isVisible || options.attachRef === false || currentRefIdx === undefined) return view;
                 return (
-                  <div key={`${keyPrefix}-${idx}`} ref={attachVisibleRef(idx, currentRefIdx)}>
+                  <div key={stableKey} ref={attachVisibleRef(idx, currentRefIdx)}>
                     {view}
                   </div>
                 );
@@ -1248,7 +1244,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                   );
                   rendered.push(
                     <div
-                      key={`process-group-${userIdx}-${finalAssistantIdx}`}
+                      key={`process-group-${entryIds[userIdx] ?? userIdx}-${entryIds[finalAssistantIdx] ?? finalAssistantIdx}`}
                       ref={processRefIdx === undefined ? undefined : (el) => { messageRefs.current[processRefIdx] = el; }}
                     >
                       {processGroup}
@@ -1398,8 +1394,9 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
             transform: quoteInputOpen ? "none" : "translateX(-50%)",
             zIndex: 130,
             display: "flex",
-            flexWrap: "wrap",
-            gap: 3,
+            flexDirection: "column",
+            alignItems: "stretch",
+            gap: 2,
             width: quoteInputOpen ? "min(420px, calc(100vw - 16px))" : undefined,
             maxWidth: "calc(100vw - 16px)",
             maxHeight: "calc(var(--app-viewport-height, 100dvh) - 16px)",
@@ -1468,8 +1465,20 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 type="button"
                 role="menuitem"
                 onPointerDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  handlePin(quotedSelection.text, quotedSelection.left, quotedSelection.top);
+                  closeQuotedSelection();
+                }}
+                style={menuItemStyle}
+              >
+                {t("i18n.pin")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onPointerDown={(event) => event.preventDefault()}
                 onClick={askSelectionHere}
-                style={{ padding: "6px 9px", border: "none", borderRadius: 6, background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 12, fontWeight: 650, whiteSpace: "nowrap" }}
+                style={menuItemStyle}
               >
                 {t("chat.askInCurrent")}
               </button>
@@ -1479,7 +1488,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                   role="menuitem"
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={openQuoteInput}
-                  style={{ padding: "6px 9px", border: "none", borderRadius: 6, background: "var(--bg-selected)", color: "var(--accent)", cursor: "pointer", fontSize: 12, fontWeight: 650, whiteSpace: "nowrap" }}
+                  style={menuItemStyle}
                 >
                   {t("chat.askInNewChat")}
                 </button>
@@ -1572,25 +1581,6 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       </div>
       </>
       )}
-      {pins.map((pin, idx) => (
-        <PinnedBubble
-          key={pin.id}
-          item={pin}
-          render={{
-            toolResults: toolResultsMap,
-            modelNames,
-            cwd: messageCwd,
-            sessionId: session?.id ?? sessionIdRef.current ?? undefined,
-            entryId: pin.entryId,
-            onOpenFile,
-          }}
-          zIndex={3000 + idx}
-          active={idx === pins.length - 1}
-          onClose={handleClosePin}
-          onActivate={handleActivatePin}
-          onMove={handleMovePin}
-        />
-      ))}
     </div>
   );
 }

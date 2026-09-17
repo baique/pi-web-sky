@@ -15,6 +15,7 @@ import { TurnWrittenFiles } from "./TurnWrittenFiles";
 import { ThinkingOrb } from "thinking-orbs";
 import type { WrittenFile } from "@/lib/turn-written-files";
 import { skillExpansionToCommand } from "@/lib/slash-display";
+import { extractMessageMarkdown } from "@/lib/message-text";
 import type {
   AgentMessage,
   UserMessage,
@@ -223,14 +224,16 @@ interface Props {
   prevTimestamp?: number;
   sessionId?: string;
   /**
-   * Pin this message as a floating copy (snapshot).
-   * @param anchorY optional viewport y of the message, used as the float's initial top.
+   * Pin content as a floating glass card. Content is the message's markdown
+   * text snapshot — the pin card renders content only, decoupled from the bubble.
+   * @param content markdown text to pin (whole message or a selected fragment)
+   * @param clientX viewport x where the card should appear (mouse)
+   * @param clientY viewport y where the card should appear (mouse)
    */
-  onPin?: (message: AgentMessage, entryId?: string, anchorY?: number) => void;
+  onPin?: (content: string, clientX: number, clientY: number) => void;
   /**
    * Bare mode: render only the message body content — no model label, no
-   * usage/statistics footer, no action buttons or timestamps. Used by the
-   * pinned-message floating windows.
+   * usage/statistics footer, no action buttons or timestamps.
    */
   bare?: boolean;
   /**
@@ -341,7 +344,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   parentEntryId?: string | null;
   isLeafEntry?: boolean;
   onEditContent?: (message: UserMessage) => void;
-  onPin?: (message: AgentMessage, entryId?: string, anchorY?: number) => void;
+  onPin?: (content: string, clientX: number, clientY: number) => void;
   bare?: boolean;
 }) {
   const { t } = useI18n();
@@ -532,7 +535,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
           }}>
             {onPin && (
               <button
-                onClick={(e) => onPin(message, entryId, e.currentTarget.getBoundingClientRect().top)}
+                onClick={(e) => onPin(extractMessageMarkdown(message), e.clientX, e.clientY)}
                 title={t("i18n.pinTitle")}
                 style={{
                   display: "flex", alignItems: "center", gap: 4,
@@ -692,7 +695,7 @@ function AssistantMessageView({
   sessionId?: string;
   entryId?: string;
   writtenFiles?: WrittenFile[];
-  onPin?: (message: AgentMessage, entryId?: string, anchorY?: number) => void;
+  onPin?: (content: string, clientX: number, clientY: number) => void;
   bare?: boolean;
 }) {
   const { t } = useI18n();
@@ -959,7 +962,7 @@ function AssistantMessageView({
           )}
           {onPin && (
             <button
-              onClick={(e) => onPin(message, entryId, e.currentTarget.getBoundingClientRect().top)}
+              onClick={(e) => onPin(extractMessageMarkdown(message), e.clientX, e.clientY)}
               title={t("i18n.pinTitle")}
               style={{
                 display: "flex", alignItems: "center", gap: 4,
