@@ -19,6 +19,8 @@
 }
 
 :root {
+  --chat-content-max-width: 820px;
+  --chat-content-font-size: 14px;
   --bg: #ffffff;
   --bg-panel: #f5f5f5;
   --bg-hover: #eeeeee;
@@ -732,7 +734,7 @@ pre, code {
   max-width: 100%;
   overflow-x: hidden;
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: calc(14px + var(--chat-font-size-offset, 0px));
   line-height: 1.7;
   color: var(--text);
   word-break: break-word;
@@ -876,7 +878,7 @@ pre, code {
   border-collapse: separate;
   border-spacing: 0;
   min-width: 100%;
-  font-size: 13px;
+  font-size: calc(13px + var(--chat-font-size-offset, 0px));
 }
 .markdown-body th, .markdown-body td {
   border: 0;
@@ -1923,6 +1925,9 @@ span.token.table {
   select {
     font-size: 16px !important;
   }
+  .chat-input-textarea {
+    font-size: max(16px, var(--chat-content-font-size, 14px)) !important;
+  }
 }
 
 /* Accessibility fallbacks — frost gets frostier per user preference.
@@ -2387,4 +2392,10 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
   background: color-mix(in srgb, var(--accent) 35%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
   border-radius: 3px;
+}
+
+/* 聊天宽度/字号设置：--chat-font-size-offset 由 .chat-content 依据用户偏好算出，
+   消息内固定 px 字号统一叠加该偏移（上游 #704 移植） */
+.chat-content {
+  --chat-font-size-offset: calc(var(--chat-content-font-size, 14px) - 14px);
 }

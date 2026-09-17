@@ -40,6 +40,45 @@ export interface SessionIndexScanSummary {
 /** 默认扫描周期：30s（外部/CLI 新建会话最长等一个周期进列表）。 */
 export const SESSION_INDEX_SCAN_INTERVAL_MS = 30_000;
 
+/**
+ * 单文件立即索引：新会话文件已落盘但等不及后台扫描时调用（如 fork_branch 创建
+ * 的引用分支，需立刻出现在会话列表）。幂等 upsert，parent 由调用方显式指定
+ * （磁盘 header 的父路径反查需要全量 path 映射，单文件场景不划算）。
+ */
+export async function indexSessionFileNow(
+  filePath: string,
+  parentSessionId: string | null,
+): Promise<void> {
+  const head = scanOneSessionHead(filePath);
+  if (!head) return;
+  const projectKey = await resolveProject(head.cwd).then((p) => projectIdentityKey(p?.projectRoot ?? head.cwd));
+  getDb()
+    .prepare(
+      `INSERT INTO session_meta
+         (session_id, task_id, updated, pinned, path, cwd, project_key, title, first_message, parent_id, created, modified)
+       VALUES (?, NULL, ?, 0, ?, ?, ?, NULL, ?, ?, ?, ?)
+       ON CONFLICT(session_id) DO UPDATE SET
+         path = excluded.path,
+         cwd = excluded.cwd,
+         project_key = excluded.project_key,
+         first_message = excluded.first_message,
+         parent_id = excluded.parent_id,
+         created = excluded.created,
+         modified = excluded.modified`,
+    )
+    .run(
+      head.id,
+      Date.now(),
+      filePath,
+      head.cwd,
+      projectKey,
+      head.firstMessage || null,
+      parentSessionId,
+      head.created.getTime(),
+      Date.now(),
+    );
+}
+
 /** 一轮全量扫描。`sessionsDir` 仅在测试注入（默认走 agentDir）。 */
 export async function runSessionIndexScan(
   sessionsDir?: string,

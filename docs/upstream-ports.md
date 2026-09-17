@@ -99,6 +99,42 @@
 - **改动**：服务端在 `app/api/files/[...path]/route.ts` 新增 `type=search`：从目标目录有界递归遍历（上限 20000 条目 / 12 层深 / 50 结果），复用现有允许根校验与 `IGNORED_NAMES` 忽略表，大小写不敏感子串匹配相对路径；客户端 `FileExplorer.tsx` 树上方加搜索框（200ms 防抖，Esc 清空），命中时以平铺列表替代目录树，点击直接打开文件。
 - **本仓库提交**：`1a05cb2`
 
+### 上游 v0.9.0 / v0.9.1 移植（6 项，2026-09，基于发布说明 + 单 PR）
+
+#### #657 — Alt/Option+Enter 流式跟发
+
+- **改动**：`ChatInput.tsx` 的 `handleKeyDown` 发送分支改为 `sendQueued((e.altKey && onFollowUp) || !onSteer ? "followup" : "steer")`——Alt+Enter 强制 followup，否则 steer 优先；follow-up 按钮 title 加快捷键提示 + `aria-keyshortcuts`。
+- **与上游**：本仓库守卫（Shift 换行、IME、移动端 Ctrl/Cmd+Alt）原本已有，无额外改动。
+- **本仓库提交**：（未提交）
+
+#### #704 — 聊天内容宽度 + 字号设置
+
+- **改动**：新增 `hooks/useChatAppearance.ts`（localStorage 持久化，CSS 变量 `--chat-content-max-width` / `--chat-content-font-size` 挂 `documentElement`，`useSyncExternalStore` 跨组件同步）；ChatWindow/ChatInput 消息与输入框 maxWidth 改 `var(...)`；MessageView 主要字号（用户气泡/md 正文/thinking/patch/compaction）加 `calc(x + var(--chat-font-size-offset, 0px))`；globals.css `:root` 加变量 + `.chat-content` 定义 offset + **`.markdown-body` / `.markdown-body table` 字号改 calc（正文字号生效的关键，漏了会导致调整不生效）**。
+- **与上游的差异**：UI 入口不同，见「与上游刻意不同」。
+- **本仓库提交**：（未提交）
+
+#### #698 — 选中文本分支对话
+
+- **改动**：新增 `lib/quoted-selection.ts`（buildQuotedSelection 转 markdown 引用）；`rpc-manager` 新增 `fork_branch` 命令（`createBranchedSession(entryId)` 复制选中 entry 到子会话，不替换源会话）；MessageView 的 AssistantMessageView 加 `data-message-role="assistant"` + `data-entry-id` 供选中定位；ChatWindow 选中助手文本弹菜单（在当前询问 → 插入主输入框；在新对话询问 → 内联引用输入框，发送读取用户编辑内容），新会话经 `initialPrompt` 自动发送；AppShell `quoteSelectionEnabled`（localStorage 开关，默认关）+ `onAskInNewChat`（fork_branch → 切新会话 + 预填 prompt）。
+- **与上游的差异**：fork_branch 落盘补救、引用输入框实现、设置入口，均见「与上游刻意不同」。
+- **本仓库提交**：（未提交）
+
+#### #655 — 文件面板视频预览
+
+- **改动**：`lib/file-types.ts` webm 从音频移入 `VIDEO_EXT_TO_MIME`（mp4/m4v/webm/mov/ogv）+ `getVideoMime`/`isVideoPath`；`app/api/files/[...path]` read/download/meta 三处 mime 合并加 video；`FileViewer.tsx` 新增 `VideoViewer`（复用 AudioViewer 的 watch/live 同步骨架），分支优先于文本预览。
+- **本仓库提交**：（未提交）
+
+#### #665 — 空闲超时可配
+
+- **改动**：`lib/rpc-manager.ts` 新增 `resolveSessionIdleTimeoutMs()` 解析 `PI_WEB_IDLE_TIMEOUT_MS`（默认 10 分钟，`0` 禁用，上限 Node timer 2^31-1），`resetIdleTimer` 用常量且 0 时直接 return。
+- **本仓库提交**：（未提交）
+
+#### #636 — 附件给不支持图片的模型时警告
+
+- **改动**：`app/api/models` modelList 带 `input` 模态字段（SDK 0.84.3 已支持）；`lib/models-cache.ts` 类型加 `input?: string[]`；`ChatInput.tsx` 新增 `modelSupportsImageInput()`，附加图片且选中模型明确不支持 image 时出黄色警告 banner；`hooks/useAgentSession.ts` 新会话默认模型只信 `d.defaultModel`，不再回退 `nextModelList[0]`（列表首个 ≠ 运行时默认会误报）。
+- **与上游的差异**：本仓库 ModelNoticeBanner 已内置关闭按钮，未移植上游 onClose prop（行为一致）。
+- **本仓库提交**：（未提交）
+
 ## 与上游刻意不同的地方（改动了原 PR 逻辑，阅读者需知悉）
 
 ### #587 分页 —— 额外增加服务端 `hasMore` 标记
@@ -112,6 +148,22 @@
 - 上游有两个对同一问题的 PR：#516 和 #526。二者核心思路相同（路径缓存 miss 时按文件名定位单条会话）。
 - **为什么选 #516**：[#526](https://github.com/agegr/pi-web/pull/526) 额外改写了 `loadAllSessions`，只保留解析后位于默认 sessions 目录内的路径（用 `realpathSync` 过滤），这可能**误伤符号链接目录或自定义布局里的会话**；#516 不动列表逻辑、只优化正向查询，风险更低，热点路径的收益相同（PR 自测 7ms vs 322ms）。
 
+### #698 fork_branch —— 补 SDK 惰性落盘 + 立即索引
+
+- **为什么偏离**：本仓库 SDK（0.84.3）的 `SessionManager.createBranchedSession` **惰性落盘**——fork 点之前无 assistant 消息时不写文件（`flushed=false`），只返回路径字符串。上游 fork_branch 原样照抄（其 SDK 版本行为可能不同），在本仓库会导致返回的 newSessionId 对应文件不存在，session_meta 索引/侧栏列表/看板全部读不到，直到 30s 后台扫描删行——表现为「引用 fork 后数据库没更新」。
+- **本仓库做法**：fork_branch 与既有 `fork` case 一致，手动把 header + entries 写入磁盘（`writeFileSync`），随后调 `indexSessionFileNow(forkedPath, parentSessionId)` 立即写 session_meta（不等 30s 扫描），新会话马上出现在列表。
+
+### #698 引用输入框 —— 独立轻量 textarea 替代 ChatInput compact 复用
+
+- **为什么偏离**：上游内联引用 composer 复用 ChatInput（`compact` 模式，改动 20 处条件分支）。本仓库 ChatInput 是打磨最狠的高频核心组件，逐处加 `compact ?` 分支回归风险高。
+- **本仓库做法**：独立轻量 textarea（预填引用+问题，用户可编辑），发送时读 `textarea.value`；为空才回退默认引用文本。
+
+### #704 / #698 设置入口 —— 暂用顶栏「偏好」弹窗，方案待定
+
+- **上游**：宽度/字号/主题/语言等集中在 SettingsPanel（点「设置」按钮打开）。本仓库暂无 SettingsPanel（主题为顶栏按钮、语言在顶栏下拉）。
+- **本仓库现状**：顶栏 Aa 按钮弹「偏好」面板，含聊天宽度、字号、选中文本询问开关。
+- **待定**：是否按上游建设置面板（迁移主题/语言入口），下一轮与用户确认后再定。
+
 ## 已审查但未采用的上游改动
 
 - **#526**：见上，被 #516 取代。
@@ -121,6 +173,14 @@
 
 - 大功能、动 UI 布局：`#522`（会话列表/文件浏览器间拖拽调分隔比例）、`#458`（侧边栏会话分组）。
 - 大功能、动输入与插件：`#510`（内置 ask_user 工具 + 行内确认卡片）。
+
+### 上游 v0.9.0 / v0.9.1 之后新增的候选（2026-09，按实用性整理）
+
+- 文件编辑与管理：上游 v0.10.5 `0815194c`（文件手动编辑 + 文件/文件夹增删改）；git 工作区还原 `015b8ec6`（本仓库 git API 只有 diff/status）。
+- 插件更新检查 + 批量更新：`#611`（本仓库 PluginsConfig 无版本检查；需抽 `lib/pi-cli.ts` 避免 child_process 进浏览器 bundle）。
+- 大文本文件预览分页：上游 v0.9.1（本仓库 FileViewer 无分页，大文件一次渲染）。
+- 平台/部署层：后台服务 + CLI（version/restart/logs）`abf960b5`；可读主题 v0.9.1；浏览器密码登录 v0.9.1（To G 部署场景）；内置 subagent 的 Agents 设置入口 v0.9.0/v0.9.1（本仓库 subagent 走 skill+fork，无 UI 管理入口，需评估兼容）。
+- 性能/本地化：会话列表窗口化虚拟化 `#626`（本仓库已有 session_meta 缓存+索引，列表未虚拟化）；gzip 会话 JSON `#731`；繁体中文 locale `#512`。
 
 ## 移植流程备忘
 

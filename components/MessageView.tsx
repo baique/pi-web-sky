@@ -153,7 +153,7 @@ function SafeMarkdownBody({ children, className, ...props }: React.ComponentProp
     );
   }
   return (
-    <div className={className} style={{ maxHeight: 420, overflow: "auto", fontSize: 12, lineHeight: 1.5 }}>
+    <div className={className} style={{ maxHeight: 420, overflow: "auto", fontSize: "calc(12px + var(--chat-font-size-offset, 0px))", lineHeight: 1.5 }}>
       <pre
         style={{
           margin: 0,
@@ -444,7 +444,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             border: bare ? "none" : "1px solid var(--user-border-glass)",
             borderRadius: 12,
             padding: "8px 12px",
-            fontSize: 14,
+            fontSize: "calc(14px + var(--chat-font-size-offset, 0px))",
             lineHeight: 1.6,
             color: "var(--text)",
             wordBreak: "break-word",
@@ -469,7 +469,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                   cursor: "pointer",
                   color: "var(--accent)",
                   fontFamily: "var(--font-mono)",
-                  fontSize: 13,
+                  fontSize: "calc(13px + var(--chat-font-size-offset, 0px))",
                   textAlign: "left",
                   width: "fit-content",
                 }}
@@ -500,7 +500,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
               {commandArgs && (
                 <span style={{
                   color: "var(--text)",
-                  fontSize: 14,
+                  fontSize: "calc(14px + var(--chat-font-size-offset, 0px))",
                   lineHeight: 1.6,
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
@@ -824,6 +824,8 @@ function AssistantMessageView({
 
   return (
     <div
+      data-message-role="assistant"
+      data-entry-id={entryId}
       style={{ marginBottom: 20 }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -854,7 +856,7 @@ function AssistantMessageView({
               gap: 6,
               padding: "2px 0",
               fontFamily: "var(--font-mono)",
-              fontSize: 12,
+              fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
               lineHeight: 1.5,
               whiteSpace: "pre-wrap",
               overflowWrap: "anywhere",
@@ -1052,7 +1054,7 @@ function ThinkingBlock({ block, duration, isStreaming, sessionId, entryId, block
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        fontSize: 13,
+        fontSize: "calc(13px + var(--chat-font-size-offset, 0px))",
         // 方案 A：零背景零边框，纯文本 + 左侧细线标识思考区。
         // 思考是长文本阅读区，不用卡片/玻璃，最长文也舒服。
       }}
@@ -1070,7 +1072,7 @@ function ThinkingBlock({ block, duration, isStreaming, sessionId, entryId, block
           border: "none",
           color: hovered ? "var(--text-meta)" : "var(--text-muted)",
           cursor: "pointer",
-          fontSize: 13,
+          fontSize: "calc(13px + var(--chat-font-size-offset, 0px))",
           textAlign: "left",
           transition: "color 0.12s, background 0.12s",
         }}
@@ -1189,7 +1191,7 @@ function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; re
       style={{
         borderRadius: expanded ? "var(--bubble-inner-radius)" : 5,
         overflow: "hidden",
-        fontSize: 12,
+        fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
         border: expanded ? "1px solid var(--bubble-border)" : "1px solid transparent",
         // 折叠态不渲染玻璃块：就是一行融入正文的文本（圆点+名称+秒数），
         // 展开时才浮现玻璃承载参数/结果。
@@ -1258,7 +1260,7 @@ function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; re
               margin: 0,
               padding: "8px 10px",
               color: "var(--text)",
-              fontSize: 12,
+              fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
               lineHeight: 1.5,
               overflow: "auto",
               background: "transparent",
@@ -1327,7 +1329,7 @@ function SplitPatchView({ text }: { text: string }) {
             minWidth: 0,
             borderTop: fileIndex === 0 ? "none" : "1px solid var(--border)",
             fontFamily: "var(--font-mono)",
-            fontSize: 12,
+            fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
             lineHeight: 1.55,
           }}
         >
@@ -1455,7 +1457,7 @@ function PatchTextView({ text }: { text: string }) {
   const lines = text.split(/\r?\n/);
 
   return (
-    <div style={{ maxHeight: 520, overflowY: "auto", overflowX: "hidden", fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.55, minWidth: 0 }}>
+    <div style={{ maxHeight: 520, overflowY: "auto", overflowX: "hidden", fontFamily: "var(--font-mono)", fontSize: "calc(12px + var(--chat-font-size-offset, 0px))", lineHeight: 1.55, minWidth: 0 }}>
       {lines.map((line, i) => {
         const kind =
           line.startsWith("@@") ? "hunk" :
@@ -1598,10 +1600,10 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
         </div>
 
         <div style={{ padding: "11px 13px 12px" }}>
-          <div style={{ color: "var(--text)", fontSize: 15, fontWeight: 700, lineHeight: 1.35 }}>
+          <div style={{ color: "var(--text)", fontSize: "calc(15px + var(--chat-font-size-offset, 0px))", fontWeight: 700, lineHeight: 1.35 }}>
              {t("i18n.conversationCompacted")}
           </div>
-          <div style={{ marginTop: 3, marginBottom: 10, color: "var(--text)", fontSize: 14, lineHeight: 1.5 }}>
+          <div style={{ marginTop: 3, marginBottom: 10, color: "var(--text)", fontSize: "calc(14px + var(--chat-font-size-offset, 0px))", lineHeight: 1.5 }}>
              {t("i18n.compactionDescription")}
           </div>
           {parsedSummary.body ? (
@@ -1801,7 +1803,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
               borderTop: "1px solid var(--bubble-hairline)",
               background: "color-mix(in srgb, var(--assistant-card-glass) 55%, transparent)",
               color: "var(--text-muted)",
-              fontSize: 12,
+              fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
               lineHeight: 1.5,
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",

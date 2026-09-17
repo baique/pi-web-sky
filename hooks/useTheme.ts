@@ -168,10 +168,16 @@ export function useTheme() {
       });
   }, []);
 
+  const setPreference = useCallback((pref: ThemePreference) => {
+    const nextTheme = resolveTheme(pref);
+    setThemeState(pref, nextTheme, true);
+  }, []);
+
   return {
     theme: snapshot.theme,
     preference: snapshot.preference,
     toggleTheme,
+    setPreference,
     isDark: snapshot.theme === "dark",
   };
 }

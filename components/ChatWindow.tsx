@@ -1,4 +1,5 @@
 "use client";
+import { createPortal } from "react-dom";
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, CustomMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage, UserMessage } from "@/lib/types";
@@ -7,6 +8,7 @@ import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
 import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
+import { buildQuotedSelection } from "@/lib/quoted-selection";
 import { MessageView } from "./MessageView";
 import { PinnedBubble, type PinnedMessageItem } from "./PinnedBubble";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
@@ -70,6 +72,12 @@ interface Props {
   /** 看板工作台内嵌模式：多张展开卡并存时，全局 Esc 停止不生效（各卡 Esc 由 ChatInput 自理），
    *  避免模块级 abort handler 被最后挂载的卡片接管、停错会话。 */
   inWorkbench?: boolean;
+  /** 选中助手文本 → 在新对话询问（上游 #698 移植）。prompt 为引用+问题，会 fork_branch 到新会话。 */
+  onAskInNewChat?: (prompt: string, sourceSessionId: string, sourceEntryId: string) => Promise<void>;
+  quoteSelectionEnabled?: boolean;
+  /** 新会话预填 prompt 并自动发送（用于“选中文本→新对话”的收尾）。 */
+  initialPrompt?: string;
+  onInitialPromptConsumed?: () => void;
 }
 
 const CHAT_COLUMN_PADDING = 16;
@@ -261,7 +269,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onEnvWorktreeChange, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal, inWorkbench = false }: Props) {
+export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onEnvWorktreeChange, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal, inWorkbench = false, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const { isDark } = useTheme();
@@ -310,6 +318,143 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsPanelOpen,
   });
+
+  // ── 选中助手文本 → 询问菜单 / 引用分支（上游 #698 移植）──
+  const [quotedSelection, setQuotedSelection] = useState<{
+    text: string;
+    top: number;
+    left: number;
+    sourceEntryId?: string;
+  } | null>(null);
+  const [quoteInputOpen, setQuoteInputOpen] = useState(false);
+  const [quoteSubmitting, setQuoteSubmitting] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const quotePopoverRef = useRef<HTMLDivElement | null>(null);
+  const quoteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const closeQuotedSelection = useCallback(() => {
+    setQuotedSelection(null);
+    setQuoteInputOpen(false);
+    setQuoteError(null);
+  }, []);
+
+  useEffect(() => {
+    if (!quoteSelectionEnabled) closeQuotedSelection();
+  }, [quoteSelectionEnabled, closeQuotedSelection]);
+
+  const captureQuotedSelection = useCallback(() => {
+    if (!quoteSelectionEnabled || quoteInputOpen) return;
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const root = messageContentRef.current;
+    if (!selection || selection.isCollapsed || !range || !root || !root.contains(range.commonAncestorContainer)) {
+      setQuotedSelection(null);
+      return;
+    }
+    const text = selection.toString().trim();
+    if (!text) {
+      setQuotedSelection(null);
+      return;
+    }
+    const rect = range.getBoundingClientRect();
+    const ancestor = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+      ? range.commonAncestorContainer as Element
+      : range.commonAncestorContainer.parentElement;
+    const start = range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer as Element
+      : range.startContainer.parentElement;
+    const end = range.endContainer.nodeType === Node.ELEMENT_NODE
+      ? range.endContainer as Element
+      : range.endContainer.parentElement;
+    const sourceEntryId = [ancestor, start, end]
+      .map((element) => element?.closest<HTMLElement>("[data-message-role=\"assistant\"]")?.dataset.entryId)
+      .find((entryId): entryId is string => Boolean(entryId));
+    setQuotedSelection({
+      text,
+      top: Math.min(window.innerHeight - 44, rect.bottom + 8),
+      left: Math.max(64, Math.min(window.innerWidth - 64, rect.left + rect.width / 2)),
+      sourceEntryId,
+    });
+  }, [quoteSelectionEnabled, quoteInputOpen]);
+
+  const askSelectionHere = useCallback(() => {
+    if (!quotedSelection) return;
+    chatInputRef?.current?.insertText(buildQuotedSelection(
+      quotedSelection.text,
+      t("chat.quoteIntro"),
+      t("chat.quoteQuestion"),
+    ));
+    window.getSelection()?.removeAllRanges();
+    closeQuotedSelection();
+  }, [chatInputRef, quotedSelection, closeQuotedSelection, t]);
+
+  const askSelectionInNewChat = useCallback(async () => {
+    const sourceSessionId = sessionIdRef.current ?? session?.id;
+    if (quoteSubmitting || !quotedSelection?.sourceEntryId || !sourceSessionId || !onAskInNewChat) return;
+    // 用用户在引用输入框里编辑后的内容；为空才回退默认引用文本
+    const typed = quoteTextareaRef.current?.value?.trim();
+    const prompt = typed || buildQuotedSelection(quotedSelection.text, t("chat.quoteIntro"), t("chat.quoteQuestion"));
+    setQuoteSubmitting(true);
+    setQuoteError(null);
+    unlockAudio?.();
+    try {
+      await onAskInNewChat(prompt, sourceSessionId, quotedSelection.sourceEntryId);
+      closeQuotedSelection();
+    } catch (error) {
+      setQuoteError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setQuoteSubmitting(false);
+    }
+  }, [onAskInNewChat, quotedSelection, quoteSubmitting, session?.id, sessionIdRef, closeQuotedSelection, unlockAudio, t]);
+
+  const openQuoteInput = useCallback(() => {
+    if (!quotedSelection) return;
+    setQuoteInputOpen(true);
+    requestAnimationFrame(() => {
+      const ta = quoteTextareaRef.current;
+      if (ta) {
+        ta.value = buildQuotedSelection(quotedSelection.text, t("chat.quoteIntro"), t("chat.quoteQuestion"));
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    });
+  }, [quotedSelection, t]);
+
+  useEffect(() => {
+    if (!quotedSelection) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!quoteInputOpen && !quotePopoverRef.current?.contains(event.target as Node)) closeQuotedSelection();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!quoteSubmitting) closeQuotedSelection();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [quotedSelection, quoteInputOpen, quoteSubmitting, closeQuotedSelection]);
+
+  // 新会话预填 prompt 并自动发送（“选中文本→新对话”收尾）。
+  // initialPrompt 被消费（变为 undefined）后解除已发标记，
+  // 同一 ChatWindow 实例跨会话复用时允许再次发送（key 不重挂的路径）。
+  const initialPromptSentRef = useRef(false);
+  useEffect(() => {
+    if (loading || error) return;
+    if (!initialPrompt) {
+      // 已消费/无待发 prompt：解除已发标记，下次出现时重新发送
+      initialPromptSentRef.current = false;
+      return;
+    }
+    if (initialPromptSentRef.current) return;
+    initialPromptSentRef.current = true;
+    onInitialPromptConsumed?.();
+    void handleSend(initialPrompt);
+  }, [initialPrompt, loading, error, handleSend, onInitialPromptConsumed]);
 
   // 会话所属任务名：仅在新建会话（isNew，主会话尚未落盘）时用于输入框
   // placeholder 前置展示；主会话出现后不再需要（sessionInfo 面板仍展示）。
@@ -825,7 +970,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
   return (
     <div
-      className={`relative flex h-full min-w-0 flex-col ${inWorkbench ? "overflow-visible" : "overflow-hidden"}`}
+      className={`chat-content relative flex h-full min-w-0 flex-col ${inWorkbench ? "overflow-visible" : "overflow-hidden"}`}
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
@@ -903,7 +1048,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
       {isEmptyNew ? (
         <div className={`flex flex-1 flex-col items-center justify-center px-4 py-8 ${inWorkbench ? "overflow-visible" : "overflow-y-auto"}`}>
-          <div className="w-full max-w-[820px]">
+          <div className="w-full" style={{ maxWidth: "var(--chat-content-max-width, 820px)" }}>
             <div
               className="mb-3"
               style={{
@@ -953,7 +1098,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
           }}
         >
           <div style={{ minWidth: 0, padding: isMobile ? `0 ${CHAT_COLUMN_PADDING}px` : `0 ${CHAT_MESSAGE_RIGHT_PADDING}px 0 ${CHAT_COLUMN_PADDING}px` }}>
-            <div ref={messageContentRef} style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
+            <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 820px)", margin: "0 auto" }}>
             {(() => {
               let lastUserIdx = -1;
               for (let i = messages.length - 1; i >= 0; i--) {
@@ -1240,6 +1385,110 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
           />
         )}
       </div>
+
+      {quoteSelectionEnabled && quotedSelection && createPortal(
+        <div
+          ref={quotePopoverRef}
+          role={quoteInputOpen ? "dialog" : "toolbar"}
+          aria-label={t(quoteInputOpen ? "chat.newQuoteChat" : "chat.askSelection")}
+          style={{
+            position: "fixed",
+            top: quotedSelection.top,
+            left: quotedSelection.left,
+            transform: quoteInputOpen ? "none" : "translateX(-50%)",
+            zIndex: 130,
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 3,
+            width: quoteInputOpen ? "min(420px, calc(100vw - 16px))" : undefined,
+            maxWidth: "calc(100vw - 16px)",
+            maxHeight: "calc(var(--app-viewport-height, 100dvh) - 16px)",
+            overflowY: "auto",
+            padding: quoteInputOpen ? 12 : 3,
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: quoteInputOpen ? "var(--bg)" : "var(--bg-panel)",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
+          }}
+        >
+          {quoteInputOpen ? (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", marginBottom: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 650, color: "var(--text)" }}>{t("chat.newQuoteChat")}</span>
+                <button
+                  type="button"
+                  onClick={closeQuotedSelection}
+                  disabled={quoteSubmitting}
+                  style={{ padding: "3px 8px", border: "none", borderRadius: 6, background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 12 }}
+                >
+                  ✕
+                </button>
+              </div>
+              <textarea
+                ref={quoteTextareaRef}
+                aria-label={t("chat.quoteQuestion")}
+                style={{
+                  width: "100%",
+                  minHeight: 96,
+                  resize: "vertical",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  padding: "8px 10px",
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  fontFamily: "inherit",
+                  background: "var(--bg-panel)",
+                  color: "var(--text)",
+                  boxSizing: "border-box",
+                }}
+              />
+              {quoteError && <div style={{ color: "var(--danger, #dc2626)", fontSize: 12, marginTop: 6 }}>{quoteError}</div>}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={closeQuotedSelection}
+                  disabled={quoteSubmitting}
+                  style={{ padding: "6px 12px", border: "1px solid var(--border)", borderRadius: 6, background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 12 }}
+                >
+                  {t("chat.cancel")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void askSelectionInNewChat()}
+                  disabled={quoteSubmitting}
+                  style={{ padding: "6px 12px", border: "none", borderRadius: 6, background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 650 }}
+                >
+                  {quoteSubmitting ? "…" : t("chat.sendQuestion")}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={askSelectionHere}
+                style={{ padding: "6px 9px", border: "none", borderRadius: 6, background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: 12, fontWeight: 650, whiteSpace: "nowrap" }}
+              >
+                {t("chat.askInCurrent")}
+              </button>
+              {onAskInNewChat && quotedSelection.sourceEntryId && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={openQuoteInput}
+                  style={{ padding: "6px 9px", border: "none", borderRadius: 6, background: "var(--bg-selected)", color: "var(--accent)", cursor: "pointer", fontSize: 12, fontWeight: 650, whiteSpace: "nowrap" }}
+                >
+                  {t("chat.askInNewChat")}
+                </button>
+              )}
+            </>
+          )}
+        </div>,
+        document.body,
+      )}
 
       <div className="relative">
         {chatInputElement}

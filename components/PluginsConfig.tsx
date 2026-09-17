@@ -619,11 +619,13 @@ export function PluginsConfig({
   sessionId,
   onClose,
   onReloaded,
+  embedded = false,
 }: {
   cwd: string;
   sessionId: string | null;
   onClose: () => void;
   onReloaded?: () => void;
+  embedded?: boolean;
 }) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -756,7 +758,7 @@ export function PluginsConfig({
 
   return (
     <div
-      style={{
+      style={embedded ? { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" } : {
         position: "fixed",
         inset: 0,
         zIndex: 1000,
@@ -765,12 +767,19 @@ export function PluginsConfig({
         alignItems: "center",
         justifyContent: "center",
       }}
-      onClick={(e) => {
+      onClick={embedded ? undefined : (e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        style={{
+        style={embedded ? {
+          width: "100%",
+          height: "100%",
+          background: "var(--bg)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        } : {
           width: isMobile ? "calc(100vw - 16px)" : 860,
           maxWidth: "calc(100vw - 16px)",
           height: isMobile ? "calc(100dvh - 16px)" : "76vh",
@@ -784,6 +793,7 @@ export function PluginsConfig({
           overflow: "hidden",
         }}
       >
+        {!embedded && (
         <div
           style={{
             display: "flex",
@@ -826,6 +836,7 @@ export function PluginsConfig({
             ×
           </button>
         </div>
+        )}
 
         {!projectResourcesLoaded && (
           <div

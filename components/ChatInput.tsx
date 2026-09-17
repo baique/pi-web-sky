@@ -28,6 +28,7 @@ import { DraftStash } from "./DraftStash";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
+import { useChatAppearance } from "@/hooks/useChatAppearance";
 import { ComposerHeader } from "./ComposerHeader";
 import type { ToolPreset } from "@/lib/tool-presets";
 import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
@@ -55,7 +56,7 @@ interface Props {
   model?: { provider: string; modelId: string } | null;
   isAutoModelSelection?: boolean;
   modelNames?: Record<string, string>;
-  modelList?: { id: string; name: string; provider: string }[];
+  modelList?: { id: string; name: string; provider: string; input?: string[] }[];
   modelError?: string | null;
   /** Diagnostics from resolving `enabledModels`, e.g. a pattern that matched nothing. */
   modelScopeWarnings?: string[];
@@ -458,6 +459,17 @@ function ModelNoticeBanner({ tone, title, body }: { tone: "error" | "warning"; t
   );
 }
 
+/** True when the selected model is known to accept image input (#584). Unknown modality info never blocks the user. */
+export function modelSupportsImageInput(
+  model: { provider: string; modelId: string } | null | undefined,
+  modelList: { id: string; name: string; provider: string; input?: string[] }[] | undefined
+): boolean {
+  if (!model) return true;
+  const entry = modelList?.find((m) => m.provider === model.provider && m.id === model.modelId);
+  if (!entry || !entry.input) return true;
+  return entry.input.includes("image");
+}
+
 export function ModelErrorBanner({ error }: { error?: string | null }) {
   if (!error) return null;
   return <ModelNoticeBanner tone="error" title="Model error" body={error} />;
@@ -495,6 +507,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const { isDark } = useTheme();
+  const { fontSize } = useChatAppearance();
 
   // 发件箱展开态（排队 steer / follow-up 明细）
   const [outboxOpen, setOutboxOpen] = useState(false);
@@ -566,6 +579,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const pendingImageCountRef = useRef(0);
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
+
+  // Warn when images are attached but the selected model is known not to accept
+  // image input (#584). Unknown modality info and auto model selection stay silent.
+  const showImageUnsupportedWarning = (
+    attachedImages.length > 0
+    && !isAutoModelSelection
+    && !modelSupportsImageInput(model, modelList)
+  );
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
@@ -873,7 +894,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (!ta) return;
     ta.style.height = "auto";
     if (value) ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-  }, [value]);
+  }, [value, fontSize]);
 
   useEffect(() => {
     return () => {
@@ -1318,8 +1339,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       if (sendShortcut) {
         e.preventDefault();
         if (isStreaming && (onSteer || onFollowUp)) {
-          // Default Enter sends as steer if available, else followup
-          sendQueued(onSteer ? "steer" : "followup");
+          // Alt/Option+Enter 强制 followup；否则优先 steer，无 steer 时回退 followup
+          sendQueued((e.altKey && onFollowUp) || !onSteer ? "followup" : "steer");
         } else {
           handleSend();
         }
@@ -1832,9 +1853,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           e.target.value = "";
         }}
       />
-      <div style={{ maxWidth: 820, margin: "0 auto" }}>
+      <div style={{ maxWidth: "var(--chat-content-max-width, 820px)", margin: "0 auto" }}>
         <ModelErrorBanner error={modelError} />
         <ModelScopeWarningBanner warnings={modelScopeWarnings} />
+        {showImageUnsupportedWarning && (() => {
+          const entry = modelList?.find((m) => m.provider === model?.provider && m.id === model?.modelId);
+          return (
+            <ModelNoticeBanner
+              tone="warning"
+              title={t("chat.imageNotSupportedTitle")}
+              body={t("chat.imageNotSupportedBody", { model: entry?.name || model?.modelId || "" })}
+            />
+          );
+        })()}
         {compactError && !compactErrorDismissed && (
           <div
             role="alert"
@@ -2391,6 +2422,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           >
           <textarea
             ref={textareaRef}
+            className="chat-input-textarea"
             value={value}
             onChange={(e) => {
               valueRef.current = e.target.value;
@@ -2433,7 +2465,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               outline: "none",
               resize: "none",
               color: "var(--text)",
-              fontSize: 14,
+              fontSize: "var(--chat-content-font-size, 14px)",
               lineHeight: 1.6,
               fontFamily: "inherit",
               minHeight: 24,
@@ -2495,6 +2527,46 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <polyline points="21 15 16 10 5 21" />
               </svg>
             </button>
+            {isMobile && onSoundToggle !== undefined && (
+              <button
+                onClick={onSoundToggle}
+                title={soundEnabled ? t("chat.disableSound") : t("chat.enableSound")}
+                aria-label={soundEnabled ? t("chat.disableSound") : t("chat.enableSound")}
+                style={{
+                  flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 32, height: 32, padding: 0,
+                  background: "none", border: "none", borderRadius: 9,
+                  color: soundEnabled ? "var(--text-muted)" : "var(--text-dim)",
+                  cursor: "pointer",
+                  opacity: soundEnabled ? 1 : 0.55,
+                  transition: "background 0.12s, color 0.12s, opacity 0.12s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.color = "var(--text)";
+                  e.currentTarget.style.opacity = "1";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "none";
+                  e.currentTarget.style.color = soundEnabled ? "var(--text-muted)" : "var(--text-dim)";
+                  e.currentTarget.style.opacity = soundEnabled ? "1" : "0.55";
+                }}
+              >
+                {soundEnabled ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                  </svg>
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                    <line x1="23" y1="9" x2="17" y2="15" />
+                    <line x1="17" y1="9" x2="23" y2="15" />
+                  </svg>
+                )}
+              </button>
+            )}
             {!isMobile && (
               <>
                 {/* 不起眼的灰色竖线分隔 */}
@@ -2710,51 +2782,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   </div>
                 )}
 
-                {onSoundToggle !== undefined && (
-                  <button
-                    onClick={onSoundToggle}
-                     title={soundEnabled ? t("chat.disableSound") : t("chat.enableSound")}
-                     aria-label={soundEnabled ? t("chat.disableSound") : t("chat.enableSound")}
-                    style={{
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                      width: isMobile ? 32 : 32,
-                      height: 32,
-                      padding: 0,
-                      background: "none",
-                      border: "none",
-                      borderRadius: 9,
-                      color: soundEnabled ? "var(--text-muted)" : "var(--text-dim)",
-                      cursor: "pointer",
-                      opacity: soundEnabled ? 1 : 0.55,
-                      transition: "background 0.12s, color 0.12s, opacity 0.12s",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = "var(--bg-hover)";
-                      e.currentTarget.style.color = "var(--text)";
-                      e.currentTarget.style.opacity = "1";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "none";
-                      e.currentTarget.style.color = soundEnabled ? "var(--text-muted)" : "var(--text-dim)";
-                      e.currentTarget.style.opacity = soundEnabled ? "1" : "0.55";
-                    }}
-                  >
-                    {soundEnabled ? (
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                      </svg>
-                    ) : (
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                        <line x1="23" y1="9" x2="17" y2="15" />
-                        <line x1="17" y1="9" x2="23" y2="15" />
-                      </svg>
-                    )}
-                  </button>
-                )}
-
               </>
             )}
           </div>
@@ -2774,15 +2801,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {isMobile && (
               <button
                 type="button"
-                 title={controlsMenuOpen ? undefined : t("chat.moreControls")}
-                 aria-label={t("chat.moreControls")}
+                title={t("chat.moreControls")}
+                aria-label={t("chat.moreControls")}
                 aria-expanded={controlsMenuOpen}
-                aria-hidden={controlsMenuOpen || undefined}
-                tabIndex={controlsMenuOpen ? -1 : undefined}
                 onClick={() => {
                   setModelDropdownOpen(false);
                   setModelFilter("");
-                  setControlsMenuOpen(true);
+                  setControlsMenuOpen((v) => !v);
                 }}
                 style={{
                   display: "flex",
@@ -2791,45 +2816,63 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   width: "100%",
                   height: 32,
                   padding: "8px 10px",
-                  background: "none",
+                  background: controlsMenuOpen ? "var(--bg-selected)" : "none",
                   border: "none",
                   borderRadius: 9,
-                  color: "var(--text-muted)",
-                  cursor: controlsMenuOpen ? "default" : "pointer",
+                  color: controlsMenuOpen ? "var(--text)" : "var(--text-muted)",
+                  cursor: "pointer",
                   fontSize: 12,
                   fontWeight: 500,
-                  visibility: controlsMenuOpen ? "hidden" : "visible",
-                  pointerEvents: controlsMenuOpen ? "none" : "auto",
                   transition: "background 0.12s, color 0.12s",
                 }}
                 onMouseEnter={(e) => {
-                  if (controlsMenuOpen) return;
                   e.currentTarget.style.background = "var(--bg-hover)";
                   e.currentTarget.style.color = "var(--text)";
                 }}
                 onMouseLeave={(e) => {
-                  if (controlsMenuOpen) return;
-                  e.currentTarget.style.background = "none";
-                  e.currentTarget.style.color = "var(--text-muted)";
+                  e.currentTarget.style.background = controlsMenuOpen ? "var(--bg-selected)" : "none";
+                  e.currentTarget.style.color = controlsMenuOpen ? "var(--text)" : "var(--text-muted)";
                 }}
               >
                 {t("chat.moreControls")}
               </button>
             )}
+            {isMobile && (
+              <button
+                onClick={handleSend}
+                disabled={(!value.trim() && !attachedImages.length) || commandBusy}
+                aria-label={t("chat.send")}
+                style={{
+                  flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  height: 32, padding: "0 10px",
+                  background: "none", border: "none", borderRadius: 9,
+                  color: (value.trim() || attachedImages.length) && !commandBusy ? "var(--accent)" : "var(--text-dim)",
+                  cursor: (value.trim() || attachedImages.length) && !commandBusy ? "pointer" : "not-allowed",
+                  fontSize: 13, fontWeight: 600, whiteSpace: "nowrap",
+                  transition: "color 0.12s",
+                }}
+              >
+                {t("chat.send")}
+              </button>
+            )}
             <div style={{
               display: isMobile ? (controlsMenuOpen ? "flex" : "none") : "none",
-              alignItems: "center",
+              flexDirection: "column",
+              alignItems: "stretch",
               gap: isMobile ? 1 : 2,
               ...(isMobile ? {
                 position: "absolute",
                 right: 0,
-                bottom: 0,
+                bottom: "100%",
+                marginBottom: 4,
                 zIndex: 60,
-                padding: 1,
+                padding: 4,
                 width: "max-content",
+                minWidth: 132,
                 maxWidth: "calc(100vw - 32px)",
                 flexWrap: "nowrap",
-                justifyContent: "flex-end",
+                justifyContent: "flex-start",
                 border: "1px solid color-mix(in srgb, var(--border) 72%, transparent)",
                 borderRadius: 10,
                 background: "color-mix(in srgb, var(--glass-bg-strong) 60%, transparent)",
@@ -2845,10 +2888,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                    title={t("chat.changeReasoning", { level: thinkingDisplayLabel })}
                    aria-label={t("chat.changeReasoningLabel")}
                   style={{
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                    padding: isMobile ? "0 6px" : "8px 12px",
-                    width: isMobile ? "auto" : undefined,
+                    display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 8,
+                    padding: isMobile ? "0 12px" : "8px 12px",
+                    width: isMobile ? "100%" : undefined,
                     height: 32,
+                    textAlign: "left",
                     background: thinkingDropdownOpen ? "var(--bg-hover)" : "none",
                     border: "none",
                     borderRadius: 9,
@@ -2933,10 +2977,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                    title={t("chat.changeToolPreset") + `: ${toolPresetLabel}`}
                    aria-label={t("chat.changeToolPreset")}
                   style={{
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                    padding: isMobile ? "0 6px" : "8px 12px",
-                    width: isMobile ? "auto" : undefined,
+                    display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 8,
+                    padding: isMobile ? "0 12px" : "8px 12px",
+                    width: isMobile ? "100%" : undefined,
                     height: 32,
+                    textAlign: "left",
                     background: toolDropdownOpen ? "var(--bg-hover)" : "none",
                     border: "none",
                     borderRadius: 9,
@@ -3015,10 +3060,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   onClick={onCompact}
                   disabled={isCompacting}
                   style={{
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                    padding: isMobile ? "0 6px" : "8px 12px",
-                    width: isMobile ? "auto" : undefined,
+                    display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 8,
+                    padding: isMobile ? "0 12px" : "8px 12px",
+                    width: isMobile ? "100%" : undefined,
                     height: 32,
+                    textAlign: "left",
                     background: "none",
                     border: "none",
                     borderRadius: 9,
@@ -3075,19 +3121,39 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </button>
             )}
 
-            {onSoundToggle !== undefined && (
+            {!atBottom && onScrollToBottom && (
+              <button
+                type="button"
+                onClick={() => onScrollToBottom()}
+                title={t("chat.scrollToLatest")}
+                aria-label={t("chat.scrollToLatest")}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 32, height: 32, padding: 0, flexShrink: 0,
+                  background: "none", border: "none", borderRadius: 9,
+                  color: "var(--text-muted)", cursor: "pointer",
+                  transition: "background 0.12s, color 0.12s, opacity 0.12s",
+                  animation: "back-to-latest-in 0.18s ease-out both",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="7 13 12 18 17 13" />
+                  <polyline points="7 6 12 11 17 6" />
+                </svg>
+              </button>
+            )}
+            </div>
+            {!isMobile && onSoundToggle !== undefined && (
               <button
                 onClick={onSoundToggle}
-                 title={soundEnabled ? t("chat.disableSound") : t("chat.enableSound")}
-                 aria-label={soundEnabled ? t("chat.disableSound") : t("chat.enableSound")}
+                title={soundEnabled ? t("chat.disableSound") : t("chat.enableSound")}
+                aria-label={soundEnabled ? t("chat.disableSound") : t("chat.enableSound")}
                 style={{
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                  width: isMobile ? 32 : 32,
-                  height: 32,
-                  padding: 0,
-                  background: "none",
-                  border: "none",
-                  borderRadius: 9,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 32, height: 32, padding: 0, flexShrink: 0,
+                  background: "none", border: "none", borderRadius: 9,
                   color: soundEnabled ? "var(--text-muted)" : "var(--text-dim)",
                   cursor: "pointer",
                   opacity: soundEnabled ? 1 : 0.55,
@@ -3119,70 +3185,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 )}
               </button>
             )}
-            {isMobile && controlsMenuOpen && (
-              <button
-                type="button"
-                 title={t("chat.collapseControls")}
-                 aria-label={t("chat.collapseControls")}
-                aria-expanded={true}
-                onClick={() => {
-                  setToolDropdownOpen(false);
-                  setThinkingDropdownOpen(false);
-                  setControlsMenuOpen(false);
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 36,
-                  height: 32,
-                  padding: 0,
-                  marginLeft: 0,
-                  background: "var(--bg-hover)",
-                  border: "none",
-                  borderLeft: "1px solid color-mix(in srgb, var(--border) 72%, transparent)",
-                  borderRadius: "0 9px 9px 0",
-                  color: "var(--text)",
-                  cursor: "pointer",
-                  transition: "background 0.12s, color 0.12s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--bg-selected)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "var(--bg-hover)";
-                }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            )}
-            {!atBottom && onScrollToBottom && (
-              <button
-                type="button"
-                onClick={() => onScrollToBottom()}
-                title={t("chat.scrollToLatest")}
-                aria-label={t("chat.scrollToLatest")}
-                style={{
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 32, height: 32, padding: 0, flexShrink: 0,
-                  background: "none", border: "none", borderRadius: 9,
-                  color: "var(--text-muted)", cursor: "pointer",
-                  transition: "background 0.12s, color 0.12s, opacity 0.12s",
-                  animation: "back-to-latest-in 0.18s ease-out both",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="7 13 12 18 17 13" />
-                  <polyline points="7 6 12 11 17 6" />
-                </svg>
-              </button>
-            )}
-            </div>
             {/* 右槽（桌面）：空闲=发送（纯文本）；处理中=停止（玻璃圆钮）+（输入有内容时）引导/后续
                 顺序：停止 → 引导 → 后续 */}
             {!isMobile && (
@@ -3236,7 +3238,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   {hasInputText && onFollowUp && (
                     <button
                       onClick={() => sendQueued("followup")}
-                      title="Queue this message after the agent finishes"
+                      title={`Queue this message after the agent finishes (${isMobile ? "Ctrl/Cmd+" : ""}Alt/Option+Enter)`}
+                      aria-keyshortcuts={isMobile ? "Control+Alt+Enter Meta+Alt+Enter" : "Alt+Enter"}
                       onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
                       onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
                       style={{
