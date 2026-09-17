@@ -13,7 +13,14 @@ import {
   preferUserBashExtension,
 } from "./project-command-env";
 import { createTodoExtension } from "./todo-extension";
-import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
+import { createSubagentExtension, preferPiWebSubagentExtension } from "./subagent-extension";
+import { listSubagentProfiles, readSubagentRun, readSubagentSessionResources, SUBAGENT_CONTROL_TOOL_NAMES } from "./subagents";
+import { createSubagentController } from "./subagent-runtime";
+import { isBuiltInSubagentsEnabled } from "./subagent-settings";
+import { resolveShellTools } from "./powershell-settings";
+import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS } from "./chat-only";
+import { cacheSessionPath, invalidateSessionListCache, resolveSessionPath } from "./session-reader";
+import { indexSessionFileNow } from "./session-index-scanner";
 import { projectIdentityKey } from "./project-identity";
 import { resolveProject } from "./worktree";
 import { ensureSessionMetaRow } from "./task-store";
@@ -27,6 +34,7 @@ import type {
   ExtensionUiRequest,
   ExtensionUiResponse,
   ExtensionWidgetItem,
+  SessionEntry,
   SessionInfo,
   SessionMessageEntry,
 } from "./types";
@@ -97,12 +105,39 @@ type ExtensionBindingOptions = {
   forceEmptySystemPrompt?: boolean;
 };
 
+type AgentSessionWrapperOptions = {
+  exactSystemPrompt?: () => string;
+  chatOnly?: boolean;
+};
+
 const IDLE_RESET_EVENT_TYPES = new Set([
   "agent_end",
   "agent_settled",
   "auto_compaction_end",
   "compaction_end",
 ]);
+
+const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Resolves the PI_WEB_IDLE_TIMEOUT_MS environment variable into a session idle
+ * timeout in milliseconds. An unset/blank value returns the 10-minute default,
+ * `0` disables idle shutdown, and positive values up to Node's timer limit
+ * (2147483647 ms) are used as-is. Invalid or out-of-range values fall back to
+ * the default with a console warning.
+ */
+export function resolveSessionIdleTimeoutMs(
+  rawValue: string | undefined = process.env.PI_WEB_IDLE_TIMEOUT_MS,
+): number {
+  if (rawValue !== undefined && rawValue.trim() !== "") {
+    const parsed = Number(rawValue);
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 2_147_483_647) return parsed;
+    console.warn(`[pi-web] invalid PI_WEB_IDLE_TIMEOUT_MS "${rawValue}", falling back to 10 minutes`);
+  }
+  return DEFAULT_SESSION_IDLE_TIMEOUT_MS;
+}
+
+const SESSION_IDLE_TIMEOUT_MS = resolveSessionIdleTimeoutMs();
 
 export interface RpcSessionStartOptions {
   toolNames?: string[];
@@ -180,8 +215,15 @@ export class AgentSessionWrapper {
   private _alive = true;
   /** 最近一次 agent_start 的时间（看板“运行时长”用）；0 = 未知 */
   private lastAgentStart = 0;
+  private readonly exactSystemPrompt?: () => string;
+  private readonly chatOnly: boolean;
 
-  constructor(public readonly inner: AgentSessionLike) {}
+  constructor(public readonly inner: AgentSessionLike, options: AgentSessionWrapperOptions = {}) {
+    this.exactSystemPrompt = options.exactSystemPrompt;
+    this.chatOnly = options.chatOnly ?? false;
+    this.installExactSystemPromptContinuation();
+    this.applyExactSystemPrompt();
+  }
 
   /** 是否有等待用户响应的扩展 UI 请求（waiting_input 判定用） */
   hasPendingUiRequest(): boolean {
@@ -217,6 +259,10 @@ export class AgentSessionWrapper {
     return this._alive;
   }
 
+  isChatOnly(): boolean {
+    return this.chatOnly;
+  }
+
   isRunning(): boolean {
     return this._alive && (this.pendingPromptCount > 0 || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning);
   }
@@ -250,10 +296,31 @@ export class AgentSessionWrapper {
     await this.waitForExtensionsBound();
   }
 
+  private applyExactSystemPrompt(): void {
+    if (!this.exactSystemPrompt || !this.inner.agent.state) return;
+    this.inner.agent.state.systemPrompt = this.exactSystemPrompt();
+  }
+
+  private installExactSystemPromptContinuation(): void {
+    if (!this.exactSystemPrompt) return;
+    const previous = this.inner.agent.prepareNextTurnWithContext;
+    this.inner.agent.prepareNextTurnWithContext = async (turn, signal) => {
+      const prepared = await previous?.(turn, signal);
+      return {
+        ...prepared,
+        context: {
+          ...(prepared?.context ?? turn.context),
+          systemPrompt: this.exactSystemPrompt!(),
+        },
+      };
+    };
+  }
+
   private ensureExtensionsBound(options: ExtensionBindingOptions = {}): Promise<void> {
     if (options.forceEmptySystemPrompt) this.forceEmptySystemPrompt = true;
     if (this.extensionsBound) {
       this.applyForcedEmptySystemPrompt();
+      this.applyExactSystemPrompt();
       return Promise.resolve();
     }
     if (this.extensionBindingPromise) return this.extensionBindingPromise;
@@ -293,6 +360,7 @@ export class AgentSessionWrapper {
       }
       this.extensionsBound = true;
       this.applyForcedEmptySystemPrompt();
+      this.applyExactSystemPrompt();
       console.log(`[pi-web] session_start dispatched to extensions for session ${this.inner.sessionId}`);
     })().catch((err) => {
       this.extensionBindingError = err;
@@ -361,6 +429,8 @@ export class AgentSessionWrapper {
   }
 
   private resetIdleTimer(): void {
+    // A resolved timeout of 0 disables idle shutdown entirely.
+    if (SESSION_IDLE_TIMEOUT_MS === 0) return;
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
       if (this.isRunning()) {
@@ -370,7 +440,7 @@ export class AgentSessionWrapper {
       void this.shutdown().catch((error) => {
         console.error("[pi-web] failed to shut down idle session:", error instanceof Error ? error.message : error);
       });
-    }, 10 * 60 * 1000);
+    }, SESSION_IDLE_TIMEOUT_MS);
   }
 
   onEvent(listener: EventListener): () => void {
@@ -531,6 +601,40 @@ export class AgentSessionWrapper {
         return { id: model.id, provider: model.provider };
       }
 
+      case "fork_branch": {
+        if (this.isRunning()) {
+          throw new Error("Cannot fork while the session is running");
+        }
+        const entryId = command.entryId as string;
+        const sessionManager = this.inner.sessionManager;
+        const currentSessionFile = this.inner.sessionFile;
+        if (!sessionManager.isPersisted()) return { cancelled: true };
+        if (!currentSessionFile) throw new Error("Persisted session is missing a session file");
+        if (!sessionManager.getEntry(entryId)) throw new Error("Invalid entry ID for forking");
+
+        const sessionDir = sessionManager.getSessionDir();
+        const sourceManager = SessionManager.open(currentSessionFile, sessionDir);
+        const forkedPath = sourceManager.createBranchedSession(entryId);
+        if (!forkedPath) throw new Error("Failed to create forked session");
+        // SDK 惰性落盘契约：fork 点之前无 assistant 消息时不写文件（flushed=false），
+        // 只返回路径字符串。不强制落盘则后续 open 不存在文件会 newSession 生成新 id，
+        // 索引/列表/看板全部读不到——必须和 fork case 一样手动写盘。
+        if (!existsSync(forkedPath)) {
+          const content = [sourceManager.getHeader(), ...sourceManager.getEntries()]
+            .map((entry) => JSON.stringify(entry))
+            .join("\n") + "\n";
+          writeFileSync(forkedPath, content, { encoding: "utf8", flag: "wx" });
+          (sourceManager as unknown as { flushed: boolean }).flushed = true;
+        }
+
+        const newSessionId = SessionManager.open(forkedPath, sessionDir).getSessionId();
+        cacheSessionPath(newSessionId, forkedPath);
+        invalidateSessionListCache();
+        // 立即进 session_meta 索引（否则要等 30s 后台扫描才出现在会话列表）
+        await indexSessionFileNow(forkedPath, sessionManager.getSessionId());
+        return { cancelled: false, newSessionId };
+      }
+
       case "fork": {
         if (this.inner.isBashRunning) {
           throw new Error("Cannot fork while a shell command is running");
@@ -685,9 +789,10 @@ export class AgentSessionWrapper {
       case "get_tools": {
         const all: ToolInfo[] = this.inner.getAllTools();
         const active = new Set<string>(this.inner.getActiveToolNames());
+        // 对齐上游：展开整个 ToolInfo（含 parameters / promptGuidelines），
+        // 之前只挑 name/description/active 会把参数 schema 丢掉 → 面板参数全是“无”。
         return all.map((t) => ({
-          name: t.name,
-          description: t.description,
+          ...t,
           active: active.has(t.name),
         }));
       }
@@ -723,6 +828,9 @@ export class AgentSessionWrapper {
 
       case "set_tools": {
         const toolNames = command.toolNames as string[];
+        if (readSubagentSessionResources(this.inner.sessionManager.getEntries() as unknown as SessionEntry[])) {
+          throw new Error("Subagent tool selection is fixed by its profile");
+        }
         this.setForceEmptySystemPrompt(toolNames.length === 0);
         this.inner.setActiveToolsByName(withExtensionTools(this.inner, toolNames));
         this.applyForcedEmptySystemPrompt();
@@ -1518,6 +1626,8 @@ export function getRpcSessionInfos(): SessionInfo[] {
     // loads commands. Do not leak it into history before a prompt is accepted.
     if (!persisted && (!session.isRunning() || !firstUserMessage)) continue;
 
+    const subagent = readSubagentRun(entries as unknown as SessionEntry[], header?.id ?? session.sessionId, sessionFile ?? "");
+
     const created = header?.timestamp
       ?? entries[0]?.timestamp
       ?? new Date().toISOString();
@@ -1537,6 +1647,16 @@ export function getRpcSessionInfos(): SessionInfo[] {
       modified: new Date(lastActivityMs).toISOString(),
       messageCount: messages.length,
       firstMessage: firstUserMessage ? runtimeMessageText(firstUserMessage) || "(no messages)" : "(no messages)",
+      ...(subagent ? {
+        parentSessionId: subagent.parentSessionId,
+        relation: {
+          kind: "subagent" as const,
+          parentSessionId: subagent.parentSessionId,
+          profile: subagent.profile,
+          description: subagent.description,
+          status: session.isRunning() ? "running" as const : subagent.status,
+        },
+      } : {}),
       transient: !persisted,
     });
   }
@@ -1646,14 +1766,25 @@ export async function startRpcSession(
   const sessionCwd = sessionManager.getCwd();
   const finishStartingSession = trackStartingSession(sessionCwd);
   const starting = (async () => {
+    // subagent 会话（含恢复）按 profile 的资源/工具加载选项重建；普通会话不命中。
+    const subagentResources = sessionFile
+      ? readSubagentSessionResources(sessionManager.getEntries() as unknown as SessionEntry[])
+      : null;
+    const subagentLoadsResources = Boolean(subagentResources?.loadExtensions || subagentResources?.loadSkills);
+    // chatOnly 仅当“显式空工具列表”时为真：subagent 会话按 profile 的 tools 判定，
+    // 普通会话按调用方传入的 toolNames（undefined = 默认全量，[] = 全关）。
+    const chatOnly = subagentResources
+      ? subagentResources.tools.length === 0 && !subagentLoadsResources
+      : toolNames?.length === 0;
+
     // Some extensions access the SDK's global theme even outside the terminal UI.
-    initTheme();
+    if (!chatOnly) initTheme();
     const agentDir = getAgentDir();
 
     // Determine which tools to pass based on requested toolNames.
     // Since v0.68.0, session creation expects string[] tool names instead of Tool[] instances.
-    let toolsOption: string[] | undefined;
-    if (toolNames !== undefined) {
+    let toolsOption: string[] | undefined = subagentResources?.tools;
+    if (!subagentResources && toolNames !== undefined) {
       // toolNames === [] -> "all off" (an empty allow-list disables every tool).
       // Otherwise DO NOT pass a builtin-only allow-list: passing CODING_TOOL_NAMES
       // set allowedToolNames to coding builtins only, which filtered every
@@ -1674,18 +1805,37 @@ export async function startRpcSession(
       cwd: sessionCwd,
       agentDir,
       settingsManager,
-      resourceLoaderOptions: {
-        extensionFactories: [
-          createProjectCommandBashExtension({
-            cwd: sessionCwd,
-            settings: settingsManager,
-          }),
-          // 内建会话 TODO（工具 + pi-todo.state 快照），装 pi-web-sky 即自带，
-          // 无需用户安装任何 pi 包。工具重名时用户扩展优先（见 pi-todo 文档）。
-          createTodoExtension(),
-        ],
-        extensionsOverride: preferUserBashExtension,
-      },
+      resourceLoaderOptions: subagentResources
+        ? {
+            noExtensions: !subagentResources.loadExtensions,
+            noSkills: !subagentResources.loadSkills,
+            noPromptTemplates: true,
+            noThemes: true,
+            noContextFiles: true,
+            systemPrompt: " ",
+            appendSystemPrompt: subagentResources.appendSystemPrompt,
+          }
+        : chatOnly
+          ? CHAT_ONLY_RESOURCE_LOADER_OPTIONS
+          : {
+              extensionFactories: [
+                createProjectCommandBashExtension({
+                  cwd: sessionCwd,
+                  settings: settingsManager,
+                }),
+                // 内建会话 TODO（工具 + pi-todo.state 快照），装 pi-web-sky 即自带，
+                // 无需用户安装任何 pi 包。工具重名时用户扩展优先（见 pi-todo 文档）。
+                createTodoExtension(),
+                // 内置 subagent（Agent/steer_subagent/get_subagent_result 工具），
+                // 开关见 agents 设置（isBuiltInSubagentsEnabled）。
+                createSubagentExtension(
+                  SUBAGENT_CONTROLLER.extensionRuntime,
+                  () => listSubagentProfiles(sessionCwd),
+                  isBuiltInSubagentsEnabled,
+                ),
+              ],
+              extensionsOverride: (base) => preferUserBashExtension(preferPiWebSubagentExtension(base)),
+            },
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });
     const scope = await resolveVisibleModels(
@@ -1751,7 +1901,7 @@ export async function startRpcSession(
 
     wrapper.onDestroy(() => registry.delete(realSessionId));
     registry.set(realSessionId, wrapper);
-    wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });
+    if (!chatOnly) wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });
 
     return { session: wrapper, realSessionId };
   })().finally(() => {
@@ -1761,4 +1911,40 @@ export async function startRpcSession(
 
   locks.set(sessionId, starting);
   return starting;
+}
+
+const SUBAGENT_CONTROLLER = createSubagentController({
+  getSession: (sessionId) => getRegistry().get(sessionId),
+  registerSession: (inner, options) => {
+    const wrapper = new AgentSessionWrapper(inner, {
+      ...(options?.exactSystemPrompt !== undefined
+        ? { exactSystemPrompt: () => options.exactSystemPrompt! }
+        : {}),
+      chatOnly: options?.chatOnly,
+    });
+    const realSessionId = inner.sessionId as string;
+    const realSessionFile = inner.sessionFile as string | undefined;
+    if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
+    wrapper.onDestroy(() => getRegistry().delete(realSessionId));
+    getRegistry().set(realSessionId, wrapper);
+    wrapper.start();
+    if (!wrapper.isChatOnly()) wrapper.beginExtensionBinding();
+  },
+  reopenSession: async (sessionId, sessionFile) =>
+    (await startRpcSession(sessionId, sessionFile, undefined)).session,
+  resolveSessionPath,
+  invalidateSessionList: invalidateSessionListCache,
+  isBuiltInSubagentsEnabled,
+});
+
+export function getSubagentRun(sessionId: string) {
+  return SUBAGENT_CONTROLLER.get(sessionId);
+}
+
+export function steerSubagent(sessionId: string, message: string) {
+  return SUBAGENT_CONTROLLER.steer(sessionId, message);
+}
+
+export function abortSubagent(sessionId: string) {
+  return SUBAGENT_CONTROLLER.abort(sessionId);
 }

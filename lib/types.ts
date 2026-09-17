@@ -271,6 +271,15 @@ export interface SessionInfoEntry extends SessionEntryBase {
   name?: string;
 }
 
+export type SubagentSessionStatus =
+  | "starting"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "aborted"
+  | "interrupted";
+
 export type SessionEntry =
   | SessionMessageEntry
   | ThinkingLevelChangeEntry
@@ -309,6 +318,16 @@ export interface SessionInfo {
   /** 最后一条 assistant 回复文本（看板卡片中间区展示用，截断），无则为空串 */
   lastReply?: string;
   parentSessionId?: string; // set if this session was forked from another
+  /** 会话间关系：fork 在 UI 保持顶层；仅 subagent 关系形成可见的父子树。 */
+  relation?:
+    | { kind: "fork"; originSessionId?: string }
+    | {
+        kind: "subagent";
+        parentSessionId: string;
+        profile: string;
+        description: string;
+        status: SubagentSessionStatus;
+      };
   /** Main repo root shared by all worktrees of this cwd (cwd itself for non-git dirs).
    *  Always set by the server; optional because the client builds transient
    *  SessionInfo objects before the first refresh. Fall back to cwd. */

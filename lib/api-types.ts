@@ -1,4 +1,14 @@
 import type { ResourceDiagnostic } from "@earendil-works/pi-coding-agent";
+import type { SubagentProfile } from "./subagents";
+
+export interface SubagentProfilesResponse {
+  profiles: SubagentProfile[];
+}
+
+export interface SubagentSettingsResponse {
+  enabled: boolean;
+  maxConcurrent: number;
+}
 
 /** 时间轴导航条（ChatMinimap）的 turn 索引条目：只含文本摘要，不携带完整 content。 */
 export interface TurnIndexItem {

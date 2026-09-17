@@ -2,6 +2,8 @@ export interface ToolEntry {
   name: string;
   description: string;
   active: boolean;
+  parameters?: Record<string, unknown>;
+  promptGuidelines?: string[];
 }
 
 export const TOOL_PRESET_VALUES = ["none", "read-only", "default", "full"] as const;
@@ -11,6 +13,8 @@ export const PRESET_NONE: string[] = [];
 export const PRESET_READ_ONLY: string[] = ["read", "grep", "find", "ls"];
 export const PRESET_DEFAULT: string[] = ["read", "bash", "edit", "write"];
 export const PRESET_FULL: string[] = ["bash", "read", "edit", "write", "grep", "find", "ls"];
+/** 子代理默认工具集（subagents.ts 与 AgentsConfig 共用，客户端安全模块）。 */
+export const DEFAULT_TOOLS: string[] = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
 const BUILTIN_TOOL_NAMES = new Set(PRESET_FULL);
 
