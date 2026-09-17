@@ -69,6 +69,7 @@ Browser                Next.js Server              AgentSession (in-process)
 
 每轮开发几乎都会碰到，必须记牢。更完整的主题细则见 [参考索引](#参考索引docsreference)。
 
+- **发送消息必须新建测试会话**：一切需要发送消息 / 会写入会话文件的场景（发 prompt、跑命令、改文件），不允许使用用户已有会话，必须自行新建（`/api/agent/new` 指定 cwd 新建，或复制会话文件到临时 cwd）。只读测试（加载、滚动、查看 DOM）不受限，可用用户已有会话。
 - **AgentSession wrapper 挂在 `globalThis.__piSessions`**：`globalThis` 存活 Next.js 热重载，模块级 Map 不行。并发 `startRpcSession()` 共享单个 start Promise（`__piStartLocks`），空闲 10 分钟超时。
 - **fork 必须立即 destroy wrapper**：`AgentSession.fork()` 原地改内部状态——fork 后 `inner.sessionId` 已是新会话 id。wrapper 留在注册表会导致后续请求拿到已 fork 状态、fork 链损坏。`send("fork")` 拿到 `newSessionId` 后立刻 `this.destroy()`。
 - **会话文件可整体重写**：`parentSession` 仅展示元数据，对聊天内容零影响；删会话级联重挂子节点可安全 `writeFileSync` 整文件。

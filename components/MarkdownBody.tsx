@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, type MouseEvent } from "react";
+import { memo, useMemo, type MouseEvent } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { resolveLocalFileHref } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
@@ -15,7 +15,7 @@ interface MarkdownBodyProps {
   onOpenFile?: (filePath: string) => void;
 }
 
-export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile }: MarkdownBodyProps) {
+export const MarkdownBody = memo(function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile }: MarkdownBodyProps) {
   const normalizedMarkdown = useMemo(() => normalizeDisplayMath(children), [children]);
   // Stable renderer identities keep stateful blocks mounted across message hover updates.
   const components = useMemo<Components>(() => ({
@@ -88,8 +88,8 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
     },
   }), [cwd, isStreaming, onOpenFile]);
 
-  return (
-    <div className={["markdown-body", className].filter(Boolean).join(" ")}>
+  const rendered = useMemo(
+    () => (
       <ReactMarkdown
         remarkPlugins={markdownRemarkPlugins}
         rehypePlugins={markdownRehypePlugins}
@@ -97,6 +97,13 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
       >
         {normalizedMarkdown}
       </ReactMarkdown>
+    ),
+    [normalizedMarkdown, components],
+  );
+
+  return (
+    <div className={["markdown-body", className].filter(Boolean).join(" ")}>
+      {rendered}
     </div>
   );
-}
+});

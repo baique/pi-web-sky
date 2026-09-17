@@ -417,6 +417,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const isNearBottomRef = useRef(true);
   const previousScrollTopRef = useRef(0);
   const liveFollowFrameRef = useRef<number | null>(null);
+  const entryIdsRef = useRef<string[]>([]);
   const executeBashRef = useRef<(command: string, excludeFromContext: boolean) => Promise<void> | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -465,6 +466,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     messagesEndRef.current?.scrollIntoView({ behavior });
     if (container) previousScrollTopRef.current = container.scrollTop;
   }, []);
+
+  useEffect(() => {
+    entryIdsRef.current = entryIds;
+  }, [entryIds]);
 
   const currentModel = currentModelOverride ?? data?.context.model ?? pendingModel ?? null;
   const displayModel = isNew ? (newSessionModel ?? newSessionDefaultModel) : currentModel;
@@ -555,9 +560,46 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const persistedMessages = d.context.messages;
       setData(d);
       setActiveLeafId(d.leafId);
-      setMessages(persistedMessages);
-      setEntryIds(d.context.entryIds ?? []);
-      setParentIds(d.context.parentIds ?? d.context.entryIds.map(() => null));
+      const newEntryIds = d.context.entryIds ?? [];
+      // 合并语义：服务端默认只返回最新 tail 条，若与当前已加载列表尾部一致，
+      // 保留已加载的历史前缀（修复流式完成后全量刷新把历史清掉导致的列表缩水/位置跳变）。
+      const oldIds = entryIdsRef.current;
+      // 合并语义：服务端默认只返回最新 tail 条，若其前缀与已加载列表尾部重叠（公共链），
+      // 保留已加载的历史前缀 + 用新窗口整体刷新（流式完成后不会把历史清掉）。
+      // 校验只检查重叠段——新窗口尾部可能含刚流式落盘的新消息（不在 oldIds 里），
+      // 那部分不参与匹配，否则校验必失败导致整体替换、列表缩水。
+      let overlapIdx = -1;
+      if (newEntryIds.length > 0 && oldIds.length > 0) {
+        const candidate = oldIds.lastIndexOf(newEntryIds[0]);
+        if (candidate >= 0) {
+          const overlapLen = Math.min(newEntryIds.length, oldIds.length - candidate);
+          let ok = overlapLen > 0;
+          for (let i = 0; i < overlapLen; i++) {
+            if (oldIds[candidate + i] !== newEntryIds[i]) {
+              ok = false;
+              break;
+            }
+          }
+          if (ok) overlapIdx = candidate;
+        }
+      }
+      if (overlapIdx >= 0) {
+        setMessages((prev) => (prev.length > overlapIdx ? [...prev.slice(0, overlapIdx), ...persistedMessages] : persistedMessages));
+        setEntryIds((prev) => {
+          const next = [...prev.slice(0, overlapIdx), ...newEntryIds];
+          entryIdsRef.current = next;
+          return next;
+        });
+        setParentIds((prev) => {
+          const newParents = d.context.parentIds ?? newEntryIds.map(() => null);
+          return [...prev.slice(0, overlapIdx), ...newParents];
+        });
+      } else {
+        entryIdsRef.current = newEntryIds;
+        setMessages(persistedMessages);
+        setEntryIds(newEntryIds);
+        setParentIds(d.context.parentIds ?? newEntryIds.map(() => null));
+      }
       setTodos(d.context.todos ?? []);
       setHasOlderChat(d.hasMore ?? false);
       setCurrentModelOverride((current) => modelSwitchPendingRef.current ? current : null);
@@ -601,6 +643,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, []);
 
   const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null, tail?: number) => {
+    // 加载历史时脱离底部吸附并取消进行中的 smooth 跟随，
+    // 避免 smooth 事件风暴与分页加载互相咬合、重复触发。
+    isNearBottomRef.current = false;
+    if (liveFollowFrameRef.current !== null) {
+      cancelAnimationFrame(liveFollowFrameRef.current);
+      liveFollowFrameRef.current = null;
+    }
     try {
       const params = new URLSearchParams({ deferThinking: "1" });
       // Explicit null leaf: context is the empty root (rollback to session start).
@@ -622,11 +671,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // Older page: prepend so scroll position stays anchored. Todos reflect
         // current session state, so leave them unchanged on a history page.
         setMessages((prev) => [...d.context.messages, ...prev]);
-        setEntryIds((prev) => [...d.context.entryIds, ...prev]);
+        setEntryIds((prev) => {
+          const next = [...d.context.entryIds, ...prev];
+          entryIdsRef.current = next;
+          return next;
+        });
         setParentIds((prev) => [...parentFallback(d.context.parentIds), ...prev]);
       } else {
         setMessages(d.context.messages);
-        setEntryIds(d.context.entryIds ?? []);
+        setEntryIds(() => {
+          const next = d.context.entryIds ?? [];
+          entryIdsRef.current = next;
+          return next;
+        });
         setParentIds(parentFallback(d.context.parentIds));
         setTodos(d.context.todos ?? []);
       }
