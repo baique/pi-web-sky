@@ -93,3 +93,4 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 - **`GET /api/sessions/summary`**（POST `{ids}`）：看板卡片摘要点查——画布有几张卡查几个 id，替代全量轮询自筛。
 - 改名 `PATCH /[id]` 同步写 `session_meta.title`（不依赖扫描器）。lastReply 不入库，只有看板卡片摘要点查（`loadSessionSummariesByIds` → `scanOneSessionFile`）才尾读文件。
 - 列表读取 = 纯查 session_meta（title/pinned/project_key）；文件只在 meta 行缺 first_message 时才读头部补齐。文件是存在性事实源，meta 是标题/归属持久层，不做主动补行。
+- **聊天区时间分组（2026-09）**：前端把已排好序的根会话切成今天/昨天/本周/近一月/更久之前五段，只插小角标不改排序（`lib/session-time-group.ts` 纯分类函数：日历天判今天/昨天、周一为周首、近一月 = 滚动 30 天）。**置顶段不分组**，越过置顶分隔线后重新起头；fork 子会话跟着根所在段。

@@ -36,6 +36,6 @@
 | 设置 SettingsPanel | 左下角"设置/模型/技能" | ✗（再点同一按钮只切分区，不收起） | ✓（backdrop 点击） | ✓ |
 | 偏好/外观（已并入设置） | — | — | — | — |
 
-> 设置面板是**唯一不满足铁律 1** 的浮层：三个入口按钮各自 `setSettingsSection("…")`，点同一段不会置 null，只能靠 backdrop / Esc / × 关闭。要收敛就改 `components/AppShell.tsx` 的三个入口（同段再点→ `setSettingsSection(null)`）。
+> 设置面板是**唯一不满足铁律 1** 的浮层：三个入口按钮都直接 `setSettingsSection("…")`（模型/技能是固定分区，设置按钮走 `getLastSettingsSection()` 恢复上次分区），点同一段不会置 null，只能靠 backdrop / Esc / × 关闭。要收敛就改 `components/AppShell.tsx` 的三个入口（同段再点→ `setSettingsSection(null)`）。
 
 > 新增浮层后更新此表。

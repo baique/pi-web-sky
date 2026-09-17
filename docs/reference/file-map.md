@@ -107,6 +107,7 @@ session-family.ts   会话家族：把可见会话与其 subagent 后代会话�
 session-search.ts   会话全文搜索（FTS5 trigram + LIKE 兜底）
 session-stats.ts    会话统计行格式（in/out/cache/cost/context，与 AppShell 共用）
 session-timing.ts   会话累计活跃时长（computeSessionTotalActiveMs）
+session-time-group.ts  聊天列表时间分组（sessionTimeGroup：今天/昨天/本周/近一月/更久之前，纯分类不排序）
 session-title.ts    AI 生成会话标题（提示词组装 + 解析并返回；持久化由 auto-name 路由负责）
 session-file-references.ts  判断某文件路径是否被会话引用（删文件前校验）
 session-file-references-core.ts  上者的纯逻辑（正则/边界判定，可单测）
