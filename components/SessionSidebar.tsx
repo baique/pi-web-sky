@@ -8,6 +8,7 @@ import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
 import { getProjectActivity, getRecentProjects } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
+import { sessionTimeGroup, type SessionTimeGroup } from "@/lib/session-time-group";
 import { useI18n } from "@/hooks/useI18n";
 import { AnimatedDropdown } from "./AnimatedDropdown";
 import { dropdownDirection } from "@/lib/dropdown-direction";
@@ -1190,6 +1191,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     return tree;
   }, [chatSessions, runningSessionIds]);
 
+  // 聊天区时间分组：置顶段不参与（置顶会话本就脱离时间顺序），
+  // 越过置顶分隔线后重新开始分组；分组标签只在同一段内换组时出现一次。
+  const chatListItems = useMemo(() => {
+    const now = Date.now();
+    let lastGroup: SessionTimeGroup | null = null;
+    return chatNodes.map((node, i) => {
+      const isPinned = Boolean(node.session.pinned);
+      const prevPinned = i > 0 && Boolean(chatNodes[i - 1]?.session.pinned);
+      const startsUnpinned = !isPinned && (i === 0 || prevPinned);
+      if (startsUnpinned) lastGroup = null;
+      const group = isPinned ? null : sessionTimeGroup(node.session.modified, now);
+      const header = group && group !== lastGroup ? group : null;
+      if (group) lastGroup = group;
+      return { node, header, pinDivider: prevPinned && !isPinned };
+    });
+  }, [chatNodes]);
+
 
 
   return (
@@ -1741,14 +1759,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       background: tempDragOver ? "color-mix(in srgb, var(--accent) 8%, transparent)" : "transparent",
                     }}
                   >
-                    {chatNodes.map((node, i) => {
-                      const isPin = Boolean(node.session.pinned);
-                      const prevPin = i > 0 && Boolean(chatNodes[i - 1].session.pinned);
+                    {chatListItems.map(({ node, header, pinDivider }) => {
                       return (
                         <div key={node.session.id}>
-                          {prevPin && !isPin && (
+                          {pinDivider && (
                             <div style={{ margin: "2px 6px 4px", height: 1, background: "color-mix(in srgb, var(--border) 45%, transparent)" }} />
                           )}
+                          {header && <SessionTimeGroupLabel group={header} />}
                           <SessionTreeItem
                             node={node}
                             selectedSessionId={selectedSessionId}
@@ -1883,6 +1900,34 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     </div>
   );
 }
+const TIME_GROUP_LABEL_KEY = {
+  today: "sidebar.timeToday",
+  yesterday: "sidebar.timeYesterday",
+  thisWeek: "sidebar.timeThisWeek",
+  thisMonth: "sidebar.timeThisMonth",
+  older: "sidebar.timeOlder",
+} as const;
+
+/** 聊天区时间分组的小角标（左侧小字，不占整行高度）。 */
+function SessionTimeGroupLabel({ group }: { group: SessionTimeGroup }) {
+  const { t } = useI18n();
+  return (
+    <div
+      style={{
+        margin: 0,
+        padding: "7px 12px 2px",
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: "0.06em",
+        color: "var(--text-dim)",
+        userSelect: "none",
+      }}
+    >
+      {t(TIME_GROUP_LABEL_KEY[group])}
+    </div>
+  );
+}
+
 function SessionTreeItem({
   node,
   selectedSessionId,
