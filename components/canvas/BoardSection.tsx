@@ -429,6 +429,45 @@ function BoardRow({
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
+  /** 会话拖入看板行：高亮态 + 成功落卡后的短暂闪光（视觉同「会话拖入任务」） */
+  const [sessionDrop, setSessionDrop] = useState(false);
+  const [sessionDropped, setSessionDropped] = useState(false);
+
+  /** 会话拖入（分配语义）：本行只吃 text/session-id；看板排序拖拽（x-board-id）交回上游 */
+  const handleSessionDragOver = (e: React.DragEvent): boolean => {
+    if (!e.dataTransfer.types.includes("text/session-id")) return false;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setSessionDrop(true);
+    return true;
+  };
+
+  const handleSessionDrop = (e: React.DragEvent): boolean => {
+    if (!e.dataTransfer.types.includes("text/session-id")) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    setSessionDrop(false);
+    const sessionId = e.dataTransfer.getData("text/session-id");
+    if (!sessionId) return true;
+    const title = e.dataTransfer.getData("text/session-title") || undefined;
+    void fetch(`/api/boards/${encodeURIComponent(board.id)}/add-session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, title }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        // 落卡是后台动作（看板没打开时页面上看不到结果）——闪一下作为受理反馈
+        setSessionDropped(true);
+        setTimeout(() => setSessionDropped(false), 700);
+      })
+      .catch((error) => {
+        console.warn(`[board] 拖入看板 ${board.id} 落卡失败 (${sessionId}):`, error?.message ?? error);
+      });
+    return true;
+  };
+
+  const dropActive = sessionDrop || sessionDropped;
 
   const boardIcon = (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -456,8 +495,13 @@ function BoardRow({
 
   return (
     <div
-      onDragOver={onDragOver}
-      onDrop={onDrop}
+      onDragOver={(e) => {
+        if (!handleSessionDragOver(e)) onDragOver(e);
+      }}
+      onDragLeave={() => setSessionDrop(false)}
+      onDrop={(e) => {
+        if (!handleSessionDrop(e)) onDrop(e);
+      }}
       style={{
         margin: "0 4px 2px",
         borderRadius: 6,
@@ -482,9 +526,13 @@ function BoardRow({
           minHeight: 38,
           padding: "0 8px 0 5px",
           borderRadius: 6,
-          background: isActive ? "var(--side-active)" : hovered ? "var(--side-hover)" : "transparent",
+          // 会话拖入看板（同一套「拖入」视觉语言：accent 底色 + 左侧竖线）
+          background: dropActive
+            ? "color-mix(in srgb, var(--accent) 8%, transparent)"
+            : isActive ? "var(--side-active)" : hovered ? "var(--side-hover)" : "transparent",
+          boxShadow: dropActive ? "inset 2px 0 0 var(--accent)" : "none",
           cursor: renaming ? "default" : "pointer",
-          transition: "background 0.12s",
+          transition: "background 0.12s, box-shadow 0.12s",
         }}
       >
         {renaming ? (

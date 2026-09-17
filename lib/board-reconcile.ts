@@ -418,6 +418,60 @@ function listTaskForkedSessions(taskId: string): Array<{ sessionId: string; pare
 }
 
 /**
+ * 侧栏拖会话到「看板」行 → 在目标看板落一张会话卡。
+ *
+ * 为什么走后端写：拖到侧栏行时目标看板可能没在当前页面打开（前端没有那个 Y.Doc），
+ * 只有服务端能权威写。落点用 findFreeSpot 找空位——拖到侧栏行没有画布坐标，
+ * 位置由后端定（不与已有卡重叠即可）。
+ *
+ * 幂等：画布已有同 sid 卡 → 不动（保留用户的布局/展开态），返回 false。
+ */
+export async function addSessionCardToBoard(
+  boardId: string,
+  sessionId: string,
+  title?: string,
+): Promise<boolean> {
+  let added = false;
+  await mutateBoard(boardId, (maps) => {
+    const id = `session-${sessionId}`;
+    if (maps.nodes.get(id)) return;
+    const nodes = Array.from(maps.nodes.values()) as unknown as DocNode[];
+    const spot = findFreeSpot(nodes, SESSION_CARD_W, SESSION_CARD_H);
+    maps.nodes.set(id, {
+      id,
+      type: "session-card",
+      position: { x: spot.x, y: spot.y },
+      style: { width: SESSION_CARD_W, height: SESSION_CARD_H },
+      data: {
+        sessionId,
+        title: title ?? "",
+        emoji: "💬",
+        projectName: "",
+        messageCount: 0,
+        lastReply: "",
+        phase: "idle",
+        runningMs: 0,
+        endedAt: 0,
+        lastActivityAt: 0,
+        stale: false,
+        expanded: false,
+        // cwd 必须留空：非空在 reconcile 语义里 = 「新会话卡（会话未创建）」
+        cwd: "",
+        taskId: "",
+        w: SESSION_CARD_W,
+        h: SESSION_CARD_H,
+        expandedW: 0,
+        expandedH: 0,
+        collapsedW: 0,
+        collapsedH: 0,
+      },
+    });
+    added = true;
+  });
+  return added;
+}
+
+/**
  * fork 后精准触发：源会话归属任务 → reconcile 该任务看板（fork 卡即时出现）。
  * 源会话不归属任何任务（普通看板）→ 无操作。单板 reconcile，毫秒级；
  * 失败不阻塞 fork，由 10s 定时兜底。
