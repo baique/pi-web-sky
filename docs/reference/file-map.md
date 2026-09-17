@@ -103,7 +103,7 @@ session-index-scanner.ts  后台扫描器：启动即扫 + 每 30s 全量扫磁�
 session-scanner.ts  轻量会话文件扫描（头尾定向读：header/首条消息/自定义名/lastReply）
 session-path.ts     会话文件路径归一化 key（Windows 大小写不敏感）
 session-delete.ts   删会话文件 + 递归收集/删除子会话（级联）
-session-family.ts   会话家族：把可见会话与其 subagent 后代会话归为一家（relation.kind === "subagent"；listSessionFamilies / getSessionFamily）
+session-family.ts   会话家族：把可见会话与其 subagent 后代会话归为一家（relation.kind === "subagent"；listSessionFamilies / getSessionFamily）——**当前全仓无调用方**，列表 API 也不注入 relation，属于未接线的会话级 UI
 session-search.ts   会话全文搜索（FTS5 trigram + LIKE 兜底）
 session-stats.ts    会话统计行格式（in/out/cache/cost/context，与 AppShell 共用）
 session-timing.ts   会话累计活跃时长（computeSessionTotalActiveMs）
@@ -232,7 +232,7 @@ draft-stash.ts      草稿暂存（增删改查 + 相对时间）
 panel-layout.ts     侧栏/右面板宽度常量与 clamp
 dropdown-direction.ts  下拉展开方向判定（空间不足时向上）
 
-# ---- 子代理（上游内置运行时）----
+# ---- 子代理（上游内置运行时；完整说明见 docs/reference/subagents.md）----
 subagents.ts        子代理类型/常量（SUBAGENT_CONTROL_TOOL_NAMES / SubagentRunInfo / SubagentProfile）
 subagent-runtime.ts 内置 subagent 运行时（子会话执行/恢复/收尾）
 subagent-queue.ts   子代理 per-parent 并发队列
@@ -297,7 +297,7 @@ McpConfigPanel.tsx  MCP server manager popover (global/project mcp.json, connect
 SettingsPanel.tsx   设置弹窗主体（通用/模型/技能/代理/插件分区，SettingsUi 提供布局件）
 SettingsUi.tsx      设置面板布局件（ConfigPanel/ConfigSplitView/ConfigSidebar/…）
 AgentsConfig.tsx    内置 subagent 设置（启用开关 + 并发数 + profile 管理）
-AgentSessionPanel.tsx   子代理会话列表/切换器（搜索 + 状态 + 选中切换）
+AgentSessionPanel.tsx   子代理会话列表/切换器（搜索 + 状态 + 选中切换）——**当前未挂载**，全仓无引用
 ToolDefinitionsPanel.tsx  工具定义详情浮层（视口 45% 宽）
 ModelSelector.tsx   模型选择器（内置模型搜索/分组）
 WorktreeSelector.tsx  worktree 选择器（侧栏，分支/主 checkout + 新建）

@@ -98,6 +98,7 @@ Browser                Next.js Server              AgentSession (in-process)
 | 浮层交互规范 | [docs/reference/ui-popovers.md](docs/reference/ui-popovers.md) | 新增/改动任何 popover / panel / dialog / 菜单（终端、MCP、工具面板、设置等）——toggle 开关、点外部关闭、Esc、位置对齐 |
 | 会话生命周期 | [docs/reference/sessions.md](docs/reference/sessions.md) | 改会话加载 / 分支 / SSE / compaction / 运行状态轮询 / 会话文件读写 / 会话文件格式 |
 | 会话 TODO | [docs/reference/todo.md](docs/reference/todo.md) | 改内建 todo 工具 / 顶栏 todo 面板 / `pi-todo.state` 快照契约 / auto-clear / 节奏提醒 |
+| 内置 subagent | [docs/reference/subagents.md](docs/reference/subagents.md) | 改 Agent 工具 / subagent profile 格式与加载 / 并发队列 / 设置里的代理分区 / subagent 会话展示 |
 | 会话看板 | [docs/reference/boards.md](docs/reference/boards.md) | 改看板 / 画布 / **派生边 reconcile（后端权威）** / 任务即看板 / 便笺 / scrim / React Flow 节点 / yjs 数据层 |
 | 看板交互与事件层 | [docs/reference/board-events.md](docs/reference/board-events.md) | 改卡片交互 / 滚轮 / 右键菜单 / 事件劫持 / 焦点 / 新增自定义 shape 卡片 |
 | 认证与模型 | [docs/reference/auth-models.md](docs/reference/auth-models.md) | 改 provider 列表 / 登录 / models.json / 模型选择 / enabledModels / 思考级别 |
@@ -113,6 +114,8 @@ Browser                Next.js Server              AgentSession (in-process)
 ## 文档约定
 
 AGENTS.md 只保留每轮都需要的核心铁律与速览；长主题按上表拆到 `docs/reference/` 渐进式加载。新增一个主题时：先在 `docs/reference/` 建文件、内容归位，再在「参考索引」加一行指针（含触发分支），不要往 AGENTS.md 正文堆细节。
+
+**文档与代码的一致性由 `scripts/docs-audit.mjs` 审计**（`node scripts/docs-audit.mjs`，无缺口退出码 0）：查幽灵引用（文档提到的文件已不存在）、模块归属（代码模块有没有对应说明文档）、模块完备（有没有整块代码没有文档位置）。改了 `docs/reference/` 的结构（拆/合篇）要同步它的 `MODULE_DOC` 映射表与豁免清单。
 
 <!-- BEGIN:nextjs-agent-rules -->
 
