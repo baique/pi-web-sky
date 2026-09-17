@@ -26,4 +26,9 @@ RF 尺寸来源：顶层 `width/height` > `style.width/height`（渲染）> `mea
 
 ### 5. e2e 用干净环境
 
-新建独立看板 + API 造数据（`POST /api/boards`），视口缩小留操作空间，每步验证 elementFromPoint/visibility——别在存量污染数据上猜状态。坐标换算记 pane 偏移，screenToFlowPosition 是唯一正确入口。
+新建独立看板 + API 造数据（`POST /api/boards`），视口缩小留操作空间，每步验证 elementFromPoint/visibility——别在存量污染数据上猜状态。坐标换算记 pane 偏移，screenToFlowPosition 是唯一正确入口。用完 `DELETE` 掉临时看板；碰过真实库（`pi-web.db`）要清干净。
+
+### 6. e2e 工具的边界：playwright 点不动 RF，落库值靠 dump
+
+- RF 的鼠标合成事件（**框选 / resize 手柄 / 节点选中**）`page.mouse` **无法可靠触发**（d3 内部事件）→ 这类场景交给用户手测，不要死磕（曾陷入 20+ 轮死循环）。
+- 验证落库真值别只看 UI：`node:sqlite` 读 `~/.pi/agent/sync.db` 的 `yjs_documents`，解码 Y.Doc 看实际写入值——比看界面快且准（见第 3 条）。
