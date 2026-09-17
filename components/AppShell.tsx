@@ -14,10 +14,13 @@ import { BoardLoading } from "./canvas/BoardLoading";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
-import { ModelsConfig } from "./ModelsConfig";
-import { SkillsConfig } from "./SkillsConfig";
-import { PluginsConfig } from "./PluginsConfig";
 import { McpConfigPanel } from "./McpConfigPanel";
+import { SettingsPanel, SettingsSectionIcon } from "./SettingsPanel";
+import { useChatAppearance } from "@/hooks/useChatAppearance";
+import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
+import type { ToolEntry } from "@/lib/tool-presets";
+import { getLastSettingsSection, type SettingsSection } from "@/lib/settings-navigation";
+import { sendAgentCommand } from "@/lib/agent-client";
 // ssr:false — xterm.js touches browser globals at import time.
 const TerminalPanel = dynamic(() => import("./TerminalPanel").then((m) => m.TerminalPanel), { ssr: false });
 // ssr:false — 画布依赖浏览器环境，仅进入看板模式时下载（~1MB）。
@@ -169,6 +172,9 @@ export function AppShell() {
   const searchParams = useSearchParams();
   const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
   const { preference, toggleTheme } = useTheme();
+  // 聊天宽度/字号设置必须在页面加载时即应用（不依赖打开设置面板），
+  // 否则刷新后未打开面板时 CSS 变量不生效（上游挂在 ChatWindow 上同因）。
+  useChatAppearance();
   const { hasBg, ready: bgReady, pick: pickBg, remove: removeBg, kind: bgKind, url: bgUrl } = useAppBackground();
  const { settings: wallSettings, update: updateWallSettings } = useWallpaperSettings(hasBg && bgKind === "image");
  // 消息列表预模糊壁纸切片：图片壁纸时生成视口对齐模糊图（零实时 blur），
@@ -258,10 +264,7 @@ export function AppShell() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [sessionKey, setSessionKey] = useState(0);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
-  const [modelsConfigOpen, setModelsConfigOpen] = useState(false);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
-  const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
-  const [pluginsConfigOpen, setPluginsConfigOpen] = useState(false);
   const [projectTrust, setProjectTrust] = useState<ProjectTrustStatus | null>(null);
   const [projectTrustDialogOpen, setProjectTrustDialogOpen] = useState(false);
   const [projectTrustBusy, setProjectTrustBusy] = useState(false);
@@ -276,6 +279,53 @@ export function AppShell() {
   // MCP manager panel — topbar entry next to the terminal button.
   const [mcpOpen, setMcpOpen] = useState(false);
   const mcpBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [systemTools, setSystemTools] = useState<ToolEntry[] | null>(null);
+  const [toolsLoading, setToolsLoading] = useState(false);
+  const toolsBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  // 弹层关闭行为铁律：多次点击触发按钮 toggle 开关；点击弹层外部 / Esc 关闭（与其它菜单一致）。
+  useEffect(() => {
+    if (!toolsOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const el = toolsBtnRef.current;
+      if (el && el.contains(event.target as Node)) return;
+      const panel = document.querySelector("[data-tools-panel]");
+      if (panel && panel.contains(event.target as Node)) return;
+      setToolsOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.isComposing) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setToolsOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [toolsOpen]);
+  const [quoteSelectionEnabled, setQuoteSelectionEnabled] = useState(false);
+  const [pendingQuotePrompt, setPendingQuotePrompt] = useState<{ sessionId: string; text: string } | null>(null);
+  useEffect(() => {
+    try {
+      setQuoteSelectionEnabled(localStorage.getItem("pi-quote-selection-enabled") === "true");
+    } catch {
+      // Browser storage is best-effort.
+    }
+  }, []);
+  const handleQuoteSelectionChange = useCallback((enabled: boolean) => {
+    setQuoteSelectionEnabled(enabled);
+    try {
+      localStorage.setItem("pi-quote-selection-enabled", String(enabled));
+    } catch {
+      // Keep the current page usable when storage is unavailable.
+    }
+  }, []);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [mobileToolbarMoreOpen, setMobileToolbarMoreOpen] = useState(false);
   const [bgMenuOpen, setBgMenuOpen] = useState(false);
@@ -1213,6 +1263,16 @@ export function AppShell() {
     router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
   }, [invalidateWorkspaceRestore, router, hydrateSelectedSession]);
 
+  const handleAskInNewChat = useCallback(async (prompt: string, sourceSessionId: string, sourceEntryId: string) => {
+    const result = await sendAgentCommand<{ newSessionId?: string }>(sourceSessionId, {
+      type: "fork_branch",
+      entryId: sourceEntryId,
+    });
+    if (!result?.newSessionId) throw new Error(translate("chat.quoteForkFailed"));
+    setPendingQuotePrompt({ sessionId: result.newSessionId, text: prompt });
+    handleSessionForked(result.newSessionId);
+  }, [handleSessionForked, translate]);
+
   const handleInitialRestoreDone = useCallback(() => {
     setInitialSessionRestored(true);
   }, []);
@@ -1501,7 +1561,7 @@ export function AppShell() {
         {([
           {
              label: translate("common.models"),
-            onClick: () => setModelsConfigOpen(true),
+            onClick: () => setSettingsSection("models"),
             disabled: false,
             icon: (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1515,8 +1575,8 @@ export function AppShell() {
           },
           {
              label: translate("common.skills"),
-            onClick: () => setSkillsConfigOpen(true),
-            disabled: !activeCwd && !selectedSession?.cwd && !newSessionCwd,
+            onClick: () => setSettingsSection("skills"),
+            disabled: !projectTrustCwd,
             icon: (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2L2 7l10 5 10-5-10-5z" />
@@ -1526,17 +1586,10 @@ export function AppShell() {
             ),
           },
           {
-             label: translate("common.plugins"),
-            onClick: () => setPluginsConfigOpen(true),
-            disabled: !activeCwd && !selectedSession?.cwd && !newSessionCwd,
-            icon: (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 7V2" />
-                <path d="M15 7V2" />
-                <path d="M6 13V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5a6 6 0 0 1-12 0Z" />
-                <path d="M12 19v3" />
-              </svg>
-            ),
+             label: translate("common.settings"),
+            onClick: () => setSettingsSection(getLastSettingsSection(projectTrustCwd)),
+            disabled: false,
+            icon: <SettingsSectionIcon section="general" size={14} strokeWidth={2} />,
           },
         ] as { label: string; onClick: () => void; disabled: boolean; icon: React.ReactNode }[]).map(({ label, onClick, disabled, icon }) => (
           <button
@@ -1759,6 +1812,7 @@ export function AppShell() {
         <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
           {renderTerminalButton()}
           {renderMcpButton()}
+          {renderToolsButton()}
         </div>
       );
     }
@@ -1907,6 +1961,7 @@ export function AppShell() {
         </button>
         {!mobile && renderTerminalButton()}
         {!mobile && renderMcpButton()}
+        {!mobile && renderToolsButton()}
         {mobile && renderThemeButton(true)}
         {mobile && renderLanguageButton(true)}
         {mobile && renderBackgroundButton(true)}
@@ -2169,6 +2224,48 @@ export function AppShell() {
           <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" />
         </svg>
         <span>MCP</span>
+      </button>
+    );
+  };
+
+  const renderToolsButton = () => {
+    const open = toolsOpen;
+    return (
+      <button
+        type="button"
+        id="tools-topbar-btn"
+        ref={toolsBtnRef}
+        onClick={() => {
+          if (!open && selectedSession && systemTools === null && !toolsLoading) {
+            setToolsLoading(true);
+            void sendAgentCommand<ToolEntry[]>(selectedSession.id, { type: "get_tools" })
+              .then((tools) => setSystemTools(tools))
+              .catch(() => setSystemTools(null))
+              .finally(() => setToolsLoading(false));
+          }
+          setToolsOpen((value) => !value);
+        }}
+        title={translate("tools.title")}
+        aria-label={translate("tools.title")}
+        aria-expanded={open}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: "auto", height: "100%", padding: "0 10px", gap: 5,
+          background: open ? "var(--bg-selected)" : "none",
+          border: "none",
+          borderTop: open ? "2px solid var(--accent)" : "2px solid transparent",
+          borderRight: "1px solid var(--border)",
+          color: open ? "var(--text)" : "var(--text-muted)",
+          cursor: "pointer", flexShrink: 0, transition: "color 0.12s, background 0.12s",
+          fontSize: 12, whiteSpace: "nowrap",
+        }}
+        onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
+        onMouseLeave={(event) => { event.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)"; }}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemTools?.some((tool) => tool.active) ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }} aria-hidden="true">
+          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z" />
+        </svg>
+        <span>{translate("tools.label")}</span>
       </button>
     );
   };
@@ -3167,6 +3264,10 @@ export function AppShell() {
               unlockAudio={unlockAudio}
               terminalOpen={terminalOpen && terminalOrigin === "bottombar"}
               onToggleTerminal={() => toggleTerminal("bottombar")}
+              onAskInNewChat={handleAskInNewChat}
+              quoteSelectionEnabled={quoteSelectionEnabled}
+              initialPrompt={pendingQuotePrompt?.sessionId === selectedSession?.id ? pendingQuotePrompt?.text : undefined}
+              onInitialPromptConsumed={() => setPendingQuotePrompt(null)}
             />
           ) : initialCwdStatus === "validating" ? (
             <div
@@ -3316,7 +3417,6 @@ export function AppShell() {
         </div>
       </div>
     </div>
-    {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} cwd={selectedSession?.cwd ?? newSessionCwd ?? activeCwd ?? undefined} />}
     <TerminalPanel
       origin={terminalOrigin}
       anchorRect={terminalAnchor}
@@ -3336,6 +3436,47 @@ export function AppShell() {
       hidden={!mcpOpen}
       onClose={() => setMcpOpen(false)}
     />
+    {settingsSection && (
+      <SettingsPanel
+        cwd={selectedSession?.cwd ?? effectiveNewSessionCwd ?? null}
+        sessionId={selectedSession?.id ?? null}
+        initialSection={settingsSection}
+        quoteSelectionEnabled={quoteSelectionEnabled}
+        onQuoteSelectionChange={handleQuoteSelectionChange}
+        onClose={() => {
+          setSettingsSection(null);
+          setModelsRefreshKey((key) => key + 1);
+        }}
+        onSessionReloaded={() => setSessionKey((key) => key + 1)}
+      />
+    )}
+    {toolsOpen && (() => {
+      const el = toolsBtnRef.current;
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      // 面板宽度 = 视口的 45%
+      const panelWidth = vw * 0.45;
+      const left = Math.max(8, Math.min(rect.left, vw - panelWidth - 8));
+      return (
+        <div data-tools-panel style={{
+          position: "fixed",
+          top: rect.bottom,
+          left,
+          width: panelWidth,
+          maxWidth: "calc(100vw - 16px)",
+          maxHeight: "calc(100dvh - 8px - " + rect.bottom + "px)",
+          overflowY: "auto",
+          zIndex: 500,
+        }}>
+          <ToolDefinitionsPanel
+            loading={toolsLoading}
+            tools={systemTools}
+            translate={translate}
+          />
+        </div>
+      );
+    })()}
     {projectTrustDialogOpen && projectTrustCwd && (
       <ProjectTrustDialog
         cwd={projectTrustCwd}
@@ -3345,17 +3486,6 @@ export function AppShell() {
           if (!projectTrustBusy) setProjectTrustDialogOpen(false);
         }}
         onConfirm={() => void handleTrustProject()}
-      />
-    )}
-    {skillsConfigOpen && projectTrustCwd && (
-      <SkillsConfig cwd={projectTrustCwd} onClose={() => setSkillsConfigOpen(false)} />
-    )}
-    {pluginsConfigOpen && projectTrustCwd && (
-      <PluginsConfig
-        cwd={projectTrustCwd}
-        sessionId={selectedSession?.id ?? null}
-        onClose={() => setPluginsConfigOpen(false)}
-        onReloaded={() => setSessionKey((k) => k + 1)}
       />
     )}
     </>

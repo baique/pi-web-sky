@@ -92,6 +92,7 @@ Browser                Next.js Server              AgentSession (in-process)
 
 | 主题 | 文件 | 什么时候读 |
 |---|---|---|
+| 浮层交互规范 | [docs/reference/ui-popovers.md](docs/reference/ui-popovers.md) | 新增/改动任何 popover / panel / dialog / 菜单（终端、MCP、工具面板、设置等）——toggle 开关、点外部关闭、Esc、位置对齐 |
 | 会话生命周期 | [docs/reference/sessions.md](docs/reference/sessions.md) | 改会话加载 / 分支 / SSE / compaction / 运行状态轮询 / 会话文件读写 / 会话文件格式 |
 | 会话 TODO | [docs/reference/todo.md](docs/reference/todo.md) | 改内建 todo 工具 / 顶栏 todo 面板 / `pi-todo.state` 快照契约 / auto-clear / 节奏提醒 |
 | 会话看板 | [docs/reference/boards.md](docs/reference/boards.md) | 改看板 / 画布 / **派生边 reconcile（后端权威）** / 任务即看板 / 便笺 / scrim / React Flow 节点 / yjs 数据层 |
