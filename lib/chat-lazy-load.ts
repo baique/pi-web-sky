@@ -2,6 +2,9 @@ export const VISIBLE_PAGE_SIZE = 50;
 export const CHAT_SCROLL_TAIL_TOLERANCE = 8;
 export const CHAT_SCROLL_REATTACH_TOLERANCE = 96;
 
+/** 流式期间列表底部保留的安全间距（px）：最新内容不贴视口底边，留出呼吸区。 */
+export const CHAT_STREAM_BOTTOM_GAP = 96;
+
 export function getVisibleRenderWindow(totalCount: number, visibleCount: number): {
   startIndex: number;
   hasMore: boolean;

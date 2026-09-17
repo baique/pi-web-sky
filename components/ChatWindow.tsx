@@ -32,6 +32,7 @@ import type { AppUpdateResponse } from "@/lib/api-types";
 import type { TurnIndexItem } from "@/lib/api-types";
 import {
   captureScrollDistance,
+  CHAT_STREAM_BOTTOM_GAP,
   getPromptAnchorSpacerHeight,
   getVisibleRenderWindow,
   isScrollAtTail,
@@ -784,7 +785,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       promptAnchorUpdateRef.current = null;
       promptAnchorSpacerHeightRef.current = 0;
       promptAnchorAdjustmentDoneRef.current = false;
-      if (spacer) spacer.style.height = "";
+      // 流式期间底部留安全间距：最新内容不贴视口底边，吐字时留出呼吸区。
+      if (spacer) spacer.style.height = agentRunning ? `${CHAT_STREAM_BOTTOM_GAP}px` : "";
       return;
     }
 
@@ -811,10 +813,9 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       const contentEnd = spacer.getBoundingClientRect().top
         - containerTop
         + container.scrollTop;
-      const nextPromptAnchorSpacerHeight = getPromptAnchorSpacerHeight(
-        targetTop,
-        contentEnd,
-        container.clientHeight,
+      const nextPromptAnchorSpacerHeight = Math.max(
+        getPromptAnchorSpacerHeight(targetTop, contentEnd, container.clientHeight),
+        CHAT_STREAM_BOTTOM_GAP,
       );
 
       const isInitialMeasurement = !promptAnchorAdjustmentDoneRef.current;
