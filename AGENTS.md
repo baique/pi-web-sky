@@ -115,8 +115,6 @@ Browser                Next.js Server              AgentSession (in-process)
 
 AGENTS.md 只保留每轮都需要的核心铁律与速览；长主题按上表拆到 `docs/reference/` 渐进式加载。新增一个主题时：先在 `docs/reference/` 建文件、内容归位，再在「参考索引」加一行指针（含触发分支），不要往 AGENTS.md 正文堆细节。
 
-**文档与代码的一致性由 `scripts/docs-audit.mjs` 审计**（`node scripts/docs-audit.mjs`，无缺口退出码 0）：查幽灵引用（文档提到的文件已不存在）、模块归属（代码模块有没有对应说明文档）、模块完备（有没有整块代码没有文档位置）。改了 `docs/reference/` 的结构（拆/合篇）要同步它的 `MODULE_DOC` 映射表与豁免清单。
-
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
