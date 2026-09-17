@@ -7,6 +7,7 @@ import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
 import { useGlassActive } from "@/hooks/useGlassWallpaper";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { getAssistantErrorMessage, isEmptyThinkingBlock } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
@@ -698,6 +699,8 @@ function AssistantMessageView({
   onPin?: (content: string, clientX: number, clientY: number) => void;
   bare?: boolean;
 }) {
+  // 移动端隐藏底部元信息里的模型名：这一行还有 token 统计/时间/按钮，窄屏下文本会被挤成一团。
+  const isMobile = useIsMobile();
   const { t } = useI18n();
   const hasGlassImage = useGlassActive();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
@@ -939,7 +942,7 @@ function AssistantMessageView({
           // 深壁纸保持亮，不依赖固定色值
           mixBlendMode: "exclusion",
         }}>
-          {message.provider && (
+          {message.provider && !isMobile && (
             <span style={{ whiteSpace: "nowrap" }}>
               {modelNames?.[`${message.provider}:${message.model}`] ?? modelNames?.[message.model] ?? message.model}
             </span>
