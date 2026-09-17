@@ -69,6 +69,8 @@ Browser                Next.js Server              AgentSession (in-process)
 
 每轮开发几乎都会碰到，必须记牢。更完整的主题细则见 [参考索引](#参考索引docsreference)。
 
+- **【最高优先·用户数据只读】用户的任务 / 看板 / 会话一律只读，开发调试验证过程中绝不写入**：禁止发消息、新建、改名、删除、移动 / 改归属、拖入拖出、清空、指派 —— 一律先问用户要授权，由用户自己动手或指定方式。这条压过一切「方便验证」的理由。（例外：用户当轮明确授权的那一次操作。）
+- **【血的教训】`DELETE /api/tasks/[id]` 会连带硬删该任务下全部会话文件**（`deleteSessionTrees` → `unlinkSync`，无回收站、无快照、不可恢复）。历史上误用该接口删测试任务，把一个用户的真实会话永久删掉。删任务 / 删会话 / 改会话归属前必须先问用户。
 - **发送消息必须新建测试会话**：一切需要发送消息 / 会写入会话文件的场景（发 prompt、跑命令、改文件），不允许使用用户已有会话，必须自行新建（`/api/agent/new` 指定 cwd 新建，或复制会话文件到临时 cwd）。只读测试（加载、滚动、查看 DOM）不受限，可用用户已有会话。
 - **AgentSession wrapper 挂在 `globalThis.__piSessions`**：`globalThis` 存活 Next.js 热重载，模块级 Map 不行。并发 `startRpcSession()` 共享单个 start Promise（`__piStartLocks`），空闲 10 分钟超时。
 - **fork 必须立即销毁 wrapper**：fork 由 `SessionManager.create` / `createBranchedSession` 手工造分支文件（不再用 `AgentSession.fork()`），拿到 `newSessionId` 后立刻 `await this.shutdown()`——旧 wrapper 留在注册表会让后续请求拿到已 fork 的内存态、fork 链损坏。建 session_meta 行放在 shutdown 之后（`resolveProject` 的 await 不能落在这个窗口里）。
