@@ -20,9 +20,7 @@ import { getToolNamesForPreset, type ToolEntry, type ToolPreset } from "@/lib/to
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { userMessageKey } from "@/lib/prompt-recovery";
 import { AgentEventConnection } from "@/lib/agent-event-connection";
-import { parseSubagentInspectReply, SUBAGENT_INSPECT_WIDGET_KEY } from "@/lib/subagent-widget";
 import { newId } from "@/lib/id";
-import { dispatchInspectReply } from "@/lib/extension-command";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
 import { parseTodoSnapshot, TODO_TOOL_NAME, type Todo } from "@/lib/todo-store";
 import {
@@ -898,12 +896,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         });
         break;
       case "setWidget":
-        // 同步分发 inspect 回包（emit 帧），绕过 React 批处理——emit-then-retract
-        // 两帧若走 state，emit 帧会被 retract 覆盖导致前端永远看不到。
-        if (request.widgetKey === SUBAGENT_INSPECT_WIDGET_KEY && request.widgetLines) {
-          const reply = parseSubagentInspectReply(request.widgetLines);
-          if (reply) dispatchInspectReply(reply, reply.requestId);
-        }
         setExtensionWidgets((prev) => {
           const rest = prev.filter((item) => item.key !== request.widgetKey);
           return request.widgetLines
@@ -1720,10 +1712,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const nextModelList = d.modelList ?? [];
     setModelList(nextModelList);
     if (isNew && !sessionIdRef.current) {
-      const match = d.defaultModel
+      // The first listed model is not necessarily the runtime's automatic choice,
+      // so only trust the resolved default (上游 #636 对齐，避免图片能力警告误报)。
+      const displayModel = d.defaultModel
         ? nextModelList.find((m) => m.id === d.defaultModel?.modelId && m.provider === d.defaultModel?.provider)
         : undefined;
-      const displayModel = match ?? nextModelList[0];
       setNewSessionDefaultModel(displayModel ? { provider: displayModel.provider, modelId: displayModel.id } : null);
       // An `enabledModels` pattern may pin a thinking level (`anthropic/*:high`).
       // Like pi, apply it to the model a new session starts with.

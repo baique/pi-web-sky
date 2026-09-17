@@ -1,18 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
 import { parseAnsiLine, stripAnsi } from "@/lib/ansi";
 import type { ExtensionStatusItem, ExtensionWidgetItem } from "@/lib/types";
-import {
-  parseSubagentInspectReply,
-  parseSubagentSnapshot,
-  SUBAGENT_ASYNC_WIDGET_KEY,
-  SUBAGENT_HIDDEN_WIDGET_KEYS,
-  SUBAGENT_INSPECT_WIDGET_KEY,
-} from "@/lib/subagent-widget";
-import { dispatchInspectReply } from "@/lib/extension-command";
 import { ExtensionWidgets } from "./ExtensionWidgets";
-import { SubagentWidgetCard } from "./subagent/SubagentWidgetCard";
 
 export function sanitizeExtensionStatusText(text: string): string {
   return text
@@ -44,24 +34,6 @@ export function ExtensionStatusBar({
   /** 当前会话 id，用于 inspect 命令。 */
   sessionId?: string;
 }) {
-  // 拦截 subagent-inspect 回包（emit-then-retract 的 emit 帧）分发给订阅者。
-  // 注：真正的分发在 useAgentSession 的 setWidget case 同步完成（绕过 React 批处理）；
-  // 这里作为兜底保留（若未来 useAgentSession 路径变更，此处仍能捕获）。
-  useEffect(() => {
-    const inspect = widgets.find((w) => w.key === SUBAGENT_INSPECT_WIDGET_KEY);
-    if (!inspect) return;
-    const reply = parseSubagentInspectReply(inspect.lines);
-    if (!reply) return;
-    dispatchInspectReply(reply, reply.requestId);
-  }, [widgets]);
-
-  // 分离 subagent-async 与其余 widget：subagent 快照 → 结构化卡片；其余原样走文本。
-  // 解析失败时 subagent 也降级回文本 widget（不放卡片，不丢内容）。
-  // subagent-inspect / subagent-fleet-status 是回包/TUI 专属，不渲染。
-  const subagentWidget = widgets.find((w) => w.key === SUBAGENT_ASYNC_WIDGET_KEY);
-  const subagentSnapshot = subagentWidget ? parseSubagentSnapshot(subagentWidget.lines) : null;
-  const otherWidgets = widgets.filter((w) => !SUBAGENT_HIDDEN_WIDGET_KEYS.has(w.key));
-
   // The shelf is event-driven: Pi Web tools use its reserved right slot but
   // must not make the otherwise-empty extension shelf permanently visible.
   if (statuses.length === 0 && widgets.length === 0 && !tools && !notice) return null;
@@ -75,11 +47,7 @@ export function ExtensionStatusBar({
     >
       {/* Left: the original TUI extension shelf (widgets + status text). */}
       <div className="extension-status-left">
-        {/* subagent 快照渲染为结构化卡片（解析失败则降级为文本 widget） */}
-        {subagentWidget && subagentSnapshot ? (
-          <SubagentWidgetCard snapshot={subagentSnapshot} sessionId={sessionId} />
-        ) : null}
-        {otherWidgets.length > 0 && <ExtensionWidgets widgets={otherWidgets} />}
+        {widgets.length > 0 && <ExtensionWidgets widgets={widgets} />}
         {statuses.length > 0 && (
           <div
             role="status"
