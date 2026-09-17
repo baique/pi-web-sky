@@ -24,20 +24,20 @@
 --bubble-border                      气泡边框色（border 60%）
 --bubble-hairline                    所有 hairline 分隔线（border 55%）
 --bubble-tool-bg / -hover / -fold    工具/思考块玻璃底三态（58/80/28%）
---bubble-code-bg                     代码块近实底（bg 92% + panel）
---bubble-th-bg                       表格表头 / 代码 header 次级底（bg-panel）
+--bubble-code-bg                     代码块玻璃加深层（tool-bg-glass 58%，透出磨砂非实心）
+--bubble-th-bg                       表格表头 / 代码 header 更透的玻璃加深层（tool-bg-glass 45%）
 --bubble-file-bg / -file-chrome      文件预览阅读区近实底 / chrome 加深层
 ```
 
 组件约定（工具块 `ToolCallBlock` / 思考块 `ThinkingBlock`）：
 - 工具块：折叠态是无背景的轻行，展开才浮现玻璃块（`--bubble-tool-bg`）；两态 header 的 padding 必须一致，避免展开时边距 / 高度跳变。
-- 思考块：折叠态同样是轻行（✧ 图标 + 思考 + 时长）；展开后是**纯文本注记**——零背景零边框，仅左侧一条细线标识思考区。思考是长文本阅读区，不用玻璃 / 卡片，最长文也舒服。
-- 工具 / 思考块**不加整圈彩色边框**，状态用圆点 / 图标表达，只用一根极淡 `--bubble-border` 中性描边。
+- 思考块：折叠态同样是轻行（轨道图标 + 思考 + 时长）；展开后是**纯文本注记**——零背景零边框，仅左侧 `2px var(--bubble-hairline)` 细线标识思考区。思考是长文本阅读区，不用玻璃 / 卡片，最长文也舒服。
+- 工具 / 思考块**不加整圈彩色边框**，状态用圆点 / 图标表达；工具块展开区用一根极淡 `--bubble-border` 中性描边，思考块连这根也不用（只用左侧细线）。
 - header 内不两端对齐：时长紧跟文字（不用 `marginLeft:auto`）。
 
 ## 画布 scrim（`--board-scrim-*`）
 
-画布内容层之下、壁纸之上的一层磨砂（SessionCanvas），右上角滑块驱动：
+画布内容层之下、壁纸之上的一层磨砂（SessionCanvas），由**画布左上角顶栏胶囊的「磨砂调节」按钮**（`BoardTopbar`）驱动：
 
 ```
 --board-scrim-alpha / -bg / -blur
@@ -61,8 +61,8 @@
 ## 思考球 loading（`thinking-orbs`）
 
 Agent 运行状态用 [`thinking-orbs`](https://www.npmjs.com/package/thinking-orbs)（0.3.1，MIT）做加载球：
-- **agent 状态行**：玻璃胶囊 `.chat-status-pill`（近实底 `--bubble-code-bg` + 文字 `--text`），内嵌 `ThinkingOrb size=20`。状态映射：`waiting_model → breathing`、`running_tools / running_command → working`。
-- **思考块**：`isStreaming` 时折叠行 ✧ 换成 `ThinkingOrb state="breathing" size=20`；展开区 `deferred` 内容拉取中（loading）用 `state="searching"`。
+- **agent 状态行**：在 **composer 顶栏左槽**（`ComposerHeader`），纯文本（12px mono + `--text-muted`），内嵌 `ThinkingOrb size=20`。状态映射：`waiting_model → breathing`、`running_tools / running_command → working`。
+- **思考块**：`isStreaming` 时折叠行的轨道图标换成 `ThinkingOrb state="breathing" size=20`；展开区 `deferred` 内容拉取中（loading）用 `state="searching"`。
 - **模型载入 / 切换中**（`ChatInput` 模型槽）**不用 orb**：用普通转圈（13px 弧线 svg + 全局 `@keyframes spin`）。orb 专供「模型正在跑」，载入态要与之区分。
 - **主题必须显式传** `theme={isDark ? "dark" : "light"}`（来自 `useTheme().isDark`），不要用库默认 `auto`——项目主题由 `localStorage` 强制，`auto` 会误判。
 - **浅色主题对比度**：库 light 主题墨色上限只有 ~158 中灰，浅底上太淡。浅色（`!isDark`）下给 orb 加 `filter: brightness(0.57) contrast(1.15)`（墨色≈90 近黑），深色不加。

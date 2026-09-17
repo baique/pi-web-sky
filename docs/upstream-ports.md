@@ -6,6 +6,8 @@
 > - **本仓库与上游的关系**：本仓库是 agegr/pi-web 的一个分叉（叫 pi-web-sky）。因为分叉后代码已大量改动（皮肤、终端等自研能力），上游合并的 PR 无法直接 `git merge`，只能把改动**手工搬过来**（下文叫「移植 / port」）。
 > - **验证方式**：本项目按 `AGENTS.md` 约定，前端改动用真实浏览器（Playwright）做 e2e 验证，配合 `tsc --noEmit`、`npm run lint` 和单元测试。
 > - 正文里提到的方法名 / 文件路径，都能在本仓库源码里找到，方便对照。
+>
+> **本文件是结果文档，不是决策文档**：只记录「做了什么、怎么做的」的最终结果，供后来人对照源码核对。方案未定、正在斟酌的内容不要写进来（写进来就默认已落地）；每项移植落地提交后，立即回填「本仓库提交」的 hash，**禁止留「（未提交）」占位**——这是结果文档，不留过程态。
 
 ## 已移植的上游 PR 清单
 
@@ -67,7 +69,7 @@
 - **问题**：本仓库此前只能在状态条看 MCP 启用了几个 server，没有 UI 管理 mcp.json（增删改查/测试连通）的入口。
 - **改动**：新增 `app/api/mcp/route.ts`（GET 读全局+项目 mcp.json 合并；POST 支持 add/remove/enable/disable/update/move/test/get 8 个 action，test 会真实 spawn/请求握手并列出工具数）；`lib/api-types.ts` 加 `McpResponse`/`McpScope`/`McpServerInfo`；UI 独立组件 `components/McpConfigPanel.tsx`。
 - **与上游的差异**：上游把 MCP 管理**塞进插件面板**（PluginsConfig 内加 plugins/mcp 双 tab）。本仓库 PluginsConfig 已自研（资源明细/粘贴支持等）且上游 patch 无法直接 apply，改把 MCP UI 做成**独立面板组件** `McpConfigPanel`（McpServerDetail/AddMcpServer/列表逻辑全部复用上游代码），挂在**顶栏 Terminal 按钮旁**的新入口按钮，portal 锚定触发按钮、仿终端弹窗样式。API 层（route.ts/types）原样移植。
-- **本仓库提交**：（未提交）
+- **本仓库提交**：`013d0d3`
 
 ### 上游 v0.8.10 / v0.8.11 版本级变更（4 项，合并自发布说明而非单个 PR）
 
@@ -105,35 +107,41 @@
 
 - **改动**：`ChatInput.tsx` 的 `handleKeyDown` 发送分支改为 `sendQueued((e.altKey && onFollowUp) || !onSteer ? "followup" : "steer")`——Alt+Enter 强制 followup，否则 steer 优先；follow-up 按钮 title 加快捷键提示 + `aria-keyshortcuts`。
 - **与上游**：本仓库守卫（Shift 换行、IME、移动端 Ctrl/Cmd+Alt）原本已有，无额外改动。
-- **本仓库提交**：（未提交）
+- **本仓库提交**：`239ee31`
 
 #### #704 — 聊天内容宽度 + 字号设置
 
 - **改动**：新增 `hooks/useChatAppearance.ts`（localStorage 持久化，CSS 变量 `--chat-content-max-width` / `--chat-content-font-size` 挂 `documentElement`，`useSyncExternalStore` 跨组件同步）；ChatWindow/ChatInput 消息与输入框 maxWidth 改 `var(...)`；MessageView 主要字号（用户气泡/md 正文/thinking/patch/compaction）加 `calc(x + var(--chat-font-size-offset, 0px))`；globals.css `:root` 加变量 + `.chat-content` 定义 offset + **`.markdown-body` / `.markdown-body table` 字号改 calc（正文字号生效的关键，漏了会导致调整不生效）**。
 - **与上游的差异**：UI 入口不同，见「与上游刻意不同」。
-- **本仓库提交**：（未提交）
+- **本仓库提交**：`239ee31`
 
 #### #698 — 选中文本分支对话
 
 - **改动**：新增 `lib/quoted-selection.ts`（buildQuotedSelection 转 markdown 引用）；`rpc-manager` 新增 `fork_branch` 命令（`createBranchedSession(entryId)` 复制选中 entry 到子会话，不替换源会话）；MessageView 的 AssistantMessageView 加 `data-message-role="assistant"` + `data-entry-id` 供选中定位；ChatWindow 选中助手文本弹菜单（在当前询问 → 插入主输入框；在新对话询问 → 内联引用输入框，发送读取用户编辑内容），新会话经 `initialPrompt` 自动发送；AppShell `quoteSelectionEnabled`（localStorage 开关，默认关）+ `onAskInNewChat`（fork_branch → 切新会话 + 预填 prompt）。
 - **与上游的差异**：fork_branch 落盘补救、引用输入框实现、设置入口，均见「与上游刻意不同」。
-- **本仓库提交**：（未提交）
+- **本仓库提交**：`239ee31`
 
 #### #655 — 文件面板视频预览
 
 - **改动**：`lib/file-types.ts` webm 从音频移入 `VIDEO_EXT_TO_MIME`（mp4/m4v/webm/mov/ogv）+ `getVideoMime`/`isVideoPath`；`app/api/files/[...path]` read/download/meta 三处 mime 合并加 video；`FileViewer.tsx` 新增 `VideoViewer`（复用 AudioViewer 的 watch/live 同步骨架），分支优先于文本预览。
-- **本仓库提交**：（未提交）
+- **本仓库提交**：`239ee31`
 
 #### #665 — 空闲超时可配
 
 - **改动**：`lib/rpc-manager.ts` 新增 `resolveSessionIdleTimeoutMs()` 解析 `PI_WEB_IDLE_TIMEOUT_MS`（默认 10 分钟，`0` 禁用，上限 Node timer 2^31-1），`resetIdleTimer` 用常量且 0 时直接 return。
-- **本仓库提交**：（未提交）
+- **本仓库提交**：`239ee31`
 
 #### #636 — 附件给不支持图片的模型时警告
 
 - **改动**：`app/api/models` modelList 带 `input` 模态字段（SDK 0.84.3 已支持）；`lib/models-cache.ts` 类型加 `input?: string[]`；`ChatInput.tsx` 新增 `modelSupportsImageInput()`，附加图片且选中模型明确不支持 image 时出黄色警告 banner；`hooks/useAgentSession.ts` 新会话默认模型只信 `d.defaultModel`，不再回退 `nextModelList[0]`（列表首个 ≠ 运行时默认会误报）。
 - **与上游的差异**：本仓库 ModelNoticeBanner 已内置关闭按钮，未移植上游 onClose prop（行为一致）。
-- **本仓库提交**：（未提交）
+- **本仓库提交**：`239ee31`
+
+### 上游内置 subagent 运行时移植（2026-09，2 个提交）
+
+- **背景**：上游 v0.9 起内置了完整 subagent 运行时（Agent 工具/并发队列/状态路由/配置），本仓库此前 subagent 走「skill+fork」自制路线，无 UI 管理入口。本次把上游完整运行时搬过来作为内置能力，并移除旧的自制 pi-subagents widget 机制（与内置 Agent 工具重复）。
+- **改动**：新增 `lib/subagents.ts`（类型/常量）、`lib/subagent-runtime.ts`（子会话执行/恢复/收尾）、`lib/subagent-queue.ts`（per-parent 并发）、`lib/subagent-extension.ts`（Agent/steer_subagent 工具注册）、`lib/subagent-settings.ts` / `lib/subagent-input.ts` / `lib/subagent-prompt.ts` / `lib/subagent-profile-precedence.ts`；`rpc-manager.ts` 集成 SUBAGENT_CONTROLLER + getSubagentRun/steer/abort；`app/api/subagents/[id]`（状态/steer/abort）+ `/settings` + `/profiles`；`AgentsConfig.tsx` 开关 UI（启用内置子代理 + 并发数）；同时移除 `lib/subagent-widget.ts` / `lib/extension-command.ts` / `components/subagent/`（SubagentWidgetCard/SubagentInspectPanel）及对应测试。
+- **本仓库提交**：`38f99b6`（移植运行时）、`50dcd45`（移除旧 widget 机制）
 
 ## 与上游刻意不同的地方（改动了原 PR 逻辑，阅读者需知悉）
 
@@ -158,11 +166,17 @@
 - **为什么偏离**：上游内联引用 composer 复用 ChatInput（`compact` 模式，改动 20 处条件分支）。本仓库 ChatInput 是打磨最狠的高频核心组件，逐处加 `compact ?` 分支回归风险高。
 - **本仓库做法**：独立轻量 textarea（预填引用+问题，用户可编辑），发送时读 `textarea.value`；为空才回退默认引用文本。
 
-### #704 / #698 设置入口 —— 暂用顶栏「偏好」弹窗，方案待定
+### #704 / #698 设置入口 —— 已并入住设置面板（2026-09 已定）
 
-- **上游**：宽度/字号/主题/语言等集中在 SettingsPanel（点「设置」按钮打开）。本仓库暂无 SettingsPanel（主题为顶栏按钮、语言在顶栏下拉）。
-- **本仓库现状**：顶栏 Aa 按钮弹「偏好」面板，含聊天宽度、字号、选中文本询问开关。
-- **待定**：是否按上游建设置面板（迁移主题/语言入口），下一轮与用户确认后再定。
+- **上游**：宽度/字号/主题/语言等集中在 SettingsPanel（点「设置」按钮打开）。
+- **本仓库做法**：设置面板重构完成（`3201e53`）——SettingsPanel/SettingsUi 分通用/模型/技能/代理/插件区，顶栏按钮迁移并入；聊天宽度/字号（#704）与选中文本询问开关（#698）进「通用」区。
+- **与上游的差异**：主题、语言仍是顶栏按钮/下拉入口，未迁入设置面板（刻意保留，非待定项）。
+
+### 上游内置 subagent 运行时 —— 替代旧自制 widget 机制
+
+- **为什么偏离**：上游 v0.9 起内置完整 subagent 运行时（Agent 工具/并发队列/状态路由/配置）。本仓库此前为适配 `pi-subagents` 扩展自制了 widget 机制（`subagent-widget.ts` / `extension-command.ts` / SubagentWidgetCard/SubagentInspectPanel，靠 RPC 推送渲染快照卡片），与上游内置 Agent 工具功能重复，且两套并存时同名工具冲突。
+- **本仓库做法**：完整移植上游运行时作为唯一内置实现，`subagent-extension.ts` 在加载结果里**剔除** `pi-subagents` 扩展（含同名 Agent 工具的 legacy 扩展及其冲突报错），旧 widget 机制连同测试一并删除；`AgentsConfig.tsx` 提供「启用内置子代理 + 并发数」开关 UI（默认关）。
+- **注意**：开关默认关闭（`isBuiltInSubagentsEnabled` 读不到设置时返回 false），旧 `pi-subagents` 扩展用户需在代理设置里手动启用内置运行时，或依赖冲突剔除逻辑自动停用旧扩展。
 
 ## 已审查但未采用的上游改动
 
@@ -179,7 +193,7 @@
 - 文件编辑与管理：上游 v0.10.5 `0815194c`（文件手动编辑 + 文件/文件夹增删改）；git 工作区还原 `015b8ec6`（本仓库 git API 只有 diff/status）。
 - 插件更新检查 + 批量更新：`#611`（本仓库 PluginsConfig 无版本检查；需抽 `lib/pi-cli.ts` 避免 child_process 进浏览器 bundle）。
 - 大文本文件预览分页：上游 v0.9.1（本仓库 FileViewer 无分页，大文件一次渲染）。
-- 平台/部署层：后台服务 + CLI（version/restart/logs）`abf960b5`；可读主题 v0.9.1；浏览器密码登录 v0.9.1（To G 部署场景）；内置 subagent 的 Agents 设置入口 v0.9.0/v0.9.1（本仓库 subagent 走 skill+fork，无 UI 管理入口，需评估兼容）。
+- 平台/部署层：后台服务 + CLI（version/restart/logs）`abf960b5`；可读主题 v0.9.1；浏览器密码登录 v0.9.1（To G 部署场景）。
 - 性能/本地化：会话列表窗口化虚拟化 `#626`（本仓库已有 session_meta 缓存+索引，列表未虚拟化）；gzip 会话 JSON `#731`；繁体中文 locale `#512`。
 
 ## 移植流程备忘

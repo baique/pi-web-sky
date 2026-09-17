@@ -25,11 +25,11 @@
 
 ## ToolCall field normalization
 
-Pi stores toolCall blocks as `{type:"toolCall", id, name, arguments}` but `ToolCallContent` uses `{toolCallId, toolName, input}`. `normalizeToolCalls()` in `lib/normalize.ts` handles this — called in both `session-reader.ts` (file load) and `ChatWindow.handleAgentEvent()` (streaming).
+Pi stores toolCall blocks as `{type:"toolCall", id, name, arguments}` but `ToolCallContent` uses `{toolCallId, toolName, input}`. `normalizeToolCalls()` in `lib/normalize.ts` handles this — called in both `session-reader.ts` (file load) and `hooks/useAgentSession.ts` 的 `handleAgentEvent()` (streaming).
 
 ## New session tool preset
 
-Tool names are passed at session creation (`POST /api/agent/new` → `toolNames[]`). For existing sessions, the active preset is inferred on mount via `get_tools` → `getPresetFromTools()`. When tools are fully disabled (`toolNames = []`), `rpc-manager.ts` passes an empty tool allow-list and forces `agent.state.systemPrompt = ""` after startup/reload/resource discovery.
+Tool names are passed at session creation (`POST /api/agent/new` → `toolNames[]`). For existing sessions, the preset is inferred from `get_tools` → `getPresetFromTools()` only when the session is actually running (mount sees `agentState.running`, or after a `reload`); idle sessions are not re-inferred. When tools are fully disabled (`toolNames = []`), `rpc-manager.ts` passes an empty tool allow-list and forces `agent.state.systemPrompt = ""` after startup/reload/resource discovery.
 
 ## Specified session id + create-on-persist
 
@@ -41,7 +41,7 @@ The last preset explicitly selected by the user is stored in browser `localStora
 
 ## SSE reconnect on page refresh mid-stream
 
-On `ChatWindow` mount, `GET /api/agent/[id]` is called. If `state.isStreaming === true`, SSE is reconnected automatically. `thinkingLevel` and `isCompacting` are also synced from this response.
+On `useAgentSession` mount, `GET /api/sessions/[id]/state` is called. If `state.isStreaming` **or** `state.isPromptRunning` is true, SSE is reconnected automatically (and `loadTools` runs for the running session). `thinkingLevel` and `isCompacting` are also synced from this response.
 
 ## Compaction SSE events
 
@@ -91,5 +91,5 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 - **`lib/session-index-scanner.ts`**：启动即扫 + 每 30s 全量扫磁盘（`scanSessionFileMeta`），建行/刷 mtime/删行，幂等。`ensureSessionIndexReady` 供首请求前懒初始化（复用首轮 promise，不双跑）。
 - **`GET /api/sessions?project=<key>`**：单项目聊天区列表，`loadProjectSessions` 纯查 session_meta（project_key 过滤 + 排除 task 会话 + 置顶/mtime 排序），union 运行中 runtime。
 - **`GET /api/sessions/summary`**（POST `{ids}`）：看板卡片摘要点查——画布有几张卡查几个 id，替代全量轮询自筛。
-- 改名 `PATCH /[id]` 同步写 `session_meta.title`（不依赖扫描器）。lastReply 不入库，列表/卡片尾读文件。
-- 列表读取 = stat(存在/mtime) + meta(title/pinned) + 尾读(lastReply) 结合；文件是存在性事实源，meta 是标题/归属持久层，不做主动补行。
+- 改名 `PATCH /[id]` 同步写 `session_meta.title`（不依赖扫描器）。lastReply 不入库，只有看板卡片摘要点查（`loadSessionSummariesByIds` → `scanOneSessionFile`）才尾读文件。
+- 列表读取 = 纯查 session_meta（title/pinned/project_key）；文件只在 meta 行缺 first_message 时才读头部补齐。文件是存在性事实源，meta 是标题/归属持久层，不做主动补行。

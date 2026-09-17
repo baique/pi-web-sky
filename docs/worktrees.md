@@ -4,11 +4,12 @@ Pi Web can show all Git worktrees for one project in the sidebar. Use this when 
 
 ## When the Worktree Control Appears
 
-The worktree switcher appears below the project picker when the selected directory is a Git repository root.
+The worktree switcher sits in the same row as the project picker (a suffix to the right of the CWD/path button), active when the selected directory is a Git repository root.
 
-It is hidden when:
+It stays visible but disabled when:
 
-- The selected directory is not a Git repository.
+- The selected directory is not a Git repository (button disabled, hint in its tooltip).
+- The directory is a subdirectory inside a repo (sessions there keep their own project identity).
 - The selected directory is inside a repository, but not the repository root.
 - Git cannot read the repository's worktree list.
 
@@ -75,7 +76,7 @@ Each session still remembers the working directory it was created with. That mea
 ## Troubleshooting
 
 **I do not see the worktree switcher.**
-Select a Git repository root. Non-Git directories and repo subdirectories show a small hint instead of the switcher.
+Select a Git repository root. Non-Git directories and repo subdirectories still render the switcher but disabled — hover it for the reason. (The switcher lives next to the path button, not below the project picker.)
 
 **A branch cannot be added as a worktree.**
 Git allows a branch to be checked out in only one worktree at a time. Switch to the existing worktree for that branch, or remove it first.

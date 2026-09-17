@@ -33,7 +33,9 @@
 | 终端面板 TerminalPanel | 顶栏"终端" | ✓ | ✓ | ✓ |
 | MCP 面板 McpConfigPanel | 顶栏"MCP" | ✓ | ✓ | ✓ |
 | 工具面板 ToolDefinitionsPanel | 顶栏"工具" | ✓ | ✓ | ✓ |
-| 设置 SettingsPanel | 左下角"设置/模型/技能" | ✓ | ✓（backdrop 点击） | ✓ |
+| 设置 SettingsPanel | 左下角"设置/模型/技能" | ✗（再点同一按钮只切分区，不收起） | ✓（backdrop 点击） | ✓ |
 | 偏好/外观（已并入设置） | — | — | — | — |
+
+> 设置面板是**唯一不满足铁律 1** 的浮层：三个入口按钮各自 `setSettingsSection("…")`，点同一段不会置 null，只能靠 backdrop / Esc / × 关闭。要收敛就改 `components/AppShell.tsx` 的三个入口（同段再点→ `setSettingsSection(null)`）。
 
 > 新增浮层后更新此表。

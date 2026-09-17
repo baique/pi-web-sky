@@ -6,7 +6,7 @@
 
 任务卡 = 看板上的工作项卡（独立实体，与 sidebar「任务/会话分组」解耦）。业务字段在 `task_cards` 表；**画布节点在 yjs 文档**（RF 节点 `data.cardId`，持久化到 sync.db `yjs_documents`）。**任务以看板为界**：前置/关联只能引用同看板任务卡。
 
-**形态**：任务卡 = 纯工作项卡，**无内置执行会话工作台**。常态 = 编辑表单栏（340px，左侧常驻，直接可输入）；展开 = 表单全宽（900px）。任务卡通过 **exec 线**引用画布上独立存在的执行会话卡（原子-链接，见「执行会话线」），提供「定位执行会话」动作跳到那张卡。从工具栏**拖出创建**（像便笺，`ToolbarItem tool="task-card"`）。
+**形态**：任务卡 = 纯工作项卡，**无内置执行会话工作台**。常态 = 编辑表单栏（380px，左侧常驻，直接可输入）；展开 = 表单全宽（760px）。任务卡通过 **exec 线**引用画布上独立存在的执行会话卡（原子-链接，见「执行会话线」）。从工具栏**拖出创建**（像便笺，`ToolbarBtn` 拖拽 `task-card`）。
 
 ## 数据模型（迁移 v7）
 
@@ -83,7 +83,7 @@ task_card_questions  待回答队列（S3 用）
 ## 删除（确认制 + 事务）
 
 - 删除拦截 toast 已废除（无 `boards.deleteBlocked`）；删除走**确认弹窗**（提示关联关系）→ 事务删除。
-- **删会话**（单事务）：断 exec 线 → 清任务卡 `session_id` → 删画布 session 节点 + 关联边 → 删 `session_meta` → 删会话文件。先断引用再删实体，任一步失败回滚。
+- **删会话**：无事务、各步幂等（失败不回滚，exec 线由 reconcile 收尾）。顺序：`removeSessionFromBoards`（断 exec 线 + 清任务卡 `session_id` + 删画布卡）→ 删会话文件 → 清 `session_meta`/归属 → `removeSessionsFromYjsBoards` 清 yjs 会话卡（含占位卡）。
 - **删任务卡**（单事务）：删依赖/问答 → 删卡行（画布节点由前端删，yjs 文档持久化）。
 
 ## API
@@ -108,6 +108,6 @@ GET/PATCH/DELETE /api/task-cards/[id]          详情(links+inbound)/改字段(�
 - 预计截止：`DuePicker`（年/月/日三 ThemedSelect 联动，ms epoch）。
 - 执行状态：只读徽章。
 - 工作目录：`DirectoryPicker` 弹窗（「选择目录」按钮）+ 只读展示；默认 = `useBoardDefaultCwd()`。
-- Worktree：调 `/api/worktrees?cwd=` 列 git worktrees，ThemedSelect 选择（主 checkout / 分支），选中联动 cwd。
+- Worktree：`WorktreePicker`（AnimatedDropdown 下拉，数据走 `GET /api/worktrees?cwd=`）选择主 checkout / 分支，选中联动 cwd。
 - 前置/关联：同看板候选卡多选 checkbox（**新建时也可选**）。
-- 最小尺寸：`onResize` minWidth 340 / minHeight 240。
+- 最小尺寸：`NodeResizer` minWidth 380（展开 480）/ minHeight 240（展开 400）。

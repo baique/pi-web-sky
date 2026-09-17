@@ -32,7 +32,7 @@ todo({ action: "list" | "add" | "update" | "delete",
 | `update` | `id` + (`status` \| `text`)；或 `updates[]` | `updates[]` **优先于**单条字段 |
 | `delete` | `ids[]` | **部分 id 缺失则整体拒绝**（原子性） |
 
-- **schema 是扁平 `Type.Object`，字段全 Optional**：OpenAI 兼容网关会 400 掉顶层 union；必填与 `text`/`texts`、`id`/`ids` 双形陷阱全放 `dispatchTodoAction` 运行时校验（错误文案直接教模型怎么写对的 JSON）。改 schema 或校验时，`lib/todo-store.test.mjs` 的「shape traps」用例是回归网。
+- **schema 是扁平 `Type.Object`，除必填的 `action` 外字段全 Optional**：OpenAI 兼容网关会 400 掉顶层 union；必填与 `text`/`texts`、`id`/`ids` 双形陷阱全放 `dispatchTodoAction` 运行时校验（错误文案直接教模型怎么写对的 JSON）。改 schema 或校验时，`lib/todo-store.test.mjs` 的「shape traps」用例是回归网。
 - 错误一律 `throw`，不返回「错误成功模式」。
 - `in_progress` 不强制、`pending → completed` 直接跳转合法（刻意无状态机，与 goal 扩展的 6 态相反）。
 - `nextId` **单调自增不复用**（删掉 #1 后再 add 得到 #2），只有 auto-clear 才复位 1。

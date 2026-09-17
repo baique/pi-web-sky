@@ -18,13 +18,13 @@
 
 **派生元素由后端权威 reconcile**（`lib/board-reconcile.ts`）：
 - 业务表（tasks / task_cards / task_card_links / session_meta）= 唯一真相源，后端写。
-- 补会话卡（`session-<sid>`）、补任务卡（`task-<cardId>`）、exec 线（`exec-<cardId>-<sessionId>`）、依赖线（`link-<from>-<to>-<kind>`）——确定性 id 幂等，缺补多删，**绝不整表覆盖**。
-- **任务卡派生对所有看板生效**（普通看板上的任务卡也派发执行，同样补执行会话卡 + exec 线）；**会话卡孤儿删仅任务看板**——普通看板的会话卡由用户拖入/新建管理，不因业务表无记录而删除。
+- 补会话卡（`session-<sid>`）、exec 线（`exec-<cardId>-<sessionId>`）、依赖线（`link-<from>-<to>-<kind>`）、fork 线（`fork-<parentSid>-<sid>`）——确定性 id 幂等，缺补多删，**绝不整表覆盖**。**任务卡不是派生元素**：它是用户画布内容（前端建/删），reconcile 只删「引用了已删业务卡」的孤儿节点。
+- **任务卡派生对所有看板生效**（普通看板上的任务卡也派发执行，同样补执行会话卡 + exec 线）；**会话卡孤儿删仅任务看板**——普通看板的会话卡由用户拖入/新建管理（三个入口见下节），不因业务表无记录而删除。
 - 孤儿删（业务表不存在的会话卡/任务卡节点）由后端唯一执行，前端不做 → 多端不互相删卡。
 - 触发：调度器派发 / 建卡删卡 / 任务归属变化 / 任务初始化 / 10s 定时兜底（`board-reconcile-scheduler`，仅 leader 实例执行）。
 - **任务初始化是纯后台动作**：`/api/tasks/[id]/board` 建看板后立即 reconcile 补已有会话卡，不依赖前端加载时机。
 
-**前端职责**：用户内容（布局 / 尺寸 / 便笺文本 / 新建卡）+ 展示字段（phase / runningMs / 标题）写 Y.Doc 增量；不做孤儿清理 / 派生 reconcile。
+**前端职责**：用户内容（布局 / 尺寸 / 便笺文本 / 新建卡）+ **摘要字段**（标题 / 消息数 / lastReply / lastActivityAt）写 Y.Doc 增量；**高频运行态（phase / runningMs / execStatus）只走本地镜像不写 Y.Doc**；不做孤儿清理 / 派生 reconcile。
 
 ### 启动
 
@@ -37,9 +37,9 @@ npm run dev          # 单进程：HTTP + WS 同端口（yjs 房间内嵌，无�
 
 - **画布文档在 sync.db（yjs_documents）**，业务表在 pi-web.db。两库独立，业务进程写业务表，派生 reconcile 写画布。
 - **前端编辑 = 增量 Y.Map.set**（按 id），无全量快照 / 乐观锁 / 409 / 重灌。
-- **派生边**：exec 线（`data.execLink`）、依赖线（`data.taskLink`）→ **禁删**（前端 onEdgesChange 跳过，后端 reconcile 兜底补回）。
+- **派生边**：exec 线（`data.execLink`）、依赖线（`data.taskLink`）、fork 线（`data.forkLink`）→ **禁删**（前端 onEdgesChange 跳过，后端 reconcile 兜底补回）。
 - **孤儿卡删除**：后端 reconcile 删（业务表确认不存在 + 非新会话卡 cwd 非空）。
-- **展示字段**：2.5s running 快照（phase/runningMs/execStatus）+ 10s 摘要（标题/消息数）轮询 → 写 Y.Map data，多端一致。
+- **展示字段**：2.5s running 快照（phase/runningMs/execStatus，**本地镜像、不写 Y.Doc**）+ 5s 摘要（标题/消息数/lastReply）轮询 → 摘要写 Y.Map data，多端一致。
 
 ## 卡片即工作台（React Flow）
 
@@ -49,9 +49,27 @@ npm run dev          # 单进程：HTTP + WS 同端口（yjs 房间内嵌，无�
 - **改名**：内联输入 → PATCH /api/sessions/[id] → 事件桥刷左侧树。
 - **节点 Handle**：连线端点（左 target / 右 source），exec/依赖线依赖它渲染。
 
+## 会话入板（三个入口 + 出板）
+
+会话卡进入画布有三条路，落点与归属规则不同——**归属必须先于落卡**，否则任务看板的 reconcile 会把这张卡当孤儿删掉：
+
+| 入口 | 归谁写 | 落点 |
+|---|---|---|
+| 侧栏拖会话 → 画布 | `CanvasStage`（外层容器 capture 监听 drop）→ `board.addSessionNode` | 鼠标位置（`screenToFlowPosition`） |
+| 侧栏拖会话 → 侧栏「看板」行 | `POST /api/boards/[id]/add-session`（**后端权威写**） | 服务端 `findFreeSpot` 找空位 |
+| 工具栏拖出「会话卡」 | `board.addNewSessionCard` | 拖放点为中心（点击 = 视口中心）+ 级联偏移 |
+
+- **拖到看板行为什么走后端**：目标看板可能根本没在当前页面打开（前端没有那个 Y.Doc），只有服务端能写。前端只管看板行的拖放视觉（accent 底色 + 左侧竖线，落卡成功后闪一下作受理反馈）。
+- 任务看板（`board.taskId` 非空）两个拖入入口都**先写归属再落卡**：画布入口走 `addSessionNode` 内部，侧栏入口走 `assignSessionToTask()`，失败就不落卡（不留无保护窗口卡）。
+- 侧栏入口**幂等**：画布已有同 sid 卡 → 不动（保留用户的布局/展开态），返回 `{ ok: true, added: false }`；重复拖同一会话不会把用户拖过位置重置。
+- 系统「运行中」看板是虚拟视图（不落库、内容由运行态派生）→ 侧栏入口一律 403。
+- 落卡 data 的 **`cwd` 必须留空**：非空在 reconcile 语义里 = 「新会话卡（会话还没创建）」，会被当成待创建占位处理。标题随拖拽源（`text/session-title`）带入，后续摘要轮询可覆盖。
+- **出板**：把会话卡拖回侧栏的「临时会话」区 → `handleUnassignSession`（清归属，卡由 reconcile 清理）；删除画布上的执行会话卡 → `POST /api/task-cards/unbind` 清 `session_id`（否则 reconcile 立刻补回来）。
+
 ## 顶栏功能区与调度器面板
 
-- **BoardTopbar（左上）**：看板名（可改名）+ 新建会话/磨砂/清空 + 执行队列。看板全局共享：列表/新建/排序不再跟随选中目录（projectKey）变化。
+- **BoardTopbar（左上）**：看板名（只读，改名在侧栏看板行）+ 刷新 / 新建会话 / 磨砂调节 / 清空画布。看板全局共享：列表/新建/排序不再跟随选中目录（projectKey）变化。
+- **进行中面板在左下角**（`BoardControls`，与缩放控制同区）：列出运行中 + 工作中（展开态）的会话卡，点击定位。
 - **SchedulerPanel（右上）**：调度器状态面板——状态字加深，任务队列为具体任务可点击定位到画布对应卡。
 - 缩放控制（Controls）在左下角，小地图留右下（带玻璃框：board-card-glass 背景 + 磨砂 + 1px 边框 + 圆角阴影）。
 
@@ -78,7 +96,7 @@ npm run dev          # 单进程：HTTP + WS 同端口（yjs 房间内嵌，无�
 ## 派生边 reconcile 细节（board-reconcile）
 
 - reconcile 读业务表 → mutateBoard（openDirectConnection.transact）→ Y.Doc 增量增删。
-- 确定性 id：会话卡 `session-<sid>`、任务卡 `task-<cardId>`、exec 线 `exec-<cardId>-<sessionId>`、依赖线 `link-<from>-<to>-<kind>` → 幂等。
-- 补卡落点：findFreeSpot（4 列布局，每行 4 卡逐行找空位）。
+- 确定性 id：会话卡 `session-<sid>`、exec 线 `exec-<cardId>-<sessionId>`、依赖线 `link-<from>-<to>-<kind>`、fork 线 `fork-<parentSid>-<sid>` → 幂等。
+- 补卡落点：优先锚定锚点右侧（exec 卡锚任务卡、fork 卡锚源会话卡，`findSpotNearAnchor`），无锚点才回退 4 列 `findFreeSpot`。
 - 孤儿删：画布有、业务表无 → 删节点 + 级联删边（幂等，唯一执行者）。
-- 前端 onEdgesChange 对 exec/依赖边跳过删除；后端 reconcile 负责一致性。
+- 前端 onEdgesChange 对 exec/依赖/fork 边跳过删除；后端 reconcile 负责一致性。

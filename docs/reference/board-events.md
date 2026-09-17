@@ -17,8 +17,8 @@ React Flow 原生提供三个 CSS class，挂在节点内元素上即隔离画�
 源码依据：`@xyflow/system` 的 `createFilter`（nowheel → 禁 zoom；nopan → 禁 pan；节点内 nodrag 元素不参与 drag）。
 
 **对比 tldraw（已废弃的坑）**：
-- 无需 copy 拦截：RF 不设全局 `user-select:none`，便笺/消息文本选中复制天然可用。
-- 无需激活态判定：`nowheel` 只在可滚动容器内生效，背景卡不吞滚轮。
+- **保留一处 copy 拦截**：RF 的 CanvasStage 在 document 上监听 Ctrl+C 复制选中节点（`copySelected`），会劫持工作台内的文本选区——所以 `SessionWorkbench` 仍有一个原生 `copy` 监听：有非空选区时 `stopPropagation` 放行浏览器原生复制，无选区时放行给 RF 复制节点。tldraw 时代那套「恢复选区 / 拦截复制篡改」不需要。
+- 无需激活态判定：`nowheel` 是**按 class 命中**的（`isWrappedWithClass`）——挂了该 class 的区域滚轮不缩放画布，与它实际是否可滚动无关；背景卡不吞滚轮。
 - 无需 `canScroll()` 声明、原生 wheel 监听、radix 菜单失同步修复。
 - 节点内输入框/按钮天然可交互（非 nodrag 元素按下会拖节点——所以交互元素必须加 nodrag）。
 
@@ -90,8 +90,9 @@ React Flow 原生提供三个 CSS class，挂在节点内元素上即隔离画�
 
 - Delete/Backspace → ReactFlow `onBeforeDelete` → 按节点类型走确认制：
   - 会话卡 / 任务卡：确认弹窗 → `deleteNodeWithConfirm`（确认 → 删 Y.Doc 节点 + 调删除 API）。
-  - 便笺 / 文本：直接删。
-  - 派生边（exec/依赖）：onEdgesChange 跳过删除，后端 reconcile 兜底补回。
+  - **New session 占位卡：直接删**（`cwd` 非空 = 会话还没创建，无确认弹窗）。
+  - 便笺 / 文本 / 图片：直接删。
+  - 派生边（exec / 依赖 / fork）：onEdgesChange 跳过删除，后端 reconcile 兜底补回。
 - 返回 false 阻止 RF 默认删除（由我们处理确认流程）。
 
 ## 四、相关文件

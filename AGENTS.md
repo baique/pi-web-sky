@@ -50,7 +50,7 @@ Browser                Next.js Server              AgentSession (in-process)
   ├─ GET /api/agent/running ───────▶ running id snapshot   │
   │                        │                               │
   ├─ send message ─────────▶ POST /api/agent/[id]          │
-  │                        │   startRpcSession() ─────────▶│ createAgentSession()
+  │                        │   startRpcSession() ─────────▶│ createAgentSessionFromServices()
   │                        │   session.send(cmd) ─────────▶│ session.prompt()
   │                        │                               │
   ├─ SSE connect ──────────▶ GET /api/agent/[id]/events    │
@@ -61,7 +61,7 @@ Browser                Next.js Server              AgentSession (in-process)
 **Session browsing** (read-only): reads `.jsonl` files through SDK `SessionManager` helpers and `lib/session-reader.ts` — no AgentSession created.  
 **Sending a message**: `startRpcSession()` in `lib/rpc-manager.ts` creates an AgentSession in-process.
 
-**Board mode** (会话看板): selecting a board (`?board=`) replaces the ChatWindow area with the React Flow canvas (`SessionCanvas`) — the sidebar stays visible, exiting / clicking a session / new-session returns to chat. **画布已迁移到自研（React Flow + yjs，2026-09）**：每看板一个 Y.Doc（`@hocuspocus/server` 内嵌：`server.mjs` + `lib/yjs-room-server.mjs`，同端口），画布文档持久化到 `~/.pi/agent/sync.db` 的 `yjs_documents` 表；前端 `HocuspocusProvider` 连接（CRDT 自动合并，无全量保存/乐观锁/409）。业务派生边（exec/依赖线/会话卡/任务卡）由**后端 reconcile** 从业务表渲染（`lib/board-reconcile.ts`）。旧 `lib/board-store.ts` 的 nodes/edges 表仅作业务表辅助（countNodes/级联清空）保留，画布渲染完全走 yjs。`__running__` 系统看板的后端支持（`getSystemRunningBoard`，不落库恒存在）保留供 `/api/boards` 使用，UI 入口已移除。
+**Board mode** (会话看板): selecting a board (`?board=`) replaces the ChatWindow area with the React Flow canvas (`SessionCanvas`) — the sidebar stays visible, exiting / clicking a session / new-session returns to chat. **画布已迁移到自研（React Flow + yjs，2026-09）**：每看板一个 Y.Doc（`@hocuspocus/server` 内嵌：`server.mjs` + `lib/yjs-room-server.mjs`，同端口），画布文档持久化到 `~/.pi/agent/sync.db` 的 `yjs_documents` 表；前端 `HocuspocusProvider` 连接（CRDT 自动合并，无全量保存/乐观锁/409）。业务派生元素（会话卡 + exec / 依赖 / fork 线）由**后端 reconcile** 从业务表渲染（`lib/board-reconcile.ts`）。**任务卡不是派生元素**——它是用户画布内容（前端建/删），reconcile 只清孤儿、绝不反向补卡；旧 `lib/board-store.ts` 的 nodes/edges 表是 tldraw 遗留，仅作级联清空保留，画布渲染完全走 yjs。`__running__` 系统看板的后端支持（`getSystemRunningBoard`，不落库恒存在）保留供 `/api/boards` 使用，UI 入口已移除。
 
 ---
 
@@ -71,17 +71,17 @@ Browser                Next.js Server              AgentSession (in-process)
 
 - **发送消息必须新建测试会话**：一切需要发送消息 / 会写入会话文件的场景（发 prompt、跑命令、改文件），不允许使用用户已有会话，必须自行新建（`/api/agent/new` 指定 cwd 新建，或复制会话文件到临时 cwd）。只读测试（加载、滚动、查看 DOM）不受限，可用用户已有会话。
 - **AgentSession wrapper 挂在 `globalThis.__piSessions`**：`globalThis` 存活 Next.js 热重载，模块级 Map 不行。并发 `startRpcSession()` 共享单个 start Promise（`__piStartLocks`），空闲 10 分钟超时。
-- **fork 必须立即 destroy wrapper**：`AgentSession.fork()` 原地改内部状态——fork 后 `inner.sessionId` 已是新会话 id。wrapper 留在注册表会导致后续请求拿到已 fork 状态、fork 链损坏。`send("fork")` 拿到 `newSessionId` 后立刻 `this.destroy()`。
+- **fork 必须立即销毁 wrapper**：fork 由 `SessionManager.create` / `createBranchedSession` 手工造分支文件（不再用 `AgentSession.fork()`），拿到 `newSessionId` 后立刻 `await this.shutdown()`——旧 wrapper 留在注册表会让后续请求拿到已 fork 的内存态、fork 链损坏。建 session_meta 行放在 shutdown 之后（`resolveProject` 的 await 不能落在这个窗口里）。
 - **会话文件可整体重写**：`parentSession` 仅展示元数据，对聊天内容零影响；删会话级联重挂子节点可安全 `writeFileSync` 整文件。
-- **ToolCall 字段归一化**：pi 存 `{type:"toolCall", id, name, arguments}`，组件用 `{toolCallId, toolName, input}`；`lib/normalize.ts` 的 `normalizeToolCalls()` 在文件加载和流式事件两处都要调。
-- **看板空画布保护**：`PUT /api/boards/[id]/canvas` 默认拒绝空 nodes 覆盖已有内容（`empty-overwrite` → 409）——防客户端未加载完成把看板清空；用户显式清空才传 `allowEmpty: true`。
+- **ToolCall 字段归一化****：pi 存 `{type:"toolCall", id, name, arguments}`，组件用 `{toolCallId, toolName, input}`；`lib/normalize.ts` 的 `normalizeToolCalls()` 在文件加载和流式事件两处都要调。
+- **看板卡片入板先归属后落卡**：拖会话进看板（画布落点 / 侧栏看板行 / 工具栏新建）都必须先写归属（`assignSessionToTask`）再落卡 —— 任务看板上的无归属会话卡会被 reconcile 当孤儿删。详见 [boards.md](docs/reference/boards.md)。
 - **SQLite 事务铁律**：不支持嵌套 BEGIN。`deleteBoardCascade` / `renameTaskBoard` 必须无事务，由调用方（`deleteBoard` / `deleteTask` / `updateTask`）在自身事务内调用。
 - **看板双源状态**：卡片内状态以展开卡的 `useAgentSession` SSE 为准，看板聚合态以 `/api/agent/running` 轮询为准——不要混用打架。
-- **SSE 重连**：`ChatWindow` mount 时若 `state.isStreaming === true` 自动重连；compaction 事件新旧两套都要认（`compaction_*` / `auto_compaction_*`）。
-- **运行状态轮询**：2.5s 轮询、后台 tab 暂停；prompt 用单调 run id，旧 run 的迟到 SSE / 慢 reconciliation 必须忽略，防复活过期流式气泡。
+- **SSE 重连**：`useAgentSession` mount 时拉 `GET /api/sessions/[id]/state`，`isStreaming` 或 `isPromptRunning` 为真则自动重连 SSE；compaction 事件新旧两套都要认（`compaction_*` / `auto_compaction_*`）。
+- **运行状态轮询**：侧栏 2.5s 轮询 `/api/agent/running`（后台 tab 暂停，画布不暂停，只额外补一次）；prompt 用单调 run id，旧 run 的迟到 SSE / 慢 reconciliation 必须忽略，防复活过期流式气泡。
 - **worktree 路径比较用 `samePath()` 绝不用 `===`**：git 在 Windows 也输出 POSIX 路径，读出来先过 `toNativePath()`；分支名不是路径，保留正斜杠。
 - **文件白名单只有一个实现**：`isPathWithinRoots()`（`lib/path-security.ts`）是 `isFilePathAllowed()` 的唯一实现，重解析 + case-fold 两侧，别另起炉灶。
-- **yjs 画布铁律**：① `nodeTypes`/`edgeTypes` 必须模块级常量（引用不稳定 → 每次渲染重建 → 连接堆积）；② 派生元素（会话卡/exec线/依赖线）由**后端 reconcile** 权威渲染（确定性 id 幂等），前端只做用户布局增量，**不做孤儿清理**（多端不互相删卡）；③ 节点内交互用 RF 原生 `nowheel`/`nodrag`/`nopan`（可滚动区 nowheel、按钮输入 nodrag）；④ 节点必须有 `<Handle>` 才能连线。详见 [boards.md](docs/reference/boards.md)。
+- **yjs 画布铁律**：① `nodeTypes`/`edgeTypes` 必须模块级常量（引用不稳定 → 每次渲染重建 → 连接堆积）；② 派生元素（会话卡 / exec 线 / 依赖线 / fork 线）由**后端 reconcile** 权威渲染（确定性 id 幂等），前端只做用户布局增量，**不做孤儿清理**（多端不互相删卡）；高频运行态（phase / runningMs / execStatus）只走本地镜像不写 Y.Doc；③ 节点内交互用 RF 原生 `nowheel`/`nodrag`/`nopan`（可滚动区 nowheel、按钮输入 nodrag）；④ 节点必须有 `<Handle>` 才能连线。详见 [boards.md](docs/reference/boards.md)。
 - **RF 不设全局 `user-select:none`**：便笺/message 文本选中复制天然可用，无需 tldraw 时代的手动恢复/拦截 hack。
 - **`enabledModels` 是 `--models` 语法**：minimatch glob / 模糊匹配 / `:thinkingLevel` 后缀，绝不能当字面字符串比较；交给 `lib/model-scope.ts` 委托 SDK 解析。
 

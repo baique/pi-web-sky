@@ -4,11 +4,12 @@ Pi Web 会把同一个 Git 项目的 main checkout 和 linked worktree 放在同
 
 ## 什么时候会看到 Worktree 控件
 
-当左上角选择的是 Git 仓库根目录时，项目选择器下面会出现 worktree 切换控件。
+当左上角选择的是 Git 仓库根目录时，worktree 切换控件出现在**项目选择器同一行的右侧**（路径按钮的 suffix）。
 
-以下情况不会显示：
+以下情况控件仍在，但禁用（悬停显示原因）：
 
 - 当前目录不是 Git 仓库。
+- 当前目录是仓库子目录（子目录会话保持自身项目身份）。
 - 当前目录在某个 Git 仓库里面，但不是仓库根目录。
 - Git 无法读取这个仓库的 worktree 列表。
 
@@ -74,8 +75,8 @@ Pi Web 按 project root 分组会话，所以 main checkout 和 linked worktree 
 
 ## 常见问题
 
-**为什么我看不到 worktree 切换器？**
-请确认当前选择的是 Git 仓库根目录。非 Git 目录和仓库子目录会显示一行轻提示，而不是切换器。
+**为什么我没看到 worktree 切换器？**
+请确认当前选择的是 Git 仓库根目录。非 Git 目录和仓库子目录仍会渲染该控件，只是禁用——悬停可见原因。（控件在路径按钮旁边，不在项目选择器下面。）
 
 **为什么某个 branch 不能创建 worktree？**
 Git 不允许同一个 branch 同时被多个 worktree checkout。你可以切到已有的 worktree，或者先删除那个 checkout。

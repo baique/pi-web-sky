@@ -28,21 +28,21 @@
 ### 坑 4：滑块拖动卡顿的根因不是 canvas 生成，是 React 重渲染
 - 实测：`onChange` 每格 → `updateWallSettings` → AppShell 巨型组件重渲染（单格 20ms+ 主线程阻塞，超 16ms 帧预算）；canvas 生成反而被防抖挡住、PNG 编码只要几 ms。
 - 解（`GlassSlider` 组件）：滑块改「本地 state 即时显示 + 松手 / 键盘提交全局」→ 拖动中只重渲染面板小组件，AppShell 零重渲染。
-- 拖动中实时预览：`previewBubbleBlur` 直接写 CSS 变量（不经过 React），防抖 120ms，**只重算气泡档不碰 chrome 档**；生成版本号递增防过期覆盖。
-- 重生成防抖 400ms（连续拖 offsetX / 滑块时停顿后才生成）；生成降采样 0.5（模糊图对清晰度不敏感）。
+- 拖动中实时预览：`previewBubbleBlur` 直接写 CSS 变量（不经过 React），防抖 120ms，**只重算气泡档 + 卡片叠加档（--glass-bg-image / --glass-bg-image-card），不碰 chrome / scrim 档**；生成版本号递增防过期覆盖。
+- 重生成防抖 120ms（与预览防抖同档：停手后快速生效）；生成降采样 0.5（模糊图对清晰度不敏感）。
 
 ### 坑 5：调试壁纸注入（playwright 环境 file chooser 受限）
 - 调试时点壁纸按钮会弹 file chooser，playwright 安全限制无法选择文件（modal 卡住会拦截后续所有工具调用，需用 file_upload 处理或刷新）。
 - 改用 IndexedDB 写入：`fetch('/test-assets/wallpaper-jinx.jpg') → blob → indexedDB('pi-web') store('bg-image') put(blob,'wallpaper')`，reload 即生效（走 useAppBackground 读取路径）。
-- 测试壁纸已入库 `public/test-assets/wallpaper-jinx.jpg`（来源 `/mnt/d/Download/`），别删。
+- 测试壁纸曾入库 `public/test-assets/wallpaper-jinx.jpg`，**该目录现已不在仓库**——要复现就临时放一张图到 `public/` 下再走上面的 IndexedDB 注入。
 
 ### 坑 6：进程操作自杀
-- `pkill -f "next dev"` 会匹配到自身 bash 命令行（含 "next dev" 字样）→ 把自己杀了。用 `pkill -f "[n]ext dev"`（方括号正则）或精确 PID。
-- **系统服务可能用 next-server 跑别的服务，不要全局杀 next-server**；只杀自己起的 dev（用 tmux 会话管理，见下）。
+- `pkill -f` 会匹配到自身 bash 命令行（命令串里就含目标字样）→ 把自己杀了。用方括号正则（如 `pkill -f "[s]erver.mjs"`）或精确 PID。本项目 dev 入口是 `npm run dev` → `node server.mjs`，**没有 `next dev` 命令行**。
+- **系统服务可能用 next-server 跑别的服务，不要全局杀 next-server**；只杀自己起的 dev（用 tmux 会话管理）。
 
 ## 端口约定
 
-- `npm run dev` / `start`：127.0.0.1:30143（见 package.json）；历史上有过 30141/30142 双实例并存时期，遇到旧文档提到这两个端口一律以 package.json 为准。
+- `npm run dev` / `start`：127.0.0.1:**30143**（端口定义在 `server.mjs`：`process.env.PORT ?? 30143`，dev/start 共用；package.json 里没有端口号）；历史上有过 30141/30142 双实例并存时期，遇到旧文档提到这两个端口一律以 `server.mjs` 为准。
 
 ## 会话 / 目录（pi 硬约束）
 
