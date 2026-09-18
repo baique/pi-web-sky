@@ -12,6 +12,7 @@ import "prosemirror-view/style/prosemirror.css";
 import { HIGHLIGHT_SHADOW, useBoardSearch } from "@/components/canvas/BoardSearchContext";
 import { EmojiPickerField } from "@/components/canvas/EmojiPickerField";
 import { useCardGlass } from "@/hooks/useCardGlass";
+import { useIMEGuard } from "@/hooks/useIMEGuard";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { memoBoardNode } from "./memoNode";
 import { formatNoteDefaultTitle } from "@/lib/note-time";
@@ -51,6 +52,7 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
 
   // 玻璃（局部贴图）：从 RF store 读节点 position
   const { setContainer } = useCardGlass("var(--assistant-card-glass)");
+  const ime = useIMEGuard();
 
   // 本地编辑态（RF 无 tldraw editing 概念）；autofocus：双击画布创建便笺后直接进入编辑
   const [isEditing, setIsEditing] = useState(Boolean(data.autofocus));
@@ -278,8 +280,10 @@ function StickyNoteNodeImpl({ id, data, selected, width, height }: NodeProps & {
             ref={titleInputRef}
             value={titleDraft}
             onChange={(e) => setTitleDraft(e.target.value)}
+            {...ime.compositionProps}
             onKeyDown={(e) => {
               e.stopPropagation();
+              if (ime.isIMEBusy(e)) return;
               if (e.key === "Enter") commitTitleEdit();
               if (e.key === "Escape") cancelTitleEdit();
             }}
@@ -410,6 +414,8 @@ function NoteEditor({
 }) {
   // 取消中标记：Esc/取消按钮触发的取消不应被随后的 blur 自动保存抢先
   const cancellingRef = useRef(false);
+  // 正文编辑器的 Esc 同样要先让给输入法：组合中按 Esc 是取消候选，不是丢掉整篇便笺
+  const ime = useIMEGuard();
   const editor = useEditor({
     extensions: [StarterKit, Markdown],
     content: initialText || "",
@@ -460,6 +466,7 @@ function NoteEditor({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       e.stopPropagation();
+      if (ime.isIMEBusy(e)) return;
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         // 先同步当前内容（keydown 时 React setState 可能未提交），再让父完成保存
@@ -470,13 +477,14 @@ function NoteEditor({
         handleCancel();
       }
     },
-    [editor, onDraftChange, onExit, handleCancel],
+    [editor, onDraftChange, onExit, handleCancel, ime],
   );
 
   return (
     <div
       className="nodrag nowheel sticky-note-edit-wrap"
       data-testid="sticky-note-editor"
+      {...ime.compositionProps}
       onKeyDown={handleKeyDown}
       style={{
         flex: 1,

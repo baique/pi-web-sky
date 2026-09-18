@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatedDropdown } from "@/components/AnimatedDropdown";
+import { useIMEGuard } from "@/hooks/useIMEGuard";
 
 /**
  * 工作区选择器（worktree picker）：交互参照文件树下方（SessionSidebar）的选择器——
@@ -39,6 +40,7 @@ export function WorktreePicker({
   const [open, setOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [branch, setBranch] = useState("");
+  const ime = useIMEGuard();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -262,7 +264,9 @@ export function WorktreePicker({
               ref={newInputRef}
               value={branch}
               onChange={(e) => { setBranch(e.target.value); setErr(null); }}
+              {...ime.compositionProps}
               onKeyDown={(e) => {
+                if (ime.isIMEBusy(e)) return;
                 if (e.key === "Enter") { e.preventDefault(); void create(); }
                 if (e.key === "Escape") { setNewOpen(false); setBranch(""); setErr(null); }
               }}

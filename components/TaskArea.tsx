@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { useIMEGuard } from "@/hooks/useIMEGuard";
 import { FolderIcon } from "./FileIcons";
 import { AnimatedDropdown } from "./AnimatedDropdown";
 import { dropdownDirection } from "@/lib/dropdown-direction";
@@ -188,6 +189,7 @@ function TaskCard({
   dropAfter: boolean;
 }) {
   const { t } = useI18n();
+  const ime = useIMEGuard();
   /** 任务卡片默认收起：用户创建的任务默认折叠，点击展开；
    *  选中会话属于本任务时自动展开（会话切换后卡片保持展开）。 */
   const [collapsed, setCollapsed] = useState(true);
@@ -385,7 +387,9 @@ function TaskCard({
               ref={renameRef}
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
+              {...ime.compositionProps}
               onKeyDown={(e) => {
+                if (ime.isIMEBusy(e)) return;
                 if (e.key === "Enter") commitRename();
                 if (e.key === "Escape") setRenaming(false);
               }}
@@ -666,6 +670,7 @@ export function TaskArea({
   onReorderTasks,
 }: Props) {
   const { t } = useI18n();
+  const ime = useIMEGuard();
   const [newTaskName, setNewTaskName] = useState("");
   const [createHovered, setCreateHovered] = useState(false);
   const [cancelHovered, setCancelHovered] = useState(false);
@@ -770,7 +775,9 @@ export function TaskArea({
             ref={newTaskRef}
             value={newTaskName}
             onChange={(e) => setNewTaskName(e.target.value)}
+            {...ime.compositionProps}
             onKeyDown={(e) => {
+              if (ime.isIMEBusy(e)) return;
               if (e.key === "Enter") commitNewTask();
               if (e.key === "Escape") { onNewTaskOpenChange(false); setNewTaskName(""); }
             }}

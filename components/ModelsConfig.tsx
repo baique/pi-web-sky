@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
+import { useIMEGuard } from "@/hooks/useIMEGuard";
 import type { ModelCatalogPreset, ModelCatalogRecommendation } from "@/lib/model-catalog";
 import type { DiscoveredModel } from "@/lib/model-discovery";
 import {
@@ -210,6 +211,8 @@ function SecretTextInput({
 }) {
   const [visible, setVisible] = useState(false);
   const { t } = useI18n();
+  // IME 守卫放在包装组件内部：Enter 在输入法组合中只上屏，不触发调用方的提交。
+  const ime = useIMEGuard();
 
   useEffect(() => {
     if (!value) setVisible(false);
@@ -221,7 +224,11 @@ function SecretTextInput({
         type={visible ? "text" : "password"}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
+        {...ime.compositionProps}
+        onKeyDown={(e) => {
+          if (ime.isIMEBusy(e)) return;
+          onKeyDown?.(e);
+        }}
         placeholder={placeholder}
         style={{ ...inputStyle, paddingRight: 34, fontFamily: mono ? "var(--font-mono)" : "inherit" }}
         autoComplete={autoComplete}
@@ -1306,6 +1313,7 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
   const [loginState, setLoginState] = useState<OAuthLoginState>({ phase: "idle" });
   const { t } = useI18n();
   const [inputValue, setInputValue] = useState("");
+  const ime = useIMEGuard();
   const eventSourceRef = useRef<EventSource | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -1487,7 +1495,11 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
                 ref={inputRef}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") submitCode(loginState.token, inputValue); }}
+                {...ime.compositionProps}
+                onKeyDown={(e) => {
+                  if (ime.isIMEBusy(e)) return;
+                  if (e.key === "Enter") submitCode(loginState.token, inputValue);
+                }}
                 placeholder={loginState.phase === "auth" ? "http://localhost:1455/auth/callback?code=…" : (loginState.placeholder ?? "Enter value…")}
                 style={{ flex: 1, padding: "6px 9px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text)", fontSize: 12, outline: "none", fontFamily: "var(--font-mono)", boxSizing: "border-box" }}
               />
@@ -1749,6 +1761,8 @@ function AddProviderPicker({
 }: AddProviderPickerProps) {
   const [search, setSearch] = useState("");
   const { t } = useI18n();
+  // Esc 在组合中只取消候选，不应关掉整个弹窗（丢掉未保存的 API key / Base URL 编辑）
+  const ime = useIMEGuard();
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setTimeout(() => inputRef.current?.focus(), 30); }, []);
@@ -1792,7 +1806,11 @@ function AddProviderPicker({
             ref={inputRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+            {...ime.compositionProps}
+            onKeyDown={(e) => {
+              if (ime.isIMEBusy(e)) return;
+              if (e.key === "Escape") onClose();
+            }}
              placeholder={t("i18n.searchProviders")}
             style={{ flex: 1, background: "none", border: "none", outline: "none", color: "var(--text)", fontSize: 13, boxSizing: "border-box" }}
           />

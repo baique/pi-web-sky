@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { useReactFlow } from "@xyflow/react";
 import { useI18n } from "@/hooks/useI18n";
+import { useIMEGuard } from "@/hooks/useIMEGuard";
 import { useBoardSearch } from "./BoardSearchContext";
 import { boardFloatGlass } from "./board-glass";
 
@@ -58,6 +59,7 @@ export function BoardSearch({
   onViewportSave?: (vp: { x: number; y: number; zoom: number }) => void;
 }) {
   const { t } = useI18n();
+  const ime = useIMEGuard();
   const { setHighlight } = useBoardSearch();
   const { setCenter, getViewport, getNodes } = useReactFlow();
   const [query, setQuery] = useState("");
@@ -203,6 +205,7 @@ export function BoardSearch({
   }, [totalCount, activeIndex, locate]);
 
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (ime.isIMEBusy(e)) return;
     if (e.key === "Enter" || e.key === "ArrowDown") { e.preventDefault(); locateNext(); }
     else if (e.key === "ArrowUp") { e.preventDefault(); locatePrev(); }
     else if (e.key === "Escape") {
@@ -210,7 +213,7 @@ export function BoardSearch({
       if (open) setOpen(false);
       else { setQuery(""); setActiveIndex(-1); focusEl.current?.blur(); }
     }
-  }, [open, locateNext, locatePrev, focusEl]);
+  }, [open, locateNext, locatePrev, focusEl, ime]);
 
   const showDropdown = open && query.trim().length > 0;
   // 正文搜索中（bodyHits === null 且已有关键词）= 首次结果未回；空数组 = 已返回无命中
@@ -228,6 +231,7 @@ export function BoardSearch({
           ref={focusEl}
           value={query}
           onChange={(e) => { setQuery(e.target.value); setActiveIndex(-1); setOpen(true); }}
+          {...ime.compositionProps}
           onKeyDown={onKeyDown}
           onFocus={() => { if (query.trim()) setOpen(true); }}
           onBlur={() => setOpen(false)}

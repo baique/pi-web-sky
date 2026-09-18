@@ -7,6 +7,7 @@ import { SessionWorkbench } from "@/components/canvas/SessionWorkbench";
 import { CARD_W, CARD_H } from "@/hooks/useBoardCanvas";
 import type { SessionCardData } from "@/hooks/useBoardCanvas";
 import { useCardGlass } from "@/hooks/useCardGlass";
+import { useIMEGuard } from "@/hooks/useIMEGuard";
 import { useBoardCanvasOps } from "./BoardCanvasContext";
 import { useSessionRunning, useSessionSummary } from "@/hooks/useBoardCanvas";
 import { memoBoardNode } from "./memoNode";
@@ -67,6 +68,7 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
   const isWorktree = summary?.isWorktree ?? data.isWorktree;
   const isNewSession = Boolean(cwd);
   const { setContainer } = useCardGlass("var(--board-card-glass)");
+  const ime = useIMEGuard();
 
   // ---- 展开态工作台按需挂载（离屏缓冲）----
   // 卡片外壳（标题栏/Handle/边框）常驻 DOM，重量级 SessionWorkbench 仅在
@@ -399,8 +401,10 @@ function SessionCardNodeImpl({ id, data, selected, width, height }: NodeProps & 
             ref={renameInputRef}
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
+            {...ime.compositionProps}
             onKeyDown={(e) => {
               e.stopPropagation();
+              if (ime.isIMEBusy(e)) return;
               if (e.key === "Enter") { cancelRenameRef.current = false; void commitRename(); }
               if (e.key === "Escape") cancelRename();
             }}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { useIMEGuard } from "@/hooks/useIMEGuard";
 import type { BoardInfo } from "@/lib/board-types";
 
 /**
@@ -29,6 +30,7 @@ export function BoardSection({
   refreshKey?: number;
 }) {
   const { t } = useI18n();
+  const ime = useIMEGuard();
   const [boards, setBoards] = useState<BoardInfo[]>([]);
   const [, setLoading] = useState(true);
   const [newOpen, setNewOpen] = useState(false);
@@ -250,7 +252,9 @@ export function BoardSection({
                 ref={newInputRef}
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
+                {...ime.compositionProps}
                 onKeyDown={(e) => {
+                  if (ime.isIMEBusy(e)) return;
                   if (e.key === "Enter") void create();
                   if (e.key === "Escape") { setNewOpen(false); setNewName(""); }
                 }}
@@ -428,6 +432,7 @@ function BoardRow({
   onOpenBoard: () => void;
 }) {
   const { t } = useI18n();
+  const ime = useIMEGuard();
   const [hovered, setHovered] = useState(false);
   /** 会话拖入看板行：高亮态 + 成功落卡后的短暂闪光（视觉同「会话拖入任务」） */
   const [sessionDrop, setSessionDrop] = useState(false);
@@ -549,7 +554,9 @@ function BoardRow({
               ref={renameInputRef}
               value={renameValue}
               onChange={(e) => onRenameValueChange(e.target.value)}
+              {...ime.compositionProps}
               onKeyDown={(e) => {
+                if (ime.isIMEBusy(e)) return;
                 if (e.key === "Enter") onCommitRename();
                 if (e.key === "Escape") onCancelRename();
               }}

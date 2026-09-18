@@ -15,6 +15,7 @@ import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { useI18n } from "@/hooks/useI18n";
+import { useIMEGuard } from "@/hooks/useIMEGuard";
 import { useBroadcast } from "@/hooks/useBroadcast";
 import { useProviderQuota } from "@/hooks/useProviderQuota";
 import { useTheme } from "@/hooks/useTheme";
@@ -1568,6 +1569,7 @@ function ExtensionDialog({
   onRespond: (request: ExtensionDialogRequest, response: { value: string } | { confirmed: boolean } | { cancelled: true }) => void;
 }) {
   const { t } = useI18n();
+  const ime = useIMEGuard();
   const [value, setValue] = useState(request.method === "editor" ? request.prefill ?? "" : "");
 
   useEffect(() => {
@@ -1648,7 +1650,9 @@ function ExtensionDialog({
               value={value}
               placeholder={request.placeholder}
               onChange={(e) => setValue(e.target.value)}
+              {...ime.compositionProps}
               onKeyDown={(e) => {
+                if (ime.isIMEBusy(e)) return;
                 if (e.key === "Enter") submitValue();
                 if (e.key === "Escape") onRespond(request, { cancelled: true });
               }}
@@ -1669,7 +1673,9 @@ function ExtensionDialog({
               autoFocus
               value={value}
               onChange={(e) => setValue(e.target.value)}
+              {...ime.compositionProps}
               onKeyDown={(e) => {
+                if (ime.isIMEBusy(e)) return;
                 if (e.key === "Escape") onRespond(request, { cancelled: true });
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submitValue();
               }}

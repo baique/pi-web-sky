@@ -10,6 +10,7 @@ import { getProjectActivity, getRecentProjects } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { sessionTimeGroup, type SessionTimeGroup } from "@/lib/session-time-group";
 import { useI18n } from "@/hooks/useI18n";
+import { useIMEGuard } from "@/hooks/useIMEGuard";
 import { AnimatedDropdown } from "./AnimatedDropdown";
 import { dropdownDirection } from "@/lib/dropdown-direction";
 import { DirectoryPicker } from "./DirectoryPicker";
@@ -2136,6 +2137,7 @@ function SessionItem({
   onToggleCollapse?: () => void;
 }) {
   const { t } = useI18n();
+  const ime = useIMEGuard();
   const [hovered, setHovered] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -2337,7 +2339,9 @@ function SessionItem({
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
           onBlur={commitRename}
+          {...ime.compositionProps}
           onKeyDown={(e) => {
+            if (ime.isIMEBusy(e)) return;
             if (e.key === "Enter") commitRename();
             if (e.key === "Escape") setRenaming(false);
           }}

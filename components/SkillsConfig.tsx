@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
+import { useIMEGuard } from "@/hooks/useIMEGuard";
 import type {
   SkillInfo as Skill,
   SkillInstallScope,
@@ -375,6 +376,7 @@ function AddSkillPanel({
   onInstalled: () => void;
 }) {
   const { t } = useI18n();
+  const ime = useIMEGuard();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SkillSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -473,7 +475,9 @@ function AddSkillPanel({
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            {...ime.compositionProps}
             onKeyDown={(e) => {
+              if (ime.isIMEBusy(e)) return;
               if (e.key === "Enter") search(query);
             }}
              placeholder={t("i18n.skillSearchPlaceholder")}

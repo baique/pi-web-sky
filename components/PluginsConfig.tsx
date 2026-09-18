@@ -5,6 +5,7 @@ import { sendAgentCommand } from "@/lib/agent-client";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { PluginPackageInfo, PluginsResponse } from "@/lib/api-types";
 import { useI18n } from "@/hooks/useI18n";
+import { useIMEGuard } from "@/hooks/useIMEGuard";
 import { extractPathsFromClipboardData } from "@/lib/clipboard-paths";
 
 type PluginScope = PluginPackageInfo["scope"];
@@ -308,6 +309,7 @@ function AddPluginPanel({
   onInstall: () => void;
 }) {
   const { t } = useI18n();
+  const ime = useIMEGuard();
   const inputRef = useRef<HTMLInputElement>(null);
   const examples = ["npm:@scope/pi-plugin", "git:https://github.com/user/repo", "/absolute/path/to/plugin"];
 
@@ -383,7 +385,9 @@ function AddPluginPanel({
             fontSize: 13,
             outline: "none",
           }}
+          {...ime.compositionProps}
           onKeyDown={(e) => {
+            if (ime.isIMEBusy(e)) return;
             if (e.key === "Enter" && source.trim() && !busy) onInstall();
           }}
         />

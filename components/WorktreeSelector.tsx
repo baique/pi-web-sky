@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
+import { useIMEGuard } from "@/hooks/useIMEGuard";
 import { AnimatedDropdown } from "./AnimatedDropdown";
 
 interface WorktreeEntry {
@@ -110,6 +111,7 @@ export function WorktreeSelector({ cwd, onSelect, style, labelStyle, onOpenChang
   const [filter, setFilter] = useState("");
   const [newOpen, setNewOpen] = useState(false);
   const [newBranch, setNewBranch] = useState("");
+  const ime = useIMEGuard();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
@@ -530,7 +532,9 @@ export function WorktreeSelector({ cwd, onSelect, style, labelStyle, onOpenChang
                 setNewBranch(e.target.value);
                 setError(null);
               }}
+              {...ime.compositionProps}
               onKeyDown={(e) => {
+                if (ime.isIMEBusy(e)) return;
                 if (e.key === "Enter") {
                   e.preventDefault();
                   void handleCreate();
