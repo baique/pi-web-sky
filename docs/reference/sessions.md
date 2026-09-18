@@ -33,11 +33,17 @@ Tool names are passed at session creation (`POST /api/agent/new` → `toolNames[
 
 ## Specified session id + create-on-persist
 
-New sessions can carry a client-chosen id: `POST /api/agent/new` accepts an `id` field (validated against the SDK's `assertValidSessionId` rule: alphanumerics plus `-_.`, must start/end alphanumeric). `startRpcSession` passes it to `SessionManager.create(cwd, dir, { id })`, so the real session id equals the client-supplied one — the caller knows the id **before** the session is ready, which is what task/board bindings rely on (no draft-card waiting, no polling to "promote").
+New sessions can carry a client-chosen id: `POST /api/agent/new` accepts an `id` field (validated against the SDK's `assertValidSessionId` rule: alphanumerics plus `-_.`, must start/end alphanumeric — the route rejects anything else with `Invalid session id`). `startRpcSession` passes it to `SessionManager.create(cwd, dir, { id })`, so the real session id equals the client-supplied one — the caller knows the id **before** the session is ready, which is what task/board bindings rely on (no draft-card waiting, no polling to "promote"). 前端一律用 `lib/id.ts` 的 `newId()` 生成（它同时兼顾非安全上下文）；**别拿目录/描述当 id**（2026-09-18 修的旧写法 `initial:<cwd>` 带 `:` 与 `/`，`?cwd=` 深链的第一条消息会被 400 挡下）。
 
 Pi delays the first JSONL flush until an assistant message exists. Pi Web overrides this with `persistNewSessionFile()` in `startRpcSession`: the empty header is written immediately and the manager is marked `flushed`, so a session exists on disk from birth and survives page reloads. This also makes the old `persistBashOnlySession` fallback unnecessary (removed).
 
 The last preset explicitly selected by the user is stored in browser `localStorage` and initializes fresh-session composers only. Existing sessions never trust that preference; they use their live `get_tools` state or pi's default when no wrapper exists.
+
+## New-session draft slots (`tmp_new_<项目>` / `task_<id>`)
+
+新建会话输入框的**草稿槽不是会话 id**：会话 id 每点一次新建都换（必须唯一），拿它当草稿键就记不住；两者以 `newSessionId` / `newSessionDraftKey` 两个 props 分开传。草稿槽与会话 id 解耦、跨多次「新建」存活 —— 临时会话按**项目**一份 `tmp_new_<项目身份>`（同项目 worktree 共用；`projectKey` 未定时退回 `cwd`），任务新建 `task_<任务id>`（`lib/draft-store.ts` 内存表，发送成功由 `clearInput` 清空，组件卸载不清）。
+
+两处容易弄反的地方：① 任务归属的 `draftId` 校验（`draftId === 本轮会话 id`）在 AppShell（显示/草稿槽）与 `useAgentSession.ensureNewSession`（创建请求）**必须同一个谓词**，AppShell 的 `newSessionTaskId` 只在新建会话态给出；② 提交失败回填要用**此刻**的草稿键（`composerDraftKeyRef`）——转正后键从槽变成会话 id，用发起提交那次闭包里的旧值会把文字写进看不见的槽（“迟到的提交失败”仍由 `restoreSubmission` 的 mounted/promoted 守卫拦住）。创建失败（`/api/agent/new` 报错）必须把 `sessionIdRef` 清回去，否则重试会绕过创建接口、丢掉任务归属。
 
 ## SSE reconnect on page refresh mid-stream
 

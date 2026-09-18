@@ -52,7 +52,7 @@ test("keeps the session event stream open through the idle grace window", () => 
   assert.match(promptDoneSource, /scheduleEventStreamClose\(sid\)/);
   assert.match(sendSource, /const definitivelyRejected = !promptRequestStarted/);
   assert.match(sendSource, /if \(!definitivelyRejected && sentSessionId\) \{[\s\S]*?waitForPromptSettlement/);
-  assert.match(sendSource, /restoreSubmission\(message, images, composerDraftKey\);[\s\S]*?if \(sentSessionId\) \{[\s\S]*?reconcileAgentState\(sentSessionId\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?closeEvents\(\)/);
+  assert.match(sendSource, /restoreSubmission\(message, images\);[\s\S]*?if \(sentSessionId\) \{[\s\S]*?reconcileAgentState\(sentSessionId\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?closeEvents\(\)/);
   assert.doesNotMatch(
     sendSource,
     /rpcPromptPendingRef\.current = false;\s*agentRunningRef\.current = false;\s*closeEvents\(\)/,
@@ -105,11 +105,12 @@ test("new-session promotion publishes the real session without draft rekeying", 
     source.indexOf("  const ensureNewSession = useCallback"),
   );
 
-  // draft key = 会话 UUID（发起时即确定），与 sid 恒等：不再需要 rekey 映射。
+  // 会话 id 与草稿槽解耦：转正回传的是会话 id（sourceDraftKey），不再需要 rekey 映射。
   assert.doesNotMatch(promoteSource, /draftKeyAliasesRef/);
   assert.doesNotMatch(promoteSource, /rekeyDraft/);
+  assert.match(promoteSource, /const provisionalDraftKey = newSessionId \?\? sid;/);
   assert.match(promoteSource, /}, provisionalDraftKey\)/);
-  assert.match(chatWindowSource, /draftKey=\{session\?\.id \?\? \(sessionIdRef\.current \?\? newSessionDraftKey\) \?\? undefined\}/);
+  assert.match(chatWindowSource, /draftKey=\{session\?\.id \?\? newSessionDraftKey \?\? undefined\}/);
 });
 
 test("fresh sessions restore the preferred tool preset without overriding existing sessions", () => {
@@ -165,10 +166,9 @@ test("stale fresh-session completion cannot replace the active composer", () => 
     appShellSource.indexOf("  const handleAgentEnd = useCallback"),
   );
 
-  assert.match(newSessionSource, /const draftKey = sessionId;/);
   assert.match(newSessionSource, /\/\/ 新建会话的 ID 发起时即确定（UUID）/);
-  assert.match(newSessionSource, /activeNewSessionDraftKeyRef\.current = draftKey/);
-  assert.match(createdSource, /activeNewSessionDraftKeyRef\.current !== sourceDraftKey/);
+  assert.match(newSessionSource, /activeNewSessionIdRef\.current = sessionId;/);
+  assert.match(createdSource, /activeNewSessionIdRef\.current !== sourceDraftKey/);
   assert.match(cwdChangeSource, /const currentFreshCwd = newSessionCwd \?\? activeCwd/);
   assert.match(
     cwdChangeSource,
@@ -177,27 +177,67 @@ test("stale fresh-session completion cannot replace the active composer", () => 
   assert.match(cwdChangeSource, /if \(currentProject !== newProject\) \{[\s\S]*?setFileTabs\(\[\]\)/);
   assert.match(
     appShellSource,
-    /useLayoutEffect\(\(\) => \{\s*activeNewSessionDraftKeyRef\.current = newSessionDraftKey;/,
+    /useLayoutEffect\(\(\) => \{\s*activeNewSessionIdRef\.current = newSessionId;/,
   );
   assert.ok(
-    createdSource.indexOf("activeNewSessionDraftKeyRef.current !== sourceDraftKey")
+    createdSource.indexOf("activeNewSessionIdRef.current !== sourceDraftKey")
       < createdSource.indexOf("setSelectedSession(session)"),
   );
 });
 
-test("abandoned fresh-session drafts are cleared and cannot be recreated by late rejection", () => {
+test("new-session drafts live in stable slots and survive composer abandonment", () => {
   const restoreSource = source.slice(
     source.indexOf("  const restoreSubmission = useCallback"),
     source.indexOf("  const sessionStats = useMemo"),
   );
+  const appShellRootSource = appShellSource.slice(
+    appShellSource.indexOf("  // Show chat area if a session is selected"),
+    appShellSource.indexOf("  const showChat = "),
+  );
+  const chatWindowTaskNameSource = chatWindowSource.slice(
+    chatWindowSource.indexOf("  // 会话所属任务名"),
+    chatWindowSource.indexOf("  // 播报槽（桌面）"),
+  );
+
+  // 任务 id 只认「本次新建」携带的（draftId 与本轮会话 id 一致），残留的 ref 不算数；
+  // 且只在新建会话态给出（选中已有会话时不得外泄残留值）。
+  assert.match(
+    appShellRootSource,
+    /newSessionMode && pendingNewSessionTask\?\.draftId === pendingNewSessionId/,
+  );
+  // 草稿槽与会话 id 解耦：跨多次新建存活（临时按项目一份 / 每任务一份）。
+  assert.match(appShellRootSource, /newSessionTaskId \? `task_\$\{newSessionTaskId\}` : `tmp_new_\$\{newSessionProjectKey\}`/);
+  assert.match(
+    appShellRootSource,
+    /newSessionProjectKey = activeProjectKeyRef\.current \?\? effectiveNewSessionCwd/,
+  );
+  assert.match(
+    appShellRootSource,
+    /const newSessionId = newSessionMode \? pendingNewSessionId : null;/,
+  );
+  // 会话创建仍用本次生成的会话 id，且 AppShell → ChatWindow → useAgentSession 两跳都不能断
+  // （掉了就凭空新生成 UUID：转正被当成过期回调丢掉，发送停在新建态出不来）。
+  assert.match(source, /const desiredId = newSessionId \?\? newId\(\);/);
+  assert.match(appShellSource, /newSessionId=\{newSessionId\}/);
+  assert.match(
+    chatWindowSource,
+    /session, sessionRunning, newSessionCwd, newSessionId, newSessionDraftKey, pendingNewSessionTaskRef,/,
+  );
+  // 提交失败回填用的是「此刻」的键，不是发起提交那次闭包里的旧槽。
+  assert.match(source, /const composerDraftKeyRef = useRef<string \| undefined>\(undefined\)/);
+  assert.match(source, /composerDraftKeyRef\.current = composerDraftKey;/);
+  assert.doesNotMatch(source, /restoreSubmission\([^)]*, composerDraftKey\)/);
+  // 输入框占位符前缀读的是校验后的任务 id，不再直读 ref。
+  assert.match(chatWindowTaskNameSource, /if \(!isNew \|\| !newSessionTaskId\)/);
+  assert.doesNotMatch(chatWindowTaskNameSource, /pendingNewSessionTaskRef/);
+  // 卸载不再丢弃新建草稿：槽是稳定的，切走回来看一眼内容还在。
   const mountSource = source.slice(
     source.indexOf("  // Load session on mount"),
     source.indexOf("  useEffect(() => {\n    onSystemPromptChange"),
   );
-
+  assert.doesNotMatch(mountSource, /abandonedDraftKey|clearDraft\(/);
+  // 但仍不允许「迟到的提交失败」把已经发出去的内容重新变回草稿。
   assert.match(restoreSource, /!sessionHookMountedRef\.current[\s\S]*?!newSessionPromotedRef\.current/);
-  assert.match(mountSource, /const abandonedDraftKey = isNew \? newSessionDraftKey : null/);
-  assert.match(mountSource, /clearDraft\(abandonedDraftKey\)/);
 });
 
 test("streaming submissions cannot be stranded in an idle direct queue", () => {

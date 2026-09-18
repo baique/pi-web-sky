@@ -57,7 +57,12 @@ interface Props {
   session: SessionInfo | null;
   sessionRunning?: boolean;
   newSessionCwd: string | null;
+  /** 本次新建会话的 id（创建请求/路由/过期校验用）——不是草稿键 */
+  newSessionId: string | null;
+  /** 本次新建会话的草稿槽（tmp_new_<项目> / task_<id>，跨多次新建存活） */
   newSessionDraftKey: string | null;
+  /** 本次新建会话的目标任务 id（输入框占位符前缀用；无任务为 null） */
+  newSessionTaskId: string | null;
   pendingNewSessionTaskRef?: React.MutableRefObject<{ taskId?: string; projectKey?: string; nodeId?: string; draftId?: string } | null>;
   onAgentEnd?: () => void;
   onAttentionNeeded?: (request: BlockingExtensionUiRequest) => void;
@@ -283,7 +288,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onEnvWorktreeChange, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal, inWorkbench = false, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed }: Props) {
+export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionId, newSessionDraftKey, newSessionTaskId, pendingNewSessionTaskRef, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onEnvWorktreeChange, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onTodosChange, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, terminalOpen = false, onToggleTerminal, inWorkbench = false, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const { isDark } = useTheme();
@@ -329,7 +334,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, scrollToBottom, loadContext, activeLeafId, hasOlderChat,
   } = useAgentSession({
-    session, sessionRunning, newSessionCwd, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
+    session, sessionRunning, newSessionCwd, newSessionId, newSessionDraftKey, pendingNewSessionTaskRef, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsPanelOpen,
   });
 
@@ -472,27 +477,22 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
   // 会话所属任务名：仅在新建会话（isNew，主会话尚未落盘）时用于输入框
   // placeholder 前置展示；主会话出现后不再需要（sessionInfo 面板仍展示）。
-  // 新建瞬态期从 pendingNewSessionTaskRef 的 taskId 拉取一次任务名兜底。
+  // 任务 id 由 AppShell 校验过后传入（只认本次新建携带的任务，避免残留）。
   const [taskName, setTaskName] = useState<string | null>(null);
   useEffect(() => {
-    if (!isNew) {
-      setTaskName(null);
-      return;
-    }
-    const pendingTaskId = pendingNewSessionTaskRef?.current?.taskId;
-    if (!pendingTaskId) {
+    if (!isNew || !newSessionTaskId) {
       setTaskName(null);
       return;
     }
     let cancelled = false;
-    fetch(`/api/tasks/${encodeURIComponent(pendingTaskId)}`, { cache: "no-store" })
+    fetch(`/api/tasks/${encodeURIComponent(newSessionTaskId)}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() as Promise<{ task?: { name?: string } | null }> : null))
       .then((d) => {
         if (!cancelled && d?.task?.name) setTaskName(d.task.name);
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [isNew, pendingNewSessionTaskRef]);
+  }, [isNew, newSessionTaskId]);
 
   // 播报槽（桌面）：状态与通知分槽合成，结果下发 ChatInput（左槽）与 widget shelf（通知）
   const compactSavedTokens = compactResult
@@ -847,7 +847,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       soundEnabled={soundEnabled}
       onSoundToggle={onSoundToggle}
       onAudioUnlock={unlockAudio}
-      draftKey={session?.id ?? (sessionIdRef.current ?? newSessionDraftKey) ?? undefined}
+      draftKey={session?.id ?? newSessionDraftKey ?? undefined}
       cwd={session?.cwd ?? newSessionCwd}
       taskName={taskName}
       atBottom={atBottom}

@@ -14,7 +14,7 @@ import type {
 import { isBlockingExtensionUiRequest } from "@/lib/browser-notifications";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
-import { clearDraft, restoreDraftSubmission } from "@/lib/draft-store";
+import { restoreDraftSubmission } from "@/lib/draft-store";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
 import { getToolNamesForPreset, type ToolEntry, type ToolPreset } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -152,7 +152,12 @@ export interface UseAgentSessionOptions {
   session: SessionInfo | null;
   sessionRunning?: boolean;
   newSessionCwd: string | null;
+  /** 新建会话草稿槽：临时会话 `tmp_new_<项目身份>` / 任务新建 `task_<id>`（与下面 newSessionId 解耦，
+   *  跨多次「新建」存活，发送成功后由 ChatInput 清空） */
   newSessionDraftKey: string | null;
+  /** 本次新建会话的 id（UUID，前端发起时确定）：创建会话用它；转正时作为 sourceDraftKey
+   *  回传，用于识别过期转正（与 newSessionDraftKey 不是同一个东西）。 */
+  newSessionId: string | null;
   onAgentEnd?: () => void;
   onAttentionNeeded?: (request: BlockingExtensionUiRequest) => void;
   onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;
@@ -337,7 +342,7 @@ type SlashCommandsResponse = {
 
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
-    session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
+    session, sessionRunning, newSessionCwd, newSessionDraftKey, newSessionId, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsPanelOpen,
   } = opts;
 
@@ -471,20 +476,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const currentModel = currentModelOverride ?? data?.context.model ?? pendingModel ?? null;
   const displayModel = isNew ? (newSessionModel ?? newSessionDefaultModel) : currentModel;
-  // draft key = 会话 UUID（新建会话发起时生成），与 sessionId 恒等，无需别名映射。
+  // 输入框当时的草稿键：已有会话 = 会话 id；新建会话 = 稳定草稿槽（AppShell 转正前一直给槽）。
   const composerDraftKey = session?.id ?? newSessionDraftKey ?? undefined;
+  // 提交失败回填必须用「此刻的」键：新建会话转正后键会从草稿槽变成会话 id，而发起提交那次闭包
+  // 里捕获的是转正前的槽 —— 用旧值会把文字写进看不见的槽（草稿槽与会话 id 恒等的年代掩盖了这点）。
+  const composerDraftKeyRef = useRef<string | undefined>(undefined);
+  composerDraftKeyRef.current = composerDraftKey;
 
   const restoreSubmission = useCallback((
     text: string,
     images: AttachedImage[] | undefined,
-    targetDraftKey: string | undefined,
   ) => {
     const draftImages = images?.map(({ data, mimeType }) => ({ data, mimeType }));
-    const destinationDraftKey = targetDraftKey;
+    // 目标键取「此刻」的键（见 composerDraftKeyRef）：转正后它会从草稿槽变成会话 id。
+    const destinationDraftKey = composerDraftKeyRef.current;
     if (
       !sessionHookMountedRef.current
       && !newSessionPromotedRef.current
-      && targetDraftKey === newSessionDraftKey
+      && destinationDraftKey === newSessionDraftKey
     ) return;
     const input = opts.chatInputRef?.current;
     if (input) {
@@ -701,9 +710,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const sid = sessionIdRef.current;
     if (!isNew || !newSessionCwd || !sid || newSessionPromotedRef.current) return;
     newSessionPromotedRef.current = true;
-    // draft key 即会话 UUID（AppShell/看板在进入新建会话时生成）：
-    // 与 sid 恒等，无需 rekey 映射。草稿持久化从一开始就用真实会话 ID。
-    const provisionalDraftKey = newSessionDraftKey ?? sid;
+    // sourceDraftKey = 本次新建的会话 id（AppShell/看板发起时生成）：与 sid 恒等，
+    // 只用来识别“过期转正”（旧输入框的转正回调不得覆盖当前视图）。
+    const provisionalDraftKey = newSessionId ?? sid;
     onSessionCreated?.({
       id: sid,
       path: "",
@@ -715,17 +724,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       firstMessage,
       transient: true,
     }, provisionalDraftKey);
-  }, [isNew, newSessionCwd, newSessionDraftKey, onSessionCreated]);
+  }, [isNew, newSessionCwd, newSessionId, onSessionCreated]);
 
   const ensureNewSession = useCallback(async () => {
     if (sessionIdRef.current) return sessionIdRef.current;
     if (!isNew || !newSessionCwd) return sessionIdRef.current;
     if (ensuringNewSessionRef.current) return ensuringNewSessionRef.current;
 
-    // 会话 ID 发起时即确定：复用已有 draft key（= 卡片 sessionId / AppShell 生成的 UUID），
-    // 确保「卡片/路由/草稿用的 ID」与「服务端创建的会话 ID」一致。
-    // 无 draft key 时（理论上不发生，兜底）才新生成。
-    const desiredId = newSessionDraftKey ?? newId();
+    // 会话 ID 发起时即确定：AppShell/看板在进入新建会话时生成 UUID 传进来，
+    // 确保「路由/任务归属/过期校验用的 ID」与「服务端创建的会话 ID」一致。
+    // 无 id 时（理论上不发生，兜底）才新生成。
+    const desiredId = newSessionId ?? newId();
     sessionIdRef.current = desiredId;
 
     const promise = (async () => {
@@ -736,11 +745,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (selectedModel) setPendingModel(selectedModel);
       const toolNames = getToolNamesForPreset(toolPreset);
       const pendingTask = opts.pendingNewSessionTaskRef?.current;
-      // 任务归属只在「同一次新建」内生效：ref 带 draftId 时必须与本次会话 id 一致。
-      // ref 只在创建成功后清空（AppShell 的 onSessionCreated），中途被放弃会残留——没它
-      // 这一校验，残留的 taskId 会把后续任何一条新会话挂到那个任务下。
-      const pendingTaskId = pendingTask?.taskId
-        && (!pendingTask.draftId || pendingTask.draftId === desiredId)
+      // 任务归属只在「同一次新建」内生效：ref 必须带与本次会话 id 相同的 draftId（与 AppShell
+      // 的显示/草稿槽校验用同一个谓词）。ref 只在创建成功后清空（AppShell 的 onSessionCreated），
+      // 中途被放弃会残留——没这一校验，残留的 taskId 会把后续任何一条新会话挂到那个任务下。
+      const pendingTaskId = pendingTask?.taskId && pendingTask.draftId === desiredId
         ? pendingTask.taskId
         : undefined;
       const res = await fetch("/api/agent/new", {
@@ -782,10 +790,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     ensuringNewSessionRef.current = promise;
     try {
       return await promise;
+    } catch (e) {
+      // 创建失败必须把 id 收回去：留在 ref 上，这个输入框之后每次发送都会短路成
+      // 「拿这个不存在的 id 直接 prompt」——会话会被 /api/agent/[id] 建出来、却不再
+      // 经过 /api/agent/new，任务归属静默丢失。重试走同一条路径（id 不变，taskId 照样带）。
+      if (sessionIdRef.current === desiredId) sessionIdRef.current = null;
+      throw e;
     } finally {
       ensuringNewSessionRef.current = null;
     }
-  }, [isNew, newSessionCwd, toolPreset, opts.pendingNewSessionTaskRef]);
+  }, [isNew, newSessionCwd, newSessionId, toolPreset, opts.pendingNewSessionTaskRef]);
 
   // Opening the System panel is also allowed to initialize an otherwise dormant
   // session. This is deliberately a non-prompt command: it creates no message
@@ -1420,7 +1434,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return;
     if (agentRunningRef.current || bashRunningRef.current || commandBusyRef.current) {
-      restoreSubmission(message, images, composerDraftKey);
+      restoreSubmission(message, images);
       return;
     }
     const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
@@ -1430,7 +1444,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const isExcluded = trimmedMessage.startsWith("!!");
       const bashCmd = (isExcluded ? trimmedMessage.slice(2) : trimmedMessage.slice(1)).trim();
       if (!bashCmd) {
-        restoreSubmission(message, images, composerDraftKey);
+        restoreSubmission(message, images);
         return;
       }
       await executeBashRef.current?.(bashCmd, isExcluded);
@@ -1520,7 +1534,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           : [...prev.slice(0, optimisticIndex), ...prev.slice(optimisticIndex + 1)];
       });
       addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
-      restoreSubmission(message, images, composerDraftKey);
+      restoreSubmission(message, images);
       optimisticUserMessageKeyRef.current = null;
       // Rejection only describes this submission. Another tab or an event we
       // missed may still have a real run active for the same session, so keep
@@ -1535,7 +1549,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission]);
+  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, reconcileAgentState, restoreSubmission]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (agentRunningRef.current || bashRunningRef.current || commandBusyRef.current) return;
@@ -1558,13 +1572,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to execute shell command:", e);
       addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
-      restoreSubmission(inputText, undefined, composerDraftKey);
+      restoreSubmission(inputText, undefined);
     } finally {
       bashRunningRef.current = false;
       setPendingBash(null);
       setBashRunning(false);
     }
-  }, [addNotice, composerDraftKey, ensureNewSession, loadSession, promoteNewSession, restoreSubmission, session]);
+  }, [addNotice, ensureNewSession, loadSession, promoteNewSession, restoreSubmission, session]);
   executeBashRef.current = executeBash;
 
   const handleAbort = useCallback(async () => {
@@ -1868,7 +1882,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     images?: AttachedImage[],
   ) => {
     const sid = sessionIdRef.current;
-    const restore = () => restoreSubmission(message, images, composerDraftKey);
+    const restore = () => restoreSubmission(message, images);
     if (!sid) {
       restore();
       addNotice({ type: "error", message: "No active session for the queued message" });
@@ -1893,7 +1907,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         message: e instanceof Error ? e.message : String(e),
       });
     }
-  }, [addNotice, composerDraftKey, restoreSubmission]);
+  }, [addNotice, restoreSubmission]);
 
   const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
     await sendStreamingPrompt(message, "steer", images);
@@ -2043,14 +2057,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
     return () => {
       sessionHookMountedRef.current = false;
-      const abandonedDraftKey = isNew ? newSessionDraftKey : null;
-      if (abandonedDraftKey) {
-        queueMicrotask(() => {
-          if (!sessionHookMountedRef.current && !newSessionPromotedRef.current) {
-            clearDraft(abandonedDraftKey);
-          }
-        });
-      }
+      // 新建会话的草稿不随输入框卸载而丢弃：草稿槽是稳定的（tmp_new_<项目身份> / task_<id>），
+      // 用户切走看一眼再回来，内容还在。
       bashRecoveryIdRef.current += 1;
       cancelEventStreamGrace();
       closeEvents();

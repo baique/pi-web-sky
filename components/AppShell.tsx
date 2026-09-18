@@ -259,8 +259,11 @@ export function AppShell() {
   }, [router]);
   // The temporary id distinguishes consecutive fresh composers in one cwd.
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
-  const [newSessionDraftId, setNewSessionDraftId] = useState("initial");
-  const activeNewSessionDraftKeyRef = useRef<string | null>(null);
+  // 本次新建会话的会话 id（UUID）：创建请求与路由用它；每次新建/切 cwd 都换新值。
+  const [pendingNewSessionId, setPendingNewSessionId] = useState(() => newId());
+  // 「待转正的新建会话 id」：promoteNewSession 回传的 sourceDraftKey 与它一致时
+  // handleSessionCreated 才认（否则就是过期输入框的转正回调，不得覆盖当前视图）。
+  const activeNewSessionIdRef = useRef<string | null>(null);
   const [initialCwdStatus, setInitialCwdStatus] = useState<"idle" | "validating" | "ready" | "error">(
     () => initialNavigation.requestedCwd ? "validating" : "idle",
   );
@@ -768,7 +771,7 @@ export function AppShell() {
 
   useEffect(() => {
     setMobileToolbarMoreOpen(false);
-  }, [isMobile, selectedSession?.id, newSessionDraftId]);
+  }, [isMobile, selectedSession?.id, pendingNewSessionId]);
 
   useEffect(() => {
     if (!activeTopPanel || !topBarRef.current) return;
@@ -874,10 +877,13 @@ export function AppShell() {
 
         // The sidebar will notify us when it adopts this cwd. Avoid remounting
         // the just-created empty chat during that initial synchronization.
+        // 新建会话 id 必须是合法会话 id（服务端 SESSION_ID_RE 校验，见 app/api/agent/new）：
+        // 早先直接用 `initial:${cwd}` 既含 `:` 又含 `/`，深链进来第一条消息会被 400 挡下。
         suppressCwdBumpRef.current = true;
-        const draftId = `initial:${requestedCwd}`;
-        setNewSessionDraftId(draftId);
-        activeNewSessionDraftKeyRef.current = `new:${draftId}:${data.cwd}`;
+        setPendingNewSessionId(newId());
+        // 先清「待转正 id」：本轮真 id 由渲染后的 layout effect 写入，
+        // 期间上一轮输入框的转正回调一律作废。
+        activeNewSessionIdRef.current = null;
         setNewSessionCwd(data.cwd);
         setInitialCwdStatus("ready");
       })
@@ -973,8 +979,9 @@ export function AppShell() {
     // Close any session that belongs to a different project — it no longer
     // matches the selected project directory.
     const draftId = newId();
-    setNewSessionDraftId(draftId);
-    activeNewSessionDraftKeyRef.current = `new:${draftId}:${cwd}`;
+    setPendingNewSessionId(draftId);
+    // 先清「待转正 id」：本轮真 id 由渲染后的 layout effect 写入。
+    activeNewSessionIdRef.current = null;
     setSelectedSession(null);
     setNewSessionCwd((prev) => {
       if (prev && prev !== cwd) return null;
@@ -1007,7 +1014,7 @@ export function AppShell() {
   // 看板 cwd-switch 事件用最新引用（避免监听反复重绑）
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     invalidateWorkspaceRestore();
-    activeNewSessionDraftKeyRef.current = null;
+    activeNewSessionIdRef.current = null;
     // Re-clicking the already-open session must not remount the chat and
     // re-run the full load/positioning cycle. Only skip when the effective
     // cwd context already matches — otherwise a pending cwd move still needs
@@ -1051,11 +1058,10 @@ export function AppShell() {
 
   const handleNewSession = useCallback((sessionId: string, cwd: string) => {
     invalidateWorkspaceRestore();
-    // 新建会话的 ID 发起时即确定（UUID）：draft key 直接用会话 ID，
-    // 任务/看板绑定、草稿持久化、路由全部同步可用，无需占位后转正。
-    const draftKey = sessionId;
-    activeNewSessionDraftKeyRef.current = draftKey;
-    setNewSessionDraftId(sessionId);
+    // 新建会话的 ID 发起时即确定（UUID）：创建请求、路由、过期校验全部同步可用，
+    // 无需占位后转正。草稿另走稳定草稿槽（newSessionDraftKey），与会话 ID 解耦。
+    activeNewSessionIdRef.current = sessionId;
+    setPendingNewSessionId(sessionId);
     setSelectedSession(null);
     setNewSessionCwd(cwd);
     setSessionKey((k) => k + 1);
@@ -1155,9 +1161,9 @@ export function AppShell() {
   // Called by ChatWindow when a new session gets its real id from pi
   const handleSessionCreated = useCallback((session: SessionInfo, sourceDraftKey: string) => {
     setRefreshKey((k) => k + 1);
-    if (activeNewSessionDraftKeyRef.current !== sourceDraftKey) return;
+    if (activeNewSessionIdRef.current !== sourceDraftKey) return;
     invalidateWorkspaceRestore();
-    activeNewSessionDraftKeyRef.current = null;
+    activeNewSessionIdRef.current = null;
     setNewSessionCwd(null);
     setSelectedSession(session);
     hydrateSelectedSession(session.id);
@@ -1254,7 +1260,7 @@ export function AppShell() {
 
   const handleSessionForked = useCallback((newSessionId: string) => {
     invalidateWorkspaceRestore();
-    activeNewSessionDraftKeyRef.current = null;
+    activeNewSessionIdRef.current = null;
     setRefreshKey((k) => k + 1);
     setSessionKey((k) => k + 1);
     setNewSessionCwd(null);
@@ -1287,8 +1293,9 @@ export function AppShell() {
     if (selectedSession?.id === sessionId) {
       const cwd = selectedSession.cwd;
       const draftId = newId();
-      setNewSessionDraftId(draftId);
-      activeNewSessionDraftKeyRef.current = cwd ? `new:${draftId}:${cwd}` : null;
+      setPendingNewSessionId(draftId);
+      // 先清「待转正 id」：本轮真 id 由渲染后的 layout effect 写入。
+      activeNewSessionIdRef.current = null;
       setSelectedSession(null);
       setNewSessionCwd(cwd ?? null);
       setSessionKey((k) => k + 1);
@@ -1445,14 +1452,27 @@ export function AppShell() {
 
   // Show chat area if a session is selected, or if we have a cwd to start a new session in
   const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
-  // draft key = 会话 UUID（handleNewSession 传入）：新建会话草稿从出生起就用真实会话 ID
-  // 作为持久化 key，转正后无需 rekey。
-  const newSessionDraftKey = selectedSession === null && effectiveNewSessionCwd
-    ? newSessionDraftId
+  // 新建会话态（空态 + 有 cwd）：本次新建的会话 id / 目标 / 草稿槽只在这个状态下算数。
+  const newSessionMode = selectedSession === null && effectiveNewSessionCwd !== null;
+  // 本次新建会话的会话 id（handleNewSession 传入的 UUID）：创建请求、路由、过期校验用它。
+  const newSessionId = newSessionMode ? pendingNewSessionId : null;
+  // 本次新建会话的目标任务：只认「同一次新建」携带的任务（draftId 与本轮 id 一致，
+  // 与 useAgentSession.ensureNewSession 同一套校验）。否则上一次任务新建的残留会让
+  // 「聊天」临时会话也顶着任务名前缀、还共用任务的草稿槽。
+  const pendingNewSessionTask = pendingNewSessionTaskRef.current;
+  const newSessionTaskId = newSessionMode && pendingNewSessionTask?.draftId === pendingNewSessionId
+    ? pendingNewSessionTask.taskId ?? null
+    : null;
+  // 新建会话草稿槽：与会话 id 解耦，跨多次「新建」存活 —— 临时会话按项目一份
+  // （`tmp_new_<项目身份>`，同项目的 worktree 共用；projectKey 未定时退回具体 cwd），
+  // 每个任务一份（`task_<任务id>`，任务 id 全局唯一）。发送成功后由 ChatInput 清空。
+  const newSessionProjectKey = activeProjectKeyRef.current ?? effectiveNewSessionCwd;
+  const newSessionDraftKey = newSessionMode
+    ? (newSessionTaskId ? `task_${newSessionTaskId}` : `tmp_new_${newSessionProjectKey}`)
     : null;
   useLayoutEffect(() => {
-    activeNewSessionDraftKeyRef.current = newSessionDraftKey;
-  }, [newSessionDraftKey]);
+    activeNewSessionIdRef.current = newSessionId;
+  }, [newSessionId]);
   const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
   const projectTrustCwd = selectedSession?.cwd ?? effectiveNewSessionCwd;
   // While restoring initial session from URL, don't show the placeholder
@@ -3257,7 +3277,9 @@ export function AppShell() {
               session={selectedSession}
               sessionRunning={Boolean(selectedSession && runningSessionIds.has(selectedSession.id))}
               newSessionCwd={effectiveNewSessionCwd}
+              newSessionId={newSessionId}
               newSessionDraftKey={newSessionDraftKey}
+              newSessionTaskId={newSessionTaskId}
               pendingNewSessionTaskRef={pendingNewSessionTaskRef}
               onEnvWorktreeChange={handleEnvWorktreeChange}
               onAgentEnd={handleAgentEnd}

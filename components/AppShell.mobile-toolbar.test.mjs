@@ -27,7 +27,7 @@ test("closes the mobile action layer on outside click, Escape, and session chang
   assert.match(source, /event\.composedPath\(\)\.includes\(toolbar\)/);
   assert.match(source, /document\.addEventListener\("pointerdown", handlePointerDown, true\)/);
   assert.match(source, /event\.key !== "Escape"[\s\S]*?setMobileToolbarMoreOpen\(false\)/);
-  assert.match(source, /\}, \[isMobile, selectedSession\?\.id, newSessionDraftId\]\);/);
+  assert.match(source, /\}, \[isMobile, selectedSession\?\.id, pendingNewSessionId\]\);/);
 });
 
 test("keeps the mobile action layer open after using an expanded action", () => {

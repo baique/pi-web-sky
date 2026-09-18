@@ -72,9 +72,6 @@ export const SessionWorkbench = memo(function SessionWorkbench({
   // draftId = 本卡 sessionId（= 新建会话的 draft key）：与 useAgentSession 里的校验对齐，
   // 卡内这次创建的会话才享有任务归属。
   pendingTaskRef.current = isNewSession ? (taskId ? { taskId, draftId: sessionId } : null) : null;
-  // 新会话卡草稿 key = 会话 UUID（卡片 sessionId）：与 ensureNewSession 生成的
-  // 指定 id 恒等，草稿持久化从出生起就用真实会话 ID。
-  const draftKeyRef = useRef(sessionId);
   // 新会话卡初始 cwd：转正后卡片侧会把 cwd 字段清空（props.cwd 变 ""），但 isNew 实例
   // 仍需 cwd 作 newSessionCwd（第二条消息 ensure_session 用），这里缓存首帧值。
   const cwdRef = useRef(cwd ?? null);
@@ -318,6 +315,10 @@ export const SessionWorkbench = memo(function SessionWorkbench({
     );
   }
 
+  // 看板新会话卡：卡片 sessionId 出生即有且不变，（会话 id / 草稿槽）用同一个值。
+  const isNewComposer = isNewSession || wasNewSessionRef.current;
+  const newCardKey = isNewComposer ? sessionId : null;
+
   return (
     <div
       ref={rootRef}
@@ -359,7 +360,9 @@ export const SessionWorkbench = memo(function SessionWorkbench({
         session={isNewSession || wasNewSessionRef.current ? null : session}
         sessionRunning={sessionRunning}
         newSessionCwd={isNewSession || wasNewSessionRef.current ? (cwdRef.current ?? null) : null}
-        newSessionDraftKey={isNewSession || wasNewSessionRef.current ? draftKeyRef.current : null}
+        newSessionId={newCardKey}
+        newSessionDraftKey={newCardKey}
+        newSessionTaskId={isNewComposer ? taskId ?? null : null}
         pendingNewSessionTaskRef={isNewSession || wasNewSessionRef.current ? pendingTaskRef : undefined}
         chatInputRef={chatInputRef}
         inWorkbench
