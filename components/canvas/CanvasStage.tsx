@@ -16,6 +16,7 @@ import { BoardCanvasProvider, type BoardCanvasOps } from "@/components/board/Boa
 import { BoardContextMenu, type BoardMenuState } from "@/components/board/BoardContextMenu";
 import { BoardLoading } from "./BoardLoading";
 import { BoardControls } from "./BoardControls";
+import { SESSION_DEPTH_MIME, membershipDropAllowed, parseSessionDepth } from "@/components/session-sidebar-list";
 import { uploadBoardImage } from "@/lib/board-assets";
 import { dispatchBoardCwdSwitch, dispatchBoardRenameNode } from "@/lib/board-events";
 import { newId } from "@/lib/id";
@@ -204,6 +205,12 @@ export function CanvasStage({ board, isDark }: { board: UseBoardCanvasReturn; is
       }
       const sid = dt.getData("text/session-id");
       if (sid) {
+        // 任务看板拖入 = 加入任务（归属变更）：子会话行（depth>0）会被服务端按子树
+        // 归一化，直接拒绝（与聊天区 unassign / TaskArea 同一规则、共享 membershipDropAllowed）。
+        // **手动看板**（board.taskId 为空）落卡只是新增内容，不受限。
+        if (board.board?.taskId && !membershipDropAllowed(parseSessionDepth(dt.getData(SESSION_DEPTH_MIME)))) {
+          return;
+        }
         // 任务看板拖入 = 加入任务：addSessionNode 内部先写 session_meta 归属、成功才落卡
         // （失败不落卡，不留无保护窗口卡）。标题随拖拽源带来，落卡即带标题。
         const dropTitle = dt.getData("text/session-title") || undefined;

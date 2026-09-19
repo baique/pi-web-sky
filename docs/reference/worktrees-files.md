@@ -4,7 +4,7 @@
 
 ## Worktrees and project grouping
 
-- `lib/worktree.ts` resolves linked worktree top-levels back to the main repo `projectRoot`; `listAllSessions()` attaches that to each `SessionInfo` so all worktrees for one repo are grouped together in the sidebar.
+- `lib/worktree.ts` resolves linked worktree top-levels back to the main repo `projectRoot`; `attachSessionProjectInfo()` (called by `loadProjectSessions` / `loadAllSessionIndex` / `loadTaskSessionsPage` / `loadSessionSummariesByIds` / `GET /api/sessions/[id]`) attaches that to each `SessionInfo` so all worktrees for one repo are grouped together in the sidebar.
 - Worktree operations are served by `/api/worktrees` and guarded by the same allowed-root rules as `/api/files`.
 - New worktrees are created under `<repoRoot>-worktrees/<sanitized-branch>`. Existing branches are reused; otherwise `git worktree add -b` creates the branch.
 - Removing a dirty worktree returns `409` with `{ dirty: true }` so the UI can ask before retrying with `force`.

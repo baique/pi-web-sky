@@ -3,50 +3,24 @@
 // 与单个会话删除（app/api/sessions/[id] DELETE）不同：那里删一个节点并把
 // 子树级联重挂到父级；这里整棵树全部删除，不做重挂。
 
-import { readdirSync, unlinkSync } from "fs";
-import { dirname, join } from "path";
+import { unlinkSync } from "fs";
 import {
   invalidateSessionListCache,
   invalidateSessionPathCache,
-  readSessionHeader,
   resolveSessionPath,
 } from "./session-reader";
-import { sessionPathKey } from "./session-path";
 import { getRpcSession } from "./rpc-manager";
-import { unassignSession } from "./task-store";
+import { listDescendantIds, unassignSession } from "./task-store";
 import { removeSessionFromBoards } from "./board-store";
 import { removeSessionsFromYjsBoards } from "./board-reconcile";
 
-/** 递归收集一个会话的全部 fork 后代 id（含自身）。 */
+/** 递归收集一个会话的全部 fork 后代 id（含自身）。
+ *
+ *  父子链以 session_meta.parent_id 为唯一事实源：旧实现 readdirSync 平铺会话目录
+ *  + 读每个文件 header 推父链，既漏掉子目录里的 fork（`<session>/forks/…`），
+ *  也在每次删任务时把整个项目目录读一遍。库里的 parent_id 已含全部副本。 */
 export async function collectSessionDescendants(rootId: string): Promise<string[]> {
-  const rootPath = await resolveSessionPath(rootId);
-  if (!rootPath) return [rootId];
-  const dir = dirname(rootPath);
-  const keySet = new Set<string>([sessionPathKey(rootPath)]);
-  const ids = [rootId];
-  let files: string[];
-  try {
-    files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
-  } catch {
-    return [rootId];
-  }
-  // 迭代扫描：parentSession 指向已收集集合的 .jsonl 全部纳入（支持多级分叉）。
-  let added = true;
-  while (added) {
-    added = false;
-    for (const file of files) {
-      const p = join(dir, file);
-      const pk = sessionPathKey(p);
-      if (keySet.has(pk)) continue;
-      const header = readSessionHeader(p);
-      if (header?.parentSession && keySet.has(sessionPathKey(header.parentSession))) {
-        keySet.add(pk);
-        ids.push(header.id);
-        added = true;
-      }
-    }
-  }
-  return ids;
+  return [rootId, ...listDescendantIds(rootId)];
 }
 
 /** 删除单个会话文件（含 RPC/路径缓存/列表缓存/任务元数据/画布引用），不重挂子树。 */

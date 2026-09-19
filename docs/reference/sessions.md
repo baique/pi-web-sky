@@ -1,6 +1,6 @@
 # 会话生命周期与文件格式
 
-> 改会话加载 / 分支 / SSE / compaction / 运行状态轮询 / 会话文件读写前阅读。
+> 改会话加载 / 分支 / SSE / compaction / 运行状态轮询 / 会话归属 / 索引 / 会话文件读写前阅读。
 
 ## AgentSession lifecycle (`lib/rpc-manager.ts`)
 
@@ -10,18 +10,18 @@
 
 ## Fork must destroy the wrapper immediately
 
-`AgentSession.fork()` **mutates the wrapper's inner state in-place** — after fork, `inner.sessionId` is the *new* session's id. If the wrapper stays alive in the registry under the old id, the next request gets the already-forked state and subsequent forks produce a corrupt `parentSession` chain.
+fork 后 `inner` 状态即指向新会话（`AgentSession.fork()` **in-place mutate** wrapper 的 inner state，`inner.sessionId` 变成 *新* 会话 id）。If the wrapper stays alive in the registry under the old id, the next request gets the already-forked state and subsequent forks produce a corrupt `parentSession` chain.
 
-**Fix**: `send("fork")` captures `newSessionId`, then calls `this.destroy()` before returning. The next request for the original session reloads a clean AgentSession from the original file.
+**Fix**: `send("fork")` 用 `SessionManager.create/createBranchedSession` 造分支文件，拿到 `newSessionId` 后立即 `await this.shutdown()`（registry 里不能留已 fork 的 wrapper）；建 session_meta 行放在 shutdown 之后（`resolveProject` 的 await 不能落在这个窗口）。The next request for the original session reloads a clean AgentSession from the original file.
 
 ## Two kinds of branching — don't confuse them
 
-- **Fork** (Fork button on user message): creates a new independent `.jsonl` file. Shown as a child in the sidebar tree via `parentSession` header field.
+- **Fork**（用户消息上的 Fork 按钮）：新建独立 `.jsonl` 并立即建 `session_meta` 全列行（`parent_id` = 源会话、`task_id` 继承源会话归属）；侧栏父子树按库 `parent_id` 建（磁盘 `header.parentSession` 只是镜像）。
 - **In-session branch** (Continue button / BranchNavigator): calls `navigate_tree` within the same file. Multiple entries share the same `parentId`. Switching between them calls `/api/sessions/[id]/context?leafId=`.
 
 ## Session files can be fully rewritten
 
-`parentSession` in the header is **display metadata only** — has zero effect on chat content. Safe to `writeFileSync` the entire file (pi does this itself during migrations). Used when cascade-reparenting children on delete.
+`parentSession` in the header is **display metadata only** — has zero effect on chat content. Safe to `writeFileSync` the entire file (pi does this itself during migrations). 删会话的级联重挂必须同请求写两处：磁盘 header（`rewriteSessionParent`）与库内子行 `parent_id`（`reparentSessionChildren`，祖父反查不到则 NULL）。
 
 ## ToolCall field normalization
 
@@ -94,9 +94,10 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 
 左栏聊天列表不再逐请求全量扫会话文件——`session_meta` 升格为会话完整索引，由后台扫描器维护。
 
-- **`lib/session-index-scanner.ts`**：启动即扫 + 每 30s 全量扫磁盘（`scanSessionFileMeta`），建行/刷 mtime/删行，幂等。`ensureSessionIndexReady` 供首请求前懒初始化（复用首轮 promise，不双跑）。
+- **`lib/session-index-scanner.ts`**：启动即扫 + 每 30s 全量扫磁盘（`scanSessionFileMeta` 递归到子目录），按 path 匹配、按 header 权威 id 建行（新行的 `task_id` 先为 NULL，随后由归属收敛从父继承——无父即临时会话），刷 `modified`（单调不回退，60s 年轻行保护 + 删除前磁盘复检），并对 `last_reply IS NULL` 的存量行读一次文件尾回填；`ensureSessionIndexReady` 供首请求前懒初始化（复用首轮 promise，不双跑），另提供 `indexSessionFileNow()` 单文件立即索引。
 - **`GET /api/sessions?project=<key>`**：单项目聊天区列表，`loadProjectSessions` 纯查 session_meta（project_key 过滤 + 排除 task 会话 + 置顶/mtime 排序），union 运行中 runtime。
-- **`GET /api/sessions/summary`**（POST `{ids}`）：看板卡片摘要点查——画布有几张卡查几个 id，替代全量轮询自筛。
-- 改名 `PATCH /[id]` 同步写 `session_meta.title`（不依赖扫描器）。lastReply 不入库，只有看板卡片摘要点查（`loadSessionSummariesByIds` → `scanOneSessionFile`）才尾读文件。
-- 列表读取 = 纯查 session_meta（title/pinned/project_key）；文件只在 meta 行缺 first_message 时才读头部补齐。文件是存在性事实源，meta 是标题/归属持久层，不做主动补行。
+- **`POST /api/sessions/summary`**（body `{ids}`）：看板卡片摘要点查——画布有几张卡查几个 id，替代全量轮询自筛。
+- 改名有三条路径（`PATCH /[id]`、`POST /[id]/auto-name`、RPC `set_session_name`）都「pi 成功 → 同请求写 `session_meta.title` → 失败可见」（路由 500 / RPC 记日志），不依赖扫描器。`last_reply` 也入库（schema v12）：`agent_start` 前移 `modified`，`message_end` 只在内存缓存本轮最后一条 assistant 文本，`agent_settled`（含用户取消）一次写 `last_reply + modified`；扫描器对 `last_reply IS NULL` 的存量行读一次文件尾回填（无回复写 `''`，三态：NULL=未回填/''=无回复/文本=回复）。
+- 列表读取 = 纯查 session_meta（title/first_message/last_reply/modified/parent_id/project_key），**不读文件、不扫目录**；`/api/tasks` 的任务成员与 fork 子树按库 `task_id` + `parent_id` 递归（不再 readdir/读 header），`collectSessionDescendants` 同理；`resolveSessionPath` 先查库 `path`（命中且文件在 → 直接用），只在**库内无行**或**行内 path 的文件已不在**时按文件名兜底（每项目目录一次 readdir，不再全量扫）；看板卡摘要（`loadSessionSummariesByIds`）也全取库，只有该 id 在库内**完全无行**时才回退到文件头尾读。文件是存在性事实源（由后台扫描器写入），meta 是读取的事实源。
+- **会话归属（2026-09）**：`session_meta.task_id` 是归属唯一事实源，按**整棵子树**存——子会话（fork / fork_branch / 内置 subagent）建行继承父 `task_id`；拖入/移出任务、删任务都连带子树（`updateTask` 的成员规范化确保「父走子不留」）；服务端在归属前用 `hasForeignTaskAncestor` 拒绝「祖先属于别的任务」（409），扫描器每轮做子继承父的收敛（自愈旧数据）。
 - **聊天区时间分组（2026-09）**：前端把已排好序的根会话切成今天/昨天/本周/近一月/更久之前五段，只插小角标不改排序（`lib/session-time-group.ts` 纯分类函数：日历天判今天/昨天、周一为周首、近一月 = 滚动 30 天）。**置顶段不分组**，越过置顶分隔线后重新起头；fork 子会话跟着根所在段。

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useIMEGuard } from "@/hooks/useIMEGuard";
 import type { BoardInfo } from "@/lib/board-types";
+import { SESSION_DEPTH_MIME, membershipDropAllowed, parseSessionDepth } from "@/components/session-sidebar-list";
+import { assignmentFailureDetail } from "@/components/session-membership-feedback";
 
 /**
  * 侧栏「看板」栏目：位于会话 tab 内、任务区上方，样式与任务条目一致。
@@ -454,14 +456,24 @@ function BoardRow({
     setSessionDrop(false);
     const sessionId = e.dataTransfer.getData("text/session-id");
     if (!sessionId) return true;
+    // 任务看板行的落点就是归属变更（服务端 add-session 会先 assign 再落卡）：
+    // 子会话行（depth>0）会被服务端按子树归一化，直接拒绝（与聊天区 unassign /
+    // TaskArea 同一规则）。**手动看板**（board.taskId 为空）落卡只是新增内容，不受限。
+    if (board.taskId && !membershipDropAllowed(parseSessionDepth(e.dataTransfer.getData(SESSION_DEPTH_MIME)))) {
+      return true;
+    }
     const title = e.dataTransfer.getData("text/session-title") || undefined;
     void fetch(`/api/boards/${encodeURIComponent(board.id)}/add-session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId, title }),
     })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      .then(async (res) => {
+        if (!res.ok) {
+          // 带上服务端 error 文案（409 归属冲突 / 404 会话解析不出都是可解释的拒绝）；
+          // 具体取值规则见 assignmentFailureDetail（body 已消费/为空 → 回退状态码）。
+          throw new Error(`HTTP ${res.status} ${await assignmentFailureDetail(res)}`);
+        }
         // 落卡是后台动作（看板没打开时页面上看不到结果）——闪一下作为受理反馈
         setSessionDropped(true);
         setTimeout(() => setSessionDropped(false), 700);

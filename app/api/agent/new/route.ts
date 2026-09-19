@@ -85,7 +85,7 @@ export async function POST(req: Request) {
     // 任务归属伴随创建一次完成：会话出生即挂在任务下，任何列表刷新都不会
     // 先显示“未归属/临时区”（此前是前端拿到 realId 后再两跳 PATCH 补写）。
     if (typeof taskId === "string" && taskId) {
-      if (!assignSessionToTask(realSessionId, taskId)) {
+      if (!(await assignSessionToTask(realSessionId, taskId))) {
         throw new Error(`Task not found: ${taskId}`);
       }
       // 任务看板若已存在 → 新会话入板（后端权威，窗口期不依赖前端）

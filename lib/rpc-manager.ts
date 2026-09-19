@@ -21,9 +21,18 @@ import { resolveShellTools } from "./powershell-settings";
 import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS } from "./chat-only";
 import { cacheSessionPath, invalidateSessionListCache, resolveSessionPath } from "./session-reader";
 import { indexSessionFileNow } from "./session-index-scanner";
+import { createSessionActivityTracker, type AgentLikeMessage } from "./session-activity";
+import { FIRST_MESSAGE_PREVIEW_LENGTH } from "./session-scanner";
 import { projectIdentityKey } from "./project-identity";
 import { resolveProject } from "./worktree";
-import { ensureSessionMetaRow } from "./task-store";
+import {
+  ensureSessionMetaRow,
+  fillFirstMessageIfEmpty,
+  recordSessionOutcome,
+  setSessionTitle,
+  taskForSession,
+  touchSessionActivity,
+} from "./task-store";
 import { reconcileForkBoard } from "./board-reconcile";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
@@ -215,6 +224,8 @@ export class AgentSessionWrapper {
   private _alive = true;
   /** 最近一次 agent_start 的时间（看板“运行时长”用）；0 = 未知 */
   private lastAgentStart = 0;
+  /** 会话活跃事件 → 落库（last_reply / modified）；按 wrapper 实例持有防并发串台 */
+  private readonly activityTracker = createSessionActivityTracker();
   private readonly exactSystemPrompt?: () => string;
   private readonly chatOnly: boolean;
 
@@ -276,9 +287,40 @@ export class AgentSessionWrapper {
         invalidateSessionListCache();
       }
       if (IDLE_RESET_EVENT_TYPES.has(event.type)) this.resetIdleTimer();
+      // 会话活跃落库（last_reply / modified）。包在 try/catch 里：库是旁路索引，
+      // 写失败必须可见（console.error），但绝不能打断上面几件事与事件分发。
+      try {
+        this.persistSessionActivity(event);
+      } catch (error) {
+        console.error(
+          `[pi-web] 会话活跃写库失败（${event.type}）:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
       this.emit(event);
     });
     this.resetIdleTimer();
+  }
+
+  /**
+   * 事件 → session_meta 写入（只 UPDATE；行由创建/扫描链路建立）：
+   *   · agent_start   → modified 前移（运行中会话浮顶）
+   *   · message_end   → 本轮最后一条 assistant 文本（缓存，不落库）
+   *   · agent_settled → last_reply + modified（一轮循环真正结束；用户取消走同一路径）
+   * 用 agent_settled 而非 agent_end：后者一轮里可能多次（重试/compaction/queue 续跑）。
+   */
+  private persistSessionActivity(event: AgentEvent): void {
+    const effect = this.activityTracker.handle(event as { type: string; message?: AgentLikeMessage });
+    if (!effect) return;
+    const sessionId = this.inner.sessionId;
+    if (!sessionId) return;
+    if (effect.kind === "touch") {
+      touchSessionActivity(sessionId);
+      return;
+    }
+    recordSessionOutcome(sessionId, effect);
+    // 首条用户消息此刻已在内存 entries 里（不读文件，读取路径零扫盘）。
+    fillFirstMessageIfEmpty(sessionId, firstUserMessageOf(this.inner.sessionManager.getEntries()));
   }
 
   setForceEmptySystemPrompt(force: boolean): void {
@@ -630,8 +672,10 @@ export class AgentSessionWrapper {
         const newSessionId = SessionManager.open(forkedPath, sessionDir).getSessionId();
         cacheSessionPath(newSessionId, forkedPath);
         invalidateSessionListCache();
-        // 立即进 session_meta 索引（否则要等 30s 后台扫描才出现在会话列表）
-        await indexSessionFileNow(forkedPath, sessionManager.getSessionId());
+        // 立即进 session_meta 索引（否则要等 30s 后台扫描才出现在会话列表）；
+        // 归属继承：引用分支与源会话同任务（否则只会在聊天区当孤儿根出现）。
+        const sourceSessionId = sessionManager.getSessionId();
+        await indexSessionFileNow(forkedPath, sourceSessionId, taskForSession(sourceSessionId));
         return { cancelled: false, newSessionId };
       }
 
@@ -694,6 +738,7 @@ export class AgentSessionWrapper {
         // resolveProject 的 await 不能发生在 registry 还挂着已 fork wrapper 的窗口里；
         // 建行只用局部变量（cwd/newSessionFile/sourceSessionId），不依赖 wrapper。
         const cwd = sessionManager.getCwd();
+        const sourceTaskId = taskForSession(sourceSessionId); // 归属继承：fork 子会话与父同任务
         await this.shutdown();
         try {
           const project = await resolveProject(cwd ?? "");
@@ -702,13 +747,28 @@ export class AgentSessionWrapper {
             cwd: cwd ?? "",
             projectKey: projectIdentityKey(project?.projectRoot ?? cwd ?? ""),
             parentId: sourceSessionId,
+            taskId: sourceTaskId, // 建行即带归属，否则子会话先以临时会话落在聊天区（V1）
           });
+        } catch (error) {
+          // 不阻塞 fork（文件已经在了，pi 侧已成功），但必须可见：静默失败会让子会话
+          // 以「无归属临时会话」出现在聊天区（也是本次要修的 V1 病灶）；扫描器的归属
+          // 收敛是第二道网，不能当成唯一防线。
+          console.error(
+            `[pi-web] fork 建行失败 session=${newSessionId}:`,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        try {
           // fork 卡即时入板：源会话归属任务 → 精准 reconcile 该任务看板。
           // await 保证卡先落 yjs 再返回（前端响应到达时卡已存在，无并发写窗口）；
-          // 失败不阻塞 fork，10s 定时兜底。
+          // 失败不阻塞 fork，10s 定时兜底。单独一个 try：与建行失败分开报错，避免
+          // 入板失败被误报成「建行失败」。
           await reconcileForkBoard(sourceSessionId);
-        } catch {
-          // 建行失败不阻塞 fork：扫描器下一轮兜底补行。
+        } catch (error) {
+          console.error(
+            `[pi-web] fork 入板失败 source=${sourceSessionId}:`,
+            error instanceof Error ? error.message : String(error),
+          );
         }
         return { cancelled: false, newSessionId };
       }
@@ -748,6 +808,15 @@ export class AgentSessionWrapper {
         const name = (command.name as string | undefined)?.trim();
         if (!name) throw new Error("Session name cannot be empty");
         this.inner.setSessionName(name);
+        // 列表索引同步：pi 侧改名成功即写 session_meta.title（前端侧栏/看板卡
+        // 改名走这条 RPC，不落库则刷新后退回旧标题）。失败处理与路由层同源但
+        // 语义有别：这里只记日志、不抛——RPC 已经改了文件名，抛错对调用方没有
+        // 可恢复动作，还会断掉命令响应/事件流。
+        try {
+          await setSessionTitle(this.inner.sessionId, name);
+        } catch (error) {
+          console.error("[pi-web] 会话标题写库失败:", error);
+        }
         invalidateSessionListCache();
         return null;
       }
@@ -1576,8 +1645,13 @@ async function persistNewSessionFile(manager: SessionManager, sessionId: string)
       // 与扫描器同源归一化（Windows 大小写折叠等），防新建会话 project_key 与列表查询键不一致
       projectKey: projectIdentityKey(project?.projectRoot ?? cwd ?? ""),
     });
-  } catch {
-    // 建行失败不阻塞开会话：扫描器下一轮兜底补行。
+  } catch (error) {
+    // 建行失败不阻塞开会话（文件已落盘，运行时列表由 runtime union 覆盖），但必须可见：
+    // 静默会让该会话最多 30s 不在列表/任务区（扫描器会补行，但不能当成唯一防线）。
+    console.error(
+      `[pi-web] 新会话建行失败 session=${sessionId}:`,
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 
@@ -1593,6 +1667,19 @@ function runtimeMessageText(entry: SessionMessageEntry): string {
     .map((block) => block.type === "text" ? block.text : "")
     .filter(Boolean)
     .join(" ");
+}
+
+/**
+ * 内存 entries 里首条用户消息的简述（截断与扫描器同一上限）。
+ * 会话活跃事件落库时用它回填 first_message——读取路径不再读文件。
+ */
+function firstUserMessageOf(entries: unknown[]): string {
+  for (const entry of entries as SessionMessageEntry[]) {
+    if (entry?.type !== "message" || entry.message?.role !== "user") continue;
+    const text = runtimeMessageText(entry).trim();
+    if (text) return text.slice(0, FIRST_MESSAGE_PREVIEW_LENGTH);
+  }
+  return "";
 }
 
 function runtimeMessageActivityMs(entry: SessionMessageEntry): number | undefined {

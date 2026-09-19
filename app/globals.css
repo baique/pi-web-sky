@@ -1872,6 +1872,12 @@ span.token.table {
     max-width: 85vw;
     height: var(--app-viewport-height, 100dvh);
     transition: transform 0.25s ease, box-shadow 0.25s ease;
+    /* 抽屉是全高遮罩层，必须盖住顶栏（顶栏 z-index:300）：否则抽屉顶部那条
+       （新建会话/刷新 等首行按钮）被顶栏压住、点不到。背景遮罩同栈位在其下。 */
+    z-index: 320 !important;
+  }
+  .sidebar-overlay-backdrop {
+    z-index: 310 !important;
   }
   .sidebar-container.sidebar-open {
     transform: translateX(0);

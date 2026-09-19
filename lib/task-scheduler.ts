@@ -156,7 +156,14 @@ export async function dispatchCard(card: TaskCard): Promise<boolean> {
 
     const board = getBoard(card.boardId);
     if (board?.taskId) {
-      assignSessionToTask(session.realSessionId, board.taskId);
+      // 返回值不能丢：拒绝（祖先属别的任务 / 会话解析不出）时这个会话不会进任务区，
+      // 而 reconcile 按「卡在任务里」补卡——静默失败会让派发结果不可解释。
+      const assigned = await assignSessionToTask(session.realSessionId, board.taskId);
+      if (!assigned) {
+        console.warn(
+          `[task-scheduler] #${card.number} ${card.name} 派发的会话未能归属任务 task=${board.taskId} session=${session.realSessionId}`,
+        );
+      }
       // 注意：不在 assignSessionToTask 后 reconcile——此刻卡 sessionId 未落表，
       // reconcile 只能补会话卡、建不了 exec 线 → 造成「先出卡后出线」。
       // 统一在 updateCard(sessionId) 之后触发（补卡+建线同一次事务、一次广播）。

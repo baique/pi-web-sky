@@ -6,7 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { closeSync, existsSync, openSync, readSync } from "fs";
 import { readdir } from "fs/promises";
-import { join as joinPath, normalize as normalizePath } from "path";
+import { join as joinPath, basename as basenamePath, normalize as normalizePath } from "path";
 import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
 import { parseTodoSnapshot, TODO_STATE_CUSTOM_TYPE, type Todo } from "./todo-store";
 import type { SessionEntry as PiSessionEntry } from "@earendil-works/pi-coding-agent";
@@ -15,7 +15,7 @@ import { normalizeToolCalls } from "./normalize";
 import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
-import { scanSessionFileMeta, scanOneSessionFile, scanOneSessionHead, sessionScanner } from "./session-scanner";
+import { scanOneSessionFile } from "./session-scanner";
 import { ensureSessionIndexReady } from "./session-index-scanner";
 import type { TurnIndexItem } from "./api-types";
 
@@ -23,7 +23,13 @@ export { getAgentDir };
 
 type SessionMetaRow = Record<string, unknown>;
 
-/** 单个 session_meta 行 → SessionInfo（聊天列表与任务列表共用的唯一映射）。 */
+/** session_meta 行的读取列（列表 / 任务区 / 看板摘要共用一套映射）。 */
+const META_SELECT_COLUMNS =
+  "session_id, path, cwd, title, first_message, parent_id, created, modified, pinned, last_reply";
+
+/** 单个 session_meta 行 → SessionInfo（聊天列表与任务列表共用的唯一映射）。
+ *  lastReply 直接取库（v12 列：事件链路写真实回复、扫描器一次性回填存量）；
+ *  NULL（未回填）与 ''（回填过但无回复）在 UI 上都表现为空串。 */
 function mapSessionMetaRow(r: SessionMetaRow): SessionInfo {
   return {
     path: (r.path as string) ?? "",
@@ -34,21 +40,22 @@ function mapSessionMetaRow(r: SessionMetaRow): SessionInfo {
     modified: new Date((r.modified as number) ?? 0).toISOString(),
     messageCount: 0,
     firstMessage: (r.first_message as string | null) ?? "(no messages)",
+    lastReply: (r.last_reply as string | null) ?? "",
     parentSessionId: (r.parent_id as string | null) ?? undefined,
     pinned: Boolean((r.pinned as number) ?? 0),
   };
 }
 
 /** 按 id 集合查 session_meta 映射 SessionInfo（返回顺序与入参一致，无行 id 跳过）。
- *  任务列表详情与聊天列表 loadProjectSessions 完全同源——标题/首条消息不再依赖
- *  读文件（旧 readSessionDetails → scanOneSessionFile），统一由 session_meta 供给。 */
+ *  任务列表详情与聊天列表 loadProjectSessions 完全同源——标题/首条消息/最后回复
+ *  全部由 session_meta 供给，读取路径不读任何文件。 */
 export async function loadSessionDetailsFromMeta(ids: string[]): Promise<SessionInfo[]> {
   if (ids.length === 0) return [];
   let rows: Array<Record<string, unknown>>;
   try {
     rows = getDb()
       .prepare(
-        `SELECT session_id, path, cwd, title, first_message, parent_id, created, modified, pinned
+        `SELECT ${META_SELECT_COLUMNS}
          FROM session_meta WHERE session_id IN (${ids.map(() => "?").join(",")})`,
       )
       .all(...ids) as Array<Record<string, unknown>>;
@@ -61,42 +68,16 @@ export async function loadSessionDetailsFromMeta(ids: string[]): Promise<Session
     const row = byId.get(id);
     if (row) sessions.push(mapSessionMetaRow(row));
   }
-  return fillFirstMessageFromFile(sessions);
-}
-
-/**
- * lazy 回填：列表读取时对 first_message 为空的会话读文件头补真实首条消息
- * （文件是内容事实源），并批量写回 session_meta（后台收敛，下次免读文件）。
- * 真·空会话（文件无消息）保持 NULL → 显示 no messages。
- * 列表（聊天/任务/全量）共用同一逻辑，保证各处标题一致。
- */
-function fillFirstMessageFromFile(sessions: SessionInfo[]): SessionInfo[] {
-  const pending = sessions.filter((s) => s.firstMessage === "(no messages)" && s.path);
-  if (pending.length === 0) return sessions;
-  const updateStmt = getDb().prepare("UPDATE session_meta SET first_message = ? WHERE session_id = ?");
-  return sessions.map((s) => {
-    if (s.firstMessage !== "(no messages)" || !s.path) return s;
-    let firstMessage = s.firstMessage;
-    try {
-      const head = scanOneSessionHead(s.path);
-      if (head?.firstMessage) {
-        firstMessage = head.firstMessage;
-        updateStmt.run(firstMessage, s.id);
-      }
-    } catch {
-      // 文件不可读（丢失/权限）→ 保持 no messages
-    }
-    return firstMessage === s.firstMessage ? s : { ...s, firstMessage };
-  });
+  return sessions;
 }
 
 /**
  * 当前项目聊天区会话（列表重构 v2 主读取路径）。
  *
  * 纯查 session_meta：按 project_key 过滤 + 排除任务会话（task_id 非空交任务区管），
- * 置顶优先 + modified 降序。不读文件内容——title 用 meta.title（本应用改名写库），
- * 无自定义名回退 first_message；last_reply 不入库也不在此读（侧栏列表不消费，
- * 看板卡片走独立摘要轮询）。运行时/未落盘会话由调用方 union getRpcSessionInfos。
+ * 置顶优先 + modified 降序。**不读任何文件**（用户决策 4）：title 用 meta.title
+ * （本应用改名写库），无自定义名回退 first_message，最后一条消息用 last_reply
+ * （事件链路写入 + 扫描器一次性回填）。运行时/未落盘会话由调用方 union getRpcSessionInfos。
  */
 export async function loadProjectSessions(projectKey: string): Promise<SessionInfo[]> {
   if (!projectKey) return [];
@@ -105,7 +86,7 @@ export async function loadProjectSessions(projectKey: string): Promise<SessionIn
   try {
     rows = getDb()
       .prepare(
-        `SELECT session_id, path, cwd, title, first_message, parent_id, created, modified, pinned
+        `SELECT ${META_SELECT_COLUMNS}
          FROM session_meta
          WHERE project_key = ? AND task_id IS NULL
          ORDER BY pinned DESC, modified DESC`,
@@ -115,20 +96,18 @@ export async function loadProjectSessions(projectKey: string): Promise<SessionIn
     return [];
   }
 
-  const sessions = fillFirstMessageFromFile(rows.map(mapSessionMetaRow));
-  return attachSessionProjectInfo(sessions);
+  return attachSessionProjectInfo(rows.map(mapSessionMetaRow));
 }
 
 /** 全项目会话索引读取（无参 /api/sessions：跨项目统计/项目下拉/hydrate/红点清理用）。
- *  纯查 session_meta 全表（含任务会话、含各项目），不再整盘扫文件——
- *  lastReply 消费方已改走摘要点查，侧栏 allSessions 不需要它。 */
+ *  纯查 session_meta 全表（含任务会话、含各项目），不整盘扫文件、也不读文件尾。 */
 export async function loadAllSessionIndex(): Promise<SessionInfo[]> {
   await ensureSessionIndexReady();
   let rows: Array<Record<string, unknown>>;
   try {
     rows = getDb()
       .prepare(
-        `SELECT session_id, path, cwd, title, first_message, parent_id, created, modified, pinned
+        `SELECT ${META_SELECT_COLUMNS}
          FROM session_meta
          ORDER BY modified DESC`,
       )
@@ -137,8 +116,7 @@ export async function loadAllSessionIndex(): Promise<SessionInfo[]> {
     return [];
   }
 
-  const sessions = fillFirstMessageFromFile(rows.map(mapSessionMetaRow));
-  return attachSessionProjectInfo(sessions);
+  return attachSessionProjectInfo(rows.map(mapSessionMetaRow));
 }
 
 export async function attachSessionProjectInfo(sessions: SessionInfo[]): Promise<SessionInfo[]> {
@@ -185,93 +163,68 @@ export function mergeSessionLists(
   return [...byId.values()].sort((a, b) => b.modified.localeCompare(a.modified));
 }
 
-async function loadAllSessions(): Promise<SessionInfo[]> {
-  // 轻量扫描：只读每个会话文件的头部（header + 首条用户消息）与尾部（最新
-  // session_info 自定义名），最后活动时间用文件 mtime——列表只展示标题+时间，
-  // 不读取消息正文（SDK 的 listAll 会全量读每个 jsonl 并拼接全部文本，在大会话
-  // 文件上会把列表刷新拖到秒级甚至十几秒）。
-  const scanned = await sessionScanner.scan();
-  const pathToId = new Map<string, string>();
-  for (const s of scanned) pathToId.set(sessionPathKey(s.path), s.id);
-
-  const sessions = scanned.map((s) => {
-    cacheSessionPath(s.id, s.path);
-    return {
-      path: s.path,
-      id: s.id,
-      cwd: s.cwd,
-      name: s.name,
-      created: s.created.toISOString(),
-      modified: s.modified.toISOString(),
-      // 列表不消费消息数（精确值需要全量读，已移除）；保留字段以兼容类型。
-      messageCount: 0,
-      firstMessage: s.firstMessage || "(no messages)",
-      lastReply: s.lastReply || "",
-      parentSessionId: s.parentSessionPath ? pathToId.get(sessionPathKey(s.parentSessionPath)) : undefined,
-      transient: false,
-    };
-  });
-  return attachSessionProjectInfo(sessions);
-}
-
 /** 任务会话详情按需分页（侧栏任务区）。
  *
- *  服务端分流：任务下的会话详情由 /api/tasks 直接下发，前端不再用
- *  /api/sessions 全量列表 join task.sessionIds 反查（旧设计已被服务端
- *  分流取代——前端零归属判断）。
+ *  成员与父子链全部来自 session_meta（库是唯一事实源）：任务成员 = `task_id = 该任务`
+ *  的全部节点；**根** = `parent_id` 为空或父不在本任务成员集合内的节点。这里不 readdir、
+ *  不读 header（旧 buildTaskSessionIndex 每次请求全盘 readdir+读首行）。
  *
- *  每任务返回：置顶根会话全量 + 非置顶根从 offset 起的 limit 个（含各自
- *  fork 子树），外加 rootTotal（根会话总数，加载更多游标）与
- *  sessionTotal（含子树全部节点数，删除确认文案用）。
+ *  每任务返回：置顶节点全量 + 非置顶根从 offset 起的 limit 个（含各自 fork 子树），
+ *  外加 rootTotal（根数，前端「加载更多」游标）与 sessionTotal（任务下全部节点数，
+ *  删除确认文案用）。响应字段与分页语义与旧实现一致，前端契约不变。
  */
 export async function loadTaskSessionsPage(
   taskId: string,
   offset = 0,
   limit = 5,
 ): Promise<{ sessions: SessionInfo[]; rootTotal: number; sessionTotal: number; pinnedSessionIds: string[] }> {
-  return loadTaskSessionsPageWithIndex(taskId, await buildTaskSessionIndex(), offset, limit);
-}
-
-/** 任务会话索引：全量 id+path+mtime（readdir/stat，不读内容）+ 父链（读 header 首行）。
- *  一次构建供多个任务复用——/api/tasks 列表对每个任务都调 loadTaskSessionsPage，
- *  若各自全量扫文件会随任务数线性变慢（N 任务 = N 次全量 readdir+header）。 */
-export async function buildTaskSessionIndex(): Promise<{
-  metaById: Map<string, { path: string; id: string; modified: Date }>;
-  childrenOf: Map<string, string[]>;
-}> {
-  // 阶段一：全量 id+path+mtime（readdir+stat，不读内容）。
-  const metas = await scanSessionFileMeta();
-  const metaById = new Map(metas.map((m) => [m.id, m]));
-  const metaByPath = new Map(metas.map((m) => [sessionPathKey(m.path), m]));
-
-  // 父链索引（只读每个文件 header 首行——比 scanOneSessionFile 便宜，
-  // 不需要尾部反向分块）：childId -> parentId（childrenOf: parentId -> [childId]）。
-  const childrenOf = new Map<string, string[]>();
-  for (const m of metas) {
-    let parentPath: string | undefined;
-    try {
-      parentPath = readSessionHeader(m.path)?.parentSession ?? undefined;
-    } catch {
-      // 首行不可读 → 视为根会话
-    }
-    if (!parentPath) continue;
-    const parentMeta = metaByPath.get(sessionPathKey(parentPath));
-    if (!parentMeta) continue;
-    const arr = childrenOf.get(parentMeta.id) ?? [];
-    arr.push(m.id);
-    childrenOf.set(parentMeta.id, arr);
+  const { listPinnedTaskSessionIds } = await import("./task-store");
+  // 冷启动闸门（与同族 loadProjectSessions / loadAllSessionIndex 一致）：任务成员来自
+  // 库，而库要等首轮扫描才把磁盘会话建行。少了这一句，冷启动时任务区可能读到
+  // 「任务在、会话 0」且之后无人重拉（30s 后才自愈）。
+  // 闸门抛错（扫描器故障 / 库异常）不能穿透成路由 500：库里有上一轮扫描的行，
+  // 照旧查库返回比空页 / 500 都好。这里的闸门只是「尽力补一轮」。
+  try {
+    await ensureSessionIndexReady();
+  } catch (error) {
+    // 文案保持中性：这里只知道「索引就绪检查失败」，库好不好是另一回事——库可用时下面
+    // 照常返回库内行，库不可用时下面的查库 catch 降级为空页。旧文案「（继续查库）」把
+    // 后一种情形说反了，会让排查者以为库没问题。
+    console.error(
+      "[pi-web] 任务区索引就绪检查失败（接着查库；库不可用则降级为空页）:",
+      error instanceof Error ? error.message : String(error),
+    );
   }
-  return { metaById, childrenOf };
-}
+  // 同族读取函数（loadProjectSessions / loadAllSessionIndex）在 db 不可用时返回空，
+  // 这里同样降级为空页（路由层不必因一次读不到库整个 /api/tasks 500）。
+  // ORDER BY：成员顺序确定，让 modified 相同的根在 slice(offset, offset+limit)
+  // 下分页稳定（rowid 升序＝建行顺序；下面的 sort 是稳定排序，同键保持此顺序）。
+  let rows: Array<{ session_id: string; parent_id: string | null; modified: number | null }>;
+  let pinnedSessionIds: string[];
+  try {
+    rows = getDb()
+      .prepare("SELECT session_id, parent_id, modified FROM session_meta WHERE task_id = ? ORDER BY modified DESC, rowid")
+      .all(taskId) as Array<{ session_id: string; parent_id: string | null; modified: number | null }>;
+    pinnedSessionIds = listPinnedTaskSessionIds(taskId);
+  } catch {
+    return { sessions: [], rootTotal: 0, sessionTotal: 0, pinnedSessionIds: [] };
+  }
 
-/** 加载单个任务会话详情分页（复用外部已构建的任务索引，避免重复全量扫）。 */
-export async function loadTaskSessionsPageWithIndex(
-  taskId: string,
-  index: { metaById: Map<string, { path: string; id: string; modified: Date }>; childrenOf: Map<string, string[]> },
-  offset = 0,
-  limit = 5,
-): Promise<{ sessions: SessionInfo[]; rootTotal: number; sessionTotal: number; pinnedSessionIds: string[] }> {
-  const { metaById, childrenOf } = index;
+  const memberIds = new Set(rows.map((r) => r.session_id));
+  const modifiedOf = new Map<string, number>();
+  const childrenOf = new Map<string, string[]>();
+  const roots: string[] = [];
+  for (const row of rows) {
+    modifiedOf.set(row.session_id, row.modified ?? 0);
+    if (row.parent_id && memberIds.has(row.parent_id)) {
+      const siblings = childrenOf.get(row.parent_id) ?? [];
+      siblings.push(row.session_id);
+      childrenOf.set(row.parent_id, siblings);
+    } else {
+      roots.push(row.session_id);
+    }
+  }
+
   const collectSubtree = (rootId: string): string[] => {
     const out = [rootId];
     const queue = [rootId];
@@ -285,71 +238,24 @@ export async function loadTaskSessionsPageWithIndex(
     return out;
   };
 
-  const { listTaskSessionIds, listPinnedTaskSessionIds } = await import("./task-store");
-  const rootIds = listTaskSessionIds(taskId);
-  const pinnedSessionIds = listPinnedTaskSessionIds(taskId);
+  // 排序键：modified（最后活动时间；session_meta.updated 只是归属/置顶时间，
+  // 用它切页会把活跃会话切到后页而前端够不着）。
+  const byModifiedDesc = (a: string, b: string) => (modifiedOf.get(b) ?? 0) - (modifiedOf.get(a) ?? 0);
   const pinnedSet = new Set(pinnedSessionIds);
+  const nonPinnedRoots = roots.filter((id) => !pinnedSet.has(id)).sort(byModifiedDesc);
 
-  // 任务区根会话排序：按文件 mtime（最后写入时间）降序——活跃会话必然
-  // 最新写入，排最前。session_meta.updated 只是归属/置顶时间，切页用它
-  // 会把活跃会话切到后页（前端只能重排已加载页，够不着它）。
-  const modifiedOf = (id: string): number => metaById.get(id)?.modified.getTime() ?? 0;
-  const byMtimeDesc = (a: string, b: string) => modifiedOf(b) - modifiedOf(a);
-  const pinnedRoots = [...pinnedSessionIds].sort(byMtimeDesc);
-  const nonPinnedRoots = rootIds.filter((id) => !pinnedSet.has(id)).sort(byMtimeDesc);
-
-  // 当前页根 = 置顶全量 + 非置顶 slice(offset, offset+limit)；子树跟随根。
-  const pageRootIds = [...pinnedRoots, ...nonPinnedRoots.slice(offset, offset + limit)];
+  // 当前页根 = 置顶节点全量（不受 offset 影响）+ 非置顶根 slice(offset, offset+limit)；子树跟随根。
+  // 排序只作用于页序，返回的 pinnedSessionIds 保持库内原序（与旧实现一致）。
+  const pageRootIds = [...[...pinnedSessionIds].sort(byModifiedDesc), ...nonPinnedRoots.slice(offset, offset + limit)];
   const wantedIds = new Set<string>();
   for (const rid of pageRootIds) {
     for (const id of collectSubtree(rid)) wantedIds.add(id);
   }
-  // 详情走 session_meta（与聊天列表 loadProjectSessions 同源）——标题/首条消息
-  // 由索引供给，不再读文件；不存在/未入索引的 id 自然跳过。
+  // 详情走 session_meta（与聊天列表 loadProjectSessions 同源）——标题/最后回复由库供给，
+  // 不读文件；库内没有行的 id 自然跳过。
   const sessions = await attachSessionProjectInfo(await loadSessionDetailsFromMeta([...wantedIds]));
 
-  // sessionTotal：任务下全部根 + 子树节点数（删除确认文案）。
-  const allIds = new Set<string>();
-  for (const rid of rootIds) for (const id of collectSubtree(rid)) allIds.add(id);
-  return { sessions, rootTotal: rootIds.length, sessionTotal: allIds.size, pinnedSessionIds };
-}
-
-export async function listAllSessions(options: { force?: boolean } = {}): Promise<SessionInfo[]> {
-  if (options.force) invalidateSessionListCache();
-  const generation = globalThis.__piSessionListGeneration ?? 0;
-
-  // Return cached result if still fresh (avoids re-scanning session files
-  // and re-spawning git processes on every page load).
-  if (globalThis.__piSessionListCache && Date.now() - globalThis.__piSessionListCache.ts < SESSION_LIST_CACHE_TTL_MS) {
-    return globalThis.__piSessionListCache.data;
-  }
-
-  // Coalescing dedup: concurrent callers share the same in-flight promise
-  // only while it belongs to the current cache generation.
-  if (globalThis.__piSessionListPromise && globalThis.__piSessionListPromiseGeneration === generation) {
-    return globalThis.__piSessionListPromise;
-  }
-
-  const loadPromise = loadAllSessions().then((data) => {
-    // If a mutation invalidated this scan, make this caller join (or start) a
-    // scan for the current generation. Returning the stale result here made a
-    // refresh race indistinguishable from a successful refresh.
-    if ((globalThis.__piSessionListGeneration ?? 0) !== generation) {
-      return listAllSessions();
-    }
-    globalThis.__piSessionListCache = { data, ts: Date.now() };
-    return data;
-  });
-  const trackedPromise = loadPromise.finally(() => {
-    if (globalThis.__piSessionListPromise === trackedPromise) {
-      globalThis.__piSessionListPromise = undefined;
-      globalThis.__piSessionListPromiseGeneration = undefined;
-    }
-  });
-
-  globalThis.__piSessionListPromise = trackedPromise;
-  globalThis.__piSessionListPromiseGeneration = generation;
-  return trackedPromise;
+  return { sessions, rootTotal: roots.length, sessionTotal: rows.length, pinnedSessionIds };
 }
 
 // ============================================================================
@@ -358,17 +264,17 @@ export async function listAllSessions(options: { force?: boolean } = {}): Promis
 declare global {
   var __piSessionPathCache: Map<string, string> | undefined;
   var __piPathToSessionIdCache: Map<string, string> | undefined;
-  var __piSessionListPromise: Promise<SessionInfo[]> | undefined;
-  var __piSessionListPromiseGeneration: number | undefined;
   var __piSessionListGeneration: number | undefined;
-  var __piSessionListCache: { data: SessionInfo[]; ts: number } | undefined;
 }
 
-const SESSION_LIST_CACHE_TTL_MS = 300_000;
-
+/** 写路径的「数据变了」信号：归属/pin/改名/新建/删除/事件都会调它。
+ *
+ *  列表已无缓存（读取 = 每次一次单表查询），所以目前**没有生产读者**：这里只保留
+ *  generation 自增的既有行为（T1–T4b 的写路径与 auto-name / patch-write-failure 的
+ *  断言都依赖调用本身）。若要连函数一起删，需要同时改掉全部调用方与那两处断言——
+ *  属待清理项，本次不动。 */
 export function invalidateSessionListCache(): void {
   globalThis.__piSessionListGeneration = (globalThis.__piSessionListGeneration ?? 0) + 1;
-  globalThis.__piSessionListCache = undefined;
 }
 
 function getPathCache(): Map<string, string> {
@@ -382,13 +288,20 @@ function getPathToIdCache(): Map<string, string> {
 }
 
 /**
- * Find one session's file without parsing the catalogue.
+ * Find one session's file by name, as a bounded fallback for sessions that are
+ * not in session_meta yet (a session an external tool just created).
  *
  * Session files are written as `<timestamp>_<id>.jsonl` under a per-project
  * directory, so the id can be located by reading directory entries alone. The
  * header is then parsed — bounded, first line only — to confirm the match
- * rather than trusting the name. Returns null when nothing matches, leaving the
- * caller on the full scan.
+ * rather than trusting the name. Returns null when nothing matches; callers
+ * must not fall back to a full catalogue scan (that read path is gone).
+ *
+ * 决策 4 的代价（说得明白，免后人误以为是 bug）：这里只平铺 readdir 每个项目目录的
+ * **第一层**，并依赖 `_<id>.jsonl` 命名约定。子目录里的会话（`<session>/forks/…`、
+ * `<session>/<runId>/run-0/session.jsonl`）与文件名不合约定的行因此解析不到——它们要等
+ * 扫描器把 path 写进 session_meta（≤30s）才能被 resolveSessionPath 命中。换来的是读
+ * 取路径不发全量扫盘。
  *
  * `sessionId` is only ever compared against names that came back from
  * `readdir`, never joined into a path itself, so a separator or `..` inside it
@@ -424,7 +337,7 @@ async function findSessionPathByName(sessionId: string): Promise<string | null> 
     try {
       if (readSessionHeader(candidate)?.id === sessionId) return candidate;
     } catch {
-      // Unreadable or truncated: let the full scan decide.
+      // 读不出 header（不可读/截断）→ 不认这个候选；不回落全量扫盘（读取路径已无此退路）。
     }
   }
   return null;
@@ -434,18 +347,28 @@ export async function resolveSessionPath(sessionId: string): Promise<string | nu
   const cached = getPathCache().get(sessionId);
   if (cached) return cached;
 
-  // Opening one session should not wait for the whole catalogue to be parsed.
-  // The name carries the id, so this costs a directory listing per project plus
-  // one header read, and only a miss falls through to the full scan.
+  // 库是路径的事实源（扫描器已把每个磁盘会话的 path 写入 session_meta）：
+  // 命中即用，不读目录、不扫盘。
+  try {
+    const row = getDb()
+      .prepare("SELECT path FROM session_meta WHERE session_id = ?")
+      .get(sessionId) as { path: string | null } | undefined;
+    if (row?.path && existsSync(row.path)) {
+      cacheSessionPath(sessionId, row.path);
+      return row.path;
+    }
+  } catch {
+    // db 不可用 → 走名字兜底
+  }
+
+  // 库内无行/路径已失效（外部工具刚建的会话）→ 按名字匹配兜底：每项目目录一次
+  // readdir + 一次 header 读，不再退化成全量头尾扫。
   const direct = await findSessionPathByName(sessionId);
   if (direct) {
     cacheSessionPath(sessionId, direct);
     return direct;
   }
-
-  // Cache miss: scan all sessions to populate cache, then retry
-  await listAllSessions();
-  return getPathCache().get(sessionId) ?? null;
+  return null;
 }
 
 export async function resolveSessionIdByPath(filePath: string): Promise<string | undefined> {
@@ -453,8 +376,34 @@ export async function resolveSessionIdByPath(filePath: string): Promise<string |
   const cached = getPathToIdCache().get(pathKey);
   if (cached) return cached;
 
-  await listAllSessions();
-  return getPathToIdCache().get(pathKey);
+  try {
+    const db = getDb();
+    // 精确命中（绝大多数调用：header.parentSession 与建行时写入的 path 同源）。
+    const exact = db
+      .prepare("SELECT session_id, path FROM session_meta WHERE path = ?")
+      .get(filePath) as { session_id: string; path: string } | undefined;
+    if (exact?.path) {
+      cacheSessionPath(exact.session_id, exact.path);
+      return exact.session_id;
+    }
+    // 归一化差异兜底（`/a/./b`、Windows 大小写）：按文件名后缀粗筛，再用
+    // sessionPathKey 精确比较。`_` 在 LIKE 里是单字符通配符 → 只会多筛不会漏筛。
+    const base = basenamePath(filePath);
+    if (base) {
+      const candidates = db
+        .prepare("SELECT session_id, path FROM session_meta WHERE path LIKE ?")
+        .all(`%${base}`) as Array<{ session_id: string; path: string | null }>;
+      for (const row of candidates) {
+        if (row.path && sessionPathKey(row.path) === pathKey) {
+          cacheSessionPath(row.session_id, row.path);
+          return row.session_id;
+        }
+      }
+    }
+  } catch {
+    // db 不可用 → 查不到（读取路径不再扫盘兜底）
+  }
+  return undefined;
 }
 
 export function cacheSessionPath(sessionId: string, filePath: string): void {
@@ -848,49 +797,64 @@ export function extractTurnIndex(entries: SessionEntry[], leafId: string | null)
 /**
  * 按 id 批量点查会话摘要（看板卡片轮询用，替代全量列表自筛）。
  *
- * 画布上有几张会话卡就查几个 id——先查 session_meta 拿 path（扫描器已全量
- * 建索引，避免 resolveSessionPath 对 miss 触发全量扫盘），再 scanOneSessionFile
- * 读头尾（name=自定义名/firstMessage/lastReply/mtime），最后 attachSessionProjectInfo
- * 补 projectRoot/branch 等 UI 字段。查不到（id 不存在）跳过。
+ * 库优先（用户决策 4）：title / last_reply / modified 全部取 session_meta，
+ * 一次点查不读任何文件（旧实现逐卡 scanOneSessionFile 读头尾）。只有
+ * **库里完全没有行**的 id（外部工具刚建、尚未入索引的会话）才回退到
+ * resolveSessionPath + 单文件详情读。查不到（id 不存在）跳过。
  */
 export async function loadSessionSummariesByIds(ids: string[]): Promise<SessionInfo[]> {
   const unique = [...new Set(ids.filter(Boolean))];
   if (unique.length === 0) return [];
 
-  // meta 索引拿 path + title（扫描器维护；未索引的新会话走 resolveSessionPath 兜底）
-  // title 优先用 meta（与列表同源：改名写 session_meta.title），文件尾 session_info 兜底——
-  // 避免改名后继续聊超 tail 上限（16MB）时看板卡片标题与侧栏不一致。
-  const rows = new Map<string, { path: string | null; title: string | null }>();
+  const rowById = new Map<string, SessionMetaRow>();
   try {
     const found = getDb()
-      .prepare("SELECT session_id, path, title FROM session_meta WHERE session_id IN (" + unique.map(() => "?").join(",") + ")")
-      .all(...unique) as Array<{ session_id: string; path: string | null; title: string | null }>;
-    for (const r of found) rows.set(r.session_id, { path: r.path, title: r.title });
+      .prepare(`SELECT ${META_SELECT_COLUMNS} FROM session_meta WHERE session_id IN (${unique.map(() => "?").join(",")})`)
+      .all(...unique) as Array<Record<string, unknown>>;
+    for (const r of found) rowById.set(r.session_id as string, r);
   } catch {
-    // db 不可用 → 全部走 resolveSessionPath 兜底
+    // db 不可用 → 全部走文件兜底
   }
 
-  const sessions: SessionInfo[] = [];
+  const byId = new Map<string, SessionInfo>();
+  const missing: string[] = [];
   for (const id of unique) {
-    const metaRow = rows.get(id);
-    let filePath = metaRow?.path ?? null;
-    if (!filePath) filePath = await resolveSessionPath(id);
+    const row = rowById.get(id);
+    if (!row) {
+      missing.push(id);
+      continue;
+    }
+    if (row.path) cacheSessionPath(id, row.path as string);
+    byId.set(id, mapSessionMetaRow(row));
+  }
+
+  // 兜底：库内无行的 id（外部工具刚建的会话）—— 一次路径解析 + 文件头尾读。
+  for (const id of missing) {
+    const filePath = await resolveSessionPath(id);
     if (!filePath) continue;
     const scanned = scanOneSessionFile(filePath);
     if (!scanned) continue;
     cacheSessionPath(id, scanned.path);
-    sessions.push({
+    // parentSessionId 与主路径同字段（会话 id，不是路径）：磁盘上只有父路径，
+    // 经库反查一次；父也还没行就留 undefined（与主路径的 NULL 行为一致）。
+    const parentSessionId = scanned.parentSessionPath
+      ? await resolveSessionIdByPath(scanned.parentSessionPath)
+      : undefined;
+    byId.set(id, {
       path: scanned.path,
       id: scanned.id,
       cwd: scanned.cwd,
-      name: metaRow?.title ?? scanned.name,
+      name: scanned.name,
       created: scanned.created.toISOString(),
       modified: scanned.modified.toISOString(),
       messageCount: 0,
       firstMessage: scanned.firstMessage || "(no messages)",
       lastReply: scanned.lastReply || "",
+      parentSessionId,
       transient: false,
     });
   }
-  return attachSessionProjectInfo(sessions);
+
+  // 返回顺序与入参一致（命中集）。
+  return attachSessionProjectInfo(unique.map((id) => byId.get(id)).filter((s): s is SessionInfo => Boolean(s)));
 }

@@ -23,7 +23,9 @@ const nextConfig: NextConfig = {
     // platform-specific prebuilt package resolves at runtime, not bundle time.
     "@lydell/node-pty",
   ],
-  allowedDevOrigins: ["127.0.0.1", "192.168.*.*"],
+  // 局域网调试：dev 模式下 Next 会拦跨源 dev 资源（JS chunk/HMR），导致从局域网 IP 打开时白屏。
+  // 覆盖本机常见网段：127.0.0.1（回环）、192.168.*（家用/办公常见）、172.18.*（本机 en0 所在网段）。
+  allowedDevOrigins: ["127.0.0.1", "192.168.*.*", "172.18.*.*"],
   async headers() {
     return [
       {

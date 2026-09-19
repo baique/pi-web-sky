@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { createTask, listTasks } from "@/lib/task-store";
-import { buildTaskSessionIndex, loadTaskSessionsPageWithIndex } from "@/lib/session-reader";
+import { loadTaskSessionsPage } from "@/lib/session-reader";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/tasks?projectKey=<key>[&offset=0&limit=5]
 //   每任务附会话详情（置顶全量 + 非置顶 offset/limit + rootTotal + sessionTotal）——
 //   服务端分流，前端零归属判断（不再用 /api/sessions join task.sessionIds 反查）。
-//   会话详情共用一个全量任务索引（readdir+header 一次扫，多任务复用，不随任务数线性变慢）。
+//   成员/父子链/排序键全部来自 session_meta：不再构建磁盘索引（旧实现每次请求
+//   全盘 readdir+stat+读每个 header）。
 export async function GET(req: Request) {
   try {
     const search = new URL(req.url).searchParams;
@@ -17,11 +18,10 @@ export async function GET(req: Request) {
     const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 5;
     const tasks = listTasks(projectKey);
-    const index = await buildTaskSessionIndex();
     const tasksWithSessions = await Promise.all(
       tasks.map(async (task) => ({
         ...task,
-        ...(await loadTaskSessionsPageWithIndex(task.id, index, offset, limit)),
+        ...(await loadTaskSessionsPage(task.id, offset, limit)),
       })),
     );
     return NextResponse.json(

@@ -59,3 +59,6 @@ next-env.d.ts
 
 # 本地运行日志（dev server 等），不入库
 /.agent/logs/
+
+# AI 工作区临时产物（e2e raw JSON / 报告 / 备份等），不入库
+/.agent/tmp/

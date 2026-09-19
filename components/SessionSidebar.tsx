@@ -17,7 +17,17 @@ import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { SessionTabs, type SidebarTab } from "./SessionTabs";
 import { BoardSection } from "./canvas/BoardSection";
+import { assignmentFailureDetail } from "./session-membership-feedback";
 import { TaskArea, type TaskGroupUi } from "./TaskArea";
+import {
+  membershipDropAllowed,
+  orderPinnedFirst,
+  parseSessionDepth,
+  planSessionListItems,
+  SESSION_DEPTH_MIME,
+  sessionRowDraggable,
+  type SessionTreeNode,
+} from "./session-sidebar-list";
 
 declare global {
   interface Window {
@@ -198,13 +208,6 @@ function PathLabel({ text, style }: { text: string; style?: CSSProperties }) {
       <span style={{ unicodeBidi: "plaintext" }}>{text}</span>
     </span>
   );
-}
-
-
-
-interface SessionTreeNode {
-  session: SessionInfo;
-  children: SessionTreeNode[];
 }
 
 function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
@@ -1124,11 +1127,20 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.sessionIds.includes(sessionId)) return;
     // 原子归属（服务端 upsert，幂等）——避免读-改-写竞态（多端并发拖入互相踢）。
-    await fetch(`/api/tasks/${encodeURIComponent(taskId)}/assign-session`, {
+    const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/assign-session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId }),
     });
+    if (!res.ok) {
+      // 失败可见（409 = 祖先属别的任务 / 404 = 会话解析不出）：把服务端的 error 文案带进日志，
+      // 否则用户在界面上只看到「拖过去没反应」而控制台什么都不说。
+      // 细节由 assignmentFailureDetail 取（body 已消费/为空时回退状态码，见其单测）。
+      console.warn(
+        `[sidebar] 会话归属失败 HTTP ${res.status} task=${taskId} session=${sessionId}:`,
+        await assignmentFailureDetail(res),
+      );
+    }
     await persistTasks();
     // 归属变了，聊天区列表也得重拉：/api/sessions 只返回 task_id IS NULL 的会话，
     // 不重拉的话被拖入任务的会话仍旧挂在聊天区（要等下一次 refreshKey 才消失）。
@@ -1148,23 +1160,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     void loadChatPage();
   }, [tasks, persistTasks, loadChatPage]);
 
-  // Region-internal order: pinned segment first, then the rest — both sorted
-  // by the session's last-modified time (desc). Pinning never changes position
-  // within a segment; it only relocates the entry to the pinned segment
-  // (hairline-divided), exactly like the chat region. Sorting happens here in
-  // the client so the server never double-sorts with a different key.
-  function orderPinnedFirst(nodes: SessionTreeNode[]): SessionTreeNode[] {
-    const byModified = (a: SessionTreeNode, b: SessionTreeNode) =>
-      a.session.modified < b.session.modified
-        ? 1
-        : a.session.modified > b.session.modified
-          ? -1
-          : 0;
-    return [
-      ...nodes.filter((n) => n.session.pinned).sort(byModified),
-      ...nodes.filter((n) => !n.session.pinned).sort(byModified),
-    ];
-  }
+  // 段内排序（置顶段在前 → 段内运行中浮顶 → modified 降序）见
+  // components/session-sidebar-list.ts：纯函数，便于按顺序断言。
 
   // 任务下全部会话数（含 fork 子树）——删除确认文案用。
   const countTree = (nodes: SessionTreeNode[]): number =>
@@ -1183,31 +1180,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   // Chat region: 当前项目会话（服务端已按置顶 + mtime 排序返回）。
   // 运行中会话本地浮顶（G1）：runningSessionIds 来自轻量轮询，变化时只重排不重拉列表。
-  const chatNodes = useMemo(() => {
-    const runningIds = runningSessionIds;
-    const running = chatSessions.filter((s) => runningIds.has(s.id));
-    const rest = chatSessions.filter((s) => !runningIds.has(s.id));
-    const tree = orderPinnedFirst(buildSessionTree([...running, ...rest]));
+  // 浮顶作为排序键交给 orderPinnedFirst（此前是拼在输入前面再被 modified 重排覆盖）。
+  const chatNodes = useMemo(
     // 树内按置顶段/非置顶段渲染；会话若已置顶则整棵子树留在置顶区。
-    return tree;
-  }, [chatSessions, runningSessionIds]);
+    () => orderPinnedFirst(buildSessionTree(chatSessions), runningSessionIds),
+    [chatSessions, runningSessionIds],
+  );
 
-  // 聊天区时间分组：置顶段不参与（置顶会话本就脱离时间顺序），
-  // 越过置顶分隔线后重新开始分组；分组标签只在同一段内换组时出现一次。
-  const chatListItems = useMemo(() => {
-    const now = Date.now();
-    let lastGroup: SessionTimeGroup | null = null;
-    return chatNodes.map((node, i) => {
-      const isPinned = Boolean(node.session.pinned);
-      const prevPinned = i > 0 && Boolean(chatNodes[i - 1]?.session.pinned);
-      const startsUnpinned = !isPinned && (i === 0 || prevPinned);
-      if (startsUnpinned) lastGroup = null;
-      const group = isPinned ? null : sessionTimeGroup(node.session.modified, now);
-      const header = group && group !== lastGroup ? group : null;
-      if (group) lastGroup = group;
-      return { node, header, pinDivider: prevPinned && !isPinned };
-    });
-  }, [chatNodes]);
+  // 聊天区行计划（时间分组角标 + 置顶分隔线）见 session-sidebar-list.ts：
+  // 纯函数，便于按行为断言分组标签。
+  const chatListItems = useMemo(
+    () => planSessionListItems(chatNodes, runningSessionIds, Date.now(), sessionTimeGroup),
+    [chatNodes, runningSessionIds],
+  );
 
 
 
@@ -1743,6 +1728,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 {!chatCollapsed && (
                   <div
                     onDragOver={(e) => {
+                      // dragover 阶段只能读 types（data 在 drop 前不可读），所以深度
+                      // 判断只能放在 drop 里：子会话行可能先亮一下高亮再被拒绝。
                       if (!e.dataTransfer.types.includes("text/session-id")) return;
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
@@ -1753,7 +1740,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       e.preventDefault();
                       setTempDragOver(false);
                       const sid = e.dataTransfer.getData("text/session-id");
-                      if (sid) void handleUnassignSession(sid);
+                      // 归属类落点（移出任务）：只接受顶层行——子会话归属按子树存
+                      // （lib/task-store 不变量），单独移出会被服务端归一化加回来。
+                      const depth = parseSessionDepth(e.dataTransfer.getData(SESSION_DEPTH_MIME));
+                      if (sid && membershipDropAllowed(depth)) void handleUnassignSession(sid);
                     }}
                     style={{
                       flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden",
@@ -2306,12 +2296,15 @@ function SessionItem({
       onContextMenu={confirmDelete || renaming ? undefined : handleContextMenu}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
-      draggable={!renaming && !confirmDelete}
+      draggable={sessionRowDraggable({ renaming, confirmDelete })}
       onDragStart={(e) => {
         setMoreOpen(false);
         e.dataTransfer.setData("text/session-id", session.id);
         // 拖入画布自带标题：dataTransfer 带 session 名，画布落卡直接可用（不依赖轮询）
         e.dataTransfer.setData("text/session-title", title);
+        // 树内深度：归属类落点（任务区 / 聊天区 / 任务看板落卡）按它拒绝子会话行；
+        // 手动看板落卡不是归属变更（新增内容），不看它。
+        e.dataTransfer.setData(SESSION_DEPTH_MIME, String(depth));
         e.dataTransfer.effectAllowed = "move";
       }}
       style={{

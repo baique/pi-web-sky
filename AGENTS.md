@@ -45,7 +45,7 @@ git branch -D feat/<描述>
 ```
 Browser                Next.js Server              AgentSession (in-process)
   │                        │                               │
-  ├─ GET /api/sessions ────▶ reads ~/.pi/agent/sessions/   │
+  ├─ GET /api/sessions ────▶ 查 pi-web.db session_meta（后台扫描器建行）│
   ├─ GET /api/sessions/[id] reads .jsonl file directly     │
   ├─ GET /api/agent/running ───────▶ running id snapshot   │
   │                        │                               │
@@ -58,7 +58,7 @@ Browser                Next.js Server              AgentSession (in-process)
   │◀── data: {...} ─────────│                               │
 ```
 
-**Session browsing** (read-only): reads `.jsonl` files through SDK `SessionManager` helpers and `lib/session-reader.ts` — no AgentSession created.  
+**Session browsing** (read-only): 列表 / 任务区 / 摘要 / 路径解析纯查 `session_meta`（`lib/session-reader.ts`，不读文件）；只有单会话详情（`GET /api/sessions/[id]`）与后台扫描器读 `.jsonl` —— no AgentSession created.  
 **Sending a message**: `startRpcSession()` in `lib/rpc-manager.ts` creates an AgentSession in-process.
 
 **Board mode** (会话看板): selecting a board (`?board=`) replaces the ChatWindow area with the React Flow canvas (`SessionCanvas`) — the sidebar stays visible, exiting / clicking a session / new-session returns to chat. **画布已迁移到自研（React Flow + yjs，2026-09）**：每看板一个 Y.Doc（`@hocuspocus/server` 内嵌：`server.mjs` + `lib/yjs-room-server.mjs`，同端口），画布文档持久化到 `~/.pi/agent/sync.db` 的 `yjs_documents` 表；前端 `HocuspocusProvider` 连接（CRDT 自动合并，无全量保存/乐观锁/409）。业务派生元素（会话卡 + exec / 依赖 / fork 线）由**后端 reconcile** 从业务表渲染（`lib/board-reconcile.ts`）。**任务卡不是派生元素**——它是用户画布内容（前端建/删），reconcile 只清孤儿、绝不反向补卡；旧 `lib/board-store.ts` 的 nodes/edges 表是 tldraw 遗留，仅作级联清空保留，画布渲染完全走 yjs。`__running__` 系统看板的后端支持（`getSystemRunningBoard`，不落库恒存在）保留供 `/api/boards` 使用，UI 入口已移除。
@@ -74,9 +74,10 @@ Browser                Next.js Server              AgentSession (in-process)
 - **发送消息必须新建测试会话**：一切需要发送消息 / 会写入会话文件的场景（发 prompt、跑命令、改文件），不允许使用用户已有会话，必须自行新建（`/api/agent/new` 指定 cwd 新建，或复制会话文件到临时 cwd）。只读测试（加载、滚动、查看 DOM）不受限，可用用户已有会话。
 - **AgentSession wrapper 挂在 `globalThis.__piSessions`**：`globalThis` 存活 Next.js 热重载，模块级 Map 不行。并发 `startRpcSession()` 共享单个 start Promise（`__piStartLocks`），空闲 10 分钟超时。
 - **fork 必须立即销毁 wrapper**：fork 由 `SessionManager.create` / `createBranchedSession` 手工造分支文件（不再用 `AgentSession.fork()`），拿到 `newSessionId` 后立刻 `await this.shutdown()`——旧 wrapper 留在注册表会让后续请求拿到已 fork 的内存态、fork 链损坏。建 session_meta 行放在 shutdown 之后（`resolveProject` 的 await 不能落在这个窗口里）。
-- **会话文件可整体重写**：`parentSession` 仅展示元数据，对聊天内容零影响；删会话级联重挂子节点可安全 `writeFileSync` 整文件。
+- **会话文件可整体重写**：`parentSession` 对聊天内容零影响；但**父子链的事实源是 `session_meta.parent_id`**——删会话重挂子节点必须同请求改写磁盘 header 与库行（`rewriteSessionParent` + `reparentSessionChildren`），只写文件会被下一轮扫描覆盖回来。
 - **ToolCall 字段归一化****：pi 存 `{type:"toolCall", id, name, arguments}`，组件用 `{toolCallId, toolName, input}`；`lib/normalize.ts` 的 `normalizeToolCalls()` 在文件加载和流式事件两处都要调。
-- **看板卡片入板先归属后落卡**：拖会话进看板（画布落点 / 侧栏看板行 / 工具栏新建）都必须先写归属（`assignSessionToTask`）再落卡 —— 任务看板上的无归属会话卡会被 reconcile 当孤儿删。详见 [boards.md](docs/reference/boards.md)。
+- **看板卡片入板先归属后落卡**：拖会话进看板（画布落点 / 侧栏看板行 / 工具栏新建）都必须先写归属（拖入既有会话走 `assignSessionSubtreeToTask`，新建会话走 `/api/agent/new` 的 `assignSessionToTask`）再落卡 —— 任务看板上的无归属会话卡会被 reconcile 当孤儿删。详见 [boards.md](docs/reference/boards.md)。
+- **会话归属按子树**：子会话（fork / fork_branch / 内置 subagent）建行**继承父 `task_id`**；拖入 / 移出任务、删任务**连带整棵子树**（`updateTask` 的成员规范化保证「父走子不留」，共享守卫 `membershipDropAllowed` 拒绝 `depth>0` 的行单独改归属）；祖先已属别的任务的归属由服务端拒绝（409，`hasForeignTaskAncestor`）。详见 [sessions.md](docs/reference/sessions.md)。
 - **SQLite 事务铁律**：不支持嵌套 BEGIN。`deleteBoardCascade` / `renameTaskBoard` 必须无事务，由调用方（`deleteBoard` / `deleteTask` / `updateTask`）在自身事务内调用。
 - **看板双源状态**：卡片内状态以展开卡的 `useAgentSession` SSE 为准，看板聚合态以 `/api/agent/running` 轮询为准——不要混用打架。
 - **SSE 重连**：`useAgentSession` mount 时拉 `GET /api/sessions/[id]/state`，`isStreaming` 或 `isPromptRunning` 为真则自动重连 SSE；compaction 事件新旧两套都要认（`compaction_*` / `auto_compaction_*`）。
@@ -96,7 +97,7 @@ Browser                Next.js Server              AgentSession (in-process)
 | 主题 | 文件 | 什么时候读 |
 |---|---|---|
 | 浮层交互规范 | [docs/reference/ui-popovers.md](docs/reference/ui-popovers.md) | 新增/改动任何 popover / panel / dialog / 菜单（终端、MCP、工具面板、设置等）——toggle 开关、点外部关闭、Esc、位置对齐 |
-| 会话生命周期 | [docs/reference/sessions.md](docs/reference/sessions.md) | 改会话加载 / 分支 / SSE / compaction / 运行状态轮询 / 会话文件读写 / 会话文件格式 |
+| 会话生命周期 | [docs/reference/sessions.md](docs/reference/sessions.md) | 改会话加载 / 分支 / SSE / compaction / 运行状态轮询 / **会话归属（子树）** / **索引与列表读取** / 会话文件读写 |
 | 会话 TODO | [docs/reference/todo.md](docs/reference/todo.md) | 改内建 todo 工具 / 顶栏 todo 面板 / `pi-todo.state` 快照契约 / auto-clear / 节奏提醒 |
 | 内置 subagent | [docs/reference/subagents.md](docs/reference/subagents.md) | 改 Agent 工具 / subagent profile 格式与加载 / 并发队列 / 设置里的代理分区 / subagent 会话展示 |
 | 会话看板 | [docs/reference/boards.md](docs/reference/boards.md) | 改看板 / 画布 / **派生边 reconcile（后端权威）** / 任务即看板 / 便笺 / scrim / React Flow 节点 / yjs 数据层 |

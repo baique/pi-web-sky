@@ -83,7 +83,7 @@ task_card_questions  待回答队列（S3 用）
 ## 删除（确认制 + 事务）
 
 - 删除拦截 toast 已废除（无 `boards.deleteBlocked`）；删除走**确认弹窗**（提示关联关系）→ 事务删除。
-- **删会话**：无事务、各步幂等（失败不回滚，exec 线由 reconcile 收尾）。顺序：`removeSessionFromBoards`（断 exec 线 + 清任务卡 `session_id` + 删画布卡）→ 删会话文件 → 清 `session_meta`/归属 → `removeSessionsFromYjsBoards` 清 yjs 会话卡（含占位卡）。
+- **删会话**：无事务、各步幂等（失败不回滚，exec 线由 reconcile 收尾）。顺序：`removeSessionFromBoards`（断 exec 线 + 清任务卡 `session_id` + 删画布卡）→ 子行 `parent_id` 改写祖父（磁盘 header + 库内行同请求，`reparentSessionChildren`；拿不到祖父写 NULL）→ 删会话文件 → 清 `session_meta`/归属 → `removeSessionsFromYjsBoards` 清 yjs 会话卡（含占位卡）。
 - **删任务卡**（单事务）：删依赖/问答 → 删卡行（画布节点由前端删，yjs 文档持久化）。
 
 ## API

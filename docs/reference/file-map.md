@@ -8,15 +8,15 @@
 
 ```
 sessions/route.ts               GET ?project=<key> 单项目无分页 | 无参全量（看板/跨项目）
-sessions/[id]/route.ts          GET/PATCH/DELETE session（PATCH name 同步写 session_meta.title）
+sessions/[id]/route.ts          GET/PATCH/DELETE session（PATCH name/pinned 同请求写 session_meta；DELETE 把子行 parent_id 改写祖父：磁盘 header + 库同请求，文件已丢失也归零）
 sessions/[id]/context/route.ts  GET ?leafId= — context for a specific leaf（?tail/?before 分页）
 sessions/[id]/export/route.ts   GET exported HTML for a session（深链递归助手改迭代，防爆栈）
 sessions/[id]/minimap/route.ts  GET ?leafId= 时间轴导航条（ChatMinimap）的轻量 turn 索引（只带标题摘要，不带 content）
 sessions/[id]/state/route.ts    GET 运行中会话的实时 state（无 wrapper 时只回 running:false，不读文件；会话不存在 404）
 sessions/[id]/todos/route.ts    GET 只取最新 pi-todo.state 快照（会话切换/开面板时拉一次，无轮询）
-sessions/[id]/auto-name/route.ts POST 用模型生成会话标题（走 setSessionName + 刷列表缓存；写 session_meta.title 的是 PATCH 路由）
+sessions/[id]/auto-name/route.ts POST 用模型生成会话标题（setSessionName 成功后同请求写 session_meta.title，失败 500 + 日志可见）
 sessions/[id]/entries/[entryId]/thinking/route.ts  GET 单条 thinking 块按需取（长思考懒加载）
-sessions/summary/route.ts       POST { ids } — 看板卡片摘要点查（替代全量轮询自筛）
+sessions/summary/route.ts       POST { ids } — 看板卡片摘要点查（库优先；该 id 在库内完全无行时才回退文件头尾读）
 agent/new/route.ts              POST { cwd, message, toolNames?, provider?, modelId?, id? （可指定会话 id）}
 agent/[id]/route.ts             GET state | POST any command
 agent/[id]/events/route.ts      GET SSE stream
@@ -64,10 +64,10 @@ task-cards/unbind/route.ts      POST { sessionId } 解除任务卡与执行会�
 task-card-questions/route.ts    GET 问题列表（?status=pending|answered|all；提问记录由调度器/卡流程写库）
 task-card-questions/[id]/answer/route.ts  POST 作答（置 answered；续跑由调度器回复队列拾取）
 task-scheduler/status/route.ts  GET 调度器状态（当前派发中的任务 + 最近一次调度动作）
-tasks/route.ts                  GET/POST 任务元数据（session_meta 旁路）
-tasks/[id]/route.ts             GET/PATCH/DELETE（改名同步看板名；删除级联删看板）
+tasks/route.ts                  GET 任务列表（每任务附 session_meta 派生的会话详情分页 offset/limit + rootTotal/sessionTotal）| POST 建任务
+tasks/[id]/route.ts             GET（可按 ?offset/?limit 取该任务会话分页）/PATCH（先补全列行再按子树闭包改归属；改名同步看板名）/DELETE（删该任务全部会话树 + 级联删看板）
 tasks/[id]/board/route.ts       GET 任务看板（懒创建，看板 id = 任务 id；建板后立即 reconcile 补卡）
-tasks/[id]/assign-session/route.ts POST { sessionId } 原子归属会话到任务（ON CONFLICT upsert，替代「读-改-写」全量替换）
+tasks/[id]/assign-session/route.ts POST { sessionId } 归属会话及其整棵子树到任务（先补全列行 + 祖先守卫，祖先属别的任务 409 / 会话解析不出 404）
 tasks/reorder/route.ts          PUT { projectKey, orderedIds } 批量重排任务（按置顶/非置顶区分别调）
 terminal/route.ts               GET 终端会话列表 | POST 新建终端 { cwd, cols?, rows? }
 terminal/[id]/route.ts          GET 元信息 | POST { input | resize } | DELETE 杀进程
@@ -97,10 +97,9 @@ card-time.ts         看板卡底栏时间格式（当天时:分，跨天 月/�
 note-time.ts         便笺默认标题时间格式
 
 # ---- 会话读写 / 索引 / 归属 ----
-session-reader.ts   SessionManager wrappers + 路径缓存 + buildSessionContext 适配 +
-                    loadProjectSessions（按 project_key 纯查 session_meta）+ loadSessionSummariesByIds（摘要点查）
-session-index-scanner.ts  后台扫描器：启动即扫 + 每 30s 全量扫磁盘建/刷 session_meta（列表纯查表的事实源维护者）
-session-scanner.ts  轻量会话文件扫描（头尾定向读：header/首条消息/自定义名/lastReply）
+session-reader.ts   SessionManager wrappers + 路径缓存 + buildSessionContext 适配 + loadProjectSessions / loadAllSessionIndex / loadSessionDetailsFromMeta（纯查 session_meta）+ loadTaskSessionsPage（任务成员与 fork 子树按库 task_id/parent_id 分页）+ loadSessionSummariesByIds（看板摘要点查，库优先、库内无行才读文件）+ resolveSessionPath / resolveSessionIdByPath（库 path 优先，名字兜底）
+session-index-scanner.ts  后台扫描器：启动即扫 + 每 30s 全量扫磁盘（scanSessionFileMeta 递归）建/刷 session_meta，按 header 权威 id 建行、path 优先匹配、modified 单调、60s 年轻行保护 + 删除前磁盘复检、last_reply 三态回填、子继承父的归属收敛；indexSessionFileNow 供新文件立即索引
+session-scanner.ts  会话文件定向读：scanSessionFileMeta（目录项+stat，递归，不读内容）/ scanOneSessionHead（header + 首条消息）/ readSessionTail（反向分块取名字 + lastReply）/ scanOneSessionFile（单文件详情，库内无行时的回退）；全量 scanSessionFiles / sessionScanner.scan 已删
 session-path.ts     会话文件路径归一化 key（Windows 大小写不敏感）
 session-delete.ts   删会话文件 + 递归收集/删除子会话（级联）
 session-family.ts   会话家族：把可见会话与其 subagent 后代会话归为一家（relation.kind === "subagent"；listSessionFamilies / getSessionFamily）——**当前全仓无调用方**，列表 API 也不注入 relation，属于未接线的会话级 UI
@@ -123,6 +122,7 @@ agent-client.ts     typed fetch helper for /api/agent commands
 agent-event-wire.ts agent 事件线上格式（toClientAgentEvent / 快照包含判定）
 agent-event-stream.ts 服务端 agent 事件流（createAgentEventStream）
 agent-event-connection.ts 浏览器侧 SSE 连接封装（重连/错误状态/关闭）
+session-activity.ts  会话活跃事件 → 库写入意图纯函数（agent_start→touch modified；message_end 只缓存本轮最后一条 assistant 文本；agent_settled→last_reply+modified，含用户取消；tracker 按 wrapper 实例持有，非模块级）
 agent-phase.ts      会话相位 → 文案 + 思考球模式（phaseLabel / orbModeForPhase）
 streaming-message.ts  流式消息状态机（streamReducer，纯函数）
 tool-execution-progress.ts  从 partialResult 取工具执行最新一行进度（截断 500 字）
@@ -154,7 +154,7 @@ ansi.ts             ANSI 转义序列解析（终端输出 / 自定义面板行�
 browser-notifications.ts  浏览器通知投递判定（可见性/焦点/抢占）
 
 # ---- 任务与调度 ----
-task-store.ts       任务元数据 CRUD（session_meta 旁路，boards.task_id 联动的源头）
+task-store.ts       任务 CRUD + session_meta 归属/索引写入（ensureSessionMetaRow/ensureSessionRows 建全列行、归属按子树 assignSessionSubtreeToTask/listDescendantIds、祖先守卫 hasForeignTaskAncestor、删会话 reparentSessionChildren、事件写入口 touchSessionActivity/recordSessionOutcome）
 task-card-store.ts  任务卡元数据 CRUD（task_cards/links/questions，SDK-free）
 task-scheduler.ts   任务调度器（派发/审核冷却/巡检/问答队列，S2/S3）
 scheduler-leader.ts  多实例 leader 选举（10s 心跳 / 30s 过期接管）
@@ -247,7 +247,7 @@ i18n/registry.ts    语言包注册表（registerLocale / getSupportedLocales，
 i18n/types.ts       LocalePlugin / Locale 类型
 i18n/format.ts      文案插值与回退（缺 key 先回落 en，再回落 key 本身）
 i18n/messages/*.ts  内置语言包 en / zh-CN（键集以 en 为准，缺 key 开发期告警）
-sqlite-db.ts        SQLite 单例 + 版本化迁移（SCHEMA_VERSION = 11，session_meta 含会话索引列）
+sqlite-db.ts        SQLite 单例 + 版本化迁移（SCHEMA_VERSION = 12；session_meta 13 列含会话索引列 + last_reply）
 app-update.ts       版本比较与 release 链接
 ```
 
@@ -256,6 +256,8 @@ app-update.ts       版本比较与 release 链接
 ```
 AppShell.tsx        layout + URL state + tab management
 SessionSidebar.tsx  session tree + FileExplorer + 会话/文件 tab（SessionTabs）
+session-sidebar-list.ts  侧栏会话列表纯规则（段内排序：置顶段 → 运行中浮顶 → modified 降序；时间分组角标与置顶分隔线；拖拽深度 SESSION_DEPTH_MIME / parseSessionDepth / 归属落点守卫 membershipDropAllowed / sessionRowDraggable）
+session-membership-feedback.ts  assignmentFailureDetail：归属/落卡失败响应的「人话细节」（服务端 error 文本优先，取不到回退状态码；永不抛）
 SessionStatsSummary.tsx  session stats compact summary（统计弹层第一行，复用 AppShell 顶栏格式）
 SidebarGlobalSearch.tsx  侧栏全局搜索结果浮层（会话 + 任务卡命中，跨项目）
 TaskArea.tsx        任务区（项目任务树、拖拽排序、新建/改名/删除、拖入会话归属）

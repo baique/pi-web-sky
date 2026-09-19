@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteTask, getTask, listTaskSessionIds, updateTask } from "@/lib/task-store";
+import { deleteTask, ensureSessionRows, getTask, listTaskSessionIds, updateTask } from "@/lib/task-store";
 import { loadTaskSessionsPage } from "@/lib/session-reader";
 import { deleteSessionTrees } from "@/lib/session-delete";
 import { destroyBoardYjsDocument, reconcileBoard } from "@/lib/board-reconcile";
@@ -80,6 +80,9 @@ export async function PATCH(
     if (patch.name === undefined && patch.sessionIds === undefined && patch.pinned === undefined && patch.sortOrder === undefined) {
       return NextResponse.json({ error: "nothing to update" }, { status: 400 });
     }
+    // 归属写入前先给「库内无行」的成员补全列行：updateTask 的加侧只 UPDATE（不在
+    // 同步事务里插缺列局部行），行不存在就会被静默丢弃。补行要在事务外用 await。
+    if (patch.sessionIds !== undefined) await ensureSessionRows(patch.sessionIds);
     const task = updateTask(id, patch);
     if (!task) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });

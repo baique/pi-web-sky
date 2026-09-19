@@ -152,8 +152,8 @@ export async function ensureSearchIndex(
 ): Promise<{ indexing: boolean }> {
   let sessions = sessionsOverride;
   if (!sessions) {
-    const { listAllSessions } = await import("./session-reader");
-    sessions = await listAllSessions();
+    const { loadAllSessionIndex } = await import("./session-reader");
+    sessions = await loadAllSessionIndex();
   }
   const db = getDb();
 
@@ -221,7 +221,7 @@ export async function searchSessions(
 ): Promise<{ indexing: boolean; results: SearchResult[] }> {
   const query = q.trim();
   if (!query) return { indexing: false, results: [] };
-  const sessions = sessionsOverride ?? (await loadAllSessions());
+  const sessions = sessionsOverride ?? (await loadIndexedSessions());
   const indexed = await ensureSearchIndex(sessions);
 
   const cap = Math.min(Math.max(limit, 1), 50);
@@ -282,9 +282,10 @@ export async function searchSessions(
   return { indexing: indexed.indexing, results };
 }
 
-async function loadAllSessions(): Promise<SessionInfo[]> {
+/** 搜索基线：session_meta 全表索引（与 /api/sessions 无参同源，纯库查询）。 */
+async function loadIndexedSessions(): Promise<SessionInfo[]> {
   // 基线吃 session_meta 索引（与 /api/sessions 无参同源）：列表重构后磁盘扫描
-  // 已不是权威数据源，这里不再整盘扫。索引 modified 由扫描器维护（≤30s 滞后），
+  // 已不是权威数据源，读取路径也不再扫盘。索引 modified 由事件链路/扫描器维护，
   // 搜索索引重建随之滞后可接受（搜索非实时）。
   const { loadAllSessionIndex } = await import("./session-reader");
   return loadAllSessionIndex();

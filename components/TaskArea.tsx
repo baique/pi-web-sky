@@ -8,6 +8,7 @@ import { FolderIcon } from "./FileIcons";
 import { AnimatedDropdown } from "./AnimatedDropdown";
 import { dropdownDirection } from "@/lib/dropdown-direction";
 import type { SessionInfo } from "@/lib/types";
+import { membershipDropAllowed, parseSessionDepth, SESSION_DEPTH_MIME } from "./session-sidebar-list";
 
 /** Local mirror of lib/task-store's Task — keeps the client bundle free of
  *  server-only modules (node:sqlite). */
@@ -307,7 +308,12 @@ function TaskCard({
     setDragOver(false);
     const sessionId = e.dataTransfer.getData(SESSION_MIME);
     if (sessionId) {
-      onDropAssign(task.id, sessionId);
+      // 归属类落点（加入任务）：只接受顶层会话行——子会话归属按子树存
+      // （lib/task-store 不变量），单独移入会被服务端按子树归一化。
+      // 看板 / 画布落点不走这个函数：它们自己区分手动看板（基本不归属）与任务看板
+      // （归属变更，同样拒绝 depth > 0）。
+      const depth = parseSessionDepth(e.dataTransfer.getData(SESSION_DEPTH_MIME));
+      if (membershipDropAllowed(depth)) onDropAssign(task.id, sessionId);
       return;
     }
     // 任务拖拽落位（同区才走到这；跨区 dragover 已禁止）。

@@ -175,7 +175,9 @@ export async function reconcileBoard(boardId: string, force = false): Promise<vo
   if (isTaskBoard) for (const sid of listTaskSessionIds(board.taskId!)) allSessionIds.add(sid);
   for (const c of cards) if (c.sessionId) allSessionIds.add(c.sessionId);
   // fork 会话派生：fork（parent_id 非空）会话的源会话归属本任务 → 本任务看板补 fork 卡。
-  // fork 会话自身不继承 task_id，需经源会话归属定位；普通看板 board.taskId 为空天然不参与。
+  // fork 会话建行时已继承源会话的 task_id（T1），这里仍按「源会话归属」定位，
+  // 是为了兼容存量行（扫描器收敛前的父在任务/子为空的脏行）与跨任务拖入的过渡态；
+  // 普通看板 board.taskId 为空天然不参与。
   const forkBySid = new Map<string, string>(); // forkSid -> parentSid
   if (isTaskBoard) {
     for (const { sessionId, parentId } of listTaskForkedSessions(board.taskId!)) {

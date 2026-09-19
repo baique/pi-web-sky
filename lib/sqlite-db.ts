@@ -93,7 +93,7 @@ export function initSchema(db: DatabaseSync): void {
  * 老库打开时自动按序补齐缺失的迁移（每个迁移一个事务，成功后推进版本号），
  * 新库建表后从 v0 一路迁到 SCHEMA_VERSION。重复打开不再执行已完成的迁移。
  */
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 interface Migration {
   version: number;
@@ -217,6 +217,15 @@ const MIGRATIONS: Migration[] = [
       "ALTER TABLE session_meta ADD COLUMN created INTEGER;",
       "ALTER TABLE session_meta ADD COLUMN modified INTEGER;",
       "CREATE INDEX IF NOT EXISTS idx_meta_project_modified ON session_meta(project_key, modified DESC);",
+    ],
+  },
+  {
+    version: 12,
+    name: "session_meta.last_reply（最后一条消息入库，列表零扫盘）",
+    statements: [
+      // 「最后一条消息」原先靠读取期读文件尾（滞后且每次列表都要摸盘）。改由事件
+      // 链路在一轮循环结束时写入（agent_settled，含取消），读取路径不再读文件。
+      "ALTER TABLE session_meta ADD COLUMN last_reply TEXT;",
     ],
   },
 ];

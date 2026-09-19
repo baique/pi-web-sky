@@ -56,7 +56,7 @@ builtin (代码内置) < global ~/.pi/agent/agents/*.md < workspace <cwd>/.agent
 7. `buildSubagentPromptPlan`：算 `chatOnly` / `appendSystemPrompt` / `delegatedTask` / `exactSystemPrompt`
 8. `createAgentSessionServices`：`noPromptTemplates` / `noThemes` / `noContextFiles` 恒为真；`noExtensions` / `noSkills` 按 profile；`appendSystemPrompt` = profile 的 systemPrompt（+ 父上下文）
 9. 工具集 = profile.tools + 扩展工具（`load_extensions` 时：有 `ext:` 选择器就按选择器取，否则取全部扩展工具）→ `resolveShellTools(...)`
-10. `SessionManager.create(cwd, undefined, { parentSession: 父会话文件 })` → 写 meta entry → `appendSessionInfo(description)`（会话名就是描述）
+10. `SessionManager.create(cwd, undefined, { parentSession: 父会话文件 })` → 写 meta entry → `appendSessionInfo(metadata.description)`（文件内会话名；空 description 时才用 profile.displayName）→ `ensureSubagentSessionRow()` 建 session_meta 行：`title` 只取 `description`（空则 NULL，展示回落 first_message）、`parent_id` = 父会话、`task_id` 继承父所在任务。
 11. 模型 / 思考级别：`request > profile > 父会话`；模型写 `provider/modelId`，只写裸 id 且匹配多个时报「ambiguous」
 12. `createAgentSessionFromServices({ tools, excludeTools: SUBAGENT_CONTROL_TOOL_NAMES })`
 13. 入队（见「并发队列」）

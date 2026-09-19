@@ -38,6 +38,8 @@ import { resolveShellTools } from "./powershell-settings";
 import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-settings";
 import { SubagentQueue } from "./subagent-queue";
 import { addWorktree, removeWorktree } from "./worktree";
+import { projectIdentityKey } from "./project-identity";
+import { ensureSessionMetaRow, taskForSession } from "./task-store";
 import { randomUUID } from "node:crypto";
 
 interface HostSession {
@@ -127,6 +129,32 @@ async function cleanupWorktree(
   } catch (error) {
     return `Worktree retained at ${worktree.path}: ${error instanceof Error ? error.message : String(error)}`;
   }
+}
+
+/** 内置 subagent 出生即建行（父会话归属 + 任务归属，否则只会在聊天区当孤儿根出现）。
+ *  `title` **只**取 `description`（用户 2026-09-18 规则：描述有值即会话标题，展示优先于首条消息）；
+ *  空/全空白不写 title——既不写空串、也不拿 run 元数据里的 profile 显示名兜底（展示链是
+ *  `title || first_message`，拿 "Explore" 当标题会把被委派任务的原文挤掉，正是要修的病）。
+ *  `first_message` 是内容派生列，这里**不写**：留给扫描器/事件链路按真实首条用户消息回填，
+ *  否则「首条消息」会变成 describe 文案而不是被委派的任务。 */
+export function ensureSubagentSessionRow(sessionId: string, row: {
+  path: string;
+  cwd: string;
+  projectKey: string;
+  parentId: string;
+  taskId?: string | null;
+  /** Agent 工具传来的短描述（request.description）——有值即标题。 */
+  description: string;
+}): void {
+  const title = row.description.trim();
+  ensureSessionMetaRow(sessionId, {
+    path: row.path,
+    cwd: row.cwd,
+    projectKey: row.projectKey,
+    parentId: row.parentId,
+    taskId: row.taskId,
+    ...(title ? { title } : {}),
+  });
 }
 
 export function createSubagentController(
@@ -257,6 +285,20 @@ export function createSubagentController(
           : {}),
         chatOnly,
       });
+
+      // 子代理会话与 fork 同规则：落库即带父会话归属（否则只会在聊天区当孤儿根出现）。
+      try {
+        ensureSubagentSessionRow(inner.sessionId, {
+          path: inner.sessionFile ?? "",
+          cwd: (isolatedWorktree ? childCwd : parent.cwd) ?? "",
+          projectKey: projectIdentityKey((isolatedWorktree ? childCwd : parent.cwd) ?? ""),
+          parentId: parentSessionId,
+          taskId: taskForSession(parentSessionId),
+          description: request.description,
+        });
+      } catch (e) {
+        console.error("[pi-web] subagent 会话建行失败:", e instanceof Error ? e.message : String(e));
+      }
 
       const initialRun: SubagentRunInfo = {
         sessionId: inner.sessionId,

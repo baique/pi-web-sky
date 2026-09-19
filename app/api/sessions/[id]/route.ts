@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
+import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   attachSessionProjectInfo,
@@ -16,7 +15,7 @@ import { sessionPathKey } from "@/lib/session-path";
 import { getRpcSession } from "@/lib/rpc-manager";
 import { projectTreeForResponse } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
-import { setSessionPinned, setSessionTitle, taskNameForSession, unassignSession } from "@/lib/task-store";
+import { setSessionPinned, setSessionTitle, taskNameForSession, reparentSessionChildren, unassignSession, listChildPaths } from "@/lib/task-store";
 import { removeSessionFromBoards } from "@/lib/board-store";
 import { removeSessionsFromYjsBoards } from "@/lib/board-reconcile";
 
@@ -108,16 +107,31 @@ export async function PATCH(
       const sm = SessionManager.open(filePath);
       sm.appendSessionInfo(body.name.trim());
       // 列表索引同步：改名实时写 session_meta.title，不依赖扫描器/懒更新。
-      setSessionTitle(id, body.name.trim());
-      invalidateSessionListCache();
+      // 库写失败：日志可见 + 缓存照样失效 + 请求报错（库是标题事实源，不允许
+      // 「磁盘改了、库没改」还报成功）。
+      try {
+        await setSessionTitle(id, body.name.trim());
+      } catch (error) {
+        console.error("[pi-web] 会话标题写库失败:", error);
+        throw error;
+      } finally {
+        invalidateSessionListCache();
+      }
       return NextResponse.json({ ok: true });
     }
     if (body.pinned !== undefined) {
       if (typeof body.pinned !== "boolean") {
         return NextResponse.json({ error: "pinned must be a boolean" }, { status: 400 });
       }
-      setSessionPinned(id, body.pinned);
-      invalidateSessionListCache();
+      // 与改名同规则：写库失败可见 + 缓存照样失效 + 500。
+      try {
+        await setSessionPinned(id, body.pinned);
+      } catch (error) {
+        console.error("[pi-web] 会话置顶写库失败:", error);
+        throw error;
+      } finally {
+        invalidateSessionListCache();
+      }
       return NextResponse.json({ ok: true });
     }
     return NextResponse.json({ error: "name or pinned is required" }, { status: 400 });
@@ -145,6 +159,8 @@ export async function DELETE(
       await getRpcSession(id)?.shutdown();
       invalidateSessionPathCache(id);
       invalidateSessionListCache();
+      // 没有文件就无从得知祖父（拿不到 → NULL）：子行不能留下指向已删 id 的悬空 parent_id。
+      reparentSessionChildren(id, null);
       unassignSession(id);
       await removeSessionsFromYjsBoards([id]);
       return NextResponse.json({ ok: true, updatedBoards: toUpdatedBoards(boardClean.boards) });
@@ -159,35 +175,28 @@ export async function DELETE(
       parentSessionPath = undefined;
     }
 
-    // Re-attach all direct children to this session's parent (cascade re-parent)
-    // Scan sibling files in the same directory
+    // Re-attach all direct children to this session's parent (cascade re-parent).
+    // 子行路径从**库**取（不 readdir）：会话文件可能在子目录里（`forks/`、`<session>/<run>/`），
+    // 平铺 `readdirSync(dirname(父文件))` 只能看到同级文件，漏掉的子行磁盘 header 仍指向
+    // 已删父→下一轮扫描按磁盘把库内 parent_id 改回 NULL（把库侧的祖父重挂白忙一场）。
     if (parentSessionPath !== undefined) {
       const targetPathKey = sessionPathKey(filePath);
-      const dir = dirname(filePath);
-      try {
-        const files = readdirSync(dir).filter(
-          (file) => file.endsWith(".jsonl") && sessionPathKey(join(dir, file)) !== targetPathKey,
-        );
-        for (const file of files) {
-          const childPath = join(dir, file);
-          try {
-            const content = readFileSync(childPath, "utf8");
-            const lines = content.split("\n");
-            const header = JSON.parse(lines[0]) as { type?: string; parentSession?: string };
-            if (
-              header.type === "session" &&
-              header.parentSession &&
-              sessionPathKey(header.parentSession) === targetPathKey
-            ) {
-              // Rewrite header with new parentSession
-              header.parentSession = parentSessionPath;
-              lines[0] = JSON.stringify(header);
-              writeFileSync(childPath, lines.join("\n"));
-            }
-          } catch { /* skip malformed */ }
-        }
-      } catch { /* skip if dir unreadable */ }
+      for (const childPath of listChildPaths(id)) {
+        // 防御脏行（parent_id 自指）——不要把被删文件自己当子行写坏
+        if (sessionPathKey(childPath) === targetPathKey) continue;
+        rewriteSessionParent(childPath, targetPathKey, parentSessionPath);
+      }
     }
+
+    // 库内子行必须同请求改 parent_id：T5 之后「根」判定全来自 session_meta（库是
+    // 父子链事实源），只改磁盘 header 的话子行仍指向已删 id，子会话会以根行呈现
+    // 到扫描器收敛为止（≤30s）。祖父 id 由磁盘 header.parentSession 反查；
+    // 反查不到（父行/文件已不在）就写 NULL（子会话变临时根，而不是悬空指针）。
+    let grandparentId: string | null = null;
+    if (parentSessionPath) {
+      grandparentId = (await resolveSessionIdByPath(parentSessionPath)) ?? null;
+    }
+    reparentSessionChildren(id, grandparentId);
 
     await getRpcSession(id)?.shutdown();
     try {
@@ -208,4 +217,20 @@ export async function DELETE(
 /** { boardId: updated } 映射（前端刷新乐观锁基线用） */
 function toUpdatedBoards(boards: Array<{ boardId: string; updated: number }>): Record<string, number> {
   return Object.fromEntries(boards.map((b) => [b.boardId, b.updated]));
+}
+
+/** 把子会话文件 header 的 parentSession 从「被删会话」改写成祖父。
+ *  只动确实指向被删会话的文件：读不到 / 损坏 / 文件不在盘上（Pi 延迟 flush）一律跳过，
+ *  不阻塞删除；库侧由 reparentSessionChildren 保证两者同向。 */
+function rewriteSessionParent(childPath: string, deletedPathKey: string, newParentPath: string): void {
+  try {
+    const content = readFileSync(childPath, "utf8");
+    const lines = content.split("\n");
+    const header = JSON.parse(lines[0]) as { type?: string; parentSession?: string };
+    if (header.type !== "session" || !header.parentSession) return;
+    if (sessionPathKey(header.parentSession) !== deletedPathKey) return;
+    header.parentSession = newParentPath;
+    lines[0] = JSON.stringify(header);
+    writeFileSync(childPath, lines.join("\n"));
+  } catch { /* skip malformed / unreadable / missing */ }
 }
