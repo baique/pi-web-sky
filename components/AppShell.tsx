@@ -283,39 +283,11 @@ export function AppShell() {
   const [terminalOrigin, setTerminalOrigin] = useState<"top" | "bottombar">("top");
   const [terminalAnchor, setTerminalAnchor] = useState<{ top: number; left: number; right: number; bottom: number } | null>(null);
   const terminalBtnRef = useRef<HTMLButtonElement | null>(null);
-  // MCP manager panel — topbar entry next to the terminal button.
-  const [mcpOpen, setMcpOpen] = useState(false);
-  const mcpBtnRef = useRef<HTMLButtonElement | null>(null);
+  // MCP / 工具面板：不再各持一份开关状态——两者与系统提示词面板共用顶栏浮层
+  // （activeTopPanel），面板宽度也随之统一为顶栏宽度（见 docs/reference/ui-popovers.md）。
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
-  const [toolsOpen, setToolsOpen] = useState(false);
   const [systemTools, setSystemTools] = useState<ToolEntry[] | null>(null);
   const [toolsLoading, setToolsLoading] = useState(false);
-  const toolsBtnRef = useRef<HTMLButtonElement | null>(null);
-
-  // 弹层关闭行为铁律：多次点击触发按钮 toggle 开关；点击弹层外部 / Esc 关闭（与其它菜单一致）。
-  useEffect(() => {
-    if (!toolsOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const el = toolsBtnRef.current;
-      if (el && el.contains(event.target as Node)) return;
-      const panel = document.querySelector("[data-tools-panel]");
-      if (panel && panel.contains(event.target as Node)) return;
-      setToolsOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.isComposing) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setToolsOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [toolsOpen]);
   const [quoteSelectionEnabled, setQuoteSelectionEnabled] = useState(false);
   const [pendingQuotePrompt, setPendingQuotePrompt] = useState<{ sessionId: string; text: string } | null>(null);
   useEffect(() => {
@@ -540,7 +512,7 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | "language" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | "language" | "mcp" | "tools" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const topPanelRef = useRef<HTMLDivElement | null>(null);
 
@@ -563,7 +535,7 @@ export function AppShell() {
   }, [activeTopPanel, selectedSession?.id]);
 
   const toggleTopPanel = useCallback((
-    panel: "branches" | "system" | "session" | "language",
+    panel: "branches" | "system" | "session" | "language" | "mcp" | "tools",
     keepMobileToolbarOpen = false,
   ) => {
     if (isMobile) setSidebarOpen(false);
@@ -2219,16 +2191,17 @@ export function AppShell() {
   };
 
   const renderMcpButton = () => {
-    const open = mcpOpen;
+    const open = activeTopPanel === "mcp";
     return (
       <button
         type="button"
         id="mcp-topbar-btn"
-        ref={mcpBtnRef}
-        onClick={() => setMcpOpen((open) => !open)}
+        data-top-panel-trigger
+        onClick={() => toggleTopPanel("mcp")}
         title="MCP"
         aria-label="MCP"
         aria-expanded={open}
+        aria-pressed={open}
         style={{
           display: "flex", alignItems: "center", justifyContent: "center",
           width: "auto", height: "100%", padding: "0 10px", gap: 5,
@@ -2253,12 +2226,12 @@ export function AppShell() {
   };
 
   const renderToolsButton = () => {
-    const open = toolsOpen;
+    const open = activeTopPanel === "tools";
     return (
       <button
         type="button"
         id="tools-topbar-btn"
-        ref={toolsBtnRef}
+        data-top-panel-trigger
         onClick={() => {
           if (!open && selectedSession && systemTools === null && !toolsLoading) {
             setToolsLoading(true);
@@ -2267,11 +2240,12 @@ export function AppShell() {
               .catch(() => setSystemTools(null))
               .finally(() => setToolsLoading(false));
           }
-          setToolsOpen((value) => !value);
+          toggleTopPanel("tools");
         }}
         title={translate("tools.title")}
         aria-label={translate("tools.title")}
         aria-expanded={open}
+        aria-pressed={open}
         style={{
           display: "flex", alignItems: "center", justifyContent: "center",
           width: "auto", height: "100%", padding: "0 10px", gap: 5,
@@ -3003,6 +2977,22 @@ export function AppShell() {
                   )}
                 </div>
               )}
+              {activeTopPanel === "mcp" && (
+                // 内嵌进顶栏浮层：宽度/定位交给浮层（与系统提示词面板同宽）
+                <McpConfigPanel
+                  embedded
+                  cwd={selectedSession?.cwd ?? effectiveNewSessionCwd ?? null}
+                  hidden={false}
+                  onClose={() => setActiveTopPanel(null)}
+                />
+              )}
+              {activeTopPanel === "tools" && (
+                <ToolDefinitionsPanel
+                  loading={toolsLoading}
+                  tools={systemTools}
+                  translate={translate}
+                />
+              )}
               {activeTopPanel === "session" && (
                 <div className="session-info-popover glass-top-panel" style={{
                   padding: "12px 16px",
@@ -3463,17 +3453,6 @@ export function AppShell() {
       hidden={!terminalOpen}
       onClose={() => setTerminalOpen(false)}
     />
-    <McpConfigPanel
-      anchorRect={mcpOpen ? (() => {
-        const el = mcpBtnRef.current;
-        if (!el) return null;
-        const r = el.getBoundingClientRect();
-        return { top: r.top, left: r.left, right: r.right, bottom: r.bottom };
-      })() : null}
-      cwd={selectedSession?.cwd ?? effectiveNewSessionCwd ?? null}
-      hidden={!mcpOpen}
-      onClose={() => setMcpOpen(false)}
-    />
     {settingsSection && (
       <SettingsPanel
         cwd={selectedSession?.cwd ?? effectiveNewSessionCwd ?? null}
@@ -3488,33 +3467,6 @@ export function AppShell() {
         onSessionReloaded={() => setSessionKey((key) => key + 1)}
       />
     )}
-    {toolsOpen && (() => {
-      const el = toolsBtnRef.current;
-      if (!el) return null;
-      const rect = el.getBoundingClientRect();
-      const vw = window.innerWidth;
-      // 面板宽度 = 视口的 45%
-      const panelWidth = vw * 0.45;
-      const left = Math.max(8, Math.min(rect.left, vw - panelWidth - 8));
-      return (
-        <div data-tools-panel style={{
-          position: "fixed",
-          top: rect.bottom,
-          left,
-          width: panelWidth,
-          maxWidth: "calc(100vw - 16px)",
-          maxHeight: "calc(100dvh - 8px - " + rect.bottom + "px)",
-          overflowY: "auto",
-          zIndex: 500,
-        }}>
-          <ToolDefinitionsPanel
-            loading={toolsLoading}
-            tools={systemTools}
-            translate={translate}
-          />
-        </div>
-      );
-    })()}
     {projectTrustDialogOpen && projectTrustCwd && (
       <ProjectTrustDialog
         cwd={projectTrustCwd}

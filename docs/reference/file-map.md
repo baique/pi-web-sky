@@ -295,12 +295,12 @@ ExtensionStatusBar.tsx  底部 widget 槽容器；通知抽屉（NoticeDrawer）
 ExtensionWidgets.tsx    renders extension-injected widgets
 PinnedBubble.tsx    pinned-message floating bubble (global drag + resize)
 TerminalPanel.tsx   multi-session web terminal panel (xterm.js + server-side pty)
-McpConfigPanel.tsx  MCP server manager popover (global/project mcp.json, connectivity test)
+McpConfigPanel.tsx  MCP server manager panel（global/project mcp.json、连通测试；`embedded` 时内嵌顶栏浮层，与系统面板同宽）
 SettingsPanel.tsx   设置弹窗主体（通用/模型/技能/代理/插件分区，SettingsUi 提供布局件）
 SettingsUi.tsx      设置面板布局件（ConfigPanel/ConfigSplitView/ConfigSidebar/…）
 AgentsConfig.tsx    内置 subagent 设置（启用开关 + 并发数 + profile 管理）
 AgentSessionPanel.tsx   子代理会话列表/切换器（搜索 + 状态 + 选中切换）——**当前未挂载**，全仓无引用
-ToolDefinitionsPanel.tsx  工具定义详情浮层（视口 45% 宽）
+ToolDefinitionsPanel.tsx  工具定义详情（顶栏满宽浮层，与系统/MCP 面板共 portal）
 ModelSelector.tsx   模型选择器（内置模型搜索/分组）
 WorktreeSelector.tsx  worktree 选择器（侧栏，分支/主 checkout + 新建）
 DirectoryPicker.tsx cwd directory picker for new sessions

@@ -14,6 +14,19 @@ import type { McpResponse, McpScope, McpServerInfo } from "@/lib/api-types";
 // The API layer (/api/mcp) is ported as-is.
 // ============================================================================
 
+/**
+ * 面板内布局：左列表 = 面板宽度的 20%（保底 168px，窄窗口下不至于挤成一条），
+ * 右侧详情/添加表单铺满剩余宽度。
+ *
+ * 不写固定 px 上限：MCP 面板已是满宽浮层（与系统/工具同 portal，见
+ * docs/reference/ui-popovers.md），内层跟着比例自适应才有意义——
+ * 否则满宽时右侧会空出一大片（列表 20% + 详情铺满 = 一套规则，详情/表单不再各写一个上限）。
+ */
+const MCP_PANEL_COLUMNS = {
+  list: { flex: "0 0 20%", minWidth: 168 } as const,
+  detail: { flex: "1 1 auto", minWidth: 0 } as const,
+};
+
 function shortenPath(path: string): string {
   return path.replace(/^\/(?:Users|home)\/[^/]+/, "~");
 }
@@ -183,7 +196,7 @@ function McpServerDetail({
     overflowWrap: "anywhere",
   };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 680 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div
         style={{
           display: "flex",
@@ -424,7 +437,7 @@ function AddMcpServer({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 660, minHeight: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 18, minHeight: "100%" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
           {isEdit ? t("mcp.editTitle", { name: initial?.name ?? "" }) : t("mcp.addTitle")}
@@ -543,6 +556,7 @@ export function McpConfigPanel({
   cwd,
   hidden,
   onClose,
+  embedded = false,
 }: {
   /** Trigger button rect — anchors the panel below the topbar MCP button. */
   anchorRect?: { top: number; left: number; right: number; bottom: number } | null;
@@ -550,6 +564,8 @@ export function McpConfigPanel({
   cwd: string | null;
   hidden: boolean;
   onClose: () => void;
+  /** 内嵌进顶栏浮层（宽度交给浮层：与系统提示词面板同宽），自己不再 fixed 定位/portal */
+  embedded?: boolean;
 }) {
   const { t } = useI18n();
   const [data, setData] = useState<McpResponse | null>(null);
@@ -782,11 +798,15 @@ export function McpConfigPanel({
       role="dialog"
       aria-label={t("mcp.sectionTitle")}
       style={{
-        position: "fixed",
-        zIndex: 130,
-        top: (anchorRect?.bottom ?? anchorRect?.top ?? 46),
-        left: panelLeft,
-        width: panelWidth,
+        ...(embedded
+          ? { position: "relative" as const, width: "100%" }
+          : {
+              position: "fixed" as const,
+              zIndex: 130,
+              top: (anchorRect?.bottom ?? anchorRect?.top ?? 46),
+              left: panelLeft,
+              width: panelWidth,
+            }),
         maxHeight: "min(72vh, 600px)",
         display: "flex",
         flexDirection: "column",
@@ -840,8 +860,7 @@ export function McpConfigPanel({
           style={{
             display: "flex",
             flexDirection: "column",
-            width: 168,
-            flexShrink: 0,
+            ...MCP_PANEL_COLUMNS.list,
             borderRight: "1px solid color-mix(in srgb, var(--border) 60%, transparent)",
             background: "transparent",
           }}
@@ -1012,7 +1031,7 @@ export function McpConfigPanel({
         </div>
 
         {/* Right: detail / add form */}
-        <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
+        <div style={{ ...MCP_PANEL_COLUMNS.detail, overflowY: "auto", padding: 20 }}>
           {addMode ? (
             <AddMcpServer
               cwd={effectiveCwd}
@@ -1068,5 +1087,6 @@ export function McpConfigPanel({
   );
 
   if (hidden) return null;
-  return createPortal(panel, document.body);
+  // 内嵌模式：由顶栏浮层负责定位与宽度，不能再 portal 到 body（否则脱离浮层约束）
+  return embedded ? panel : createPortal(panel, document.body);
 }
