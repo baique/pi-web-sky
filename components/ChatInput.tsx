@@ -1168,6 +1168,124 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     }
   }, [value, attachedImages, onBuiltinCommand, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, runBuiltinCommand]);
 
+
+  /**
+   * 发送区（空闲=发送；流式=停止 + 引导 + 后续）。桌面与移动端复用同一套按钮与事件。
+   */
+  const renderSendControls = () => (
+    isStreaming ? (
+      <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 8, minWidth: 0, flexShrink: 0 }}>
+        <button
+          onClick={onAbort}
+          title={t("chat.stopAgent")}
+          aria-label={t("chat.stopAgent")}
+          onMouseEnter={(e) => { e.currentTarget.style.color = "#dc2626"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = "#ef4444"; }}
+          style={{
+            display: "flex", alignItems: "center", gap: 5,
+            flexShrink: 0, whiteSpace: "nowrap",
+            padding: 0,
+            background: "transparent",
+            border: "none",
+            color: "#ef4444",
+            cursor: "pointer",
+            fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
+            transition: "color 0.12s",
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+            <rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor" />
+          </svg>
+          {t("chat.stop")}
+        </button>
+        {hasInputText && onSteer && (
+          <button
+            onClick={() => sendQueued("steer")}
+            title="Interrupt the current run and inject this message now"
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+            style={{
+              display: "flex", alignItems: "center", gap: 5,
+              flexShrink: 0, whiteSpace: "nowrap",
+              padding: 0,
+              background: "transparent",
+              border: "none",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
+              transition: "color 0.12s",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M7 3 L11 7 L7 11" /><line x1="3" y1="7" x2="11" y2="7" />
+            </svg>
+            {t("chat.steer")}
+          </button>
+        )}
+        {hasInputText && onFollowUp && (
+          <button
+            onClick={() => sendQueued("followup")}
+            title={`Queue this message after the agent finishes (${isMobile ? "Ctrl/Cmd+" : ""}Alt/Option+Enter)`}
+            aria-keyshortcuts={isMobile ? "Control+Alt+Enter Meta+Alt+Enter" : "Alt+Enter"}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+            style={{
+              display: "flex", alignItems: "center", gap: 5,
+              flexShrink: 0, whiteSpace: "nowrap",
+              padding: 0,
+              background: "transparent",
+              border: "none",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
+              transition: "color 0.12s",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="7" y1="3" x2="7" y2="8" /><polyline points="4.5 5.5 7 3 9.5 5.5" />
+              <line x1="4" y1="11" x2="10" y2="11" />
+            </svg>
+            {t("chat.followUp")}
+          </button>
+        )}
+      </div>
+    ) : (
+      <button
+        onClick={handleSend}
+        disabled={(!value.trim() && !attachedImages.length) || commandBusy}
+        style={{
+          flexShrink: 0,
+          whiteSpace: "nowrap",
+          display: "flex", alignItems: "center", gap: 6,
+          padding: 0,
+          background: "transparent",
+          border: "none",
+          color: (value.trim() || attachedImages.length) && !commandBusy ? "var(--text-muted)" : "var(--text-dim)",
+          cursor: (value.trim() || attachedImages.length) && !commandBusy ? "pointer" : "not-allowed",
+          fontSize: 13,
+          fontWeight: 600,
+          letterSpacing: "-0.01em",
+          transition: "color 0.12s",
+          marginLeft: 6,
+        }}
+        onMouseEnter={(e) => {
+          if (e.currentTarget.disabled) return;
+          e.currentTarget.style.color = "var(--text)";
+        }}
+        onMouseLeave={(e) => {
+          if (e.currentTarget.disabled) return;
+          e.currentTarget.style.color = "var(--text-muted)";
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="2" y1="7" x2="11" y2="7" />
+          <polyline points="7.5 3 12 7 7.5 11" />
+        </svg>
+        {t("chat.send")}
+      </button>
+    )
+  );
+
   const getNextSlashIndex = useCallback((direction: "up" | "down" | "left" | "right") => {
     const lastIndex = displayedSlashCommands.length - 1;
     if (lastIndex < 0) return 0;
@@ -2837,25 +2955,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 {t("chat.moreControls")}
               </button>
             )}
-            {isMobile && (
-              <button
-                onClick={handleSend}
-                disabled={(!value.trim() && !attachedImages.length) || commandBusy}
-                aria-label={t("chat.send")}
-                style={{
-                  flexShrink: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  height: 32, padding: "0 10px",
-                  background: "none", border: "none", borderRadius: 9,
-                  color: (value.trim() || attachedImages.length) && !commandBusy ? "var(--accent)" : "var(--text-dim)",
-                  cursor: (value.trim() || attachedImages.length) && !commandBusy ? "pointer" : "not-allowed",
-                  fontSize: 13, fontWeight: 600, whiteSpace: "nowrap",
-                  transition: "color 0.12s",
-                }}
-              >
-                {t("chat.send")}
-              </button>
-            )}
+            {isMobile && renderSendControls()}
             <div style={{
               display: isMobile ? (controlsMenuOpen ? "flex" : "none") : "none",
               flexDirection: "column",
@@ -3094,32 +3194,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             )}
 
-            {isStreaming && (
-              <button
-                onClick={onAbort}
-                 title={t("chat.stopAgent")}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "8px 14px",
-                  height: 32,
-                  background: "rgba(239,68,68,0.08)",
-                  border: "1px solid rgba(239,68,68,0.3)",
-                  borderRadius: 9,
-                  color: "#ef4444",
-                  cursor: "pointer",
-                  fontSize: 12, fontWeight: 600,
-                  whiteSpace: "nowrap", letterSpacing: "-0.01em",
-                  transition: "background 0.12s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.16)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.08)"; }}
-              >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                  <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
-                </svg>
-                 {t("chat.stop")}
-              </button>
-            )}
 
             {!atBottom && onScrollToBottom && (
               <button
@@ -3185,117 +3259,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 )}
               </button>
             )}
-            {/* 右槽（桌面）：空闲=发送（纯文本）；处理中=停止（玻璃圆钮）+（输入有内容时）引导/后续
-                顺序：停止 → 引导 → 后续 */}
-            {!isMobile && (
-              isStreaming ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  <button
-                    onClick={onAbort}
-                    title={t("chat.stopAgent")}
-                    aria-label={t("chat.stopAgent")}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = "#dc2626"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = "#ef4444"; }}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 5,
-                      padding: 0,
-                      background: "transparent",
-                      border: "none",
-                      color: "#ef4444",
-                      cursor: "pointer",
-                      fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
-                      transition: "color 0.12s",
-                    }}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 12 12" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
-                      <rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor" />
-                    </svg>
-                    {t("chat.stop")}
-                  </button>
-                  {hasInputText && onSteer && (
-                    <button
-                      onClick={() => sendQueued("steer")}
-                      title="Interrupt the current run and inject this message now"
-                      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 5,
-                        padding: 0,
-                        background: "transparent",
-                        border: "none",
-                        color: "var(--text-muted)",
-                        cursor: "pointer",
-                        fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
-                        transition: "color 0.12s",
-                      }}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M7 3 L11 7 L7 11" /><line x1="3" y1="7" x2="11" y2="7" />
-                      </svg>
-                      {t("chat.steer")}
-                    </button>
-                  )}
-                  {hasInputText && onFollowUp && (
-                    <button
-                      onClick={() => sendQueued("followup")}
-                      title={`Queue this message after the agent finishes (${isMobile ? "Ctrl/Cmd+" : ""}Alt/Option+Enter)`}
-                      aria-keyshortcuts={isMobile ? "Control+Alt+Enter Meta+Alt+Enter" : "Alt+Enter"}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 5,
-                        padding: 0,
-                        background: "transparent",
-                        border: "none",
-                        color: "var(--text-muted)",
-                        cursor: "pointer",
-                        fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
-                        transition: "color 0.12s",
-                      }}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="7" y1="3" x2="7" y2="8" /><polyline points="4.5 5.5 7 3 9.5 5.5" />
-                        <line x1="4" y1="11" x2="10" y2="11" />
-                      </svg>
-                      {t("chat.followUp")}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <button
-                  onClick={handleSend}
-                  disabled={(!value.trim() && !attachedImages.length) || commandBusy}
-                  style={{
-                    flexShrink: 0,
-                    display: "flex", alignItems: "center", gap: 6,
-                    padding: 0,
-                    background: "transparent",
-                    border: "none",
-                    color: (value.trim() || attachedImages.length) && !commandBusy ? "var(--text-muted)" : "var(--text-dim)",
-                    cursor: (value.trim() || attachedImages.length) && !commandBusy ? "pointer" : "not-allowed",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    letterSpacing: "-0.01em",
-                    transition: "color 0.12s",
-                    marginLeft: 6,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (e.currentTarget.disabled) return;
-                    e.currentTarget.style.color = "var(--text)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (e.currentTarget.disabled) return;
-                    e.currentTarget.style.color = "var(--text-muted)";
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="2" y1="7" x2="11" y2="7" />
-                    <polyline points="7.5 3 12 7 7.5 11" />
-                  </svg>
-                  {t("chat.send")}
-                </button>
-              )
-            )}
+            {/* 右槽：空闲=发送；处理中=停止 +（输入有内容时）引导/后续。桌面与移动端共用。 */}
+            {!isMobile && renderSendControls()}
           </div>
 
           </div>
