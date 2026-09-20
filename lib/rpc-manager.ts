@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme } from "@earendil-works/pi-coding-agent";
+import { getCurrentSystemMessage } from "@earendil-works/pi-ai/utils/transcript";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
@@ -157,13 +158,26 @@ export interface RpcSessionStartOptions {
 const CODING_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
 // Extensions require a complete Theme, while the web UI applies its own styling.
+const PLAIN_THEME_FG: ConstructorParameters<typeof Theme>[0] = {
+  accent: "", border: "", borderAccent: "", borderMuted: "", success: "", error: "",
+  warning: "", muted: "", dim: "", text: "", thinkingText: "", scrollbarTrack: "",
+  scrollbarThumb: "", searchMatchText: "", userMessageText: "", customMessageText: "",
+  customMessageLabel: "", toolTitle: "", toolOutput: "", mdHeading: "", mdLink: "",
+  mdLinkUrl: "", mdCode: "", mdCodeBlock: "", mdCodeBlockBorder: "", mdQuote: "",
+  mdQuoteBorder: "", mdHr: "", mdListBullet: "", toolDiffAdded: "", toolDiffRemoved: "",
+  toolDiffContext: "", syntaxComment: "", syntaxKeyword: "", syntaxFunction: "",
+  syntaxVariable: "", syntaxString: "", syntaxNumber: "", syntaxType: "",
+  syntaxOperator: "", syntaxPunctuation: "", thinkingOff: "", thinkingMinimal: "",
+  thinkingLow: "", thinkingMedium: "", thinkingHigh: "", thinkingXhigh: "",
+  thinkingMax: "", bashMode: "",
+};
+const PLAIN_THEME_BG: ConstructorParameters<typeof Theme>[1] = {
+  selectedBg: "", searchMatchBg: "", userMessageBg: "", customMessageBg: "",
+  toolPendingBg: "", toolSuccessBg: "", toolErrorBg: "",
+};
 class PlainTextTheme extends Theme {
   constructor() {
-    super(
-      { thinkingXhigh: "", searchMatchText: "" } as ConstructorParameters<typeof Theme>[0],
-      { selectedBg: "" } as ConstructorParameters<typeof Theme>[1],
-      "truecolor",
-    );
+    super(PLAIN_THEME_FG, PLAIN_THEME_BG, "truecolor");
   }
 
   override fg(...[, text]: Parameters<Theme["fg"]>): string { return text; }
@@ -232,8 +246,7 @@ export class AgentSessionWrapper {
   constructor(public readonly inner: AgentSessionLike, options: AgentSessionWrapperOptions = {}) {
     this.exactSystemPrompt = options.exactSystemPrompt;
     this.chatOnly = options.chatOnly ?? false;
-    this.installExactSystemPromptContinuation();
-    this.applyExactSystemPrompt();
+    this.installForcedPromptProjection();
   }
 
   /** 是否有等待用户响应的扩展 UI 请求（waiting_input 判定用） */
@@ -325,7 +338,7 @@ export class AgentSessionWrapper {
 
   setForceEmptySystemPrompt(force: boolean): void {
     this.forceEmptySystemPrompt = force;
-    this.applyForcedEmptySystemPrompt();
+    this.ensureForcedPromptProjection();
   }
 
   beginExtensionBinding(options: ExtensionBindingOptions = {}): void {
@@ -338,31 +351,48 @@ export class AgentSessionWrapper {
     await this.waitForExtensionsBound();
   }
 
-  private applyExactSystemPrompt(): void {
-    if (!this.exactSystemPrompt || !this.inner.agent.state) return;
-    this.inner.agent.state.systemPrompt = this.exactSystemPrompt();
+  /**
+   * 0.86.0 中 AgentState.systemPrompt 是 getter-only（由 transcript 推导），
+   * prepareNextTurn 返回的 context.systemPrompt 已被忽略。官方精确替换 prompt 的
+   * 机制是 forceSystemPrompt → transformContext 投影（见 SDK 的
+   * _installAgentForcedPromptProjection）。这里用同一机制实现：
+   *  - exactSystemPrompt 存在 → 每轮请求的 system prompt 精确等于它；
+   *  - forceEmptySystemPrompt → 每轮请求的 system prompt 为空。
+   * 两者都不满足时透传，不影响普通会话。
+   */
+  private forcedPromptProjectionInstalled = false;
+
+  private installForcedPromptProjection(): void {
+    if (this.forcedPromptProjectionInstalled) return;
+    const agent = this.inner.agent;
+    if (!agent) return;
+    this.forcedPromptProjectionInstalled = true;
+    const previousTransformContext = agent.transformContext;
+    agent.transformContext = async (messages, signal) => {
+      const transformed = previousTransformContext
+        ? await previousTransformContext(messages, signal)
+        : messages;
+      const forced = this.forceEmptySystemPrompt ? "" : this.exactSystemPrompt?.();
+      if (forced === undefined) return transformed;
+      const current = getCurrentSystemMessage(transformed as never);
+      const head = {
+        role: "system" as const,
+        content: forced,
+        ...(current?.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
+        timestamp: current?.timestamp ?? Date.now(),
+      };
+      return [head, ...transformed.filter((message) => message.role !== "system")];
+    };
   }
 
-  private installExactSystemPromptContinuation(): void {
-    if (!this.exactSystemPrompt) return;
-    const previous = this.inner.agent.prepareNextTurnWithContext;
-    this.inner.agent.prepareNextTurnWithContext = async (turn, signal) => {
-      const prepared = await previous?.(turn, signal);
-      return {
-        ...prepared,
-        context: {
-          ...(prepared?.context ?? turn.context),
-          systemPrompt: this.exactSystemPrompt!(),
-        },
-      };
-    };
+  private ensureForcedPromptProjection(): void {
+    this.installForcedPromptProjection();
   }
 
   private ensureExtensionsBound(options: ExtensionBindingOptions = {}): Promise<void> {
     if (options.forceEmptySystemPrompt) this.forceEmptySystemPrompt = true;
     if (this.extensionsBound) {
-      this.applyForcedEmptySystemPrompt();
-      this.applyExactSystemPrompt();
+      this.ensureForcedPromptProjection();
       return Promise.resolve();
     }
     if (this.extensionBindingPromise) return this.extensionBindingPromise;
@@ -401,8 +431,7 @@ export class AgentSessionWrapper {
         this.inner.extensionRunner.setUIContext?.(uiContext, "rpc");
       }
       this.extensionsBound = true;
-      this.applyForcedEmptySystemPrompt();
-      this.applyExactSystemPrompt();
+      this.ensureForcedPromptProjection();
       console.log(`[pi-web] session_start dispatched to extensions for session ${this.inner.sessionId}`);
     })().catch((err) => {
       this.extensionBindingError = err;
@@ -438,12 +467,6 @@ export class AgentSessionWrapper {
       return await operation();
     } finally {
       this.resetIdleTimer();
-    }
-  }
-
-  private applyForcedEmptySystemPrompt(): void {
-    if (this.forceEmptySystemPrompt && this.inner.agent.state) {
-      this.inner.agent.state.systemPrompt = "";
     }
   }
 
@@ -902,7 +925,6 @@ export class AgentSessionWrapper {
         }
         this.setForceEmptySystemPrompt(toolNames.length === 0);
         this.inner.setActiveToolsByName(withExtensionTools(this.inner, toolNames));
-        this.applyForcedEmptySystemPrompt();
         return null;
       }
 
@@ -915,7 +937,6 @@ export class AgentSessionWrapper {
         if (typeof this.inner.bindExtensions !== "function") {
           this.inner.extensionRunner.setUIContext?.(this.createExtensionUiContext(), "rpc");
         }
-        this.applyForcedEmptySystemPrompt();
         invalidateModelsCache();
         return { success: true };
       }
@@ -1549,7 +1570,6 @@ export class AgentSessionWrapper {
             this.inner.extensionRunner.setUIContext?.(this.createExtensionUiContext(), "rpc");
           },
         });
-        this.applyForcedEmptySystemPrompt();
       },
     };
   }
