@@ -12,8 +12,34 @@
 - **版本 tag 触发 GitHub Release**：推送 `v*` tag 到 GitHub 会触发 `.github/workflows/release.yml`，自动把该 tag 的源码打包成 `pi-web-sky-<tag>.tar.gz` 并创建 GitHub Release。tag 即版本快照，必须打在本版本提交上。
 - 发布产物包含 `.next`（见 `files`），所以发布前必须 build。build 与 dev 共用 `.next` **互不干扰**（Next 16 的 dev 产物在 `.next/dev`，2026-09-12 实测同目录并发运行正常：dev 仍服务 dev 产物、成品文件未被改动），发布时不必先停 dev。
 - **npm 版本号与 git 必须同步**：每次发布后 package.json / package-lock.json 的版本变更必须提交并推送。npm 上存在而 git 里不存在的版本号，说明上次发布没提交——先修复同步，再继续下一次发布。
+- 发布流程已固化为 `.agent/script/tools/` 下的脚本（见下方「脚本入口」）。正常发布**不必手敲长命令**，直接调脚本；`.agent/script/` 不入库，仅本机使用。
 
-## 步骤
+## 脚本入口（推荐）
+
+| 脚本 | 作用 | 参数 |
+|---|---|---|
+| `release.sh` | 前置检查（工作区干净 + token=baique）→ patch 版本 → `next build` → `npm publish` | `--dry-run` 只检查不发布；`--skip-checks` 跳过前置检查 |
+| `wait-npm.sh` | 轮询 registry，等 `dist-tags.latest` == 目标版本 | 位置参数=版本（默认读 `package.json`）；`--timeout <秒>`（默认 900）；`--interval <秒>`（默认 15）；`--package <名>`；`--verbose` 打印每次轮询 |
+| `release-finish.sh` | 提交版本变更 → 打 `v<版本>` tag → 推送 → 等 CI 创建 GitHub Release | 位置参数=版本（默认读 `package.json`）；`--no-push` 只提交 + 打 tag；`--skip-release-check` 跳过 Release 验证 |
+
+一次完整发布 = 三条命令（替代下文手工步骤 1–7）：
+
+```bash
+.agent/script/tools/release.sh           # 发布；成功回显 0.1.x → 0.1.y
+.agent/script/tools/wait-npm.sh          # 等传播就绪（默认读 package.json 版本）
+.agent/script/tools/release-finish.sh    # 收尾：提交 + tag + push + 验 Release
+```
+
+脚本里已固化的细节（不必再手敲）：
+
+- 一律带 `env -u TURBOPACK npm_config_registry=https://registry.npmjs.org/`（绕开 Nexus 覆盖 + TURBOPACK 与 `--webpack` 冲突）。
+- `release.sh` 把 build/publish 长输出写 `.agent/logs/release-<时间戳>.log`，终端只回显关键结果；失败时打印日志尾部并提示还原版本号。
+- `wait-npm.sh` 直查 registry 的 `dist-tags.latest`（比 `npm view` 实时），超时返回非 0，可重复运行。
+- `release-finish.sh` 校验 tag 与 HEAD 指向同一提交，并轮询 `gh release view` 确认 Release 与 asset 就绪。
+
+## 步骤（手工等价命令，脚本内部执行）
+
+> 正常发布走上面的脚本。以下为脚本内部的等价命令，供排查或手工兜底时参考。
 
 1. **确认工作区干净**：`git status` 无未提交改动（发布产物只该来自已提交的代码）。若有，先提交。
 2. **确认 token 有效**：`npm_config_registry=https://registry.npmjs.org/ npm whoami` 输出 `baique`。不是 → 换 token（见故障）。前缀不能省：环境里的 `npm_config_registry` 会盖掉 `~/.npmrc`，直接跑 `npm whoami` 报的是 `need auth`。
