@@ -62,3 +62,6 @@ next-env.d.ts
 
 # AI 工作区临时产物（e2e raw JSON / 报告 / 备份等），不入库
 /.agent/tmp/
+
+# 本地设计原型（静态 HTML 稿，暂不入库；见 .agent/prototype/README.md）
+/.agent/prototype/
