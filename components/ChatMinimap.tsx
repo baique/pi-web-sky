@@ -14,7 +14,7 @@ import styles from "./ChatMinimap.module.css";
 
 interface Props {
   messages: AgentMessage[];
-  entryIds: string[];
+  entryIds: (string | null)[];
   /** 全量 turn 索引（/api/sessions/[id]/minimap）：导航条节点来源，
    *  已加载窗口外的回合也能显示与跳转。 */
   turnIndex: TurnIndexItem[];

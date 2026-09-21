@@ -13,12 +13,20 @@ import type {
 } from "@/lib/types";
 import { isBlockingExtensionUiRequest } from "@/lib/browser-notifications";
 import { normalizeToolCalls } from "@/lib/normalize";
+import {
+  createTranscriptState,
+  transcriptEntryIds,
+  transcriptItemIds,
+  transcriptMessages,
+  transcriptParentIds,
+  transcriptReducer,
+  type ServerEntry,
+} from "@/lib/transcript";
 import { isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
 import { restoreDraftSubmission } from "@/lib/draft-store";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
 import { getToolNamesForPreset, type ToolEntry, type ToolPreset } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
-import { userMessageKey } from "@/lib/prompt-recovery";
 import { AgentEventConnection } from "@/lib/agent-event-connection";
 import { newId } from "@/lib/id";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
@@ -353,9 +361,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [error, setError] = useState<string | null>(null);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
   const [hasOlderChat, setHasOlderChat] = useState(false);
-  const [messages, setMessages] = useState<AgentMessage[]>([]);
-  const [entryIds, setEntryIds] = useState<string[]>([]);
-  const [parentIds, setParentIds] = useState<(string | null)[]>([]);
+  // 消息列表的单一 owner：lib/transcript.ts 的 reducer。
+  // messages / entryIds / parentIds 由 items 派生（适配层）——下游组件无需改动，
+  // 但"追加/替换"这类会造出第二份事实的写法全部取消：提交只 push 一条带 id 的 pending 条目，
+  // 服务端回声/整表合并都是**原位升级**那一条。
+  const [transcript, dispatchTranscript] = useReducer(transcriptReducer, undefined, createTranscriptState);
+  const messages = useMemo(() => transcriptMessages(transcript), [transcript]);
+  const entryIds = useMemo(() => transcriptEntryIds(transcript), [transcript]);
+  const parentIds = useMemo(() => transcriptParentIds(transcript), [transcript]);
+  /** 条目 id：渲染 key / 滚动锚点用（从生到死不变，避免重挂闪烁）。 */
+  const itemIds = useMemo(() => transcriptItemIds(transcript), [transcript]);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [streamState, dispatch] = useReducer(streamReducer, INITIAL_STREAMING_STATE);
   const [agentRunning, setAgentRunning] = useState(false);
@@ -421,6 +436,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const isNearBottomRef = useRef(true);
   const previousScrollTopRef = useRef(0);
   const entryIdsRef = useRef<string[]>([]);
+  /** 尾部窗口请求的顺序号：
+   *   同一个回合会并发发起多次 loadSession/loadContext（实测一回合 3 次、其中两次并发），
+   *   旧快照晚到会把新状态冲回去（合并语义下还会把新消息当成"离分支"删掉）。
+   *   所以只允许顺序号不小于"已应用过"的响应生效。 */
+  const tailLoadSeqRef = useRef(0);
+  const tailLoadAppliedRef = useRef(0);
   const executeBashRef = useRef<(command: string, excludeFromContext: boolean) => Promise<void> | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -429,7 +450,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const newSessionModelOverrideRef = useRef<SelectedModel | null>(null);
   const thinkingLevelOverrideRef = useRef<Exclude<ThinkingLevelOption, "auto"> | null>(null);
   const promptRunIdRef = useRef(0);
-  const optimisticUserMessageKeyRef = useRef<string | null>(null);
   const modelSwitchPendingRef = useRef(false);
   const sessionHookMountedRef = useRef(true);
 
@@ -471,7 +491,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, []);
 
   useEffect(() => {
-    entryIdsRef.current = entryIds;
+    entryIdsRef.current = entryIds.filter((id): id is string => id !== null);
   }, [entryIds]);
 
   const currentModel = currentModelOverride ?? data?.context.model ?? pendingModel ?? null;
@@ -547,6 +567,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
     let messagesLoaded = false;
+    // 请求顺序号：迟到的旧快照不得覆盖新状态（见 tailLoadSeqRef 注释）
+    const requestSeq = ++tailLoadSeqRef.current;
     try {
       if (showLoading) setLoading(true);
       const params = new URLSearchParams({ deferThinking: "1" });
@@ -555,7 +577,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (showLoading) {
           setData(null);
           setActiveLeafId(null);
-          setMessages([]);
+          dispatchTranscript({ type: "reset" });
           setTodos([]);
           setError(null);
         }
@@ -564,49 +586,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json() as SessionData;
       if (sessionIdRef.current !== sid) return null;
+      if (requestSeq < tailLoadAppliedRef.current) return null;
+      tailLoadAppliedRef.current = requestSeq;
       const persistedMessages = d.context.messages;
       setData(d);
       setActiveLeafId(d.leafId);
+      // 服务端尾部窗口 → 按身份合并（lib/transcript.ts）。
+      // 命中已有条目的位置沿用原 id（不重挂）；本地 pending 服务端还没落盘时就原位保留（不消失）。
       const newEntryIds = d.context.entryIds ?? [];
-      // 合并语义：服务端默认只返回最新 tail 条，若与当前已加载列表尾部一致，
-      // 保留已加载的历史前缀（修复流式完成后全量刷新把历史清掉导致的列表缩水/位置跳变）。
-      const oldIds = entryIdsRef.current;
-      // 合并语义：服务端默认只返回最新 tail 条，若其前缀与已加载列表尾部重叠（公共链），
-      // 保留已加载的历史前缀 + 用新窗口整体刷新（流式完成后不会把历史清掉）。
-      // 校验只检查重叠段——新窗口尾部可能含刚流式落盘的新消息（不在 oldIds 里），
-      // 那部分不参与匹配，否则校验必失败导致整体替换、列表缩水。
-      let overlapIdx = -1;
-      if (newEntryIds.length > 0 && oldIds.length > 0) {
-        const candidate = oldIds.lastIndexOf(newEntryIds[0]);
-        if (candidate >= 0) {
-          const overlapLen = Math.min(newEntryIds.length, oldIds.length - candidate);
-          let ok = overlapLen > 0;
-          for (let i = 0; i < overlapLen; i++) {
-            if (oldIds[candidate + i] !== newEntryIds[i]) {
-              ok = false;
-              break;
-            }
-          }
-          if (ok) overlapIdx = candidate;
-        }
-      }
-      if (overlapIdx >= 0) {
-        setMessages((prev) => (prev.length > overlapIdx ? [...prev.slice(0, overlapIdx), ...persistedMessages] : persistedMessages));
-        setEntryIds((prev) => {
-          const next = [...prev.slice(0, overlapIdx), ...newEntryIds];
-          entryIdsRef.current = next;
-          return next;
-        });
-        setParentIds((prev) => {
-          const newParents = d.context.parentIds ?? newEntryIds.map(() => null);
-          return [...prev.slice(0, overlapIdx), ...newParents];
-        });
-      } else {
-        entryIdsRef.current = newEntryIds;
-        setMessages(persistedMessages);
-        setEntryIds(newEntryIds);
-        setParentIds(d.context.parentIds ?? newEntryIds.map(() => null));
-      }
+      const newParentIds = d.context.parentIds ?? newEntryIds.map(() => null);
+      const persistedEntries: ServerEntry[] = newEntryIds.map((entryId, idx) => ({
+        entryId,
+        parentId: newParentIds[idx] ?? null,
+        message: persistedMessages[idx],
+      })).filter((entry) => Boolean(entry.message));
+      dispatchTranscript({ type: "mergeTail", entries: persistedEntries });
       setTodos(d.context.todos ?? []);
       setHasOlderChat(d.hasMore ?? false);
       setCurrentModelOverride((current) => modelSwitchPendingRef.current ? current : null);
@@ -650,6 +644,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, []);
 
   const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null, tail?: number) => {
+    const requestSeq = before ? 0 : ++tailLoadSeqRef.current;
     try {
       const params = new URLSearchParams({ deferThinking: "1" });
       // Explicit null leaf: context is the empty root (rollback to session start).
@@ -667,24 +662,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[]; parentIds?: (string | null)[]; todos?: Todo[] }; hasMore?: boolean };
       setHasOlderChat(d.hasMore ?? false);
       const parentFallback = (p?: (string | null)[]) => p ?? d.context.entryIds.map(() => null);
+      const serverEntries: ServerEntry[] = d.context.entryIds.map((entryId, idx) => ({
+        entryId,
+        parentId: parentFallback(d.context.parentIds)[idx] ?? null,
+        message: d.context.messages[idx],
+      })).filter((entry) => Boolean(entry.message));
       if (before) {
-        // Older page: prepend so scroll position stays anchored. Todos reflect
-        // current session state, so leave them unchanged on a history page.
-        setMessages((prev) => [...d.context.messages, ...prev]);
-        setEntryIds((prev) => {
-          const next = [...d.context.entryIds, ...prev];
-          entryIdsRef.current = next;
-          return next;
-        });
-        setParentIds((prev) => [...parentFallback(d.context.parentIds), ...prev]);
+        // Older page: prepend so scroll position stays anchored（按 entryId 去重，
+        // 同一页被并发触发两次也不会重复插入）。
+        dispatchTranscript({ type: "prependOlder", entries: serverEntries });
       } else {
-        setMessages(d.context.messages);
-        setEntryIds(() => {
-          const next = d.context.entryIds ?? [];
-          entryIdsRef.current = next;
-          return next;
-        });
-        setParentIds(parentFallback(d.context.parentIds));
+        // 尾部窗口（导航/回退/切 leaf）：只接受不早于已应用过的请求
+        if (requestSeq < tailLoadAppliedRef.current) return null;
+        tailLoadAppliedRef.current = requestSeq;
+        dispatchTranscript({ type: "mergeTail", entries: serverEntries });
         setTodos(d.context.todos ?? []);
       }
       return { entryIds: d.context.entryIds, hasMore: d.hasMore ?? false };
@@ -1071,7 +1062,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const agentWasActive = sdkAgentActiveRef.current;
       rpcPromptPendingRef.current = false;
       sdkAgentActiveRef.current = false;
-      optimisticUserMessageKeyRef.current = null;
       const wasRunning = settleUiStage();
       if (promptWasPending) {
         notifyPromptStage(runId);
@@ -1268,7 +1258,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           const runId = promptRunIdRef.current;
           const promptWasPending = rpcPromptPendingRef.current;
           rpcPromptPendingRef.current = false;
-          optimisticUserMessageKeyRef.current = null;
           const firstNotification = notifyPromptStage(runId);
           if (!promptWasPending && !firstNotification) break;
 
@@ -1325,25 +1314,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (!agentRunningRef.current) break;
         const completed = event.message as AgentMessage | undefined;
         if (completed && completed.role === "user") {
-          // Delivered steering/follow-up messages surface here as user
-          // messages. The run's initial prompt also emits one, but handleSend
-          // already appended it optimistically. Consume only the still-adjacent
-          // optimistic bubble; later same-text queue deliveries must render.
-          const delivered = normalizeToolCalls(completed);
-          const deliveredKey = userMessageKey(delivered);
-          const optimisticKey = optimisticUserMessageKeyRef.current;
-          optimisticUserMessageKeyRef.current = null;
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (optimisticKey && last?.role === "user" && userMessageKey(last) === optimisticKey) {
-              return optimisticKey === deliveredKey
-                ? prev
-                : [...prev.slice(0, -1), delivered];
-            }
-            return [...prev, delivered];
-          });
+          // 用户消息的回声（本轮 prompt 自己发的那条，或流中追加的 steer/follow-up）：
+          // 按提交顺序认领对应的 pending 条目并**原位升级** —— 不是"还在末尾就替换、否则追加"的猜测。
+          dispatchTranscript({ type: "echo", runId: promptRunIdRef.current, message: normalizeToolCalls(completed) });
         } else if (completed) {
-          setMessages((prev) => [...prev, normalizeToolCalls(completed)]);
+          dispatchTranscript({ type: "server", message: normalizeToolCalls(completed) });
         }
         dispatch({ type: "end" });
         setAgentPhase({ kind: "waiting_model" });
@@ -1463,8 +1438,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         : message,
       timestamp: Date.now(),
     };
-    setMessages((prev) => [...prev, userMsg]);
-    optimisticUserMessageKeyRef.current = userMessageKey(userMsg);
+    // 提交：只 push 一条带 id 的 pending 条目（身份在此刻确定，终生不变）。
+    // 旧写法是直接追加进 messages 且不带 entryId —— 那份事实源没有身份，
+    // 后续只能靠"末尾相邻 + 文本相等"去猜它：猜错就重复，被整表替换就消失。
+    const submissionId = newId();
+    dispatchTranscript({ type: "submit", id: submissionId, message: userMsg, runId: promptRunId, submittedAt: userMsg.timestamp ?? Date.now() });
     promptRunIdRef.current = promptRunId;
     agentRunningRef.current = true;
     setAgentRunning(true);
@@ -1527,15 +1505,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         return;
       }
       rpcPromptPendingRef.current = false;
-      setMessages((prev) => {
-        const optimisticIndex = prev.lastIndexOf(userMsg);
-        return optimisticIndex === -1
-          ? prev
-          : [...prev.slice(0, optimisticIndex), ...prev.slice(optimisticIndex + 1)];
-      });
+      // 提交被拒：按 id 移除那一条 pending（不再按对象引用回找）。
+      dispatchTranscript({ type: "fail", id: submissionId });
       addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
       restoreSubmission(message, images);
-      optimisticUserMessageKeyRef.current = null;
       // Rejection only describes this submission. Another tab or an event we
       // missed may still have a real run active for the same session, so keep
       // its SSE connection until server state says the wrapper is idle.
@@ -2159,7 +2132,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   return {
     // State
-    data, loading, error, activeLeafId, messages, entryIds, parentIds, todos, streamState,
+    data, loading, error, activeLeafId, messages, entryIds, parentIds, itemIds, todos, streamState,
     agentRunning, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, modelSwitching, sessionStats,
@@ -2177,7 +2150,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
     handleBuiltinSlashCommand,
-    handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages, loadContext,
+    handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, dispatchTranscript, loadContext,
     removeNotice, clearNotices,
     setNoticeHistoryFrozen: (frozen: boolean) => { noticeHistoryFrozenRef.current = frozen; },
     scrollToBottom, scrollUserMsgToTop, hasOlderChat,

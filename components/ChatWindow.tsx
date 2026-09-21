@@ -315,7 +315,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionI
   }, [chatInputRef]);
 
   const {
-    loading, error, messages, entryIds, parentIds, streamState,
+    loading, error, messages, entryIds, parentIds, itemIds, streamState,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     commandBusy,
@@ -1043,10 +1043,9 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionI
                 const isVisible = msg.role === "user" || msg.role === "assistant";
                 const currentRefIdx = visibleRefIndexByMessage.get(idx);
                 const keyPrefix = options.keyPrefix ?? "message";
-                // 消息 key 用稳定 entryId（prepend 历史后下标 +N 但 entryId 不变），避免全量重挂载导致闪烁。
-                const stableKey = entryIds[idx] ?? `${keyPrefix}-${idx}`;
-                // 消息 key 用稳定 entryId（prepend 历史后下标 +N 但 entryId 不变）：
-                // 避免全量重挂载导致 DOM 重建、图片/代码块重渲染、折叠状态丢失（闪烁/布局跳变）。
+                // 消息 key = 会话条目 id（从创建到销毁不变）：prepend 历史、服务端合并、
+                // 发送时的 pending→confirmed 升级都不会换 key，于是不会卸载重挂（闪烁 / 折叠丢失）。
+                const stableKey = itemIds[idx] ?? `message-${idx}`;
                 let showTimestamp = false;
                 if (msg.role === "assistant") {
                   showTimestamp = true;
@@ -1069,7 +1068,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionI
                     modelNames={modelNames}
                     cwd={messageCwd}
                     onOpenFile={onOpenFile}
-                    entryId={entryIds[idx]}
+                    entryId={entryIds[idx] ?? undefined}
                     onFork={sessionBusy || isNew ? undefined : handleFork}
                     forking={forkingEntryId === entryIds[idx]}
                     onNavigate={sessionBusy ? undefined : handleNavigate}

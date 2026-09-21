@@ -71,7 +71,7 @@ export function getAssistantAnswerMarkdown(message: AgentMessage | Partial<Agent
  */
 export function buildDomTurns(
   allMessages: (AgentMessage | Partial<AgentMessage>)[],
-  entryIds: string[],
+  entryIds: (string | null)[],
 ): DomTurn[] {
   const turns: DomTurn[] = [];
   let current: DomTurn | null = null;
