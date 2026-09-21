@@ -33,7 +33,11 @@ test("tracks the visual viewport while the software keyboard is open", () => {
   assert.match(viewportHookSource, /window\.scrollTo\(0, 0\)/);
   assert.match(cssSource, /height: var\(--app-viewport-height, 100dvh\)/);
   assert.match(cssSource, /left: env\(safe-area-inset-left\)/);
-  assert.match(chatWindowSource, /paddingBottom: "env\(safe-area-inset-bottom\)"/);
+  // 底部安全区由 widget 条自己长出来（高度 calc + 玻璃背景铺满），
+  // 键盘态再收掉：env() 不随键盘更新，留着就是键盘上方的空隙。
+  assert.match(cssSource, /\.bottom-band \{[\s\S]*?height: calc\(36px \+ env\(safe-area-inset-bottom\)\)/);
+  assert.match(cssSource, /html\[data-keyboard="true"\] \.bottom-band \{[\s\S]*?height: 36px/);
+  assert.doesNotMatch(chatWindowSource, /paddingBottom: "env\(safe-area-inset-bottom\)"/);
 });
 
 test("contains chat content and inputs within the mobile viewport", () => {

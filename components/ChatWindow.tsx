@@ -806,6 +806,9 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionI
       <span>{t("terminal.title")}</span>
     </button>
   );
+  // 桌面/移动端同样下发 phase：composer 顶栏左槽是「运行状态 ⇄ 模型名」二选一，
+  // 拦掉 phase 会让移动端在整个「等待模型」空档里没有任何运行指示
+  // （旧的消息流状态胶囊已在 5b84024 下线，没有兜底）。
   const chatInputElement = (
     <ChatInput
       ref={chatInputRef}
@@ -852,7 +855,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionI
       taskName={taskName}
       atBottom={atBottom}
       onScrollToBottom={scrollToBottom}
-      phase={isMobile ? null : phaseBroadcast}
+      phase={phaseBroadcast}
     />
   );
 
@@ -875,7 +878,6 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionI
   return (
     <div
       className={`chat-content relative flex h-full min-w-0 flex-col ${inWorkbench ? "overflow-visible" : "overflow-hidden"}`}
-      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -1411,7 +1413,10 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionI
 
       <div className="relative">
         {chatInputElement}
-        {/* 底部一行：widget（占满；内部右侧=通知按需显隐） + 扩展按钮容器（auto，目前=终端） */}
+        {/* 底部一行：widget（占满；内部右侧=通知按需显隐） + 扩展按钮容器（auto，目前=终端）。
+            没有任何内容时整条不渲染 —— 否则底部会留一条看不见的 36px 空白（移动端尤其明显）。
+            底部安全区由这条自己承担，见 globals.css 的 .bottom-band。 */}
+        {(extensionWidgets?.length ?? 0) > 0 || (extensionStatuses?.length ?? 0) > 0 || !isMobile ? (
         <div className="bottom-band">
           <ExtensionStatusBar
             statuses={extensionStatuses}
@@ -1488,6 +1493,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionI
             }
           />
         </div>
+        ) : null}
       </div>
       </>
       )}

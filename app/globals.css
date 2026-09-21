@@ -2241,7 +2241,16 @@ html.dark .terminal-all-select { color-scheme: dark; background-image: url("data
   display: flex;
   align-items: stretch;
   min-width: 0;
-  /* 中间无间距：widget 与扩展按钮容器无缝衔接 */
+  /* 中间无间距：widget 与扩展按钮容器无缝衔接。
+     底部安全区由这一条自己长出来（子项 shelf 的玻璃背景会铺满这段高度）；
+     不要交给聊天列做 padding —— 那块没有任何元素画背景，独立窗口 PWA 下
+     env(safe-area-inset-bottom) 恒为 34px，壁纸透出来就是一条留白。 */
+  height: calc(36px + env(safe-area-inset-bottom));
+}
+
+/* 键盘弹起时不留安全区：env(safe-area-inset-bottom) 不随键盘更新（WebKit #217754），
+   不置 0 就变成键盘上方多一条 34px 空隙。data-keyboard 由 hooks/useViewportHeight 打。 */
+html[data-keyboard="true"] .bottom-band {
   height: 36px;
 }
 

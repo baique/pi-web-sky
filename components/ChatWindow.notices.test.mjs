@@ -23,8 +23,11 @@ test("renders desktop notices in the widget bar through NoticeDrawer (click-to-e
   const floatingProp = source.match(/function NoticeShelf\(\{ notices, floating \}/);
   assert.ok(floatingProp, "NoticeShelf should accept a floating prop");
 
-  // 移动端不向顶栏下发公告数据（避免双重显示）
-  assert.match(source, /phase=\{isMobile \? null : phaseBroadcast\}/);
+  // 移动端公告仍走顶部 NoticeShelf；phase（运行状态）两端都下发 ——
+  // composer 顶栏左槽是「运行状态 ⇄ 模型名」二选一，拦掉会让移动端
+  // 在整个「等待模型」空档里没有任何运行指示（旧的消息流胶囊已下线）。
+  assert.match(source, /phase=\{phaseBroadcast\}/);
+  assert.doesNotMatch(source, /phase=\{isMobile \? null : phaseBroadcast\}/);
 });
 
 test("NoticeDrawer: pill reuses NoticeInline styling, flashes on new notices, expands upward into auto-height scrollable drawer", () => {
