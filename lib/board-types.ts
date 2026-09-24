@@ -40,6 +40,12 @@ export interface RunningSnapshot {
    * 带 ?boardId=&cardIds=：返回这批可见卡的**全量**状态（含 failed/done/not_started），供画布徽章用。
    */
   taskCards: TaskCardRunningState[];
+  /**
+   * 会话列表代次（服务端任何影响列表的写入都自增）。
+   * 前端比对代次：变了就重拉列表——标题/首条消息/最后回复/外部新建会话不必等
+   * 下次本地动作或刷新页面。见 lib/session-list-signal.ts。
+   */
+  listGeneration: number;
 }
 
 /** 任务卡状态（running 快照透传的画布可见卡状态；DB 是唯一真相源，此为展示镜像） */

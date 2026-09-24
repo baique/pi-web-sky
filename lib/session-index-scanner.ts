@@ -34,6 +34,7 @@ import { getDb } from "./sqlite-db";
 import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
 import { scanOneSessionHead, scanSessionFileMeta, readSessionTail, type SessionFileMeta } from "./session-scanner";
+import { markSessionListChanged } from "./session-list-signal";
 import { resolveProject } from "./worktree";
 
 /** 一轮扫描的变更摘要（日志/测试断言用）。 */
@@ -97,6 +98,8 @@ export async function indexSessionFileNow(
       head.created.getTime(),
       Date.now(),
     );
+  // 行已落库 → 列表可能变了（会话当场出现在列表/派生列被补上）。
+  markSessionListChanged();
 }
 
 /** 一轮全量扫描。`sessionsDir` 仅在测试注入（默认走 agentDir）。 */
@@ -317,6 +320,12 @@ export async function runSessionIndexScan(
       backfillReplyStmt.run(tail.lastReply || "", row.session_id);
       summary.updated += 1;
     }
+  }
+
+  // 本轮真改了什么 → 通知列表读者（外部/CLI 新建的会话、首条消息/最后回复回填、
+  // 删除都走这里；无变更不 mark，避免每 30s 空推一次前端重拉）。
+  if (summary.inserted > 0 || summary.updated > 0 || summary.deleted > 0) {
+    markSessionListChanged();
   }
 
   return summary;

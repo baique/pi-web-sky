@@ -75,6 +75,17 @@ export function membershipDropAllowed(depth: number): boolean {
   return depth === 0;
 }
 
+/**
+ * 列表代次比对：本次轮询拿到的代次 vs 「我当前这份列表对应的代次」→ 要不要重拉列表。
+ *
+ * `seen === null`（还没有过列表响应）只当种子、不刷新：挂载时已经拉过一次，
+ * 首个快照再刷一遍是白活。服务端没带这个字段（旧版本）一律不刷新。
+ * 代次的来源与写入时机见 `lib/session-list-signal.ts`。
+ */
+export function shouldRefreshForListGeneration(seen: number | null, current: number | undefined): boolean {
+  return typeof current === "number" && seen !== null && seen !== current;
+}
+
 export interface SessionListItem<T extends SessionTreeNode> {
   node: T;
   /** 该行上方要渲染的时间分组小角标；null = 不打标签。 */
@@ -88,6 +99,8 @@ export interface SessionListItem<T extends SessionTreeNode> {
  * 置顶段不参与分组（置顶会话本就脱离时间顺序）；越过置顶分隔线后重新开始分组，
  * 分组标签只在同一段内换组时出现一次。**运行中浮顶的行也不打标签、不推进游标**：
  * 浮顶把更旧的行提到段首，给它打标签就会出现「昨天 → 今天 → … → 昨天」的重复角标。
+ * **「今天」也不打标签**：这一段永远在列表最上面（置顶段除外，它不分段），列出
+ * 「今天」等于重复说了一遍「最上面 = 最近」，只是噪音；昨天及更早才需要锚点。
  * `timeGroupOf` 由调用方注入 `sessionTimeGroup`（保持本模块零 runtime 依赖）。
  */
 export function planSessionListItems<T extends SessionTreeNode>(
@@ -105,7 +118,7 @@ export function planSessionListItems<T extends SessionTreeNode>(
     const group = isPinned || runningIds.has(node.session.id)
       ? null
       : timeGroupOf(node.session.modified, now);
-    const header = group && group !== lastGroup ? group : null;
+    const header = group && group !== "today" && group !== lastGroup ? group : null;
     if (group) lastGroup = group;
     return { node, header, pinDivider: prevPinned && !isPinned };
   });

@@ -26,6 +26,7 @@ import {
   planSessionListItems,
   SESSION_DEPTH_MIME,
   sessionRowDraggable,
+  shouldRefreshForListGeneration,
   type SessionTreeNode,
 } from "./session-sidebar-list";
 
@@ -437,6 +438,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Once polling has delivered a snapshot it is the source of truth for
   // running state; late /api/sessions responses must not overwrite it.
   const runningPollAuthoritativeRef = useRef(false);
+  // 最近一次看到的会话列表代次（null = 还没拿到过：首个快照只当种子，不触发空刷）。
+  const listGenerationRef = useRef<number | null>(null);
+  // 轮询跑在挂载级 effect（[] deps）里，所以用 ref 拿最新的 onRefresh 回调。
+  const onRefreshRef = useRef(onRefresh);
+  useEffect(() => {
+    onRefreshRef.current = onRefresh;
+  }, [onRefresh]);
   const sessionRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const explorerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileExplorerRef = useRef<FileExplorerHandle>(null);
@@ -457,13 +465,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       try {
         const res = await fetch(`/api/sessions?project=${encodeURIComponent(projectKey)}`, { cache: "no-store" });
         if (!res.ok) return;
-        const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
+        const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[]; listGeneration?: number };
         // 只有当前 key 仍匹配才写 state（旧请求迟到不覆盖新项目列表）
         if (chatProjectKeyRef.current === projectKey) {
           setChatSessions(data.sessions ?? []);
           if (!runningPollAuthoritativeRef.current) {
             setRunningSessionIds(new Set(data.runningSessionIds ?? []));
           }
+          // 这份列表对应的代次：轮询拿它比对，服务端后续的写入才能被认出来。
+          if (typeof data.listGeneration === "number") listGenerationRef.current = data.listGeneration;
         }
       } catch {
         // keep last list; next refresh retries
@@ -492,8 +502,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         cache: "no-store",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
+      const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[]; listGeneration?: number };
       setAllSessions(data.sessions);
+      if (typeof data.listGeneration === "number") listGenerationRef.current = data.listGeneration;
       // 上抛全量列表：父级 hydrate 直接复用，避免再拉一次 /api/sessions。
       onSessionsLoaded?.(data.sessions);
       // Treat the fetched running set as an initial fallback only. Once the
@@ -555,9 +566,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           signal: current.signal,
         });
         if (!res.ok) return;
-        const data = await res.json() as { runningSessionIds?: string[] };
+        const data = await res.json() as { runningSessionIds?: string[]; listGeneration?: number };
         if (stopped || controller !== current) return;
         runningPollAuthoritativeRef.current = true;
+        // 服务端「列表已变更」信号（listGeneration）：变了就全量刷新（refreshKey→防抖
+        // 重拉会话/任务）——标题回填/最后回复/外部（CLI）新建的会话不必等下次本地动作。
+        // 没有这个信号时，侧栏只在挂载/切项目/本地动作时重拉，服务端写进去的东西
+        // 会一直躺在库里不显示（典型：刚发第一条消息的会话标题卡在 "(no messages)"）。
+        const generation = data.listGeneration;
+        if (shouldRefreshForListGeneration(listGenerationRef.current, generation)) {
+          onRefreshRef.current?.();
+        }
+        if (typeof generation === "number") listGenerationRef.current = generation;
         // 相等性判断：内容没变化就不 setState（否则每 2.5s 轮询都新建 Set 触发重渲染，
         // 运行中会话条目在拖拽中被重挂 → 浏览器取消 drag）。
         setRunningSessionIds((prev) => {
@@ -1891,6 +1911,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     </div>
   );
 }
+// 分组角标的 i18n key。`today` 这一项**永不渲染**：今天段不打标签（列表最上面就是今天，
+// 标出来只是噪音，见 session-sidebar-list.ts 的 planSessionListItems）；键保留只为这个
+// Record 对 SessionTimeGroup 类型完整。
 const TIME_GROUP_LABEL_KEY = {
   today: "sidebar.timeToday",
   yesterday: "sidebar.timeYesterday",

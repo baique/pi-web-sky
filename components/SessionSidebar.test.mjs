@@ -8,6 +8,7 @@ import {
   parseSessionDepth,
   planSessionListItems,
   sessionRowDraggable,
+  shouldRefreshForListGeneration,
 } from "./session-sidebar-list.ts";
 import { sessionTimeGroup } from "../lib/session-time-group.ts";
 
@@ -153,6 +154,13 @@ test("归属类落点：顶层行可落，子会话行（depth > 0）拒绝", ()
   assert.equal(membershipDropAllowed(2), false);
 });
 
+test("列表代次比对：变了才重拉；没有过列表响应 / 服务端没带字段都不刷", () => {
+  assert.equal(shouldRefreshForListGeneration(7, 8), true, "服务端写完库推了新代次 → 重拉列表");
+  assert.equal(shouldRefreshForListGeneration(7, 7), false, "代次未变：不白刷（避免每 2.5s 重建行、拖拽被取消）");
+  assert.equal(shouldRefreshForListGeneration(null, 8), false, "还没有列表响应 → 只当种子（挂载时已拉过一次）");
+  assert.equal(shouldRefreshForListGeneration(7, undefined), false, "旧服务端不带代次 → 一律不刷");
+});
+
 test("拖拽深度载荷：十进制字符串，缺失 / 非法 / 负数一律当顶层（0）", () => {
   assert.equal(parseSessionDepth(String(0)), 0);
   assert.equal(parseSessionDepth(String(3)), 3, "拖拽源写什么就回读什么");
@@ -167,7 +175,7 @@ test("拖拽深度载荷：十进制字符串，缺失 / 非法 / 负数一律�
 const NOW = new Date(2026, 8, 18, 12, 0, 0).getTime(); // 本地 2026-09-18 12:00
 const day = (offsetDays) => new Date(2026, 8, 18 + offsetDays, 9, 0, 0).toISOString();
 
-test("时间分组角标：运行中浮顶的行不打标签、也不推进游标（不会出现「昨天 → 今天 → 昨天」）", () => {
+test("时间分组角标：运行中浮顶的行不打标签、也不推进游标；今天段不打标签（最上面就是今天）", () => {
   const nodes = [
     treeNode("running-old", day(-1)), // 运行中 → 浮到段首，但 modified 比段内其它行旧
     treeNode("today-a", day(0)),
@@ -178,22 +186,23 @@ test("时间分组角标：运行中浮顶的行不打标签、也不推进游�
   const items = planSessionListItems(nodes, new Set(["running-old"]), NOW, sessionTimeGroup);
   assert.deepEqual(
     items.map((i) => i.header),
-    [null, "today", null, "yesterday", "older"],
-    "浮顶行不打标签；段内分组标签由近及远各出现一次",
+    [null, null, null, "yesterday", "older"],
+    "浮顶行不打标签；今天段整段不打标签；昨天及更早由近及远各出现一次",
   );
 });
 
-test("时间分组角标：置顶段不参与分组，进入非置顶段后重新分组", () => {
+test("时间分组角标：置顶段不参与分组，进入非置顶段后重新分组（今天段不占标签）", () => {
   const nodes = [
     treeNode("pinned-today", day(0), true),
     treeNode("pinned-old", day(-120), true),
     treeNode("today-a", day(0)),
     treeNode("today-b", day(0)),
     treeNode("yesterday", day(-1)),
+    treeNode("older", day(-120)),
   ];
   const items = planSessionListItems(nodes, new Set(), NOW, sessionTimeGroup);
-  assert.deepEqual(items.map((i) => i.header), [null, null, "today", null, "yesterday"]);
-  assert.deepEqual(items.map((i) => i.pinDivider), [false, false, true, false, false]);
+  assert.deepEqual(items.map((i) => i.header), [null, null, null, null, "yesterday", "older"]);
+  assert.deepEqual(items.map((i) => i.pinDivider), [false, false, true, false, false, false]);
 });
 
 test("接线：归属落点与任务看板/画布落点都按深度拒绝，手动看板不受限", () => {

@@ -333,6 +333,8 @@ export class AgentSessionWrapper {
     }
     recordSessionOutcome(sessionId, effect);
     // 首条用户消息此刻已在内存 entries 里（不读文件，读取路径零扫盘）。
+    // 正常链路上它更早就写好了（prompt 一被接受就写，见 send 的 prompt 分支）；
+    // 这里兑底扩展/外部注入的首条用户消息（那一轮的起点不是 RPC prompt）。
     fillFirstMessageIfEmpty(sessionId, firstUserMessageOf(this.inner.sessionManager.getEntries()));
   }
 
@@ -613,6 +615,29 @@ export class AgentSessionWrapper {
           });
 
           await preflight;
+          // 首条用户消息：prompt 一被接受就落库，**不等整轮跑完**。标题/列表的默认
+          // 展示就是「用户发送的第一句话」（title || first_message），只在 agent_settled
+          // 写的话，长首轮（几分钟~几十分钟）期间刷新页面/换客户端/看板卡上标题一直空着
+          // （-> "(no messages)"）。也不能指望 agent_start：实测那一刻用户消息还没进
+          // 内存 entries（拿不到文本）。
+          // 只在「transcript 里还没有用户消息」时写（= 这才是真首条）：已有历史的会话
+          // （CLI 建的、first_message 还空着）走 agent_settled/扫描器按真实首条回填，
+          // prompt 路径写「这一条最新消息」会被 fill-empty 钉死成永久错值。
+          const promptText = typeof command.message === "string" ? command.message.trim() : "";
+          const sessionId = this.inner.sessionId;
+          if (promptText && sessionId && !firstUserMessageOf(this.inner.sessionManager.getEntries())) {
+            try {
+              fillFirstMessageIfEmpty(sessionId, promptText.slice(0, FIRST_MESSAGE_PREVIEW_LENGTH));
+            } catch (error) {
+              // 库写失败绝不能冒泡：send() 抛出会让路由把「已经接受的 prompt」报成
+              // prompt_rejected（客户端回填草稿、诱导重发，而 agent 其实在跑）。
+              // 这条写只是旁路索引，失败记账即可（同 persistSessionActivity 口径）。
+              console.error(
+                `[pi-web] 首条消息写库失败 session=${sessionId}:`,
+                error instanceof Error ? error.message : String(error),
+              );
+            }
+          }
           return null;
         } finally {
           releaseAdmission();

@@ -81,7 +81,7 @@ Browser                Next.js Server              AgentSession (in-process)
 - **SQLite 事务铁律**：不支持嵌套 BEGIN。`deleteBoardCascade` / `renameTaskBoard` 必须无事务，由调用方（`deleteBoard` / `deleteTask` / `updateTask`）在自身事务内调用。
 - **看板双源状态**：卡片内状态以展开卡的 `useAgentSession` SSE 为准，看板聚合态以 `/api/agent/running` 轮询为准——不要混用打架。
 - **SSE 重连**：`useAgentSession` mount 时拉 `GET /api/sessions/[id]/state`，`isStreaming` 或 `isPromptRunning` 为真则自动重连 SSE；compaction 事件新旧两套都要认（`compaction_*` / `auto_compaction_*`）。
-- **运行状态轮询**：侧栏 2.5s 轮询 `/api/agent/running`（后台 tab 暂停，画布不暂停，只额外补一次）；prompt 用单调 run id，旧 run 的迟到 SSE / 慢 reconciliation 必须忽略，防复活过期流式气泡。
+- **运行状态轮询**：侧栏 2.5s 轮询 `/api/agent/running`（后台 tab 暂停，画布不暂停，只额外补一次）；prompt 用单调 run id，旧 run 的迟到 SSE / 慢 reconciliation 必须忽略，防复活过期流式气泡。该快照还带 `listGeneration`（`lib/session-list-signal.ts`）：任何影响列表的服务端写入都自增，前端见变化就 bump refreshKey 重拉列表（列表响应也带代次作种子）——没这个信号，标题/首条消息/外部新建会话会一直躺在库里不显示。
 - **worktree 路径比较用 `samePath()` 绝不用 `===`**：git 在 Windows 也输出 POSIX 路径，读出来先过 `toNativePath()`；分支名不是路径，保留正斜杠。
 - **文件白名单只有一个实现**：`isPathWithinRoots()`（`lib/path-security.ts`）是 `isFilePathAllowed()` 的唯一实现，重解析 + case-fold 两侧，别另起炉灶。
 - **yjs 画布铁律**：① `nodeTypes`/`edgeTypes` 必须模块级常量（引用不稳定 → 每次渲染重建 → 连接堆积）；② 派生元素（会话卡 / exec 线 / 依赖线 / fork 线）由**后端 reconcile** 权威渲染（确定性 id 幂等），前端只做用户布局增量，**不做孤儿清理**（多端不互相删卡）；高频运行态（phase / runningMs / execStatus）只走本地镜像不写 Y.Doc；③ 节点内交互用 RF 原生 `nowheel`/`nodrag`/`nopan`（可滚动区 nowheel、按钮输入 nodrag）；④ 节点必须有 `<Handle>` 才能连线。详见 [boards.md](docs/reference/boards.md)。

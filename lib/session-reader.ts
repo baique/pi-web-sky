@@ -16,6 +16,7 @@ import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
 import { scanOneSessionFile } from "./session-scanner";
+import { markSessionListChanged } from "./session-list-signal";
 import { ensureSessionIndexReady } from "./session-index-scanner";
 import type { TurnIndexItem } from "./api-types";
 
@@ -264,17 +265,15 @@ export async function loadTaskSessionsPage(
 declare global {
   var __piSessionPathCache: Map<string, string> | undefined;
   var __piPathToSessionIdCache: Map<string, string> | undefined;
-  var __piSessionListGeneration: number | undefined;
 }
 
 /** 写路径的「数据变了」信号：归属/pin/改名/新建/删除/事件都会调它。
  *
- *  列表已无缓存（读取 = 每次一次单表查询），所以目前**没有生产读者**：这里只保留
- *  generation 自增的既有行为（T1–T4b 的写路径与 auto-name / patch-write-failure 的
- *  断言都依赖调用本身）。若要连函数一起删，需要同时改掉全部调用方与那两处断言——
- *  属待清理项，本次不动。 */
+ *  计数器本体在 `session-list-signal`（扫描器也要 mark，不能反向 import 本模块）；
+ *  读者是 `/api/agent/running` 的 `listGeneration` —— 侧栏 2.5s 轮询见代次变化就
+ *  重拉列表，标题/首条消息/最后回复/外部新建会话因此能在几秒内现身。 */
 export function invalidateSessionListCache(): void {
-  globalThis.__piSessionListGeneration = (globalThis.__piSessionListGeneration ?? 0) + 1;
+  markSessionListChanged();
 }
 
 function getPathCache(): Map<string, string> {

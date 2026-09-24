@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRunningRpcSessionIds, getRunningSessionStates } from "@/lib/rpc-manager";
+import { getSessionListGeneration } from "@/lib/session-list-signal";
 import { listCardsByExecStatus, listCardsByIds } from "@/lib/task-card-store";
 import type { RunningSnapshot, TaskCardRunningState } from "@/lib/board-types";
 
@@ -60,6 +61,9 @@ export async function GET(req: Request) {
     runningSessionIds: runningIds,
     states,
     taskCards,
+    // 会话列表代次：侧栏拿它判断「服务端写进去的新标题/新会话该重拉了」。
+    // 不带 ?boardId= 的请求才会被侧栏消费，但两条路径都返回（同一个快照类型）。
+    listGeneration: getSessionListGeneration(),
   };
   return NextResponse.json(snapshot, { headers: { "Cache-Control": "no-store" } });
 }

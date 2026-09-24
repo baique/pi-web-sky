@@ -613,14 +613,16 @@ export function recordSessionOutcome(sessionId: string, outcome: { lastReply: st
   invalidateSessionListCache();
 }
 
-/** 首条用户消息回填（读取路径不再读文件，改由事件补齐；只补空行）。 */
+/** 首条用户消息回填（读取路径不再读文件，改由事件补齐；只补空行）。
+ *  只在真的改了行时推列表代次：这个函数在一条会话的一生里会被调多次（每次 prompt 一次），
+ *  无变化的空推会让前端白刷一轮会话/任务/看板。「空轮不推」与扫描器同一口径。 */
 export function fillFirstMessageIfEmpty(sessionId: string, firstMessage: string): void {
   const text = firstMessage.trim();
   if (!text) return;
-  getDb()
+  const result = getDb()
     .prepare(
       "UPDATE session_meta SET first_message = ? WHERE session_id = ? AND (first_message IS NULL OR first_message = '')",
     )
     .run(text, sessionId);
-  invalidateSessionListCache();
+  if (Number(result.changes) > 0) invalidateSessionListCache();
 }

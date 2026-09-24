@@ -7,6 +7,7 @@ import {
 } from "@/lib/session-reader";
 import { getRpcSessionInfos, getRunningRpcSessionIds } from "@/lib/rpc-manager";
 import { listAllTaskSessionIds } from "@/lib/task-store";
+import { getSessionListGeneration } from "@/lib/session-list-signal";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,9 @@ export async function GET(req: Request) {
         {
           sessions: [...persisted, ...extraRuntime],
           runningSessionIds: runningIds,
+          // 这份列表对应的列表代次：前端拿它当「我的列表是哪个代次」的种子，
+          // 后续轮询见到不同的代次就重拉（防「请求已发出、写在路上」的漏刷）。
+          listGeneration: getSessionListGeneration(),
         },
         { headers: { "Cache-Control": "no-store" } },
       );
@@ -48,7 +52,7 @@ export async function GET(req: Request) {
     ]);
     const sessions = mergeSessionLists(persistedSessions, runtimeSessions);
     return NextResponse.json(
-      { sessions, runningSessionIds: getRunningRpcSessionIds() },
+      { sessions, runningSessionIds: getRunningRpcSessionIds(), listGeneration: getSessionListGeneration() },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
