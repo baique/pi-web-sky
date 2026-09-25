@@ -921,10 +921,11 @@
   min-height: 0;
 }
 
+/* 不做 max-width 收窄：本块自己就是滚动容器，收窄会让滚动条停在面板中间；
+   铺满 dialog 后与其他分区（models/skills/...）一致，滚动条贴面板右缘。 */
 .settings-general {
   width: 100%;
   max-height: 100%;
-  max-width: 680px;
   padding: 26px clamp(18px, 4vw, 40px) 40px;
   overflow-y: auto;
 }
