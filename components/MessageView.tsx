@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
+import { memo, useState, useRef, useEffect, useMemo } from "react";
 import { MarkdownBody } from "./MarkdownBody";
 import { ImagePreview } from "./ImagePreview";
 import { copyText } from "@/lib/clipboard";
@@ -717,30 +717,6 @@ function AssistantMessageView({
   const blockItemsRef = useRef(blockItems);
   blockItemsRef.current = blockItems;
 
-  // 流式高度平滑：吐字换行时卡片高度不再"咔"一下跳一行，而是过渡上去。
-  // auto 高度不能直接 transition，用 ResizeObserver 把内容自然高度写成显式 height，
-  // 由 CSS transition 把每次换行的高度增量插值掉。
-  const streamCardRef = useRef<HTMLDivElement | null>(null);
-  const streamContentRef = useRef<HTMLDivElement | null>(null);
-  useLayoutEffect(() => {
-    if (!isStreaming) return;
-    const card = streamCardRef.current;
-    const content = streamContentRef.current;
-    if (!card || !content) return;
-    const sync = () => {
-      const height = content.offsetHeight;
-      const current = Number.parseFloat(card.style.height);
-      if (Number.isFinite(current) && Math.abs(current - height) < 0.5) return;
-      card.style.height = `${height}px`;
-    };
-    sync();
-    const observer = new ResizeObserver(sync);
-    observer.observe(content);
-    return () => {
-      observer.disconnect();
-      card.style.height = "";
-    };
-  }, [isStreaming]);
   const tokenEstimateCacheRef = useRef<Map<number, TokenEstimateCacheEntry>>(new Map());
   const estimatedTokens = useMemo(() => {
     if (!isStreaming) {
@@ -863,24 +839,15 @@ function AssistantMessageView({
       onMouseLeave={() => setHovered(false)}
     >
       <div
-        ref={streamCardRef}
-        style={{
-          borderRadius: "var(--bubble-radius)",
-          ...bubbleSurface("var(--assistant-card-glass)", hasGlassImage),
-          border: bare ? "none" : "1px solid var(--bubble-border)",
-          boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
-          // 流式态：高度变化走过渡（配合上面的 ResizeObserver），overflow 裁掉过渡期间的内容溢出
-          overflow: isStreaming ? "hidden" : undefined,
-          transition: isStreaming ? "height 120ms cubic-bezier(0.4, 0, 0.2, 1)" : undefined,
-        }}
-      >
-      <div
-        ref={streamContentRef}
         style={{
           display: "flex",
           flexDirection: "column",
           gap: "var(--bubble-gap)",
           padding: "var(--bubble-pad-y) var(--bubble-pad-x) var(--bubble-pad-end)",
+          borderRadius: "var(--bubble-radius)",
+          ...bubbleSurface("var(--assistant-card-glass)", hasGlassImage),
+          border: bare ? "none" : "1px solid var(--bubble-border)",
+          boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 16px -8px rgba(15,23,42,0.10)",
         }}
       >
 
@@ -924,7 +891,6 @@ function AssistantMessageView({
           <TurnWrittenFiles files={writtenFiles} onOpenFile={onOpenFile} />
         )}
 
-      </div>
       </div>
 
       {/* 底部元信息工具栏 —— 气泡外，弱化存在感：
