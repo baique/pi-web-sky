@@ -262,10 +262,8 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
           padding: "2px 0",
           border: "none",
           background: "transparent",
-          color: "#ffffff",
-          /* Blend-difference: white text automagnetically inverts against
-             whatever sits behind (wallpaper/glass), no halo needed. */
-          mixBlendMode: "exclusion",
+          // 消息区统一：固定跟随主题，不再随壁纸明暗反向变色
+          color: "var(--text-meta)",
           cursor: "pointer",
           fontSize: 12,
           textAlign: "left",
@@ -968,8 +966,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionI
               }}
             >
               <div style={{ display: "flex", alignItems: "baseline", gap: isMobile ? 7 : 10, minWidth: 0, flex: 1, lineHeight: 1.4, overflow: "hidden" }}>
-                <span style={{ fontSize: 34, fontWeight: 700, letterSpacing: 0, color: "#ffffff", mixBlendMode: "exclusion", flexShrink: 0, whiteSpace: "nowrap" }}>π</span>
-                <span style={{ fontSize: 28, color: "#ffffff", fontWeight: 700, letterSpacing: 0, mixBlendMode: "exclusion", flexShrink: 0, whiteSpace: "nowrap" }}>Pi Web</span>
+                <span style={{ fontSize: 34, fontWeight: 700, letterSpacing: 0, color: "var(--text)", flexShrink: 0, whiteSpace: "nowrap" }}>π</span>
+                <span style={{ fontSize: 28, color: "var(--text)", fontWeight: 700, letterSpacing: 0, flexShrink: 0, whiteSpace: "nowrap" }}>Pi Web</span>
                 <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
               </div>
               {/* 环境条：新建会话前决定 worktree（会话落盘即锁定，任务卡 #16）。

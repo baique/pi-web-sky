@@ -526,7 +526,8 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "flex-end",
           gap: 6, marginTop: 3,
-          mixBlendMode: "exclusion",
+          // 消息区统一：不再用 exclusion 跟随壁纸反向变色，固定吃主题 token
+          color: "var(--text-meta)",
         }}>
           <div style={{
             display: "flex", gap: 3,
@@ -543,7 +544,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                   padding: "3px 8px", height: 22,
                   background: "none", border: "none",
                   borderRadius: 5,
-                  color: "#ffffff",
+                  color: "var(--text-meta)",
                   cursor: "pointer",
                   fontSize: 11, fontWeight: 400,
                   whiteSpace: "nowrap",
@@ -567,7 +568,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                 padding: "3px 8px", height: 22,
                 background: "none", border: "none",
                 borderRadius: 5,
-                color: copied ? "var(--accent)" : "#ffffff",
+                color: copied ? "var(--accent)" : "var(--text-meta)",
                 cursor: "pointer",
                 fontSize: 11, fontWeight: 400,
                 whiteSpace: "nowrap",
@@ -617,7 +618,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                     padding: "3px 8px", height: 22,
                     background: "none", border: "none",
                     borderRadius: 5,
-                    color: "#ffffff",
+                    color: "var(--text-meta)",
                     cursor: "pointer",
                     fontSize: 11, fontWeight: 400,
                     whiteSpace: "nowrap",
@@ -643,7 +644,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                     padding: "3px 8px", height: 22,
                     background: "none", border: "none",
                     borderRadius: 5,
-                    color: forking ? "var(--accent)" : "#ffffff",
+                    color: forking ? "var(--accent)" : "var(--text-meta)",
                     cursor: forking ? "not-allowed" : "pointer",
                     fontSize: 11, fontWeight: 400,
                     whiteSpace: "nowrap",
@@ -663,7 +664,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
               )}
             </div>
           )}
-          {time && <span style={{ fontSize: 10, color: "#ffffff" }}>{time}</span>}
+          {time && <span style={{ fontSize: 10 }}>{time}</span>}
         </div>
       )}
     </div>
@@ -937,10 +938,9 @@ function AssistantMessageView({
           marginTop: 8,
           paddingLeft: 4,
           fontSize: 11,
-          color: "#ffffff",
-          // 与用户消息操作栏同款：白字 + exclusion 混合，浅壁纸自动变深、
-          // 深壁纸保持亮，不依赖固定色值
-          mixBlendMode: "exclusion",
+          // 固定跟随主题（浅色近黑 / 深色近白）。原先白字 + exclusion 会随壁纸
+          // 明暗反向变色，观感不稳，已移除混合，只吃 --text-meta。
+          color: "var(--text-meta)",
         }}>
           {message.provider && !isMobile && (
             <span style={{ whiteSpace: "nowrap" }}>
@@ -974,7 +974,7 @@ function AssistantMessageView({
                 padding: "3px 8px", height: 22,
                 background: "none", border: "none",
                 borderRadius: 5,
-                color: copied ? "var(--accent)" : "#ffffff",
+                color: copied ? "var(--accent)" : "var(--text-meta)",
                 cursor: "pointer",
                 fontSize: 11, fontWeight: 400,
                 whiteSpace: "nowrap",
@@ -1007,7 +1007,7 @@ function AssistantMessageView({
                 padding: "3px 8px", height: 22,
                 background: "none", border: "none",
                 borderRadius: 5,
-                color: "#ffffff",
+                color: "var(--text-meta)",
                 cursor: "pointer",
                 fontSize: 11, fontWeight: 400,
                 whiteSpace: "nowrap",
